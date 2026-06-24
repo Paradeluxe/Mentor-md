@@ -1,0 +1,30 @@
+# Node (将来可能加)
+node_modules/
+npm-debug.log*
+
+# 编辑器/系统临时文件
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# Python 缓存
+__pycache__/
+*.pyc
+*.pyo
+
+# 测试产物 (本地预览报告可重新生成, 不入版本)
+tests/screenshots/*.png
+tests/report.html
+tests/long-stress-result.json
+
+# 开发调试临时文件
+_outline-preview.html
+tests/_outline-preview.html
+
+# 临时 probe 文件 (开发调试用, 用完删)
+tests/probe-*.spec.js
+
+# Local env
+.env
+.env.local

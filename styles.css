@@ -1,0 +1,1234 @@
+/* ============================================================
+   Mentor — Cursor-化设计语言
+   参考: Cursor design system (warm cream, oklab borders,
+          shadow-as-border, 1.5px SVG icons, compressed display)
+   ============================================================ */
+
+/* ============ Reset ============ */
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+/* ---- oklab 暖色边框 (Cursor 风格) ---- */
+/* 原值: oklab(0.263084 -0.00230259 0.0124794 / 0.1) */
+/* fallback: rgba(38, 37, 30, 0.1) — 浏览器更兼容 */
+:root {
+  --bg: #f2f1ed;            /* Cursor cream — 暖纸感 */
+  --panel: #ffffff;         /* 卡片面 */
+  --panel-2: #f7f7f4;       /* 浅层按钮 */
+  --panel-3: #ebeae5;       /* 中层按钮 */
+  --border: #26251e;        /* Cursor Dark — 暖近黑 */
+  --border-warm: rgba(38, 37, 30, 0.1);      /* 暖棕边框默认 */
+  --border-warm-medium: rgba(38, 37, 30, 0.2); /* hover 状态 */
+  --text: #26251e;          /* 暖近黑 — 主文字 */
+  --text-2: rgba(38, 37, 30, 0.6); /* 次要文字 */
+  --text-3: rgba(38, 37, 30, 0.4); /* 三级 */
+  --muted: #8a8780;         /* muted — 暖灰 */
+  --accent: #f54e00;        /* Cursor orange — 强调色 */
+  --accent-soft: rgba(245, 78, 0, 0.08);
+  --highlight: #fef3c7;        /* 批注高亮底色 */
+  --highlight-active: #fcd34d; /* 当前聚焦的批注 */
+  --resolved: #e5e7eb;
+  --comment-bg: #fff8e1;
+  --reply-bg: #f3f4f6;
+  --danger: #cf2d56;        /* Cursor 暖红 — hover 文字色 */
+  --success: #1f8a65;        /* Cursor 暖绿 */
+  --warning: #d97706;        /* dirty 暖橙 (新) */
+
+  /* 阴影系统 (Cursor 风格) */
+  --shadow-ring: 0 0 0 1px var(--border-warm);
+  --shadow-ring-hover: 0 0 0 1px var(--border-warm-medium);
+  --shadow-card: 0 0 0 1px var(--border-warm), 0 2px 2px rgba(0, 0, 0, 0.04);
+  --shadow-elevated: 0 0 0 1px var(--border-warm), 0 14px 32px rgba(0, 0, 0, 0.1), 0 28px 70px rgba(0, 0, 0, 0.14);
+  --shadow-button-inset: inset 0 1px 0 rgba(255, 255, 255, 0.5);
+  --shadow-button-inset-bottom: inset 0 -1px 0 rgba(0, 0, 0, 0.05);
+}
+
+html, body {
+  height: 100%;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  color: var(--text);
+  background: var(--bg);
+  font-size: 14px;
+  line-height: 1.5;
+  letter-spacing: 0.08px;  /* Cursor 标志: body 正字距 */
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+button { font-family: inherit; cursor: pointer; letter-spacing: 0.08px; }
+kbd {
+  font-family: 'JetBrains Mono', monospace;
+  background: var(--panel);
+  box-shadow: var(--shadow-ring);
+  border-radius: 3px;
+  padding: 1px 5px;
+  font-size: 0.85em;
+  letter-spacing: normal;
+}
+code {
+  font-family: 'JetBrains Mono', Consolas, Monaco, monospace;
+  background: rgba(38, 37, 30, 0.04);
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-size: 0.9em;
+  letter-spacing: normal;
+}
+
+/* ============ SVG 图标基础样式 ============ */
+.icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  vertical-align: middle;
+  color: var(--text-2);
+  transition: color 0.15s ease;
+}
+/* 所有 inline SVG 默认 14px 1.5px stroke currentColor */
+.icon svg, .tree-actions button svg, .pane-icon svg, .search-icon svg, .tree-search-clear svg, .float-btn button svg, .save-mode-badge svg {
+  width: 14px;
+  height: 14px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.pane-icon svg, .search-icon svg { width: 14px; height: 14px; }
+.tree-search-clear svg { width: 10px; height: 10px; }
+.tree-actions button svg { width: 12px; height: 12px; }
+.float-btn button svg { width: 12px; height: 12px; }
+.save-mode-badge svg { width: 10px; height: 10px; }
+
+.hidden { display: none !important; }
+
+/* ============ App layout ============ */
+#app {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  height: 100vh;
+}
+
+/* ============ Toolbar (Cursor 化: transparent + 跟 pane-header 统一) ============ */
+#toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  background: transparent;
+  border-bottom: 1px solid var(--border-warm);
+  flex-wrap: wrap;
+  z-index: 10;
+}
+.tb-group {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  padding: 0 6px;
+  border-right: 1px solid var(--border-warm);
+}
+.tb-group:last-child { border-right: none; }
+.tb-sep {
+  width: 1px;
+  height: 16px;
+  background: var(--border-warm);
+  margin: 0 4px;
+}
+
+/* 文字 + 图标按钮 (新建/保存等) */
+.tb-icon-text {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 12.5px;
+  color: var(--text);
+  letter-spacing: 0.04px;
+  font-weight: 500;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+.tb-icon-text .tb-icon {
+  width: 14px;
+  height: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-2);
+}
+.tb-icon-text .tb-icon::before {
+  content: "";
+  display: block;
+  width: 14px;
+  height: 14px;
+  background-color: currentColor;
+  -webkit-mask-size: contain;
+  mask-size: contain;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  mask-position: center;
+}
+.tb-icon-text:hover { background: var(--panel-2); }
+.tb-icon-text:hover .tb-icon { color: var(--text); }
+.tb-icon-text.is-active { background: var(--accent-soft); color: var(--accent); }
+.tb-icon-text.is-active .tb-icon { color: var(--accent); }
+
+/* 给 5 个工具栏按钮注入 SVG (CSS mask-image) */
+#btn-new .tb-icon::before {
+  -webkit-mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><path d='M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9l-6-6z'/><path d='M14 3v6h6'/><path d='M8 13h8'/><path d='M8 17h5'/></svg>");
+  mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><path d='M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9l-6-6z'/><path d='M14 3v6h6'/><path d='M8 13h8'/><path d='M8 17h5'/></svg>");
+}
+#btn-open-files .tb-icon::before {
+  -webkit-mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><path d='M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9l-6-6z'/><path d='M14 3v6h6'/><path d='M9 13h6'/><path d='M9 17h4'/></svg>");
+  mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><path d='M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9l-6-6z'/><path d='M14 3v6h6'/><path d='M9 13h6'/><path d='M9 17h4'/></svg>");
+}
+#btn-open-folder .tb-icon::before {
+  -webkit-mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><path d='M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z'/></svg>");
+  mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><path d='M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z'/></svg>");
+}
+#btn-save .tb-icon::before {
+  -webkit-mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><path d='M5 3h11l3 3v15H5V3z'/><path d='M7 3v6h8V3'/><path d='M7 14h10v6H7z'/></svg>");
+  mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><path d='M5 3h11l3 3v15H5V3z'/><path d='M7 3v6h8V3'/><path d='M7 14h10v6H7z'/></svg>");
+}
+#btn-save-as .tb-icon::before {
+  -webkit-mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><path d='M12 3v12'/><path d='m7 10 5 5 5-5'/><path d='M5 21h14'/></svg>");
+  mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><path d='M12 3v12'/><path d='m7 10 5 5 5-5'/><path d='M5 21h14'/></svg>");
+}
+
+/* 纯图标按钮 (粗体/斜体等格式按钮) */
+.tb-format {
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  padding: 4px 6px;
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-2);
+  position: relative;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+.tb-format::before {
+  content: "";
+  display: block;
+  width: 14px;
+  height: 14px;
+  background-color: currentColor;
+  -webkit-mask-size: contain;
+  mask-size: contain;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  mask-position: center;
+}
+.tb-format:hover { background: var(--panel-2); color: var(--text); }
+.tb-format.is-active { background: var(--accent-soft); color: var(--accent); }
+
+/* 给 12 个 format 按钮注入 SVG (CSS mask-image) */
+[data-cmd="bold"]::before { -webkit-mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><path d='M7 5h6a3.5 3.5 0 0 1 0 7H7z'/><path d='M7 12h7a3.5 3.5 0 0 1 0 7H7z'/></svg>"); mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><path d='M7 5h6a3.5 3.5 0 0 1 0 7H7z'/><path d='M7 12h7a3.5 3.5 0 0 1 0 7H7z'/></svg>"); }
+[data-cmd="italic"]::before { -webkit-mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><path d='M19 5h-6'/><path d='M11 19H5'/><path d='m14 5-4 14'/></svg>"); mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><path d='M19 5h-6'/><path d='M11 19H5'/><path d='m14 5-4 14'/></svg>"); }
+[data-cmd="strike"]::before { -webkit-mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><path d='M4 12h16'/><path d='M17 6.5a4 4 0 0 0-4-2.5 4 4 0 0 0-4 4c0 1.5 1 2.5 3 3l2 1c2 1 3 2 3 3.5a4 4 0 0 1-7 2'/></svg>"); mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><path d='M4 12h16'/><path d='M17 6.5a4 4 0 0 0-4-2.5 4 4 0 0 0-4 4c0 1.5 1 2.5 3 3l2 1c2 1 3 2 3 3.5a4 4 0 0 1-7 2'/></svg>"); }
+[data-cmd="code"]::before { -webkit-mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><path d='m8 8-4 4 4 4'/><path d='m16 8 4 4-4 4'/><path d='m14 4-4 16'/></svg>"); mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><path d='m8 8-4 4 4 4'/><path d='m16 8 4 4-4 4'/><path d='m14 4-4 16'/></svg>"); }
+[data-cmd="h1"]::before { -webkit-mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><path d='M5 5v14'/><path d='M13 5v14'/><path d='M5 12h8'/><path d='m16 9 2-1v11'/></svg>"); mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><path d='M5 5v14'/><path d='M13 5v14'/><path d='M5 12h8'/><path d='m16 9 2-1v11'/></svg>"); }
+[data-cmd="h2"]::before { -webkit-mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><path d='M5 5v14'/><path d='M13 5v14'/><path d='M5 12h8'/><path d='M16 9c0-1 1-2 2-2s2 1 2 2-1 2-2 3l-2 3h4'/></svg>"); mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><path d='M5 5v14'/><path d='M13 5v14'/><path d='M5 12h8'/><path d='M16 9c0-1 1-2 2-2s2 1 2 2-1 2-2 3l-2 3h4'/></svg>"); }
+[data-cmd="h3"]::before { -webkit-mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><path d='M5 5v14'/><path d='M13 5v14'/><path d='M5 12h8'/><path d='M17 8h4l-3 3c2 0 3 1 3 2.5s-1 2.5-3 2.5-3-.5-3-2'/></svg>"); mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><path d='M5 5v14'/><path d='M13 5v14'/><path d='M5 12h8'/><path d='M17 8h4l-3 3c2 0 3 1 3 2.5s-1 2.5-3 2.5-3-.5-3-2'/></svg>"); }
+[data-cmd="bulletList"]::before { -webkit-mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><path d='M9 6h12'/><path d='M9 12h12'/><path d='M9 18h12'/><circle cx='5' cy='6' r='1' fill='black'/><circle cx='5' cy='12' r='1' fill='black'/><circle cx='5' cy='18' r='1' fill='black'/></svg>"); mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><path d='M9 6h12'/><path d='M9 12h12'/><path d='M9 18h12'/><circle cx='5' cy='6' r='1' fill='black'/><circle cx='5' cy='12' r='1' fill='black'/><circle cx='5' cy='18' r='1' fill='black'/></svg>"); }
+[data-cmd="orderedList"]::before { -webkit-mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><path d='M9 6h12'/><path d='M9 12h12'/><path d='M9 18h12'/><path d='M4 4h2v4'/><path d='M4 12c0-1 1-1.5 2-1.5s2 .5 2 1.5-1 1.5-2 1.5-2 .5-2 1.5h4'/><path d='M5 17h2v2H4v-1l2-2'/></svg>"); mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><path d='M9 6h12'/><path d='M9 12h12'/><path d='M9 18h12'/><path d='M4 4h2v4'/><path d='M4 12c0-1 1-1.5 2-1.5s2 .5 2 1.5-1 1.5-2 1.5-2 .5-2 1.5h4'/><path d='M5 17h2v2H4v-1l2-2'/></svg>"); }
+[data-cmd="blockquote"]::before { -webkit-mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><path d='M7 7h4v6H5v-2a4 4 0 0 1 2-4z'/><path d='M15 7h4v6h-6v-2a4 4 0 0 1 2-4z'/></svg>"); mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><path d='M7 7h4v6H5v-2a4 4 0 0 1 2-4z'/><path d='M15 7h4v6h-6v-2a4 4 0 0 1 2-4z'/></svg>"); }
+[data-cmd="codeBlock"]::before { -webkit-mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><rect x='3' y='5' width='18' height='14' rx='2'/><path d='m8 10-2 2 2 2'/><path d='m16 10 2 2-2 2'/></svg>"); mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><rect x='3' y='5' width='18' height='14' rx='2'/><path d='m8 10-2 2 2 2'/><path d='m16 10 2 2-2 2'/></svg>"); }
+[data-cmd="link"]::before { -webkit-mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><path d='M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1'/><path d='M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1'/></svg>"); mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><path d='M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1'/><path d='M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1'/></svg>"); }
+[data-cmd="image"]::before { -webkit-mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><rect x='3' y='4' width='18' height='16' rx='2'/><circle cx='9' cy='10' r='1.5'/><path d='m21 16-5-5-9 9'/></svg>"); mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><rect x='3' y='4' width='18' height='16' rx='2'/><circle cx='9' cy='10' r='1.5'/><path d='m21 16-5-5-9 9'/></svg>"); }
+
+#title-group { margin-left: auto; font-size: 12.5px; color: var(--text-2); display: flex; align-items: center; gap: 6px; }
+.dirty-dot { width: 6px; height: 6px; border-radius: 50%; background: transparent; }
+.dirty-dot.is-dirty { background: var(--warning); }
+
+/* ============ Main panes (三栏布局) ============ */
+#main {
+  display: grid;
+  grid-template-columns: 260px 1fr 320px;
+  overflow: hidden;
+}
+@media (max-width: 900px) {
+  #main { grid-template-columns: 200px 1fr 280px; }
+  /* 大纲栏始终显示,不再折叠 (Word 风格) */
+}
+
+/* ============ Pane 通用 (pane-header 重新设计) ============ */
+.pane-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 10px;
+  font-weight: 500;
+  font-size: 12.5px;
+  letter-spacing: 0.04px;
+  color: var(--text);
+  background: transparent;
+  border-bottom: 1px solid var(--border-warm);
+}
+.pane-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-2);
+}
+.pane-icon {
+  width: 14px;
+  height: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-3);
+}
+.pane-icon::before {
+  content: "";
+  display: block;
+  width: 14px;
+  height: 14px;
+  background-color: currentColor;
+  -webkit-mask-size: contain;
+  mask-size: contain;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+}
+/* 注释 pane-title 文件夹图标 (file pane) */
+#file-pane .pane-icon::before {
+  /* outline 大纲图标: 三行带圆点 (lucide list) */
+  -webkit-mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M8 6h13'/><path d='M8 12h13'/><path d='M8 18h13'/><path d='M3 6h.01'/><path d='M3 12h.01'/><path d='M3 18h.01'/></svg>");
+  mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M8 6h13'/><path d='M8 12h13'/><path d='M8 18h13'/><path d='M3 6h.01'/><path d='M3 12h.01'/><path d='M3 18h.01'/></svg>");
+}
+/* 注释 pane-title 评论图标 (comment pane) */
+.pane-icon-comment::before {
+  -webkit-mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><path d='M21 12a8 8 0 0 1-8 8H4l3-3a8 8 0 0 1 14-5z'/></svg>");
+  mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><path d='M21 12a8 8 0 0 1-8 8H4l3-3a8 8 0 0 1 14-5z'/></svg>");
+}
+
+/* Collapse button 已移除 — 大纲栏不可折叠 */
+
+/* ============ File pane (Cursor 化) ============ */
+#file-pane {
+  background: var(--panel);
+  border-right: 1px solid var(--border-warm);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Tree search input — 极简 transparent + bottom border */
+.tree-search-wrap {
+  position: relative;
+  padding: 8px 10px;
+  background: transparent;
+}
+.search-icon {
+  position: absolute;
+  left: 18px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 12px;
+  height: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-3);
+  pointer-events: none;
+}
+.search-icon::before {
+  content: "";
+  display: block;
+  width: 12px;
+  height: 12px;
+  background-color: currentColor;
+  -webkit-mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><circle cx='11' cy='11' r='7'/><path d='m20 20-3.5-3.5'/></svg>");
+  mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><circle cx='11' cy='11' r='7'/><path d='m20 20-3.5-3.5'/></svg>");
+  -webkit-mask-size: contain;
+  mask-size: contain;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+}
+#tree-search {
+  width: 100%;
+  padding: 4px 26px 4px 26px;
+  font-size: 12.5px;
+  font-family: inherit;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text);
+  outline: none;
+  letter-spacing: 0.04px;
+  transition: background 0.15s ease;
+}
+#tree-search:focus { background: var(--panel-2); }
+#tree-search::placeholder { color: var(--text-3); }
+.tree-search-clear {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: transparent;
+  border: none;
+  color: var(--text-3);
+  cursor: pointer;
+  padding: 2px;
+  width: 16px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  position: absolute;
+}
+.tree-search-clear::before {
+  content: "";
+  display: block;
+  width: 10px;
+  height: 10px;
+  background-color: currentColor;
+  -webkit-mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><path d='M18 6 6 18'/><path d='m6 6 12 12'/></svg>");
+  mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><path d='M18 6 6 18'/><path d='m6 6 12 12'/></svg>");
+  -webkit-mask-size: contain;
+  mask-size: contain;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+}
+.tree-search-clear:hover { background: var(--panel-3); color: var(--text); }
+
+#file-tree { flex: 1; overflow-y: auto; padding: 4px 0; }
+
+/* ============ Outline pane (大纲视图) ============ */
+#outline-pane {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 0;
+  font-size: 12.5px;
+}
+.outline-empty {
+  padding: 24px 16px;
+  color: var(--text-2);
+  font-size: 12.5px;
+  text-align: center;
+  user-select: none;
+}
+.outline-item {
+  position: relative;
+  padding: 4px 10px 4px 12px;
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text);
+  letter-spacing: 0.02px;
+  border-radius: 4px;
+  margin: 0 6px;
+  transition: background 0.1s ease, color 0.1s ease;
+}
+.outline-item:hover { background: var(--panel-2); }
+.outline-item.is-active {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 500;
+}
+.outline-item .outline-num {
+  display: inline-block;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+  margin-right: 6px;
+  min-width: 22px;
+  font-size: 11.5px;
+}
+.outline-item.is-active .outline-num { color: var(--accent); }
+.outline-h1 { font-weight: 500; font-size: 13px; padding-top: 6px; padding-bottom: 6px; }
+.outline-h2 { padding-left: 22px; }
+.outline-h3 { padding-left: 34px; color: var(--text-2); font-size: 12px; }
+.outline-h3.is-active { color: var(--accent); }
+.tree-empty { padding: 24px 16px; color: var(--text-2); font-size: 12.5px; text-align: center; cursor: pointer; user-select: none; transition: background 0.12s; }
+.tree-empty:hover { background: var(--panel-2); color: var(--text); }
+.tree-empty:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.tree-empty:active { background: var(--panel-3); }
+.tree-empty .tree-empty-text { font-weight: 500; }
+.tree-empty p.hint { font-size: 11.5px; margin-top: 6px; color: var(--text-3); opacity: 0.85; }
+
+/* Tree node — Cursor 化: 选中态用左侧 2px accent 竖线 + accent-soft bg */
+.tree-node {
+  position: relative;
+  padding: 4.5px 10px 4.5px 12px;  /* 左侧多 2px 给 accent 竖线留位 */
+  cursor: pointer;
+  font-size: 13px;
+  user-select: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  letter-spacing: 0.02px;
+  transition: background 0.1s ease;
+}
+.tree-node:hover { background: var(--panel-2); }
+.tree-node.is-active {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 500;
+  box-shadow: inset 2px 0 0 0 var(--accent);  /* 左侧 2px accent 竖线 */
+}
+.tree-node .icon { opacity: 1; }
+.tree-node .icon.icon-md { color: var(--text-2); opacity: 0.9; }
+.tree-node .icon.icon-json { color: var(--text-2); opacity: 0.85; }
+.tree-node .icon.icon-folder { color: var(--text-2); opacity: 0.95; }
+.tree-node .icon.icon-other { color: var(--text-3); }
+.tree-node .filename { flex: 1; overflow: hidden; text-overflow: ellipsis; }
+.tree-node .filename mark {
+  background: var(--highlight);
+  color: var(--text);
+  padding: 0 1px;
+  border-radius: 2px;
+  font-weight: 500;
+}
+
+/* Per-file dirty dot (in tree) — Cursor 化 */
+.tree-node .dirty-dot-mini {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--warning);
+  flex-shrink: 0;
+  box-shadow: 0 0 0 1.5px var(--panel);  /* 让 dirty 圆点在 hover bg 上更清晰 */
+}
+.tree-node.is-active .dirty-dot-mini { box-shadow: 0 0 0 1.5px var(--accent-soft); }
+
+/* Hover-floating action buttons (Cursor 风格: 极简浮层, 与行背景融合) */
+.tree-node .tree-actions {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  gap: 1px;
+  opacity: 0;
+  background: transparent;
+  border-radius: 5px;
+  padding: 1px 0;
+  transition: opacity 0.1s ease;
+  pointer-events: none;
+}
+.tree-node:hover .tree-actions,
+.tree-node:focus-within .tree-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+.tree-actions button {
+  background: transparent;
+  border: none;
+  color: var(--text-2);
+  font-size: 0;
+  padding: 3px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+  line-height: 1;
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.1s ease, color 0.1s ease;
+}
+.tree-actions button:hover { background: var(--panel-2); color: var(--text); }
+.tree-actions button.danger:hover { background: rgba(207, 45, 86, 0.08); color: var(--danger); }
+
+.tree-folder { font-weight: 500; color: var(--text-2); }
+.tree-folder .icon.icon-folder { color: var(--text-2); opacity: 0.95; }
+.tree-children { padding-left: 12px; }
+
+/* Save mode badge (in folder row) — 极简, 无 ring */
+.save-mode-badge {
+  font-size: 10.5px;
+  font-weight: 500;
+  padding: 1px 6px 1px 4px;
+  border-radius: 9999px;
+  margin-left: auto;
+  background: var(--panel-2);
+  color: var(--text-2);
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  letter-spacing: 0.04px;
+  /* 去 box-shadow ring: vision 反馈 badge 像"补丁" */
+}
+.save-mode-badge .icon { width: 10px; height: 10px; color: var(--success); }
+.save-mode-badge .badge-download .icon { color: var(--warning); }
+.save-mode-badge .badge-check .icon { color: var(--success); }
+
+/* ============ Editor pane ============ */
+#editor-pane {
+  position: relative;
+  overflow-y: auto;
+  background: var(--panel);
+  padding: 40px 56px;
+}
+#editor {
+  max-width: 760px;
+  margin: 0 auto;
+  min-height: 100%;
+  outline: none;
+}
+#editor .tiptap p.is-editor-empty:first-child::before,
+#editor .tiptap h1.is-editor-empty:first-child::before,
+#editor .tiptap h2.is-editor-empty:first-child::before {
+  color: var(--text-3);
+  content: attr(data-placeholder);
+  float: left;
+  height: 0;
+  pointer-events: none;
+}
+
+/* ProseMirror base — Cursor 化排版
+   分层间距系统 (语义驱动, 不是统一 margin):
+   - 标题与代码块/列表/引用/表格 等带 padding 的元素之间: 间距要大
+   - 正文段落之间: 中等
+   - 标题与上一节: 大
+   - 标题与紧邻正文: 小 (避免"切断感") */
+.tiptap {
+  outline: none;
+  min-height: 400px;
+  line-height: 2.0;
+  font-size: 15px;
+  letter-spacing: 0.02px;
+  color: var(--text);
+}
+
+/* ---- 标题 (H1/H2/H3) ---- */
+.tiptap h1, .tiptap h2, .tiptap h3, .tiptap h4, .tiptap h5, .tiptap h6 {
+  font-weight: 600;
+}
+.tiptap h1 { font-size: 1.9em; letter-spacing: -0.32px; line-height: 1.3; }
+.tiptap h2 { font-size: 1.5em; letter-spacing: -0.2px;  line-height: 1.4; }
+.tiptap h3 { font-size: 1.25em; letter-spacing: -0.1px; line-height: 1.5; }
+.tiptap h4, .tiptap h5, .tiptap h6 { letter-spacing: -0.05px; }
+
+/* ---- 段落 (正文) ---- */
+.tiptap p {
+  line-height: 1.95;            /* 正文行间, 比容器略紧, 更"段落感" */
+  margin: 0;
+}
+
+/* ---- 列表 ---- */
+.tiptap ul, .tiptap ol {
+  padding-left: 1.5em;
+  line-height: 1.85;
+}
+.tiptap li {
+  margin-top: 0.4em;
+}
+.tiptap li > p {
+  margin: 0;
+}
+
+/* ---- 引用 ---- */
+.tiptap blockquote {
+  border-left: 2px solid var(--border-warm-medium);
+  padding: 0.4em 0 0.4em 1em;
+  color: var(--text-2);
+  font-style: italic;
+  letter-spacing: 0.02px;
+  line-height: 1.85;
+}
+
+/* ---- 分层段间 (核心间距系统) ----
+   全部统一基线: 0.4em = 6px (紧凑), 0.8em = 12px (正文), 1.2em = 18px (过渡), 1.8em = 27px (节切换) */
+
+/* 默认段间: 正文与正文 / 标题与正文 */
+.tiptap > p + p,
+.tiptap > p + h1,
+.tiptap > p + h2,
+.tiptap > p + h3,
+.tiptap > h1 + p,
+.tiptap > h2 + p,
+.tiptap > h3 + p,
+.tiptap > h4 + p {
+  margin-top: 0.4em;     /* 标题→正文, 正文→正文: 紧凑, 体现"同一节" */
+}
+
+/* 标题之间: 节切换感 */
+.tiptap > h1 + h1,
+.tiptap > h1 + h2,
+.tiptap > h1 + h3,
+.tiptap > h2 + h1,
+.tiptap > h2 + h2,
+.tiptap > h2 + h3,
+.tiptap > h3 + h1,
+.tiptap > h3 + h2,
+.tiptap > h3 + h3 {
+  margin-top: 1.8em;     /* 标题紧跟标题: 大间距, 强调"换章" */
+}
+
+/* 标题之前: 与上一节(正文/代码块/列表)拉开 */
+.tiptap > p + h1,
+.tiptap > pre + h1,
+.tiptap > ul + h1,
+.tiptap > ol + h1,
+.tiptap > blockquote + h1,
+.tiptap > table + h1 {
+  margin-top: 2.2em;     /* H1 是节标题, 与上一节彻底隔开 */
+}
+.tiptap > p + h2,
+.tiptap > pre + h2,
+.tiptap > ul + h2,
+.tiptap > ol + h2,
+.tiptap > blockquote + h2,
+.tiptap > table + h2 {
+  margin-top: 1.8em;
+}
+.tiptap > p + h3,
+.tiptap > pre + h3,
+.tiptap > ul + h3,
+.tiptap > ol + h3,
+.tiptap > blockquote + h3,
+.tiptap > table + h3 {
+  margin-top: 1.4em;
+}
+
+/* 代码块 / 引用 / 列表 / 表格 → 紧跟另一正文元素: 适中 */
+.tiptap > pre + pre,
+.tiptap > pre + blockquote,
+.tiptap > pre + ul,
+.tiptap > pre + ol,
+.tiptap > pre + table,
+.tiptap > table + table,
+.tiptap > table + pre {
+  margin-top: 1.4em;     /* 两个"块级容器"之间: 大间距避免视觉粘连 */
+}
+
+/* 正文 → 代码块 / 引用 / 列表 / 表格: 稍大 (这些元素本身有 padding) */
+.tiptap > p + pre,
+.tiptap > p + blockquote,
+.tiptap > p + ul,
+.tiptap > p + ol,
+.tiptap > p + table,
+.tiptap > li + pre,
+.tiptap > li + blockquote {
+  margin-top: 1.0em;
+}
+
+/* 代码块 / 列表 → 紧跟正文 */
+.tiptap > pre + p,
+.tiptap > ul + p,
+.tiptap > ol + p,
+.tiptap > blockquote + p,
+.tiptap > table + p {
+  margin-top: 0.8em;
+}
+.tiptap code {
+  background: rgba(38, 37, 30, 0.06);
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 0.88em;
+  letter-spacing: normal;
+}
+.tiptap pre {
+  background: #1f1d1a;
+  color: #f5f2eb;
+  padding: 14px 18px;
+  border-radius: 8px;
+  overflow-x: auto;
+  font-size: 13px;
+  line-height: 1.6;
+  letter-spacing: normal;
+}
+.tiptap pre code { background: transparent; color: inherit; padding: 0; }
+.tiptap pre code br.ProseMirror-trailingBreak { display: none; }
+.tiptap a { color: var(--accent); text-decoration: underline; text-decoration-color: rgba(245, 78, 0, 0.3); text-underline-offset: 2px; }
+.tiptap a:hover { text-decoration-color: var(--accent); }
+.tiptap img { max-width: 100%; border-radius: 6px; }
+.tiptap hr { border: none; border-top: 1px solid var(--border-warm); margin: 1.5em 0; }
+
+/* 批注 mark 高亮 (保留暖黄) */
+.tiptap .annotation-mark {
+  background: var(--highlight);
+  border-bottom: 2px solid #f59e0b;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.tiptap .annotation-mark:hover { background: #fde68a; }
+.tiptap .annotation-mark.is-active { background: var(--highlight-active); }
+.tiptap .annotation-mark.is-resolved { background: var(--resolved); border-bottom-color: var(--text-3); opacity: 0.7; }
+
+/* 空编辑器提示 */
+.empty-hint { padding: 48px 24px; color: var(--text-2); text-align: center; }
+.empty-hint h2 {
+  color: var(--text);
+  margin-bottom: 12px;
+  font-size: 1.5em;
+  font-weight: 600;
+  letter-spacing: -0.2px;
+}
+.empty-hint ul {
+  display: inline-block;
+  text-align: left;
+  margin: 16px 0;
+  font-size: 13px;
+  line-height: 1.8;
+}
+.empty-hint ul li { margin: 6px 0; }
+.empty-hint .hint { font-size: 12px; color: var(--text-3); margin-top: 12px; }
+#empty-editor-hint { display: none; }
+#empty-editor-hint.is-shown { display: block; }
+
+/* 浮动批注按钮 (Cursor 风格: shadow-as-border + inset highlight) */
+.float-btn {
+  position: absolute;
+  z-index: 100;
+  transform: translateX(-50%);
+}
+.float-btn button {
+  background: var(--text);
+  color: var(--panel);
+  border: none;
+  border-radius: 9999px;
+  padding: 5px 12px;
+  font-size: 12.5px;
+  font-weight: 500;
+  letter-spacing: 0.04px;
+  box-shadow: var(--shadow-elevated);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  position: relative;
+  transition: background 0.12s ease, transform 0.1s ease;
+}
+.float-btn button::before {
+  content: "";
+  display: block;
+  width: 12px;
+  height: 12px;
+  background-color: currentColor;
+  -webkit-mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><path d='M21 12a8 8 0 0 1-8 8H4l3-3a8 8 0 0 1 14-5z'/></svg>");
+  mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><path d='M21 12a8 8 0 0 1-8 8H4l3-3a8 8 0 0 1 14-5z'/></svg>");
+  -webkit-mask-size: contain;
+  mask-size: contain;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+}
+.float-btn button:hover { background: var(--danger); transform: scale(1.05); }
+
+/* ============ Mark 删除 popover (active mark 顶部, Linear/Notion 风格) ============ */
+.mark-delete-popover {
+  position: absolute;
+  z-index: 100;
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  background: var(--panel);
+  color: var(--text-2);
+  border-radius: 9999px;
+  padding: 1px;
+  box-shadow: 0 0 0 1px var(--border-warm), 0 2px 4px rgba(0, 0, 0, 0.08);
+  transform: translateX(-50%);
+  transition: opacity 0.12s ease;
+}
+.mark-delete-popover.hidden { display: none !important; }
+.mark-delete-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-2);
+  cursor: pointer;
+  width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9999px;
+  padding: 0;
+  transition: background 0.1s ease, color 0.1s ease;
+  position: relative;
+}
+.mark-delete-btn::before {
+  content: "";
+  display: block;
+  width: 12px;
+  height: 12px;
+  background-color: currentColor;
+  -webkit-mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M18 6 6 18'/><path d='m6 6 12 12'/></svg>");
+  mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M18 6 6 18'/><path d='m6 6 12 12'/></svg>");
+  -webkit-mask-size: contain;
+  mask-size: contain;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+}
+.mark-delete-btn:hover { background: var(--danger); color: var(--panel); }
+
+/* ============ Comment pane (Cursor 化) ============ */
+#comment-pane {
+  background: var(--panel);
+  border-left: 1px solid var(--border-warm);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+#comment-pane .filters { font-size: 11.5px; font-weight: 400; display: flex; gap: 10px; }
+#comment-pane .filters label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  color: var(--text-2);
+  letter-spacing: 0.02px;
+}
+#comment-pane .filters input[type="checkbox"] {
+  accent-color: var(--accent);
+  margin: 0;
+}
+#comment-list { flex: 1; overflow-y: auto; padding: 8px; }
+#comment-empty { padding: 30px 20px; }
+#comment-empty.hidden { display: none; }
+
+.comment-thread {
+  background: var(--panel);
+  border: none;
+  border-radius: 8px;
+  margin-bottom: 10px;
+  overflow: hidden;
+  box-shadow: var(--shadow-card);
+  transition: box-shadow 0.15s ease;
+}
+.comment-thread.is-active {
+  box-shadow: 0 0 0 1px var(--accent), 0 2px 4px rgba(245, 78, 0, 0.08);
+}
+.comment-thread.is-resolved {
+  background: var(--panel-2);
+  box-shadow: 0 0 0 1px var(--border-warm);
+  opacity: 0.85;
+}
+.comment-thread.is-pinned {
+  box-shadow: 0 0 0 1px var(--accent), 0 2px 4px rgba(245, 78, 0, 0.08);
+  border-style: dashed;
+}
+.comment-thread.is-fuzzy {
+  box-shadow: 0 0 0 1px var(--warning), 0 1px 2px rgba(217, 119, 6, 0.06);
+}
+.fuzzy-banner {
+  background: rgba(217, 119, 6, 0.08);
+  color: var(--warning);
+  padding: 3px 10px;
+  font-size: 11px;
+  font-weight: 500;
+  border-bottom: 1px solid var(--warning);
+  letter-spacing: 0.04px;
+}
+.comment-thread .pinned-banner {
+  background: var(--accent-soft);
+  color: var(--accent);
+  padding: 3px 10px;
+  font-size: 11px;
+  font-weight: 500;
+  border-bottom: 1px solid var(--border-warm);
+  letter-spacing: 0.04px;
+}
+.comment-quote {
+  padding: 8px 12px;
+  background: var(--panel-2);
+  border-bottom: 1px solid var(--border-warm);
+  font-size: 12px;
+  color: var(--text-2);
+  font-style: italic;
+  max-height: 50px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  letter-spacing: 0.02px;
+}
+.comment-quote::before { content: "❝ "; opacity: 0.5; }
+.comment-item {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-warm);
+  font-size: 13px;
+  letter-spacing: 0.02px;
+}
+.comment-item:last-child { border-bottom: none; }
+.comment-meta {
+  font-size: 11.5px;
+  color: var(--text-3);
+  margin-bottom: 4px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.comment-author { font-weight: 500; color: var(--text); }
+.comment-body { white-space: pre-wrap; word-wrap: break-word; line-height: 1.5; }
+.comment-reply {
+  margin-left: 14px;
+  background: var(--reply-bg);
+  border-radius: 6px;
+  margin-top: 8px;
+  padding: 8px 10px;
+}
+.comment-actions { display: flex; gap: 4px; margin-top: 8px; font-size: 11px; }
+.comment-actions button {
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  padding: 3px 8px;
+  font-size: 11px;
+  color: var(--text-2);
+  letter-spacing: 0.02px;
+  transition: background 0.1s ease, color 0.1s ease;
+}
+.comment-actions button:hover { background: var(--panel-2); color: var(--text); }
+.comment-actions button.danger:hover { color: var(--danger); background: rgba(207, 45, 86, 0.06); }
+.comment-reply-form {
+  padding: 10px 12px;
+  background: var(--panel-2);
+  border-top: 1px dashed var(--border-warm);
+}
+.comment-reply-form textarea {
+  width: 100%;
+  min-height: 56px;
+  padding: 8px;
+  border: none;
+  border-radius: 6px;
+  background: var(--panel);
+  font-family: inherit;
+  font-size: 13px;
+  resize: vertical;
+  outline: none;
+  box-shadow: var(--shadow-ring);
+  letter-spacing: 0.02px;
+  color: var(--text);
+}
+.comment-reply-form textarea:focus { box-shadow: var(--shadow-ring-hover); }
+.comment-reply-form .form-actions { display: flex; gap: 6px; margin-top: 6px; justify-content: flex-end; }
+.comment-reply-form button {
+  padding: 4px 12px;
+  border: none;
+  border-radius: 6px;
+  background: var(--panel-3);
+  font-size: 12px;
+  color: var(--text);
+  font-weight: 500;
+  letter-spacing: 0.02px;
+  box-shadow: var(--shadow-ring);
+  transition: background 0.1s ease, color 0.1s ease;
+}
+.comment-reply-form button:hover { background: var(--panel-2); }
+.comment-reply-form button.primary {
+  background: var(--text);
+  color: var(--panel);
+  box-shadow: var(--shadow-ring);
+}
+.comment-reply-form button.primary:hover { background: var(--accent); color: white; }
+
+/* ============ Status bar ============ */
+#statusbar {
+  display: flex;
+  justify-content: space-between;
+  padding: 5px 12px;
+  background: var(--panel-2);
+  border-top: 1px solid var(--border-warm);
+  font-size: 11.5px;
+  color: var(--text-2);
+  letter-spacing: 0.02px;
+}
+
+/* ============ Modal (Cursor 化: 暖色 shadow-as-border) ============ */
+.modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(38, 37, 30, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  backdrop-filter: blur(2px);
+}
+.modal-content {
+  background: var(--panel);
+  padding: 28px;
+  border-radius: 12px;
+  min-width: 380px;
+  box-shadow: 0 0 0 1px var(--border-warm), 0 28px 70px rgba(0, 0, 0, 0.14), 0 14px 32px rgba(0, 0, 0, 0.1);
+}
+.modal-content h3 {
+  margin-bottom: 8px;
+  font-size: 1.1em;
+  font-weight: 600;
+  letter-spacing: -0.1px;
+}
+.modal-content p {
+  margin-bottom: 14px;
+  color: var(--text-2);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.modal-content input[type="text"] {
+  width: 100%;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 6px;
+  font-family: inherit;
+  font-size: 14px;
+  letter-spacing: 0.02px;
+  background: var(--panel-2);
+  color: var(--text);
+  outline: none;
+  box-shadow: var(--shadow-ring);
+}
+.modal-content input[type="text"]:focus { box-shadow: var(--shadow-ring-hover); }
+.modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18px; }
+.modal-actions button {
+  padding: 6px 16px;
+  border: none;
+  border-radius: 6px;
+  background: var(--panel-3);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.02px;
+  box-shadow: var(--shadow-ring);
+  transition: background 0.1s ease, color 0.1s ease;
+}
+.modal-actions button:hover { background: var(--panel-2); }
+.modal-actions button.primary {
+  background: var(--text);
+  color: var(--panel);
+}
+.modal-actions button.primary:hover { background: var(--accent); color: white; }
+
+/* ============ Toast ============ */
+.toast {
+  position: fixed;
+  bottom: 30px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--text);
+  color: var(--panel);
+  padding: 8px 16px;
+  border-radius: 9999px;
+  font-size: 12.5px;
+  letter-spacing: 0.04px;
+  z-index: 2000;
+  box-shadow: 0 0 0 1px var(--border-warm), 0 14px 32px rgba(0, 0, 0, 0.14), 0 4px 12px rgba(0, 0, 0, 0.08);
+  animation: toast-in 0.2s ease-out;
+}
+@keyframes toast-in { from { opacity: 0; transform: translate(-50%, 10px); } to { opacity: 1; transform: translate(-50%, 0); } }
+
+/* ============ Scrollbars (Cursor 化) ============ */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: rgba(38, 37, 30, 0.15);
+  border-radius: 4px;
+  border: 2px solid var(--bg);
+}
+::-webkit-scrollbar-thumb:hover { background: rgba(38, 37, 30, 0.3); }
+
+/* ============ Markdown Tables ============ */
+/* Tiptap Table 扩展默认 .md-table class（见 app.js: Table.configure({ HTMLAttributes: { class: 'md-table' } })） */
+.md-table {
+  border-collapse: collapse;
+  margin: 12px 0;
+  width: 100%;
+  table-layout: auto;
+  font-size: 14px;
+  overflow: hidden;
+  border: 1px solid var(--border-warm-medium);
+  border-radius: 6px;
+}
+.md-table th,
+.md-table td {
+  border: 1px solid var(--border-warm);
+  padding: 6px 12px;
+  text-align: left;
+  vertical-align: top;
+  min-width: 60px;
+}
+.md-table th {
+  background: var(--panel-3);
+  font-weight: 600;
+  color: var(--text);
+}
+.md-table tbody tr:nth-child(even) td {
+  background: var(--panel-2);
+}
+.md-table tbody tr:hover td {
+  background: var(--accent-soft);
+}
+/* 选中单元格高亮（与文本选中色一致） */
+.md-table .selectedCell {
+  background: var(--highlight-active) !important;
+}
+/* 单元格内段落：去掉多余边距 */
+.md-table p {
+  margin: 0;
+}
+
+/* ============ Source View (源码视图) ============ */
+/* 工具栏 toggle 按钮的 active 状态（源码模式下高亮） */
+.tb-toggle[data-mode="source"] {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.tb-toggle[data-mode="source"] .tb-icon {
+  color: var(--accent);
+}
+/* 加大工具栏 .tb-sep 间距，让 "源码" 按钮组更明确独立 */
+.tb-group:has(#btn-toggle-render) {
+  margin-left: 4px;
+  padding-left: 8px;
+  border-left: 1px solid var(--border-warm);
+}
+/* 全屏源码视图 - 跟 Tiptap 编辑器同等地位，不做"卡片"反模式 */
+#source-view.source-view {
+  display: block;
+  width: calc(100% - 0px) !important;  /* 撑满 editor-pane 内容区 */
+  max-width: none !important;            /* 不受 #editor max-width: 760px 限制 */
+  flex: 1;
+  margin: 0;
+  padding: 40px 56px;
+  background: var(--panel);
+  border: none;
+  border-radius: 0;
+  font-family: 'JetBrains Mono', Menlo, Consolas, monospace;
+  font-size: 13.5px;
+  line-height: 1.7;
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-word;
+  tab-size: 2;
+  outline: none;
+  overflow: auto;
+  min-height: 100%;
+  box-sizing: border-box;
+  position: relative;
+}
+/* 焦点状态: 明显的橙色边框 + 暖色微光，让用户清楚意识到可编辑 */
+#source-view.source-view:focus {
+  background: var(--panel);
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+#source-view.source-view:focus::before {
+  content: '编辑源码';
+  position: absolute;
+  top: 12px;
+  right: 24px;
+  background: var(--accent);
+  color: white;
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 10.5px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 4px;
+  letter-spacing: 0.3px;
+  pointer-events: none;
+  opacity: 0.9;
+}
+/* 选中文字时的样式 (代码编辑感) */
+#source-view.source-view::selection {
+  background: var(--highlight-active);
+}

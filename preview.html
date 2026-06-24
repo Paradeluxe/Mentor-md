@@ -1,0 +1,405 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<title>Mentor DESIGN.md — Visual Preview</title>
+<!-- KaTeX -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" crossorigin="anonymous" />
+<style>
+/* ==== Token: copied from DESIGN.md colors/typography/spacing ==== */
+:root {
+  /* Cursor 化色板 - 与 DESIGN.md 保持一致 */
+  --bg: #f2f1ed;
+  --panel: #ffffff;
+  --panel-2: #f7f7f4;
+  --panel-3: #ebeae5;
+  --border-warm: rgba(38, 37, 30, 0.1);
+  --border-warm-medium: rgba(38, 37, 30, 0.2);
+  --text: #26251e;
+  --text-2: rgba(38, 37, 30, 0.6);
+  --text-3: rgba(38, 37, 30, 0.4);
+  --muted: #8a8780;
+  --accent: #f54e00;
+  --accent-soft: rgba(245, 78, 0, 0.08);
+  --highlight: #fef3c7;
+  --highlight-active: #fcd34d;
+  --resolved: #e5e7eb;
+  --comment-bg: #fff8e1;
+  --reply-bg: #f3f4f6;
+  --danger: #cf2d56;
+  --success: #1f8a65;
+  --warning: #d97706;
+  --code-bg: #1f2937;
+  --code-fg: #f3f4f6;
+  --scrollbar-thumb: #d1d5db;
+  --scrollbar-thumb-hover: #9ca3af;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body {
+  height: 100%;
+  font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  color: var(--text);
+  background: var(--bg);
+  line-height: 1.5;
+  font-size: 14px;
+  letter-spacing: 0.08px;  /* Cursor 标志: body 正字距 */
+  -webkit-font-smoothing: antialiased;
+}
+code { font-family: "JetBrains Mono", Consolas, Monaco, monospace; background: rgba(0,0,0,0.05); padding: 1px 4px; border-radius: 3px; font-size: 0.9em; }
+
+/* ==== Mock file pane (preview only) ==== */
+.mock-file-pane {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+  max-width: 320px;
+  margin: 12px 0;
+}
+.tree-fake { padding: 4px 0; }
+.tree-fake .tree-node { position: relative; padding: 4px 8px; display: flex; align-items: center; gap: 4px; font-size: 13px; cursor: default; }
+.tree-fake .tree-node:hover { background: var(--bg); }
+.tree-fake .tree-node.is-active { background: var(--accent-soft); color: var(--accent); font-weight: 600; box-shadow: inset 2px 0 0 0 var(--accent); }
+.tree-fake .tree-node .icon { font-size: 13px; line-height: 1; }
+.tree-fake .tree-node .icon.icon-md { color: var(--accent); }
+.tree-fake .tree-node .icon.icon-json { color: var(--success); }
+.tree-fake .tree-node .icon.icon-folder { color: var(--highlight-active); }
+.tree-fake .tree-node .dirty-dot-mini { width: 6px; height: 6px; border-radius: 50%; background: var(--warning); }
+.tree-fake .tree-node .filename { flex: 1; }
+.tree-fake .tree-node .filename mark { background: var(--highlight); color: var(--text); padding: 0 1px; border-radius: 2px; }
+/* preview mock: actions 始终可见，看清楚长啥样 */
+.tree-fake .tree-node .tree-actions {
+  display: flex; gap: 0;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0 2px;
+}
+.tree-fake .tree-node .tree-actions button {
+  background: transparent; border: none; color: var(--muted);
+  font-size: 12px; padding: 2px 5px; border-radius: 3px; cursor: pointer;
+}
+.tree-fake .tree-node .tree-actions button.danger { color: var(--danger); }
+.tree-fake .tree-folder { font-weight: 600; color: var(--muted); }
+.tree-fake .tree-children { padding-left: 14px; }
+
+/* ==== Layout ==== */
+#preview { max-width: 1280px; margin: 0 auto; padding: 32px 48px; }
+#preview h1.title { font-size: 2em; margin-bottom: 8px; }
+#preview p.lede { color: var(--muted); font-size: 14px; margin-bottom: 32px; }
+#preview section { margin-bottom: 40px; }
+#preview h2 { font-size: 1.3em; margin-bottom: 12px; padding-bottom: 6px; border-bottom: 1px solid var(--border); }
+#preview h3 { font-size: 1.05em; margin: 16px 0 8px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+#preview p { margin: 8px 0; }
+
+/* ==== Swatch grid ==== */
+.swatch-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; }
+.swatch { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+.swatch-color { height: 80px; }
+.swatch-meta { padding: 8px 10px; font-size: 12px; }
+.swatch-meta strong { display: block; font-size: 13px; margin-bottom: 2px; }
+.swatch-meta code { font-size: 11px; color: var(--muted); }
+
+/* ==== Annotation marks (the heart of Mentor) ==== */
+.doc-card { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 24px 32px; margin: 12px 0; line-height: 1.9; }
+.doc-card p { margin: 12px 0; }
+.doc-card h1 { font-size: 1.9em; font-weight: 700; margin: 16px 0 8px; }
+.doc-card h2 { font-size: 1.5em; font-weight: 700; margin: 14px 0 8px; border-bottom: none; padding: 0; }
+.annotation-mark { background: var(--highlight); border-bottom: 2px solid var(--highlight-active); padding: 0 1px; }
+.annotation-mark:hover { background: #fde68a; }
+.annotation-mark.is-resolved { background: var(--resolved); border-bottom-color: var(--scrollbar-thumb-hover); opacity: 0.7; }
+.annotation-mark.is-active { background: var(--highlight-active); }
+
+/* ==== Comment thread variants ==== */
+.thread-row { display: flex; gap: 16px; align-items: flex-start; margin: 12px 0; }
+.comment-thread {
+  background: var(--panel);
+  border: 1px solid var(--comment-bg);
+  border-left: 3px solid var(--comment-bg);
+  border-radius: 6px;
+  padding: 8px 10px;
+  width: 320px;
+  font-size: 12px;
+}
+.comment-thread.is-resolved { background: var(--resolved); border-color: var(--scrollbar-thumb); border-left-color: var(--scrollbar-thumb); opacity: 0.85; }
+.comment-thread strong.comment-author { font-size: 12px; font-weight: 600; }
+.comment-thread .timestamp { color: var(--muted); font-size: 11px; }
+.comment-thread .body { margin: 4px 0; }
+.comment-reply { background: var(--reply-bg); border-radius: 4px; margin: 6px 0 0 12px; padding: 6px 8px; }
+
+/* ==== Toolbar mock ==== */
+.mock-toolbar { display: flex; gap: 12px; padding: 8px 12px; border-bottom: 1px solid var(--border); background: var(--panel); align-items: center; }
+.tb-group { display: flex; align-items: center; gap: 4px; padding: 0 8px; border-right: 1px solid var(--border); }
+.tb-group:last-child { border-right: none; margin-left: auto; }
+.mock-toolbar button { background: transparent; border: 1px solid transparent; border-radius: 4px; padding: 4px 8px; font-size: 13px; font-family: inherit; cursor: pointer; }
+.mock-toolbar button:hover { background: var(--bg); }
+
+/* ==== Buttons ==== */
+.btn-primary { background: var(--accent); color: white; border: 1px solid var(--accent); border-radius: 4px; padding: 6px 16px; font-size: 13px; cursor: pointer; }
+.btn-primary:hover { background: var(--accent-hover); }
+.btn-secondary { background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 3px 10px; font-size: 12px; cursor: pointer; }
+.badge-warn { background: #fef3c7; color: #92400e; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 3px; display: inline-block; }
+.badge-success { background: #d1fae5; color: #065f46; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 3px; display: inline-block; }
+.badge-danger { background: #fee2e2; color: #991b1b; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 3px; display: inline-block; }
+
+/* ==== Comparison table ==== */
+.compare { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+.compare h4 { font-size: 13px; margin-bottom: 8px; color: var(--muted); }
+.compare .pro { color: var(--success); }
+.compare .con { color: var(--danger); }
+</style>
+</head>
+<body>
+<div id="preview">
+
+<h1 class="title">Mentor — Visual Design Preview</h1>
+<p class="lede">DESIGN.md token 化 + File Pane Trae 化 后的视觉验证页。打开这个文件就知道 Mentor 看起来是什么样。改 token → 刷新 → 立刻看见效果。</p>
+
+<!-- ========== File Pane (NEW: Trae 化) ========== -->
+<section>
+  <h2>0. File Pane — Trae 化（NEW）</h2>
+  <p style="color:var(--muted);font-size:13px;">4 个改动：文件类型图标 / hover 浮出操作 / per-file dirty 圆点 / 顶部搜索框。下方是 mock tree，<strong>hover 任意一行</strong>看操作按钮浮出。</p>
+
+  <div class="mock-file-pane">
+    <div class="pane-header">
+      <span>📂 文件</span>
+      <button title="收起">«</button>
+    </div>
+    <div class="tree-search-wrap">
+      <input type="text" placeholder="🔍 过滤文件" />
+    </div>
+    <div class="tree-fake">
+      <div class="tree-node tree-folder">
+        <span class="icon icon-folder">📁</span>
+        <span class="filename">my-paper-draft</span>
+        <span class="save-mode-badge">✓ 授权保存</span>
+      </div>
+      <div class="tree-children">
+        <div class="tree-node">
+          <span class="icon icon-md">📝</span>
+          <span class="filename">intro.md</span>
+          <span class="dirty-dot-mini" title="未保存"></span>
+          <span class="tree-actions">
+            <button title="复制路径">📋</button>
+            <button title="重新加载">🔄</button>
+            <button title="删除" class="danger">×</button>
+          </span>
+        </div>
+        <div class="tree-node is-active">
+          <span class="icon icon-md">📝</span>
+          <span class="filename"><mark>sam</mark>ple-paper.md</span>
+          <span class="tree-actions">
+            <button title="复制路径">📋</button>
+            <button title="重新加载">🔄</button>
+            <button title="删除" class="danger">×</button>
+          </span>
+        </div>
+        <div class="tree-node">
+          <span class="icon icon-md">📝</span>
+          <span class="filename">methods.md</span>
+          <span class="tree-actions">
+            <button title="复制路径">📋</button>
+            <button title="重新加载">🔄</button>
+            <button title="删除" class="danger">×</button>
+          </span>
+        </div>
+        <div class="tree-node">
+          <span class="icon icon-md">📝</span>
+          <span class="filename">results.md</span>
+          <span class="tree-actions">
+            <button title="复制路径">📋</button>
+            <button title="重新加载">🔄</button>
+            <button title="删除" class="danger">×</button>
+          </span>
+        </div>
+        <div class="tree-node">
+          <span class="icon icon-md">📝</span>
+          <span class="filename">discussion.md</span>
+          <span class="tree-actions">
+            <button title="复制路径">📋</button>
+            <button title="重新加载">🔄</button>
+            <button title="删除" class="danger">×</button>
+          </span>
+        </div>
+        <div class="tree-node">
+          <span class="icon icon-json">🔧</span>
+          <span class="filename">config.json</span>
+          <span class="tree-actions">
+            <button title="复制路径">📋</button>
+          </span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <h3>4 个改动的设计判断</h3>
+  <ul>
+    <li><strong>文件类型图标</strong>：.md 蓝（主语种） / .json 绿（数据） / 文件夹黄（复用批注黄，提示层级） / 其他灰</li>
+    <li><strong>hover 浮出操作</strong>：默认 opacity=0，hover 时 opacity=1，节省视觉空间。.md 3 个按钮（复制/重载/删除），.json 1 个（只复制）</li>
+    <li><strong>per-file dirty 圆点</strong>：橙色 6x6px，warning 颜色。只在当前文件 dirty 时显示，从视觉焦点里突出</li>
+    <li><strong>搜索框</strong>：4px 8px padding + 12px 字号，focus 时 border 变蓝，实时过滤 + 黄色高亮 + 清空按钮 + Cmd/Ctrl+Shift+E 快捷键</li>
+  </ul>
+</section>
+
+<!-- ========== Colors ========== -->
+<section>
+  <h2>1. Color Tokens</h2>
+
+  <h3>中性背景与文字</h3>
+  <div class="swatch-grid">
+    <div class="swatch"><div class="swatch-color" style="background:#fafafa;border:1px solid #e0e0e0;"></div><div class="swatch-meta"><strong>bg</strong><code>#fafafa</code></div></div>
+    <div class="swatch"><div class="swatch-color" style="background:#ffffff;border:1px solid #e0e0e0;"></div><div class="swatch-meta"><strong>panel</strong><code>#ffffff</code></div></div>
+    <div class="swatch"><div class="swatch-color" style="background:#e0e0e0;"></div><div class="swatch-meta"><strong>border</strong><code>#e0e0e0</code></div></div>
+    <div class="swatch"><div class="swatch-color" style="background:#1a1a1a;"></div><div class="swatch-meta"><strong>text</strong><code>#1a1a1a</code></div></div>
+    <div class="swatch"><div class="swatch-color" style="background:#6b6b6b;"></div><div class="swatch-meta"><strong>muted</strong><code>#6b6b6b</code></div></div>
+  </div>
+
+  <h3>交互蓝（accent）</h3>
+  <div class="swatch-grid">
+    <div class="swatch"><div class="swatch-color" style="background:#2563eb;"></div><div class="swatch-meta"><strong>accent</strong><code>#2563eb</code></div></div>
+    <div class="swatch"><div class="swatch-color" style="background:#1d4ed8;"></div><div class="swatch-meta"><strong>accent-hover</strong><code>#1d4ed8</code></div></div>
+    <div class="swatch"><div class="swatch-color" style="background:#dbeafe;"></div><div class="swatch-meta"><strong>accent-soft</strong><code>#dbeafe</code></div></div>
+  </div>
+
+  <h3>批注三件套（暖黄）</h3>
+  <div class="swatch-grid">
+    <div class="swatch"><div class="swatch-color" style="background:#fef3c7;"></div><div class="swatch-meta"><strong>highlight</strong><code>#fef3c7</code> — 文档内 mark</div></div>
+    <div class="swatch"><div class="swatch-color" style="background:#fcd34d;"></div><div class="swatch-meta"><strong>highlight-active</strong><code>#fcd34d</code> — 当前 mark</div></div>
+    <div class="swatch"><div class="swatch-color" style="background:#fff8e1;"></div><div class="swatch-meta"><strong>comment-bg</strong><code>#fff8e1</code> — 侧栏边框</div></div>
+    <div class="swatch"><div class="swatch-color" style="background:#e5e7eb;"></div><div class="swatch-meta"><strong>resolved</strong><code>#e5e7eb</code> — 已解决</div></div>
+  </div>
+
+  <h3>状态色</h3>
+  <div class="swatch-grid">
+    <div class="swatch"><div class="swatch-color" style="background:#dc2626;"></div><div class="swatch-meta"><strong>danger</strong><code>#dc2626</code></div></div>
+    <div class="swatch"><div class="swatch-color" style="background:#16a34a;"></div><div class="swatch-meta"><strong>success</strong><code>#16a34a</code></div></div>
+    <div class="swatch"><div class="swatch-color" style="background:#1f2937;"></div><div class="swatch-meta"><strong>code-bg</strong><code>#1f2937</code> — 暗色代码块</div></div>
+  </div>
+</section>
+
+<!-- ========== Annotation marks: the heart of Mentor ========== -->
+<section>
+  <h2>2. 批注 Mark — Mentor 的视觉一等公民</h2>
+  <p style="color:var(--muted);font-size:13px;">hover 鼠标看交互态。设计判断：<strong>黄色是「这里有话要说」，resolved 灰化主动从视线里撤出</strong>。</p>
+
+  <div class="doc-card">
+    <h1>三件套测试</h1>
+    <p>这一段是 <span class="annotation-mark">未处理的批注</span>，默认高亮底色 + 黄色下划线。</p>
+    <p>这一段是 <span class="annotation-mark is-active">当前聚焦的批注</span>，底色变深一档（hover/active 态）。</p>
+    <p>这一段是 <span class="annotation-mark is-resolved">已解决的批注</span>，灰化 + 70% 透明度，主动退场。</p>
+    <p>混排测试：这里有<span class="annotation-mark">第一个批注</span>，后面跟普通文字，然后<span class="annotation-mark">第二个批注</span>挨着。</p>
+  </div>
+</section>
+
+<!-- ========== Comment threads ========== -->
+<section>
+  <h2>3. 批注侧栏 — 嵌套回复 vs 单层</h2>
+  <p style="color:var(--muted);font-size:13px;">下一步要决定的事：右侧批注卡要支持嵌套回复吗？下面把两种模式都画出来对比。</p>
+
+  <div class="compare">
+    <div>
+      <h4>方案 A：当前实现（嵌套）</h4>
+      <div class="comment-thread">
+        <strong class="comment-author">张三</strong> · <span class="timestamp">昨天 14:32</span>
+        <div class="body">这里用 "significant" 是不是太重了？</div>
+        <div class="comment-reply">
+          <strong class="comment-author">李四</strong> · <span class="timestamp">昨天 15:01</span>
+          <div class="body">同意，改成 "notable" 更准确。</div>
+          <div class="comment-reply" style="margin-left:0;background:#e5e7eb;">
+            <strong class="comment-author">张三</strong> · <span class="timestamp">昨天 15:30</span>
+            <div class="body">"marked" 也行，看你。</div>
+          </div>
+        </div>
+        <div class="comment-reply">
+          <strong class="comment-author">王五</strong> · <span class="timestamp">昨天 18:12</span>
+          <div class="body">我觉得保留原样更好。</div>
+        </div>
+      </div>
+      <p class="con" style="font-size:12px;">❌ 缩进视觉负担重，3 楼之后基本不读</p>
+    </div>
+
+    <div>
+      <h4>方案 B：单层 + AI 标识</h4>
+      <div class="comment-thread">
+        <strong class="comment-author">张三</strong> · <span class="timestamp">昨天 14:32</span>
+        <div class="body">这里用 "significant" 是不是太重了？</div>
+        <div class="comment-reply" style="margin-left:0;background:var(--accent-soft);">
+          <strong class="comment-author">🤖 AI Reviewer</strong> · <span class="timestamp">昨天 14:33</span>
+          <div class="body">建议改成 "notable"。根据语境（结果部分），"significant" 通常指统计显著，<code>p &lt; 0.05</code>，而这里是描述效应大小。</div>
+        </div>
+        <div class="comment-reply" style="margin-left:0;background:var(--reply-bg);">
+          <strong class="comment-author">李四</strong> · <span class="timestamp">昨天 15:01</span>
+          <div class="body">同意，改成 "notable" 更准确。</div>
+        </div>
+        <div class="comment-reply" style="margin-left:0;background:var(--reply-bg);">
+          <strong class="comment-author">王五</strong> · <span class="timestamp">昨天 18:12</span>
+          <div class="body">我觉得保留原样更好。</div>
+        </div>
+      </div>
+      <p class="pro" style="font-size:12px;">✅ AI 永远在底部一次回复完；人/人回复平铺不嵌套；视觉扫读快</p>
+    </div>
+  </div>
+</section>
+
+<!-- ========== Toolbar & UI mock ========== -->
+<section>
+  <h2>4. 工具栏 & 浮起按钮</h2>
+  <div class="mock-toolbar">
+    <div class="tb-group">
+      <button>📄 新建</button>
+      <button>📂 打开文件</button>
+      <button>📁 打开文件夹</button>
+      <button>💾 保存</button>
+    </div>
+    <div class="tb-group">
+      <button><b>B</b></button>
+      <button><i>I</i></button>
+      <button>H1</button>
+      <button>• 列表</button>
+    </div>
+    <div class="tb-group">
+      <span style="color:var(--muted);font-size:13px;">📄 my-paper.md</span>
+      <span class="badge-warn">下载模式</span>
+    </div>
+  </div>
+
+  <h3>浮起批注按钮（选中文本后出现）</h3>
+  <p><button class="btn-primary">💬 批注</button> &nbsp; <button class="btn-primary" style="background:var(--accent-hover);">💬 批注 (hover)</button></p>
+
+  <h3>徽章变体</h3>
+  <p>
+    <span class="badge-warn">下载模式</span>
+    &nbsp;
+    <span class="badge-success">已保存</span>
+    &nbsp;
+    <span class="badge-danger">权限被拒</span>
+  </p>
+</section>
+
+<!-- ========== Typography scale ========== -->
+<section>
+  <h2>5. 字号比例</h2>
+  <p style="font-size:15px;line-height:1.7;">Body 15px / 1.7 — 学术写作长阅读默认</p>
+  <p style="font-size:13px;line-height:1.4;">UI-md 13px / 1.4 — 工具栏、tree、批注卡</p>
+  <p style="font-size:12px;line-height:1.4;">UI-sm 12px — author、输入框</p>
+  <p style="font-size:11px;line-height:1.3;color:var(--muted);">UI-xs 11px / 1.3 — 时间戳、徽章、提示</p>
+  <h1 style="font-size:1.9em;line-height:1.2;">H1 1.9em / 1.2</h1>
+  <h2 style="font-size:1.5em;line-height:1.3;">H2 1.5em / 1.3</h2>
+  <h3 style="font-size:1.25em;line-height:1.4;">H3 1.25em / 1.4</h3>
+</section>
+
+<!-- ========== Final decision prompt ========== -->
+<section style="background:var(--panel);border:2px dashed var(--accent);border-radius:8px;padding:24px;margin-top:48px;">
+  <h2 style="border-bottom:none;">👉 还没决定的事</h2>
+  <p><strong>1. 嵌套回复的视觉语言</strong>（preview.html 第 3 节之前）— 还没选 A/B/C 方案</p>
+  <ul style="margin:12px 0;padding-left:24px;">
+    <li><strong>A. 嵌套（docx 风格）</strong>：保留树形回复</li>
+    <li><strong>B. 单层 + AI 标识</strong>：删 replies[].replies[]，AI 永远在底部一次回复</li>
+    <li><strong>C. 砍嵌套但保留 replies 字段</strong>：数据层支持但 UI 平铺</li>
+  </ul>
+  <p style="color:var(--muted);font-size:13px;">决定后我会同步改：<code>app.js</code> 的批注渲染逻辑 + <code>DESIGN.md</code> 的 comment-thread 组件 section + 必要时 <code>styles.css</code></p>
+</section>
+
+</div>
+</body>
+</html>

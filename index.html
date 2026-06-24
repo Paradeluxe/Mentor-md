@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Mentor — 像 docx 一样批注 Markdown</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="styles.css" />
+<!-- KaTeX 数学公式渲染 -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" crossorigin="anonymous" />
+<!-- 字体：系统无衬线 + 等宽（侧栏时间戳、文件名） -->
+<style>
+  :root {
+    /* Cursor 化色板 - 与 DESIGN.md colors 块保持一致 */
+    --bg: #f2f1ed;
+    --panel: #ffffff;
+    --panel-2: #f7f7f4;
+    --panel-3: #ebeae5;
+    --border-warm: rgba(38, 37, 30, 0.1);
+    --border-warm-medium: rgba(38, 37, 30, 0.2);
+    --text: #26251e;
+    --text-2: rgba(38, 37, 30, 0.6);
+    --text-3: rgba(38, 37, 30, 0.4);
+    --muted: #8a8780;
+    --accent: #f54e00;
+    --accent-soft: rgba(245, 78, 0, 0.08);
+    --highlight: #fef3c7;
+    --highlight-active: #fcd34d;
+    --resolved: #e5e7eb;
+    --comment-bg: #fff8e1;
+    --reply-bg: #f3f4f6;
+    --danger: #cf2d56;
+    --success: #1f8a65;
+    --warning: #d97706;
+  }
+</style>
+</head>
+<body>
+<div id="app">
+
+  <!-- Toolbar -->
+  <header id="toolbar">
+    <div class="tb-group">
+      <button id="btn-new" title="新建空白文档" class="tb-icon-text"><span class="tb-icon"></span><span>新建</span></button>
+      <button id="btn-open-files" title="打开一个或多个 .md 文件" class="tb-icon-text"><span class="tb-icon"></span><span>打开文件</span></button>
+      <button id="btn-save" title="保存当前 .md 和批注 (Ctrl+S)" class="tb-icon-text"><span class="tb-icon"></span><span>保存</span></button>
+      <button id="btn-save-as" title="另存为 (下载副本)" class="tb-icon-text"><span class="tb-icon"></span><span>另存为</span></button>
+      <span class="tb-sep"></span>
+      <button id="btn-toggle-render" title="切换源码/渲染视图" class="tb-icon-text tb-toggle" data-mode="rendered"><span class="tb-icon"></span><span>源码</span></button>
+    </div>
+    <div class="tb-group" id="format-toolbar">
+      <button data-cmd="bold" title="加粗 (Ctrl+B)" class="tb-format" aria-label="加粗"></button>
+      <button data-cmd="italic" title="斜体 (Ctrl+I)" class="tb-format" aria-label="斜体"></button>
+      <button data-cmd="strike" title="删除线" class="tb-format" aria-label="删除线"></button>
+      <button data-cmd="code" title="行内代码" class="tb-format" aria-label="行内代码"></button>
+      <span class="tb-sep"></span>
+      <button data-cmd="h1" title="一级标题" class="tb-format" aria-label="一级标题"></button>
+      <button data-cmd="h2" title="二级标题" class="tb-format" aria-label="二级标题"></button>
+      <button data-cmd="h3" title="三级标题" class="tb-format" aria-label="三级标题"></button>
+      <span class="tb-sep"></span>
+      <button data-cmd="bulletList" title="无序列表" class="tb-format" aria-label="无序列表"></button>
+      <button data-cmd="orderedList" title="有序列表" class="tb-format" aria-label="有序列表"></button>
+      <button data-cmd="blockquote" title="引用" class="tb-format" aria-label="引用"></button>
+      <button data-cmd="codeBlock" title="代码块" class="tb-format" aria-label="代码块"></button>
+      <span class="tb-sep"></span>
+      <button data-cmd="link" title="插入链接" class="tb-format" aria-label="链接"></button>
+      <button data-cmd="image" title="插入图片" class="tb-format" aria-label="图片"></button>
+    </div>
+    <div class="tb-group" id="title-group">
+      <span id="current-file-name">未打开文档</span>
+      <span id="dirty-indicator" class="dirty-dot" title="有未保存修改"></span>
+    </div>
+  </header>
+
+  <!-- Main 3-pane layout -->
+  <main id="main">
+    <!-- 左：大纲视图（根据当前文档 H1/H2/H3 自动生成） -->
+    <aside id="file-pane">
+      <div class="pane-header">
+        <span class="pane-title"><span class="pane-icon pane-icon-outline"></span><span>大纲</span></span>
+        <!-- 收起按钮已移除: 大纲栏始终显示 (Word 风格) -->
+      </div>
+      <div id="outline-pane">
+        <p class="outline-empty">打开文档以查看大纲</p>
+      </div>
+      <!-- 文件树暂时隐藏,第三步砍 -->
+      <div id="file-tree" class="hidden" style="display:none"></div>
+    </aside>
+
+    <!-- 浮起"展开"按钮已移除: 大纲栏始终显示,不需要展开按钮 -->
+
+    <!-- 中：编辑器 -->
+    <section id="editor-pane">
+      <div id="editor"></div>
+      <div id="empty-editor-hint" class="empty-hint">
+        <h2>Mentor</h2>
+        <p>一个支持 docx 风格批注的 Markdown WYSIWYG 编辑器。</p>
+        <ul>
+          <li>拖选任意文字 → 点 <kbd>批注</kbd> 按钮 → 侧栏建批注线程</li>
+          <li>支持嵌套回复 (threaded reply)</li>
+          <li>支持 <em>解决</em> / <em>重新打开</em> 批注</li>
+          <li>批注存 <code>xxx.md.annotations.json</code> 侧车文件</li>
+        </ul>
+        <p class="hint">从工具栏 [打开文件] 开始。</p>
+      </div>
+      <!-- 浮动批注按钮，选中文本后出现 -->
+      <div id="float-comment-btn" class="float-btn hidden">
+        <button aria-label="批注"></button>
+      </div>
+      <!-- 浮动删除批注按钮，active mark 上出现 -->
+      <div id="mark-delete-popover" class="mark-delete-popover hidden" role="toolbar" aria-label="批注操作">
+        <button id="mark-delete-btn" class="mark-delete-btn" title="删除此批注" aria-label="删除批注"></button>
+      </div>
+    </section>
+
+    <!-- 右：批注面板 -->
+    <aside id="comment-pane">
+      <div class="pane-header">
+        <span class="pane-title"><span class="pane-icon pane-icon-comment"></span><span>批注</span></span>
+        <div class="filters">
+          <label><input type="checkbox" id="filter-open" checked /> 未解决</label>
+          <label><input type="checkbox" id="filter-resolved" /> 已解决</label>
+        </div>
+      </div>
+      <div id="comment-list"></div>
+      <div id="comment-empty" class="empty-hint">
+        <p>尚无批注</p>
+        <p class="hint">在编辑器中拖选文字以添加批注</p>
+      </div>
+    </aside>
+  </main>
+
+  <!-- 状态栏 -->
+  <footer id="statusbar">
+    <span id="status-left">就绪</span>
+    <span id="status-right"></span>
+  </footer>
+</div>
+
+<!-- 浮动"作者"输入框 (首次使用) -->
+<div id="author-modal" class="modal hidden">
+  <div class="modal-content">
+    <h3>设置作者名</h3>
+    <p>批注将使用此作者名（可随时修改）：</p>
+    <input type="text" id="author-input" placeholder="例如：张三" />
+    <div class="modal-actions">
+      <button id="author-save">确定</button>
+    </div>
+  </div>
+</div>
+
+<!-- 临时通知 -->
+<div id="toast" class="toast hidden"></div>
+
+<!-- 依赖：esm.sh CDN -->
+<script src="icons.js"></script>
+<script type="importmap">
+{
+  "imports": {
+    "@tiptap/core": "https://esm.sh/@tiptap/core@2.1.13",
+    "@tiptap/starter-kit": "https://esm.sh/@tiptap/starter-kit@2.1.13",
+    "@tiptap/extension-highlight": "https://esm.sh/@tiptap/extension-highlight@2.1.13",
+    "@tiptap/extension-link": "https://esm.sh/@tiptap/extension-link@2.1.13",
+    "@tiptap/extension-image": "https://esm.sh/@tiptap/extension-image@2.1.13",
+    "@tiptap/extension-placeholder": "https://esm.sh/@tiptap/extension-placeholder@2.1.13",
+    "@tiptap/extension-table": "https://esm.sh/@tiptap/extension-table@2.1.13",
+    "@tiptap/extension-table-row": "https://esm.sh/@tiptap/extension-table-row@2.1.13",
+    "@tiptap/extension-table-header": "https://esm.sh/@tiptap/extension-table-header@2.1.13",
+    "@tiptap/extension-table-cell": "https://esm.sh/@tiptap/extension-table-cell@2.1.13",
+    "markdown-it": "https://esm.sh/markdown-it@13.0.1",
+    "katex": "https://esm.sh/katex@0.16.9",
+    "js-yaml": "https://esm.sh/js-yaml@4.1.0",
+    "turndown": "https://esm.sh/turndown@7.1.2"
+  }
+}
+</script>
+<script type="module" src="app.js"></script>
+</body>
+</html>

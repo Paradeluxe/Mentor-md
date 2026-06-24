@@ -1,0 +1,94 @@
+{
+  "version": "1",
+  "document": "sample.md",
+  "updatedAt": "2026-06-21T11:15:11.772Z",
+  "author": "AI Reviewer (Claude)",
+  "annotations": [
+    {
+      "threadId": "d7603448-523e-4721-9702-8118549b237b",
+      "text": "WYSIWYG 编辑（所见即所得）",
+      "resolved": false,
+      "createdAt": "2026-06-21T11:15:09.907Z",
+      "comments": [
+        {
+          "id": "33c27b42-51a4-4ce6-b170-5308d1f95c64",
+          "author": "AI Reviewer (Claude)",
+          "body": "",
+          "createdAt": "2026-06-21T11:15:09.907Z"
+        },
+        {
+          "id": "027192e1-55a6-4d8e-91d5-a6fc80c1dc6f",
+          "author": "AI Reviewer (Claude)",
+          "body": "📐 建议：在 README 第一屏特性截图处放一张编辑器主界面图，展示工具栏+编辑器+批注面板三栏布局，让用户一眼理解这是什么。",
+          "createdAt": "2026-06-21T11:15:10.111Z"
+        }
+      ]
+    },
+    {
+      "threadId": "0eec7713-668a-4561-963e-59d66bd7508f",
+      "text": "选区级批注（精确到字符范围）",
+      "resolved": false,
+      "createdAt": "2026-06-21T11:15:10.265Z",
+      "comments": [
+        {
+          "id": "2275b218-6f13-4f04-abec-eb5a8f1159c0",
+          "author": "AI Reviewer (Claude)",
+          "body": "",
+          "createdAt": "2026-06-21T11:15:10.265Z"
+        },
+        {
+          "id": "5c233128-5056-4fbd-b9c6-56b19249b56c",
+          "author": "AI Reviewer (Claude)",
+          "body": "💡 这是核心亮点。建议在 README 第一屏对比 docx 批注（\"和 docx 一样，但用在 md 上\"），让用户立刻建立心智模型。",
+          "createdAt": "2026-06-21T11:15:10.469Z"
+        }
+      ]
+    },
+    {
+      "threadId": "23502707-306b-4f9b-9ac9-f55740ab043a",
+      "text": "嵌套回复",
+      "resolved": false,
+      "createdAt": "2026-06-21T11:15:10.622Z",
+      "comments": [
+        {
+          "id": "24faaa03-5c64-4b2e-9b88-7fe671315cfe",
+          "author": "AI Reviewer (Claude)",
+          "body": "",
+          "createdAt": "2026-06-21T11:15:10.622Z"
+        },
+        {
+          "id": "1814cd62-99b2-438f-9b99-d477343fb57a",
+          "author": "AI Reviewer (Claude)",
+          "body": "🧵 建议：补充 thread reply 的截图样例（线程+嵌套回复），展示 docx 风格 threaded comments 视觉效果。",
+          "createdAt": "2026-06-21T11:15:10.825Z"
+        }
+      ]
+    },
+    {
+      "threadId": "f5fee28f-794c-456d-8965-5b7a649b9767",
+      "text": "侧车 JSON 存储",
+      "resolved": false,
+      "createdAt": "2026-06-21T11:15:10.978Z",
+      "comments": [
+        {
+          "id": "9bc409b5-61be-4b35-85d5-1f2291a1d47d",
+          "author": "AI Reviewer (Claude)",
+          "body": "",
+          "createdAt": "2026-06-21T11:15:10.978Z"
+        },
+        {
+          "id": "e7c8ed18-43c3-499a-a4ab-3b11c2a088c4",
+          "author": "AI Reviewer (Claude)",
+          "body": "📂 可考虑在 test-data/ 下加一个 example/ 文件夹，附带完整 .md + .annotations.json 配对样例，方便用户复制粘贴作为起点。",
+          "createdAt": "2026-06-21T11:15:11.181Z"
+        },
+        {
+          "id": "78998d72-4c8d-4f60-87e3-da3844f61076",
+          "author": "AI Reviewer (Claude)",
+          "body": "🧮 KaTeX 支持 $inline$ + $$block$$ 两种。公式示例这里只有 inline。建议再加一个 block 例子（如 $$\\sum_{i=1}^n x_i$$），让用户看到两种语法都用得到。",
+          "createdAt": "2026-06-21T11:15:11.537Z"
+        }
+      ]
+    }
+  ]
+}

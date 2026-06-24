@@ -1,0 +1,42 @@
+{
+  "version": "1",
+  "document": "sample.md",
+  "updatedAt": "2026-06-21T10:00:00.000Z",
+  "author": "测试作者",
+  "annotations": [
+    {
+      "threadId": "test-thread-1",
+      "text": "WYSIWYG 编辑（所见即所得）",
+      "resolved": false,
+      "createdAt": "2026-06-21T10:00:00.000Z",
+      "comments": [
+        {
+          "id": "test-comment-1",
+          "author": "测试作者",
+          "body": "这个功能是否在所有浏览器上都支持？",
+          "createdAt": "2026-06-21T10:00:00.000Z"
+        },
+        {
+          "id": "test-comment-2",
+          "author": "审稿人 A",
+          "body": "建议在 README 中说明浏览器兼容性。",
+          "createdAt": "2026-06-21T10:05:00.000Z"
+        }
+      ]
+    },
+    {
+      "threadId": "test-thread-2",
+      "text": "选区级批注（精确到字符范围）",
+      "resolved": true,
+      "createdAt": "2026-06-21T10:10:00.000Z",
+      "comments": [
+        {
+          "id": "test-comment-3",
+          "author": "测试作者",
+          "body": "已实现，使用 ProseMirror mark。",
+          "createdAt": "2026-06-21T10:10:00.000Z"
+        }
+      ]
+    }
+  ]
+}

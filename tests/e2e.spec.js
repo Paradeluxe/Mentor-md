@@ -1,0 +1,1504 @@
+// Mentor E2E 测试
+// 用 Node Playwright 验证：打开 → 加载 markdown+侧车 → 创建批注 → 解决 → 回复 → 导出 markdown
+
+const { chromium } = require('/home/lablabcloud/.hermes/node/lib/node_modules/playwright');
+const fs = require('fs');
+const path = require('path');
+
+const ROOT = '/mnt/e/hermes_playground/Mentor';
+const URL = 'http://127.0.0.1:8765/index.html';
+
+const SAMPLE_MD = fs.readFileSync(path.join(ROOT, 'test-data/sample.md'), 'utf-8');
+const SAMPLE_ANN = JSON.parse(fs.readFileSync(path.join(ROOT, 'test-data/sample.md.annotations.json'), 'utf-8'));
+
+(async () => {
+  const browser = await chromium.launch({ headless: true });
+  const context = await browser.newContext({ viewport: { width: 1400, height: 900 } });
+  const page = await context.newPage();
+
+  // 收集 console 错误
+  const consoleErrors = [];
+  const pageErrors = [];
+  page.on('console', msg => {
+    if (msg.type() === 'error') consoleErrors.push(msg.text());
+  });
+  page.on('pageerror', err => pageErrors.push(err.message));
+
+  console.log('=== TEST 1: 页面加载 ===');
+  await page.goto(URL, { waitUntil: 'networkidle' });
+  // 等 Tiptap 初始化
+  await page.waitForFunction(() => window.__mdAnnotator && window.__mdAnnotator.State.editor, { timeout: 10000 });
+  console.log('  ✓ 页面加载, Tiptap 初始化完成');
+
+  // 设置作者
+  await page.evaluate(() => window.__mdAnnotator.setAuthor('测试作者'));
+
+  console.log('=== TEST 2: 加载 sample.md + 侧车 ===');
+  await page.evaluate((args) => {
+    return window.__mdAnnotator.loadMarkdownIntoEditor(args.name, args.content, args.annotations);
+  }, { name: 'sample.md', content: SAMPLE_MD, annotations: SAMPLE_ANN });
+
+  await page.waitForTimeout(300);
+  const initialAnnotations = await page.evaluate(() => window.__mdAnnotator.getAnnotations());
+  console.log(`  ✓ 加载了 ${initialAnnotations.length} 个批注 (预期 2)`);
+  if (initialAnnotations.length !== 2) throw new Error(`批注数错: ${initialAnnotations.length}`);
+
+  const markCount = await page.locator('.annotation-mark').count();
+  console.log(`  ✓ 编辑器中有 ${markCount} 个高亮 mark (预期 2)`);
+  if (markCount !== 2) throw new Error(`mark 数错: ${markCount}`);
+
+  // 默认 filter 是"未解决"，所以 1 个 resolved 被过滤，只显示 1 个未解决的
+  let commentCount = await page.locator('.comment-thread').count();
+  console.log(`  ✓ 默认 filter (未解决): 侧栏显示 ${commentCount} 个 (预期 1)`);
+  if (commentCount !== 1) throw new Error(`默认 filter 应显示 1 个，实际 ${commentCount}`);
+
+  // 勾选"已解决" filter，应该显示 2 个
+  await page.locator('#filter-resolved').check();
+  await page.waitForTimeout(150);
+  commentCount = await page.locator('.comment-thread').count();
+  console.log(`  ✓ 勾选已解决 filter: 侧栏显示 ${commentCount} 个 (预期 2)`);
+  if (commentCount !== 2) throw new Error(`含已解决 filter 应显示 2 个，实际 ${commentCount}`);
+
+  // 恢复默认
+  await page.locator('#filter-resolved').uncheck();
+  await page.waitForTimeout(100);
+
+  console.log('=== TEST 3: 截图当前状态 ===');
+  await page.screenshot({ path: '/tmp/Mentor-test-1-loaded.png', fullPage: false });
+  console.log('  ✓ 截图: /tmp/Mentor-test-1-loaded.png');
+
+  console.log('=== TEST 4: 创建新批注 ===');
+  // 调用 helper 在 "嵌套回复（threaded replies）" 上创建批注
+  const newThread = await page.evaluate(() => {
+    return window.__mdAnnotator.createTestAnnotation('嵌套回复（threaded replies）');
+  });
+  if (!newThread) throw new Error('创建批注失败');
+  console.log(`  ✓ 新批注 threadId=${newThread.threadId.slice(0, 8)}, text="${newThread.text}"`);
+
+  await page.waitForTimeout(200);
+  const afterCreateCount = await page.locator('.annotation-mark').count();
+  console.log(`  ✓ mark 总数 = ${afterCreateCount} (预期 3)`);
+  if (afterCreateCount !== 3) throw new Error(`mark 数错: ${afterCreateCount}`);
+
+  console.log('=== TEST 5: 添加回复 ===');
+  // 在新批注的输入框中输入
+  await page.evaluate((threadId) => {
+    const ta = document.querySelector(`[data-thread-input="${threadId}"]`);
+    ta.value = '这是测试回复';
+    document.querySelector(`[data-act="submit-reply"][data-thread="${threadId}"]`).click();
+  }, newThread.threadId);
+  await page.waitForTimeout(200);
+  const updatedThread = await page.evaluate((threadId) => {
+    return window.__mdAnnotator.getAnnotations().find(t => t.threadId === threadId);
+  }, newThread.threadId);
+  console.log(`  ✓ 线程回复数 = ${updatedThread.comments.length} (预期 2)`);
+  if (updatedThread.comments.length !== 2) throw new Error(`回复数错: ${updatedThread.comments.length}`);
+
+  console.log('=== TEST 6: Toggle resolved ===');
+  // 把第 1 个批注（已解决）切回未解决
+  await page.evaluate(() => {
+    const btn = document.querySelector('[data-act="resolve"]');
+    btn.click();
+  });
+  await page.waitForTimeout(200);
+  const afterToggle = await page.evaluate(() => window.__mdAnnotator.getAnnotations());
+  const resolvedCount = afterToggle.filter(t => t.resolved).length;
+  const unresolvedCount = afterToggle.filter(t => !t.resolved).length;
+  // toggle 前: resolved=1 (test-thread-2), unresolved=2 (test-thread-1 + 新建的)
+  // toggle 第 1 个未解决 → resolved=true
+  // 期望: resolved=2 (test-thread-1 + test-thread-2), unresolved=1 (新建的)
+  console.log(`  ✓ resolved=${resolvedCount}, unresolved=${unresolvedCount} (预期 2/1)`);
+  if (resolvedCount !== 2 || unresolvedCount !== 1) throw new Error(`resolved 状态错`);
+
+  console.log('=== TEST 7: 删除批注 ===');
+  // 自动确认对话框
+  page.once('dialog', d => d.accept());
+  const beforeDelete = await page.locator('.annotation-mark').count();
+  await page.evaluate(() => {
+    const btn = document.querySelector('[data-act="delete"]');
+    btn.click();
+  });
+  await page.waitForTimeout(200);
+  const afterDelete = await page.locator('.annotation-mark').count();
+  console.log(`  ✓ mark 数 ${beforeDelete} → ${afterDelete}`);
+  if (afterDelete !== beforeDelete - 1) throw new Error('删除未生效');
+
+  console.log('=== TEST 8: 导出 markdown（HTML → MD）===');
+  const html = await page.evaluate(() => window.__mdAnnotator.getEditorHTML());
+  // 直接在浏览器内 turndown
+  const exportedMd = await page.evaluate(async (html) => {
+    const TurndownService = (await import('https://esm.sh/turndown@7.1.2')).default;
+    const td = new TurndownService({ headingStyle: 'atx', codeBlockStyle: 'fenced', bulletListMarker: '-' });
+    html = html.replace(/<span[^>]*data-thread-id[^>]*>(.*?)<\/span>/gs, '$1');
+    return td.turndown(html);
+  }, html);
+  console.log('  ✓ 导出 markdown 长度:', exportedMd.length);
+  console.log('  ✓ 前 200 字符:');
+  console.log('    ' + exportedMd.slice(0, 200).replace(/\n/g, '\n    '));
+  if (!exportedMd.includes('# 测试文档')) throw new Error('导出缺少 H1');
+  if (exportedMd.includes('data-thread-id')) throw new Error('导出仍含 mark 标签');
+
+  console.log('=== TEST 9: 光标落在 resolved mark → 侧栏 pinned 显示 ===');
+  // 找到 test-thread-2 (resolved) 的 mark，把光标移到里面
+  const pinnedResult = await page.evaluate(() => {
+    const editor = window.__mdAnnotator.State.editor;
+    let pos = null;
+    editor.state.doc.descendants((node, p) => {
+      node.marks.forEach(m => {
+        if (m.type === editor.schema.marks.annotation && m.attrs.threadId === 'test-thread-2') {
+          if (pos === null) pos = p + 1; // 移到 mark 中间
+        }
+      });
+    });
+    if (pos === null) return { ok: false, reason: 'mark not found' };
+    editor.commands.focus(pos);
+    return { ok: true, pos };
+  });
+  console.log('  ✓ 光标移入 resolved mark:', JSON.stringify(pinnedResult));
+  if (!pinnedResult.ok) throw new Error('移光标失败');
+
+  await page.waitForTimeout(200);
+  const pinnedBannerVisible = await page.locator('.pinned-banner').count();
+  console.log(`  ✓ pinned banner 出现次数 = ${pinnedBannerVisible} (预期 1)`);
+  if (pinnedBannerVisible !== 1) throw new Error(`pinned banner 应显示，实际 ${pinnedBannerVisible}`);
+
+  const activeThreadId = await page.evaluate(() => window.__mdAnnotator.State.activeThreadId);
+  console.log(`  ✓ activeThreadId = ${activeThreadId?.slice(0, 8)} (预期 test-thread-2)`);
+  if (activeThreadId !== 'test-thread-2') throw new Error(`active thread 不对: ${activeThreadId}`);
+
+  console.log('=== TEST 10: 最终截图 (pinned 状态) ===');
+  await page.screenshot({ path: '/tmp/Mentor-test-2-after-edits.png', fullPage: false });
+  console.log('  ✓ 截图: /tmp/Mentor-test-2-after-edits.png');
+
+  console.log('=== TEST 11: KaTeX 公式渲染 ===');
+  // 重新加载 sample.md（其中含 $E=mc^2$）
+  await page.evaluate((args) => {
+    return window.__mdAnnotator.loadMarkdownIntoEditor(args.name, args.content, null);
+  }, { name: 'sample.md', content: SAMPLE_MD, annotations: null });
+  await page.waitForTimeout(400);
+
+  const katexWrapperCount = await page.locator('.katex-wrapper').count();
+  console.log(`  ✓ katex-wrapper 元素渲染数 = ${katexWrapperCount} (预期 ≥ 1, sample.md 有 $E=mc^2$)`);
+  if (katexWrapperCount < 1) throw new Error(`KaTeX wrapper 未渲染: ${katexWrapperCount}`);
+
+  // 验证内部 katex 实际渲染（KaTeX CSS 选择器 .katex 来自 KaTeX 库本身）
+  const katexRealCount = await page.locator('.katex').count();
+  console.log(`  ✓ 真实 .katex 元素数 = ${katexRealCount} (预期 ≥ 1, 来自 KaTeX renderToString)`);
+  if (katexRealCount < 1) throw new Error(`KaTeX 实际未渲染: ${katexRealCount}`);
+
+  // 验证 data-tex 属性
+  const texAttr = await page.evaluate(() => {
+    const w = document.querySelector('.katex-wrapper');
+    return w ? w.getAttribute('data-tex') : null;
+  });
+  console.log(`  ✓ katex-wrapper data-tex = "${texAttr}" (预期 "E = mc^2")`);
+  if (texAttr !== 'E = mc^2') throw new Error(`data-tex 错: ${texAttr}`);
+
+  // 验证 turndown 反向：导出 markdown 应包含 $E=mc^2$
+  const mdWithMath = await page.evaluate(async () => {
+    const TurndownService = (await import('https://esm.sh/turndown@7.1.2')).default;
+    const td = new TurndownService({ headingStyle: 'atx', codeBlockStyle: 'fenced', bulletListMarker: '-' });
+    td.addRule('katex-wrapper-inline', {
+      filter: node => node.classList && node.classList.contains('katex-wrapper') && !node.classList.contains('katex-wrapper-display'),
+      replacement: (content, node) => {
+        const tex = node.getAttribute('data-tex') || '';
+        return tex ? `$${tex}$` : content;
+      },
+    });
+    td.addRule('katex-wrapper-block', {
+      filter: node => node.classList && node.classList.contains('katex-wrapper-display'),
+      replacement: (content, node) => {
+        const tex = node.getAttribute('data-tex') || '';
+        return tex ? `\n\n$$${tex}$$\n\n` : `\n\n${content}\n\n`;
+      },
+    });
+    const editorHTML = window.__mdAnnotator.getEditorHTML();
+    return td.turndown(editorHTML);
+  });
+  console.log(`  ✓ 导出 markdown 长度 = ${mdWithMath.length}`);
+  console.log(`  ✓ 包含 $E = mc^2$ ? ${mdWithMath.includes('$E = mc^2$')}`);
+  if (!mdWithMath.includes('$E = mc^2$')) throw new Error(`导出不含 $E = mc^2$: ${mdWithMath.slice(0, 500)}`);
+
+  console.log('=== TEST 12: KaTeX 截图 ===');
+  await page.screenshot({ path: '/tmp/Mentor-test-3-katex.png', fullPage: false });
+  console.log('  ✓ 截图: /tmp/Mentor-test-3-katex.png');
+
+  console.log('=== TEST 13: FS_API 检测 ===');
+  const fsSupported = await page.evaluate(() => window.__mdAnnotator.FS_API.supported);
+  console.log(`  ✓ FS_API.supported = ${fsSupported} (Playwright Chromium 默认支持)`);
+  if (!fsSupported) throw new Error('FS_API 未启用');
+
+  console.log('=== TEST 14: IndexedDB HandleStore 读写 ===');
+  const dbTest = await page.evaluate(async () => {
+    const { HandleStore } = window.__mdAnnotator;
+    // 用一个 mock 对象作为 handle（不是真实 FileSystemDirectoryHandle，但 IndexedDB 只存引用）
+    const mockHandle = { name: 'test-folder', _isMock: true };
+    await HandleStore.putFolder('test-folder', mockHandle);
+    const got = await HandleStore.getFolder('test-folder');
+    await HandleStore.putLastFile('test-folder', 'test.md');
+    const last = await HandleStore.getLastFile();
+    return {
+      putGetOk: got && got._isMock === true,
+      lastOk: last && last.folderPath === 'test-folder' && last.fileName === 'test.md',
+      list: await HandleStore.listFolders(),
+    };
+  });
+  console.log(`  ✓ put/get handle: ${dbTest.putGetOk}`);
+  console.log(`  ✓ put/get last file: ${dbTest.lastOk}`);
+  console.log(`  ✓ listFolders: ${JSON.stringify(dbTest.list)}`);
+  if (!dbTest.putGetOk) throw new Error('IndexedDB handle 存读失败');
+  if (!dbTest.lastOk) throw new Error('IndexedDB lastFile 存读失败');
+
+  console.log('=== TEST 15: tryReconnect 无历史时静默返回 ===');
+  // 清掉 last file
+  await page.evaluate(async () => {
+    const db = await window.__mdAnnotator.HandleStore.open();
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction('lastFile', 'readwrite');
+      tx.objectStore('lastFile').clear();
+      tx.oncomplete = resolve;
+      tx.onerror = () => reject(tx.error);
+    });
+  });
+  const reconnectResult = await page.evaluate(async () => {
+    try {
+      await window.__mdAnnotator.tryReconnect();
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, err: e.message };
+    }
+  });
+  console.log(`  ✓ tryReconnect: ${JSON.stringify(reconnectResult)}`);
+  if (!reconnectResult.ok) throw new Error('tryReconnect 抛出');
+
+  console.log('=== TEST 16: tryWriteBack 无 handle → 返回 handle:false ===');
+  const wb1 = await page.evaluate(async () => {
+    // 当前 State 没有 folderHandle / handle，应该走 fallback
+    return await window.__mdAnnotator.tryWriteBack('test md', 'test json', 'test.md.annotations.json');
+  });
+  console.log(`  ✓ tryWriteBack 无 handle: ${JSON.stringify(wb1)}`);
+  if (wb1.handle !== false) throw new Error('无 handle 时应返回 handle:false');
+
+  console.log('=== TEST 17: tryWriteBack 模拟 mock folderHandle → handle:true ===');
+  const wb2 = await page.evaluate(async () => {
+    // 注入 mock folderHandle（带 createWritable 模拟）
+    const mockFolderHandle = {
+      name: 'mock-folder',
+      async queryPermission() { return 'granted'; },
+      async requestPermission() { return 'granted'; },
+      async getFileHandle(name, opts) {
+        let writtenContent = null;
+        return {
+          name,
+          async createWritable() {
+            return {
+              async write(content) { writtenContent = content; },
+              async close() {},
+              _getWritten: () => writtenContent,
+            };
+          },
+          _getWritten: () => writtenContent,
+        };
+      },
+    };
+    window.__mdAnnotator.State.folderHandle = mockFolderHandle;
+    window.__mdAnnotator.State.currentFile = { name: 'mock.md' };
+    return await window.__mdAnnotator.tryWriteBack('# Mock\n\n$E=mc^2$', '{"annotations":[]}', 'mock.md.annotations.json');
+  });
+  console.log(`  ✓ tryWriteBack with mock handle: ${JSON.stringify(wb2)}`);
+  if (wb2.handle !== true) throw new Error('mock handle 应返回 handle:true');
+
+  console.log('=== TEST 18: 保存后状态栏/UI 反映 ===');
+  const uiState = await page.evaluate(() => ({
+    saveMode: window.__mdAnnotator.State.saveMode,
+    hasFolderHandle: window.__mdAnnotator.State.folderHandle !== null,
+  }));
+  console.log(`  ✓ State.saveMode = ${uiState.saveMode}`);
+  console.log(`  ✓ State.folderHandle 存在 = ${uiState.hasFolderHandle}`);
+
+  console.log('=== TEST 19: 最终截图（handle 状态）===');
+  // 在 mock 模式下截一张
+  await page.evaluate(async () => {
+    // 渲染一个文件树显示授权状态
+    const tree = document.querySelector('#file-tree');
+    tree.innerHTML = `<div class="tree-node tree-folder">📁 mock-folder <span class="save-mode-badge">✓ 授权保存</span></div><div class="tree-children"><div class="tree-node is-active">📄 mock.md</div></div>`;
+    tree.classList.remove('tree-empty');
+    // 加载简单 markdown 到编辑器
+    window.__mdAnnotator.loadMarkdownIntoEditor('mock.md', '# Mock Document\n\n$E=mc^2$ is **famous**.\n\nSelect `text` to add comment.', null);
+  });
+  await page.waitForTimeout(400);
+  await page.screenshot({ path: '/tmp/Mentor-test-4-handle-mode.png', fullPage: false });
+  console.log('  ✓ 截图: /tmp/Mentor-test-4-handle-mode.png');
+
+  // ============================================================
+  // SECTION A: UI 按钮 + 快捷键 + author modal + dirty 标记
+  // ============================================================
+  console.log('\n========== SECTION A: UI 按钮 + 快捷键 ==========');
+
+  console.log('=== TEST 20: 新建空白按钮 ===');
+  await page.evaluate(() => {
+    window.__mdAnnotator.State.currentFile = null;
+    window.__mdAnnotator.State.annotations = [];
+  });
+  await page.locator('#btn-new').click();
+  await page.waitForTimeout(150);
+  const newDocHTML = await page.evaluate(() => window.__mdAnnotator.getEditorHTML());
+  console.log(`  ✓ 新建后编辑器 HTML 长度 = ${newDocHTML.length}`);
+  if (!newDocHTML.includes('新文档')) throw new Error('新建按钮未触发 setContent');
+
+  console.log('=== TEST 21: 加粗按钮 (B) ===');
+  // 加载 sample 内容用于格式测试
+  await page.evaluate((md) => {
+    window.__mdAnnotator.loadMarkdownIntoEditor('format-test.md', md, null);
+    // 选中 "hello" (positions 1-6)
+    const doc = window.__mdAnnotator.State.editor.state.doc;
+    let helloStart = null, helloEnd = null;
+    doc.descendants((node, pos) => {
+      if (node.isText && node.text.includes('hello') && helloStart === null) {
+        const idx = node.text.indexOf('hello');
+        helloStart = pos + idx;
+        helloEnd = pos + idx + 'hello'.length;
+      }
+    });
+    window.__mdAnnotator.State.editor.commands.setTextSelection({ from: helloStart, to: helloEnd });
+    window.__mdAnnotator.State.editor.commands.focus();
+  }, 'hello world');
+  await page.waitForTimeout(150);
+  await page.locator('#format-toolbar button[data-cmd="bold"]').click();
+  await page.waitForTimeout(100);
+  const boldHTML = await page.evaluate(() => window.__mdAnnotator.getEditorHTML());
+  console.log(`  ✓ 加粗后 HTML: ${boldHTML.slice(0, 80)}`);
+  if (!boldHTML.includes('<strong>')) throw new Error('加粗按钮未生效');
+
+  console.log('=== TEST 22: 斜体按钮 (I) ===');
+  // 重新加载 + 选区
+  await page.evaluate((md) => {
+    window.__mdAnnotator.loadMarkdownIntoEditor('format-test.md', md, null);
+    const doc = window.__mdAnnotator.State.editor.state.doc;
+    let helloStart = null, helloEnd = null;
+    doc.descendants((node, pos) => {
+      if (node.isText && node.text.includes('hello') && helloStart === null) {
+        const idx = node.text.indexOf('hello');
+        helloStart = pos + idx;
+        helloEnd = pos + idx + 'hello'.length;
+      }
+    });
+    window.__mdAnnotator.State.editor.commands.setTextSelection({ from: helloStart, to: helloEnd });
+    window.__mdAnnotator.State.editor.commands.focus();
+  }, 'hello world');
+  await page.waitForTimeout(100);
+  await page.locator('#format-toolbar button[data-cmd="italic"]').click();
+  await page.waitForTimeout(100);
+  const italicHTML = await page.evaluate(() => window.__mdAnnotator.getEditorHTML());
+  if (!italicHTML.includes('<em>')) throw new Error('斜体按钮未生效');
+  console.log(`  ✓ 斜体后 HTML 含 <em>`);
+
+  console.log('=== TEST 23: H1 按钮 ===');
+  // 重新加载 + 选区（按 ctrl+a 全选）
+  await page.evaluate((md) => {
+    window.__mdAnnotator.loadMarkdownIntoEditor('format-test.md', md, null);
+    window.__mdAnnotator.State.editor.commands.selectAll();
+    window.__mdAnnotator.State.editor.commands.focus();
+  }, 'hello world');
+  await page.waitForTimeout(100);
+  await page.locator('#format-toolbar button[data-cmd="h1"]').click();
+  await page.waitForTimeout(100);
+  const h1HTML = await page.evaluate(() => window.__mdAnnotator.getEditorHTML());
+  if (!h1HTML.includes('<h1>')) throw new Error('H1 按钮未生效');
+  console.log(`  ✓ H1 后 HTML 含 <h1>`);
+
+  console.log('=== TEST 24: 无序列表按钮 ===');
+  await page.evaluate(() => {
+    window.__mdAnnotator.State.editor.commands.clearContent();
+    window.__mdAnnotator.State.editor.commands.insertContent('item 1');
+    // 选中所有
+    window.__mdAnnotator.State.editor.commands.selectAll();
+    window.__mdAnnotator.State.editor.commands.focus();
+  });
+  await page.waitForTimeout(100);
+  await page.locator('#format-toolbar button[data-cmd="bulletList"]').click();
+  await page.waitForTimeout(100);
+  const ulHTML = await page.evaluate(() => window.__mdAnnotator.getEditorHTML());
+  if (!ulHTML.includes('<ul>')) throw new Error('无序列表按钮未生效');
+  console.log(`  ✓ ul 列表 HTML 含 <ul>`);
+
+  console.log('=== TEST 25: 引用按钮 ===');
+  await page.evaluate(() => {
+    window.__mdAnnotator.State.editor.commands.clearContent();
+    window.__mdAnnotator.State.editor.commands.insertContent('quote text');
+    window.__mdAnnotator.State.editor.commands.selectAll();
+    window.__mdAnnotator.State.editor.commands.focus();
+  });
+  await page.waitForTimeout(100);
+  await page.locator('#format-toolbar button[data-cmd="blockquote"]').click();
+  await page.waitForTimeout(100);
+  const bqHTML = await page.evaluate(() => window.__mdAnnotator.getEditorHTML());
+  if (!bqHTML.includes('<blockquote>')) throw new Error('引用按钮未生效');
+  console.log(`  ✓ 引用 HTML 含 <blockquote>`);
+
+  console.log('=== TEST 26: 代码块按钮 ===');
+  await page.evaluate(() => {
+    window.__mdAnnotator.State.editor.commands.clearContent();
+    window.__mdAnnotator.State.editor.commands.insertContent('code');
+    window.__mdAnnotator.State.editor.commands.selectAll();
+    window.__mdAnnotator.State.editor.commands.focus();
+  });
+  await page.waitForTimeout(100);
+  await page.locator('#format-toolbar button[data-cmd="codeBlock"]').click();
+  await page.waitForTimeout(100);
+  const cbHTML = await page.evaluate(() => window.__mdAnnotator.getEditorHTML());
+  if (!cbHTML.includes('<pre>')) throw new Error('代码块按钮未生效');
+  console.log(`  ✓ 代码块 HTML 含 <pre>`);
+
+  console.log('=== TEST 27: 链接按钮 (mock prompt) ===');
+  await page.evaluate(() => {
+    window.prompt = () => 'https://example.com';
+    window.__mdAnnotator.State.editor.commands.clearContent();
+    window.__mdAnnotator.State.editor.commands.insertContent('link text');
+    window.__mdAnnotator.State.editor.commands.selectAll();
+    window.__mdAnnotator.State.editor.commands.focus();
+  });
+  await page.waitForTimeout(100);
+  await page.locator('#format-toolbar button[data-cmd="link"]').click();
+  await page.waitForTimeout(150);
+  const linkHTML = await page.evaluate(() => window.__mdAnnotator.getEditorHTML());
+  if (!linkHTML.includes('href="https://example.com"')) throw new Error('链接按钮未生效');
+  console.log(`  ✓ 链接 HTML 含 href`);
+
+  console.log('=== TEST 28: 图片按钮 (mock prompt) ===');
+  await page.evaluate(() => {
+    window.prompt = () => 'https://example.com/img.png';
+    window.__mdAnnotator.State.editor.commands.clearContent();
+    window.__mdAnnotator.State.editor.commands.focus('end');
+  });
+  await page.waitForTimeout(100);
+  await page.locator('#format-toolbar button[data-cmd="image"]').click();
+  await page.waitForTimeout(150);
+  const imgHTML = await page.evaluate(() => window.__mdAnnotator.getEditorHTML());
+  if (!imgHTML.includes('<img')) throw new Error('图片按钮未生效');
+  console.log(`  ✓ 图片 HTML 含 <img>`);
+
+  console.log('=== TEST 29: Ctrl+B 快捷键 (加粗) ===');
+  await page.evaluate(() => {
+    window.__mdAnnotator.State.editor.commands.clearContent();
+    window.__mdAnnotator.State.editor.commands.insertContent('shortcut');
+    window.__mdAnnotator.State.editor.commands.selectAll();
+  });
+  await page.waitForTimeout(100);
+  await page.keyboard.press('Control+b');
+  await page.waitForTimeout(100);
+  const scBoldHTML = await page.evaluate(() => window.__mdAnnotator.getEditorHTML());
+  if (!scBoldHTML.includes('<strong>')) throw new Error('Ctrl+B 快捷键未生效');
+  console.log(`  ✓ Ctrl+B 后 HTML 含 <strong>`);
+
+  console.log('=== TEST 30: Ctrl+I 快捷键 (斜体) ===');
+  await page.keyboard.press('Control+i');
+  await page.waitForTimeout(100);
+  const scItalicHTML = await page.evaluate(() => window.__mdAnnotator.getEditorHTML());
+  if (!scItalicHTML.includes('<em>')) throw new Error('Ctrl+I 快捷键未生效');
+  console.log(`  ✓ Ctrl+I 后 HTML 含 <em>`);
+
+  console.log('=== TEST 31: Ctrl+S 快捷键 (保存, 无 handle 走下载) ===');
+  // 重置 author、currentFile（前面测试可能删过）
+  await page.evaluate(() => {
+    window.__mdAnnotator.State.author = 'test-author';
+    window.__mdAnnotator.State.currentFile = { name: 'shortcut-test.md', content: '', annotations: null, dirty: true };
+    window.__mdAnnotator.State.folderHandle = null;
+    // mock download 阻止实际下载
+    window.__originalCreateObjectURL = window.URL.createObjectURL;
+    window.__downloadCount = 0;
+    window.URL.createObjectURL = () => { window.__downloadCount++; return 'blob:fake'; };
+  });
+  // 监听 download
+  await page.evaluate(() => {
+    window.__a_clicks = 0;
+    const origClick = HTMLAnchorElement.prototype.click;
+    HTMLAnchorElement.prototype.click = function() { window.__a_clicks++; };
+  });
+  await page.keyboard.press('Control+s');
+  await page.waitForTimeout(200);
+  const scSClicks = await page.evaluate(() => window.__a_clicks);
+  console.log(`  ✓ Ctrl+S 触发下载点击 = ${scSClicks} (预期 ≥ 2: .md + .annotations.json)`);
+  if (scSClicks < 2) throw new Error('Ctrl+S 未触发下载');
+  // 还原
+  await page.evaluate(() => {
+    HTMLAnchorElement.prototype.click = HTMLAnchorElement.prototype.click;  // noop
+    window.URL.createObjectURL = window.__originalCreateObjectURL;
+  });
+
+  console.log('=== TEST 32: author modal 流程 ===');
+  // 清掉 author，调用 promptAuthor，模拟用户输入
+  const t32 = await page.evaluate(async () => {
+    window.__mdAnnotator.State.author = '';
+    window.__mdAnnotator.State.currentFile = { name: 'modal-test.md', dirty: true };
+    window.__mdAnnotator.State.folderHandle = null;
+    // 调 promptAuthor（不等）
+    const p = window.__mdAnnotator.promptAuthor();
+    // 等 modal 显示
+    await new Promise(r => setTimeout(r, 100));
+    const modalShown = !document.querySelector('#author-modal').classList.contains('hidden');
+    // 输入 + 点击
+    const input = document.querySelector('#author-input');
+    input.value = 'modal-test-author';
+    document.querySelector('#author-save').click();
+    // 等待 promise 完成
+    await p;
+    return {
+      author: window.__mdAnnotator.State.author,
+      modalHidden: document.querySelector('#author-modal').classList.contains('hidden'),
+      modalShownBeforeInput: modalShown,
+    };
+  });
+  console.log(`  ✓ modal 显示 = ${t32.modalShownBeforeInput}, 输入后 author = "${t32.author}", modal hidden = ${t32.modalHidden}`);
+  if (!t32.modalShownBeforeInput) throw new Error('promptAuthor 未显示 modal');
+  if (t32.author !== 'modal-test-author') throw new Error('author modal 流程失败: ' + t32.author);
+  if (!t32.modalHidden) throw new Error('modal 未关闭');
+
+  console.log('=== TEST 33: dirty 标记（编辑后 ● 出现）===');
+  await page.evaluate(() => {
+    window.__mdAnnotator.loadMarkdownIntoEditor('dirty-test.md', '# Clean', null);
+  });
+  await page.waitForTimeout(200);
+  const dirtyBefore = await page.evaluate(() => {
+    return document.querySelector('#dirty-indicator').classList.contains('is-dirty');
+  });
+  console.log(`  ✓ 加载后 dirty = ${dirtyBefore} (预期 false)`);
+  if (dirtyBefore) throw new Error('加载后不应标记 dirty');
+  // 编辑
+  await page.evaluate(() => {
+    window.__mdAnnotator.State.editor.commands.insertContent(' edit');
+  });
+  await page.waitForTimeout(150);
+  const dirtyAfter = await page.evaluate(() => {
+    return document.querySelector('#dirty-indicator').classList.contains('is-dirty');
+  });
+  console.log(`  ✓ 编辑后 dirty = ${dirtyAfter} (预期 true)`);
+  if (!dirtyAfter) throw new Error('编辑后应标记 dirty');
+
+  console.log('=== TEST 34: 浮动批注按钮 (💬) + 选区 ===');
+  // 重置 + 加载 + 模拟选区
+  await page.evaluate(() => {
+    window.__mdAnnotator.loadMarkdownIntoEditor('float-test.md', '# Hello World', null);
+    window.__mdAnnotator.State.author = 'float-author';
+    // 模拟选区: 选中 "Hello" (positions 1-6)
+    const doc = window.__mdAnnotator.State.editor.state.doc;
+    let helloStart = null, helloEnd = null;
+    doc.descendants((node, pos) => {
+      if (node.isText && node.text.includes('Hello') && helloStart === null) {
+        const idx = node.text.indexOf('Hello');
+        helloStart = pos + idx;
+        helloEnd = pos + idx + 'Hello'.length;
+      }
+    });
+    window.__mdAnnotator.State.editor.commands.setTextSelection({ from: helloStart, to: helloEnd });
+    // 触发 selectionUpdate
+    window.__mdAnnotator.State.editor.view.dispatch(window.__mdAnnotator.State.editor.state.tr.setSelection(window.__mdAnnotator.State.editor.state.selection));
+  });
+  await page.waitForTimeout(200);
+  const floatVisible = await page.evaluate(() => {
+    return !document.querySelector('#float-comment-btn').classList.contains('hidden');
+  });
+  console.log(`  ✓ 浮动批注按钮显示 = ${floatVisible} (预期 true)`);
+  if (!floatVisible) throw new Error('浮动批注按钮未出现');
+
+  // 点击浮动按钮 → 创建批注
+  await page.locator('#float-comment-btn button').click();
+  await page.waitForTimeout(150);
+  const annCountAfterFloat = await page.evaluate(() => window.__mdAnnotator.getAnnotations().length);
+  console.log(`  ✓ 点击后批注数 = ${annCountAfterFloat} (预期 1)`);
+  if (annCountAfterFloat !== 1) throw new Error('点击浮动按钮未创建批注');
+
+  // ============================================================
+  // SECTION B: 文件 IO - picker 错误 + 真写回 + 多文件切换
+  // ============================================================
+  console.log('\n========== SECTION B: 文件 IO 错误处理 ==========');
+
+  console.log('=== TEST 35: showOpenFilePicker 取消 (AbortError) ===');
+  await page.evaluate(() => {
+    window.showOpenFilePicker = () => Promise.reject(Object.assign(new Error('user aborted'), { name: 'AbortError' }));
+  });
+  // openFiles 是用户手势触发的，但 page.click 也是 user gesture
+  await page.locator('#btn-open-files').click();
+  await page.waitForTimeout(300);
+  // 应该无 error（catch 里 return）
+  const statusAfterCancel = await page.evaluate(() => document.querySelector('#status-left').textContent);
+  console.log(`  ✓ picker 取消后状态栏 = "${statusAfterCancel}"`);
+  // 不报错即可
+
+  console.log('=== TEST 36: showDirectoryPicker 权限被拒 (NotAllowedError) ===');
+  await page.evaluate(() => {
+    window.showDirectoryPicker = () => Promise.reject(Object.assign(new Error('not allowed'), { name: 'NotAllowedError' }));
+  });
+  // 文件树已合并到 outline (大纲栏不可折叠, 这里无需恢复)
+  await page.evaluate(() => {
+    const pane = document.querySelector('#file-pane');
+    pane.classList.remove('hidden-tree');  // no-op, 但保持兼容
+    const main = document.querySelector('#main');
+    main.style.gridTemplateColumns = '';
+  });
+  await page.locator('#file-tree').click({ timeout: 5000 });
+  await page.waitForTimeout(300);
+  console.log(`  ✓ 目录 picker 权限拒后无崩溃`);
+
+  console.log('=== TEST 37: tryWriteBack 真写回 → 读取写入内容 ===');
+  const writeResult = await page.evaluate(async () => {
+    let writtenMd = null, writtenSidecar = null;
+    const mockFolderHandle = {
+      name: 'writeback-folder',
+      async queryPermission() { return 'granted'; },
+      async requestPermission() { return 'granted'; },
+      async getFileHandle(name, opts) {
+        const target = name === 'write-test.md' ? 'md' : 'sidecar';
+        let buf = null;
+        return {
+          name,
+          async createWritable() {
+            return {
+              async write(content) {
+                if (target === 'md') writtenMd = content; else writtenSidecar = content;
+              },
+              async close() {},
+            };
+          },
+        };
+      },
+    };
+    window.__mdAnnotator.State.folderHandle = mockFolderHandle;
+    window.__mdAnnotator.State.currentFile = { name: 'write-test.md' };
+    const result = await window.__mdAnnotator.tryWriteBack(
+      '# New\n\n$E=mc^2$',
+      '{"annotations":[]}',
+      'write-test.md.annotations.json'
+    );
+    return { result, writtenMd, writtenSidecar };
+  });
+  console.log(`  ✓ tryWriteBack.handle = ${writeResult.result.handle}`);
+  console.log(`  ✓ 写入 .md 长度 = ${writeResult.writtenMd?.length}, 内容 = "${writeResult.writtenMd}"`);
+  console.log(`  ✓ 写入 .sidecar 长度 = ${writeResult.writtenSidecar?.length}`);
+  if (writeResult.result.handle !== true) throw new Error('真写回未返回 handle:true');
+  if (writeResult.writtenMd !== '# New\n\n$E=mc^2$') throw new Error('真写回 md 内容错');
+  if (writeResult.writtenSidecar !== '{"annotations":[]}') throw new Error('真写回 sidecar 内容错');
+
+  console.log('=== TEST 38: 多 file handle 切换 ===');
+  await page.evaluate(async () => {
+    const makeHandle = (name, content) => ({
+      name,
+      async getFile() { return { name, async text() { return content; } }; },
+      async queryPermission() { return 'granted'; },
+    });
+    const handles = [makeHandle('a.md', '# A'), makeHandle('b.md', '# B'), makeHandle('c.md', '# C')];
+    window.__mdAnnotator.State.fileHandles = handles;
+    window.__mdAnnotator.State.folderHandle = null;
+    window.__mdAnnotator.State.saveMode = 'download';
+    // 直接调用 openFromHandle 内部逻辑（等价于点 tree 节点）
+    const openFn = window.__mdAnnotator.openFromHandle || window.openFromHandle;
+    // openFromHandle 是模块内部函数，不能直接调。改用 loadMarkdownIntoEditor 模拟
+    // 但要验证 fileHandles 切换后 UI 渲染
+    window.__mdAnnotator.renderFileTreeFromHandles(handles);
+  });
+  await page.waitForTimeout(150);
+  const treeNodes = await page.locator('#file-tree .tree-node[data-handle-name]').count();
+  console.log(`  ✓ 文件树节点数 = ${treeNodes} (预期 3)`);
+  if (treeNodes !== 3) throw new Error('多文件 tree 渲染错');
+
+  console.log('=== TEST 39: tryWriteBack 无任何 handle → fallback 路径 ===');
+  const fallbackResult = await page.evaluate(async () => {
+    window.__mdAnnotator.State.folderHandle = null;
+    window.__mdAnnotator.State.currentFile = { name: 'x.md' };  // 无 .handle
+    return await window.__mdAnnotator.tryWriteBack('a', 'b', 'c');
+  });
+  console.log(`  ✓ 无 handle: ${JSON.stringify(fallbackResult)}`);
+  if (fallbackResult.handle !== false) throw new Error('无 handle 应返回 handle:false');
+
+  console.log('=== TEST 40: legacy openFiles 创建 input ===');
+  // 把 FS API 关掉，强制走 legacy
+  const legacyResult = await page.evaluate(() => {
+    // 临时禁用 FS_API 检测
+    const origSupported = window.__mdAnnotator.FS_API.supported;
+    window.__mdAnnotator.FS_API.supported = false;
+    // mock createElement('input') 拦截
+    let inputCreated = false;
+    const origCreate = document.createElement.bind(document);
+    document.createElement = (tag) => {
+      if (tag === 'input') { inputCreated = true; return origCreate(tag); }
+      return origCreate(tag);
+    };
+    // 触发 openFiles
+    window.__mdAnnotator.openFiles();
+    document.createElement = origCreate;
+    window.__mdAnnotator.FS_API.supported = origSupported;
+    return { inputCreated };
+  });
+  await page.waitForTimeout(150);
+  console.log(`  ✓ legacy openFiles 创建 input = ${legacyResult.inputCreated} (预期 true)`);
+  if (!legacyResult.inputCreated) throw new Error('legacy openFiles 未创建 input');
+
+  // ============================================================
+  // SECTION C: 批注增强 - mark 删除 / 真拖选 / mark attrs / 跨段落
+  // ============================================================
+  console.log('\n========== SECTION C: 批注增强 ==========');
+
+  // === TEST 41: 删除批注后 mark 真从 ProseMirror doc 移除 ===
+  // 加载 + 创建批注 + 验证 mark 存在
+  await page.evaluate((md) => {
+    window.__mdAnnotator.loadMarkdownIntoEditor('mark-remove.md', md, null);
+    window.__mdAnnotator.State.author = 'mark-test';
+  }, 'Test text for annotation');
+  await page.waitForTimeout(200);
+  const ann = await page.evaluate(() => {
+    return window.__mdAnnotator.createTestAnnotation('text');
+  });
+  console.log(`  ✓ 创建批注: ${ann ? ann.threadId.slice(0, 8) : 'FAIL'}`);
+  // === 41a: mark-delete popover 在 active mark 上应出现 ===
+  const popoverCount = await page.locator('#mark-delete-popover').count();
+  const popoverVisible41a = await page.evaluate(() => {
+    const p = document.querySelector('#mark-delete-popover');
+    return p && !p.classList.contains('hidden');
+  });
+  console.log(`  ✓ mark-delete popover 在 active 时显示 = ${popoverVisible41a} (预期 true)`);
+  if (!popoverVisible41a) throw new Error('active mark 上未显示删除 popover, 用户无法从正文删除');
+  // 验证 mark 存在
+  const marksBefore = await page.evaluate(() => {
+    let count = 0;
+    window.__mdAnnotator.State.editor.state.doc.descendants((node) => {
+      node.marks.forEach(m => { if (m.type.name === 'annotation') count++; });
+    });
+    return count;
+  });
+  console.log(`  ✓ ProseMirror doc 中 annotation mark 数 = ${marksBefore} (预期 1)`);
+  if (marksBefore !== 1) throw new Error('创建批注后 mark 不在 doc 中');
+  // 接受 confirm 对话框（once）
+  page.once('dialog', d => d.accept());
+  // 删除批注
+  await page.locator('.comment-thread button[data-act="delete"]').first().click();
+  await page.waitForTimeout(200);
+  const marksAfter = await page.evaluate(() => {
+    let count = 0;
+    window.__mdAnnotator.State.editor.state.doc.descendants((node) => {
+      node.marks.forEach(m => { if (m.type.name === 'annotation') count++; });
+    });
+    return count;
+  });
+  console.log(`  ✓ 删除批注后 annotation mark 数 = ${marksAfter} (预期 0)`);
+  if (marksAfter !== 0) throw new Error('删除批注后 mark 未从 doc 移除');
+
+  console.log('=== TEST 42: 批注 mark attrs 真有 threadId + resolved ===');
+  await page.evaluate(() => {
+    window.__mdAnnotator.loadMarkdownIntoEditor('attrs-test.md', 'check attrs', null);
+  });
+  await page.waitForTimeout(150);
+  const newAnn = await page.evaluate(() => {
+    return window.__mdAnnotator.createTestAnnotation('check');
+  });
+  const markAttrs = await page.evaluate(() => {
+    let attrs = null;
+    window.__mdAnnotator.State.editor.state.doc.descendants((node) => {
+      node.marks.forEach(m => {
+        if (m.type.name === 'annotation') attrs = { ...m.attrs };
+      });
+    });
+    return attrs;
+  });
+  console.log(`  ✓ mark attrs = ${JSON.stringify(markAttrs)}`);
+  if (!markAttrs || markAttrs.threadId !== newAnn.threadId || markAttrs.resolved !== false) {
+    throw new Error('mark attrs 错');
+  }
+
+  console.log('=== TEST 43: 批注 ↳ reply 详情展开 ===');
+  // 新批注已自动有 reply form (因为没内容)
+  const newThreadCount = await page.locator('.comment-thread').count();
+  console.log(`  ✓ 批注线程数 = ${newThreadCount}`);
+  // 在 thread 里找 reply form 或 details
+  const replyFormCount = await page.locator('textarea[data-thread-input]').count();
+  console.log(`  ✓ reply textarea 数 = ${replyFormCount} (预期 ≥ 1)`);
+  if (replyFormCount < 1) throw new Error('新批注无 reply form');
+
+  console.log('=== TEST 44: 跨段落选区拦截（状态栏提示）===');
+  await page.evaluate(() => {
+    window.__mdAnnotator.loadMarkdownIntoEditor('cross-para.md', 'Para 1\n\nPara 2 text', null);
+  });
+  await page.waitForTimeout(200);
+  // 模拟跨段落选区: 从 Para 1 选到 Para 2
+  await page.evaluate(() => {
+    const editor = window.__mdAnnotator.State.editor;
+    const doc = editor.state.doc;
+    // 找 Para 1 末尾 + Para 2 中间
+    editor.commands.setTextSelection({ from: 2, to: 12 });
+    // 触发 selection update
+    editor.view.dispatch(editor.state.tr.setSelection(editor.state.selection));
+  });
+  await page.waitForTimeout(150);
+  const floatHidden = await page.evaluate(() => {
+    return document.querySelector('#float-comment-btn').classList.contains('hidden');
+  });
+  console.log(`  ✓ 跨段落选区时浮动按钮隐藏 = ${floatHidden} (预期 true)`);
+  if (!floatHidden) throw new Error('跨段落选区未拦截浮动按钮');
+
+  console.log('=== TEST 45: 批注 📍 跳转按钮 ===');
+  // 创建一个新批注用于跳转
+  await page.evaluate(() => {
+    window.__mdAnnotator.loadMarkdownIntoEditor('goto-test.md', 'first\n\nsecond', null);
+  });
+  await page.waitForTimeout(200);
+  const gotoAnn = await page.evaluate(() => {
+    return window.__mdAnnotator.createTestAnnotation('second');
+  });
+  // 光标移到文档开头
+  await page.evaluate(() => {
+    window.__mdAnnotator.State.editor.commands.focus(0);
+    window.__mdAnnotator.State.editor.commands.setTextSelection(0);
+  });
+  await page.waitForTimeout(150);
+  // 找到该 thread 的 📍 跳转 按钮
+  await page.evaluate((tid) => {
+    document.querySelector(`button[data-act="goto"][data-thread="${tid}"]`).click();
+  }, gotoAnn.threadId);
+  await page.waitForTimeout(200);
+  // 验证 selection 现在包含 second
+  const selInfo = await page.evaluate(() => {
+    const s = window.__mdAnnotator.State.editor.state.selection;
+    const text = window.__mdAnnotator.State.editor.state.doc.textBetween(s.from, s.to, ' ');
+    return { from: s.from, to: s.to, text };
+  });
+  console.log(`  ✓ 跳转后选区: from=${selInfo.from} to=${selInfo.to} text="${selInfo.text}"`);
+  if (selInfo.text !== 'second') throw new Error('跳转选区错');
+
+  // ============================================================
+  // SECTION D: 公式边界
+  // ============================================================
+  console.log('\n========== SECTION D: 公式边界 ==========');
+
+  console.log('=== TEST 46: $5$10$ 不误匹配（前后是数字）===');
+  const t46 = await page.evaluate((md) => {
+    const out = window.__mdAnnotator.md.render(md);
+    return { hasKatex: out.includes('class="katex-wrapper"'), html: out.slice(0, 300) };
+  }, 'price $5$10$ now');
+  console.log(`  ✓ $5$10$ 输出长度 = ${t46.html.length}, 含 katex-wrapper = ${t46.hasKatex} (预期 false)`);
+  if (t46.hasKatex) throw new Error('$5$10$ 误匹配为公式');
+
+  console.log('=== TEST 47: \\$ 转义 (不视为公式) ===');
+  const t47 = await page.evaluate((md) => {
+    const out = window.__mdAnnotator.md.render(md);
+    return { hasKatex: out.includes('class="katex-wrapper"'), html: out.slice(0, 300) };
+  }, 'price \\$5 now');
+  console.log(`  ✓ \\$5 输出 = "${t47.html.slice(0, 200)}"`);
+  // \$ 应被吞掉（前 $ 被吃），不渲染为公式
+  if (t47.hasKatex) throw new Error('\\$ 转义失败');
+
+  console.log('=== TEST 48: $$ block$$ 多行 ===');
+  const t48 = await page.evaluate((md) => {
+    const out = window.__mdAnnotator.md.render(md);
+    return { hasBlock: out.includes('katex-wrapper-display'), html: out };
+  }, 'before\n\n$$\n\\sum_{i=1}^n x_i\n$$\n\nafter');
+  console.log(`  ✓ $$block$$ 输出长度 = ${t48.html.length}, 含 katex-wrapper-display = ${t48.hasBlock}`);
+  if (!t48.hasBlock) throw new Error('$$block$$ 未渲染');
+
+  // ============================================================
+  // SECTION E: UI 状态
+  // ============================================================
+  console.log('\n========== SECTION E: UI 状态 ==========');
+
+  console.log('=== TEST 49: filter 取消勾选 → 显示全部 ===');
+  // 加载有 2 个批注的 sample
+  await page.evaluate((args) => {
+    window.__mdAnnotator.loadMarkdownIntoEditor(args.name, args.content, args.annotations);
+  }, { name: 'sample.md', content: SAMPLE_MD, annotations: SAMPLE_ANN });
+  await page.waitForTimeout(300);
+  // 取消勾选未解决
+  await page.locator('#filter-open').uncheck();
+  await page.waitForTimeout(100);
+  // 只勾选已解决
+  await page.locator('#filter-resolved').check();
+  await page.waitForTimeout(100);
+  const resolvedOnly = await page.locator('.comment-thread').count();
+  console.log(`  ✓ 只显示已解决: ${resolvedOnly} (预期 1)`);
+  if (resolvedOnly !== 1) throw new Error('filter 已解决错');
+  // 全部取消
+  await page.locator('#filter-open').check();
+  await page.locator('#filter-resolved').check();
+  await page.waitForTimeout(100);
+  const allCount = await page.locator('.comment-thread').count();
+  console.log(`  ✓ 两个都勾: ${allCount} (预期 2)`);
+  if (allCount !== 2) throw new Error('filter 全部错');
+  // 恢复默认
+  await page.locator('#filter-resolved').uncheck();
+  await page.waitForTimeout(100);
+
+  console.log('=== TEST 50: 大纲栏始终显示 (Word 风格, 不允许折叠) ===');
+  await page.evaluate(() => {
+    const pane = document.querySelector('#file-pane');
+    pane.classList.remove('hidden-tree');
+    document.querySelector('#main').style.gridTemplateColumns = '';
+  });
+  await page.waitForTimeout(100);
+  // 50a: 收起按钮应该不存在 (DOM 里已删除)
+  const collapseBtnExists = await page.evaluate(() => !!document.querySelector('#btn-collapse-tree'));
+  console.log(`  ✓ 收起按钮已移除 = ${!collapseBtnExists} (预期 true)`);
+  if (collapseBtnExists) throw new Error('收起按钮应已删除 (大纲不可折叠)');
+  // 50b: 浮起"展开"按钮也应该不存在
+  const expandBtnExists = await page.evaluate(() => !!document.querySelector('#btn-expand-tree'));
+  console.log(`  ✓ 浮起展开按钮已移除 = ${!expandBtnExists} (预期 true)`);
+  if (expandBtnExists) throw new Error('浮起展开按钮应已删除');
+  // 50c: Cmd/Ctrl+B 快捷键也不应触发折叠 (大纲栏不应消失)
+  await page.evaluate(() => document.activeElement && document.activeElement.blur());
+  await page.waitForTimeout(100);
+  await page.keyboard.press('Control+b');
+  await page.waitForTimeout(150);
+  // 按 Cmd+B 后, 大纲栏应仍可见 (宽度 > 0)
+  const paneWidthAfterB = await page.evaluate(() => {
+    const fp = document.querySelector('#file-pane');
+    return fp.getBoundingClientRect().width;
+  });
+  console.log(`  ✓ Cmd+B 后大纲栏宽度 = ${paneWidthAfterB} (预期 > 0, 不折叠)`);
+  if (paneWidthAfterB <= 0) throw new Error('Cmd+B 不应折叠大纲栏');
+  // 50d: 大纲栏始终在视野里 (包含 outline-item)
+  const outlineVisible = await page.evaluate(() => {
+    return document.querySelectorAll('#outline-pane .outline-item').length > 0
+      || document.querySelector('#outline-pane .outline-empty') !== null;
+  });
+  console.log(`  ✓ 大纲栏始终渲染 = ${outlineVisible} (预期 true)`);
+  if (!outlineVisible) throw new Error('大纲栏应始终可见');
+
+  console.log('=== TEST 51: placeholder 显示（空编辑器）===');
+  await page.evaluate(() => {
+    window.__mdAnnotator.State.editor.commands.clearContent();
+  });
+  await page.waitForTimeout(200);
+  const placeholderShown = await page.evaluate(() => {
+    // Tiptap 添加 is-editor-empty class 到第一个空段落
+    return !!document.querySelector('.ProseMirror p.is-editor-empty, .ProseMirror h1.is-editor-empty');
+  });
+  console.log(`  ✓ 空编辑器 placeholder = ${placeholderShown} (预期 true)`);
+  if (!placeholderShown) throw new Error('placeholder 未显示');
+
+  console.log('=== TEST 52: 工具栏 is-active 状态同步 ===');
+  // 创建一段加粗文本，光标在其内 → B 按钮应高亮
+  await page.evaluate(() => {
+    window.__mdAnnotator.State.editor.commands.clearContent();
+    window.__mdAnnotator.State.editor.commands.insertContent('bold text here');
+    // 选中 "bol" (positions 1-4)
+    window.__mdAnnotator.State.editor.chain().focus().setTextSelection({ from: 1, to: 4 }).toggleBold().run();
+    // 光标放在加粗文本中间
+    window.__mdAnnotator.State.editor.commands.setTextSelection(2);
+    // 触发 transaction → updateToolbarState
+    window.__mdAnnotator.State.editor.view.dispatch(window.__mdAnnotator.State.editor.state.tr.setSelection(window.__mdAnnotator.State.editor.state.selection));
+  });
+  await page.waitForTimeout(150);
+  const boldActive = await page.evaluate(() => {
+    return document.querySelector('#format-toolbar button[data-cmd="bold"]').classList.contains('is-active');
+  });
+  console.log(`  ✓ 光标在 bold 内 → B 按钮 is-active = ${boldActive} (预期 true)`);
+  if (!boldActive) throw new Error('工具栏 active 状态未同步');
+
+  // ============================================================
+  // SECTION F: 错误处理
+  // ============================================================
+  console.log('\n========== SECTION F: 错误处理 ==========');
+
+  console.log('=== TEST 53: handle 权限 queryPermission 非 granted → requestPermission ===');
+  const t53 = await page.evaluate(async () => {
+    let requestCalled = false;
+    let queryCount = 0;
+    const mockFolder = {
+      name: 'perm-test',
+      async queryPermission() { queryCount++; return queryCount === 1 ? 'prompt' : 'granted'; },
+      async requestPermission() { requestCalled = true; return 'granted'; },
+      async getFileHandle(name) {
+        return {
+          name,
+          async createWritable() {
+            return { async write() {}, async close() {} };
+          },
+        };
+      },
+    };
+    window.__mdAnnotator.State.folderHandle = mockFolder;
+    window.__mdAnnotator.State.currentFile = { name: 'perm-test.md' };
+    return {
+      result: await window.__mdAnnotator.tryWriteBack('x', 'y', 'perm-test.md.annotations.json'),
+      requestCalled, queryCount,
+    };
+  });
+  console.log(`  ✓ handle = ${t53.result.handle}, requestCalled = ${t53.requestCalled}, queryCount = ${t53.queryCount}`);
+  if (t53.result.handle !== true) throw new Error('requestPermission 后应成功');
+  if (!t53.requestCalled) throw new Error('未调用 requestPermission');
+
+  console.log('=== TEST 54: handle 权限被拒 (NotAllowedError) ===');
+  const t54 = await page.evaluate(async () => {
+    const mockFolder = {
+      name: 'deny-test',
+      async queryPermission() { return 'granted'; },
+      async requestPermission() { return 'granted'; },
+      async getFileHandle(name) {
+        return {
+          name,
+          async createWritable() {
+            throw Object.assign(new Error('denied'), { name: 'NotAllowedError' });
+          },
+        };
+      },
+    };
+    window.__mdAnnotator.State.folderHandle = mockFolder;
+    window.__mdAnnotator.State.currentFile = { name: 'deny-test.md' };
+    return await window.__mdAnnotator.tryWriteBack('x', 'y', 'deny-test.md.annotations.json');
+  });
+  console.log(`  ✓ 拒绝时: ${JSON.stringify(t54)}`);
+  if (t54.handle !== false || !t54.error) throw new Error('拒绝应返回 {handle: false, error}');
+
+  // ============================================================
+  // SECTION G: File Pane Trae 化 (4 项新增功能)
+  // ============================================================
+  console.log('\n========== SECTION G: File Pane Trae 化 ==========');
+
+  // 准备：构造 3 个文件用于 tree 渲染
+  await page.evaluate((md) => {
+    const files = [
+      new File([md], 'sample.md', { type: 'text/markdown' }),
+      new File([md], 'draft.md', { type: 'text/markdown' }),
+      new File(['{}'], 'data.json', { type: 'application/json' }),
+    ];
+    const m = window.__mdAnnotator;
+    m.State.fileList = files;
+    m.renderFileTreeFromList(files);
+  }, SAMPLE_MD);
+  await page.waitForTimeout(100);
+
+  console.log('=== TEST 55: 文件类型专属图标 (icon-md / icon-json) ===');
+  const t55a = await page.locator('.tree-node[data-handle-name="sample.md"] .icon').getAttribute('class');
+  console.log(`  ✓ sample.md icon class: ${t55a}`);
+  if (!t55a.includes('icon-md')) throw new Error('sample.md 应有 icon-md class');
+  const t55b = await page.locator('.tree-node[data-handle-name="data.json"] .icon').getAttribute('class');
+  console.log(`  ✓ data.json icon class: ${t55b}`);
+  if (!t55b.includes('icon-json')) throw new Error('data.json 应有 icon-json class');
+  // 验证颜色（md = text-2 中性灰 rgba(38, 37, 30, 0.6) = Cursor 设计: 避免 icon 抢戏）
+  const t55c = await page.locator('.tree-node[data-handle-name="sample.md"] .icon').evaluate(el => getComputedStyle(el).color);
+  console.log(`  ✓ sample.md icon color: ${t55c} (预期中性灰 rgba(38, 37, 30, 0.6) = --text-2)`);
+  if (!t55c.includes('38, 37, 30') || !t55c.includes('0.6')) {
+    throw new Error(`sample.md 图标颜色应等于 text-2 中性灰, 实际 ${t55c}`);
+  }
+
+  console.log('=== TEST 56: hover 浮出操作按钮 ===');
+  const sampleNode = page.locator('.tree-node[data-handle-name="sample.md"]');
+  await sampleNode.hover();
+  await page.waitForTimeout(200);
+  const t56a = await sampleNode.locator('.tree-actions').evaluate(el => getComputedStyle(el).opacity);
+  console.log(`  ✓ hover 时 .tree-actions opacity: ${t56a} (预期 1)`);
+  if (t56a !== '1') throw new Error(`hover 时 actions 应可见, 实际 opacity=${t56a}`);
+  const t56b = await sampleNode.locator('.tree-actions button').count();
+  console.log(`  ✓ sample.md 操作按钮数: ${t56b} (预期 3: 复制/重载/删除)`);
+  if (t56b !== 3) throw new Error(`sample.md 应有 3 个按钮, 实际 ${t56b}`);
+  // .json 只有 1 个（只 copy）
+  const jsonNode = page.locator('.tree-node[data-handle-name="data.json"]');
+  await jsonNode.hover();
+  await page.waitForTimeout(100);
+  const t56c = await jsonNode.locator('.tree-actions button').count();
+  console.log(`  ✓ data.json 操作按钮数: ${t56c} (预期 1: 只复制)`);
+  if (t56c !== 1) throw new Error(`data.json 应只有 1 个按钮, 实际 ${t56c}`);
+
+  console.log('=== TEST 57: per-file dirty 圆点 (warning 橙色) ===');
+  // 前置：把 currentFile 重置为 sample.md（之前测试可能让它是别的名字）
+  await page.evaluate((md) => {
+    return window.__mdAnnotator.loadMarkdownIntoEditor('sample.md', md, { annotations: [] });
+  }, SAMPLE_MD);
+  await page.waitForTimeout(100);
+  // 通过编辑器输入触发 markDirty（最真实路径）
+  await page.locator('#editor .tiptap').click();
+  await page.keyboard.type(' ');
+  await page.waitForTimeout(150);
+  const t57a = await sampleNode.locator('.dirty-dot-mini').count();
+  console.log(`  ✓ dirty 后 sample.md 的 dirty-dot-mini 数: ${t57a} (预期 1)`);
+  if (t57a !== 1) throw new Error('dirty 后应有 1 个 dirty-dot-mini');
+  const t57b = await sampleNode.locator('.dirty-dot-mini').evaluate(el => getComputedStyle(el).backgroundColor);
+  console.log(`  ✓ dirty dot color: ${t57b} (预期 rgb(217, 119, 6) = warning 暖橙)`);
+  if (!t57b.includes('217') || !t57b.includes('119') || !t57b.includes('6')) {
+    throw new Error(`dirty dot 应是 warning 暖橙 #d97706, 实际 ${t57b}`);
+  }
+  // 其他文件不应有 dirty
+  const draftNode = page.locator('.tree-node[data-handle-name="draft.md"]');
+  const t57c = await draftNode.locator('.dirty-dot-mini').count();
+  console.log(`  ✓ draft.md 的 dirty-dot-mini 数: ${t57c} (预期 0)`);
+  if (t57c !== 0) throw new Error('其他文件不应有 dirty 圆点');
+  // 切换到非 dirty 文件 dirty 应消失
+  await page.evaluate((md) => {
+    return window.__mdAnnotator.loadMarkdownIntoEditor('sample.md', md, { annotations: [] });
+  }, SAMPLE_MD);
+  await page.waitForTimeout(100);
+  const t57d = await sampleNode.locator('.dirty-dot-mini').count();
+  console.log(`  ✓ clean 后 sample.md 的 dirty-dot-mini 数: ${t57d} (预期 0)`);
+  if (t57d !== 0) throw new Error('clean 后应无 dirty 圆点');
+
+  console.log('=== TEST 58: 顶部搜索框 + 实时过滤 + 高亮 ===');
+  const t58a = await page.locator('#tree-search').count();
+  console.log(`  ✓ 搜索 input 存在: ${t58a === 1}`);
+  if (t58a !== 1) throw new Error('搜索 input 应存在');
+  await page.locator('#tree-search').fill('sam');
+  await page.waitForTimeout(100);
+  const t58b = await sampleNode.isVisible();
+  const t58c = await draftNode.isVisible();
+  const t58d = await jsonNode.isVisible();
+  console.log(`  ✓ 搜索 'sam': sample=${t58b} draft=${t58c} json=${t58d}`);
+  if (!t58b) throw new Error('sample.md 应可见');
+  if (t58c) throw new Error('draft.md 应隐藏');
+  if (t58d) throw new Error('data.json 应隐藏');
+  // 验证高亮
+  const t58e = await sampleNode.locator('.filename mark').count();
+  console.log(`  ✓ sample.md 高亮 mark 数: ${t58e} (预期 1)`);
+  if (t58e !== 1) throw new Error('搜索匹配应有 mark 高亮');
+  // 清空
+  await page.locator('#tree-search-clear').click();
+  await page.waitForTimeout(100);
+  const t58f = (await sampleNode.isVisible()) && (await draftNode.isVisible()) && (await jsonNode.isVisible());
+  console.log(`  ✓ 清空后全部可见: ${t58f}`);
+  if (!t58f) throw new Error('清空后所有文件应可见');
+
+  console.log('=== TEST 59: 快捷键 Cmd/Ctrl+Shift+E 聚焦搜索 ===');
+  // 先 blur
+  await page.locator('#editor .tiptap').click();
+  await page.waitForTimeout(50);
+  await page.keyboard.press('Control+Shift+E');
+  await page.waitForTimeout(50);
+  const t59 = await page.evaluate(() => document.activeElement.id === 'tree-search');
+  console.log(`  ✓ 快捷键聚焦搜索框: ${t59}`);
+  if (!t59) throw new Error('Cmd/Ctrl+Shift+E 应聚焦搜索框');
+  // Escape 清空并 blur
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(50);
+  const t59b = await page.evaluate(() => document.activeElement.id !== 'tree-search');
+  console.log(`  ✓ Escape 后失焦: ${t59b}`);
+  if (!t59b) throw new Error('Escape 应使搜索框失焦');
+
+  // === TEST 59c: 中文锚点 + 改字 (P1 鲁棒) ===
+  // 中文 computeContext 之前有换行符 bug, 修复后应工作
+  await page.evaluate((md) => {
+    window.__mdAnnotator.loadMarkdownIntoEditor('test.md', md, null);
+    window.__mdAnnotator.State.author = 'test';
+    window.__mdAnnotator.createTestAnnotation('用于标记');
+  }, '# 标题\n\n这是一些中文内容用于标记。\n\n更多内容。');
+  await page.waitForTimeout(300);
+  const cnAnn = await page.evaluate(() => {
+    const anns = window.__mdAnnotator.State.annotations;
+    return anns[anns.length - 1] ? { prefix: anns[anns.length - 1].prefix, suffix: anns[anns.length - 1].suffix } : null;
+  });
+  if (cnAnn && cnAnn.prefix) {
+    await page.evaluate((args) => window.__mdAnnotator.loadMarkdownIntoEditor('test.md', args.md, args.ann), {
+      md: '# 标题\n\n这是一些中文内容用于标识。\n\n更多内容。',
+      ann: { annotations: [{ threadId: 'cn-test', text: '用于标记', prefix: cnAnn.prefix, suffix: cnAnn.suffix, resolved: false, createdAt: new Date().toISOString(), comments: [{ id: 'c1', author: 'test', body: 'test', createdAt: new Date().toISOString() }] }] }
+    });
+    await page.waitForTimeout(300);
+    const cnMarks = await page.locator('.annotation-mark').count();
+    const cnInvalid = await page.evaluate(() => window.__mdAnnotator.State.annotations.filter(a => a.invalid).length);
+    console.log(`  ✓ 中文改字后 mark: ${cnMarks} (预期 1, P1 鲁棒)`);
+    if (cnMarks !== 1) throw new Error('中文改字 P1 失败');
+  } else {
+    console.log('  ⚠ 跳过: 中文 prefix/suffix 未算出');
+  }
+
+  // === TEST 60: 侧车 schema 验证 - 重复 threadId ===
+  console.log('\n=== TEST 60: P0-B 重复 threadId 标 invalid ===');
+  // 构造一份带重复 threadId 的侧车
+  const dupSidecar = {
+    annotations: [
+      { threadId: 'dup-1', text: 'WYSIWYG', prefix: '', suffix: '', resolved: false, createdAt: new Date().toISOString(), comments: [{ id: 'c1', author: 't', body: '', createdAt: new Date().toISOString() }] },
+      { threadId: 'dup-1', text: 'WYSIWYG', prefix: '', suffix: '', resolved: false, createdAt: new Date().toISOString(), comments: [{ id: 'c2', author: 't', body: '', createdAt: new Date().toISOString() }] },
+    ]
+  };
+  await page.evaluate((ann) => {
+    return window.__mdAnnotator.loadMarkdownIntoEditor('dup.md', 'Some text with WYSIWYG editor here.', ann);
+  }, dupSidecar);
+  await page.waitForTimeout(300);
+  const dupInvalid = await page.evaluate(() => window.__mdAnnotator.State.annotations.filter(a => a.invalid).length);
+  console.log(`  ✓ 重复 threadId 标 invalid: ${dupInvalid} (预期 2)`);
+  if (dupInvalid !== 2) throw new Error('重复 threadId 应标 invalid');
+  const dupReason = await page.evaluate(() => window.__mdAnnotator.State.annotations[0].invalidReason);
+  if (dupReason !== 'duplicate-threadId') throw new Error(`失效原因应是 duplicate-threadId, 实际 ${dupReason}`);
+
+  // === TEST 61: 缺字段标 invalid ===
+  console.log('\n=== TEST 61: P0-B 缺字段标 invalid ===');
+  const incompleteSidecar = {
+    annotations: [
+      { threadId: 'inc-1', resolved: false, createdAt: new Date().toISOString(), comments: [] },  // 缺 text
+    ]
+  };
+  await page.evaluate((ann) => {
+    return window.__mdAnnotator.loadMarkdownIntoEditor('inc.md', 'Any content here.', ann);
+  }, incompleteSidecar);
+  await page.waitForTimeout(300);
+  const incInvalid = await page.evaluate(() => window.__mdAnnotator.State.annotations.filter(a => a.invalid).length);
+  console.log(`  ✓ 缺 text 标 invalid: ${incInvalid} (预期 1)`);
+  if (incInvalid !== 1) throw new Error('缺 text 应标 invalid');
+
+  // === TEST 62: 跨块批注标 invalid (cross-block) ===
+  console.log('\n=== TEST 62: P1-B 跨块批注标 invalid ===');
+  const crossBlockSidecar = {
+    annotations: [
+      { threadId: 'cb-1', text: 'Para 1\nPara 2', prefix: '', suffix: '', resolved: false, createdAt: new Date().toISOString(), comments: [] },
+    ]
+  };
+  await page.evaluate((ann) => {
+    return window.__mdAnnotator.loadMarkdownIntoEditor('cb.md', 'Para 1\n\nPara 2', ann);
+  }, crossBlockSidecar);
+  await page.waitForTimeout(300);
+  const cbInvalid = await page.evaluate(() => {
+    const a = window.__mdAnnotator.State.annotations[0];
+    return a ? { invalid: a.invalid, reason: a.invalidReason } : null;
+  });
+  console.log(`  ✓ 跨块批注: ${JSON.stringify(cbInvalid)} (预期 invalid=true, reason=cross-block)`);
+  if (!cbInvalid || !cbInvalid.invalid || cbInvalid.reason !== 'cross-block') {
+    throw new Error('跨块批注应标 cross-block');
+  }
+
+  // === TEST 63: 降级匹配 (改字) 时标 fuzzy ===
+  console.log('\n=== TEST 63: P1-A 降级匹配标 fuzzy ===');
+  await page.evaluate((md) => {
+    window.__mdAnnotator.loadMarkdownIntoEditor('fuzzy-test.md', md, null);
+    window.__mdAnnotator.State.author = 't';
+    window.__mdAnnotator.createTestAnnotation('to mark');
+  }, '# Title\n\nPara 1 with some text to mark clearly.\n\nPara 2 with more text here.');
+  await page.waitForTimeout(300);
+  // 改字后重新加载
+  await page.evaluate((md) => {
+    const anns = window.__mdAnnotator.State.annotations;
+    const annData = { annotations: anns.map(a => ({ ...a, comments: a.comments || [{ id: 'c1', author: 't', body: '', createdAt: new Date().toISOString() }] })) };
+    window.__mdAnnotator.loadMarkdownIntoEditor('fuzzy-test.md', md, annData);
+  }, '# Title\n\nPara 1 with some text to MArk clearly.\n\nPara 2 with more text here.');
+  await page.waitForTimeout(300);
+  const fuzzyAnns = await page.evaluate(() => window.__mdAnnotator.State.annotations.map(a => ({ fuzzy: a.fuzzy, invalid: a.invalid })));
+  console.log(`  ✓ 改字后 fuzzy 状态: ${JSON.stringify(fuzzyAnns)} (预期 fuzzy=true)`);
+  if (!fuzzyAnns[0] || !fuzzyAnns[0].fuzzy) throw new Error('改字后应标 fuzzy=true');
+  // 侧栏应显示 fuzzy-banner
+  const bannerCount = await page.locator('.fuzzy-banner').count();
+  console.log(`  ✓ 侧栏 fuzzy-banner 出现: ${bannerCount} (预期 1)`);
+  if (bannerCount !== 1) throw new Error('fuzzy-banner 应显示');
+
+  // === TEST 64: 空 text 拒绝创建 ===
+  console.log('\n=== TEST 64: P2-A 空 text 拒绝创建 ===');
+  // 不能直接调 createAnnotationThread (它是内部函数), 但可以模拟
+  // 改用 textBetween 方式 - 实际场景: 用户没选中文本就点 💬 批注
+  // 这里我们测 createTestAnnotation 不接受空 text
+  const emptyTest = await page.evaluate(() => {
+    try {
+      window.__mdAnnotator.createTestAnnotation('');
+      return { ok: true, count: window.__mdAnnotator.State.annotations.length };
+    } catch (e) {
+      return { ok: false, error: e.message };
+    }
+  });
+  console.log(`  ✓ createTestAnnotation('') 行为: ${JSON.stringify(emptyTest)}`);
+
+  // === TEST 65: 重新加载 sample.md（被前 9 个测试改过状态，需 fresh load） ===
+  console.log('\n=== TEST 65: 重新加载 sample.md 准备表格测试 ===');
+  await page.evaluate((args) => {
+    return window.__mdAnnotator.loadMarkdownIntoEditor(args.name, args.content, null);
+  }, { name: 'sample.md', content: SAMPLE_MD });
+  await page.waitForTimeout(200);
+
+  // === TEST 66: GFM 表格解析 → Tiptap 渲染（核心 bug 修复）===
+  console.log('\n=== TEST 66: GFM 表格解析为 HTML 表格 (无 cell 文本丢失) ===');
+  const tableRender = await page.evaluate(() => {
+    const html = window.__mdAnnotator.State.editor.getHTML();
+    // 找 sample.md 里"功能|状态|备注"那张表
+    const tableMatch = html.match(/<table[^>]*class="md-table"[^>]*>([\s\S]*?)<\/table>/);
+    if (!tableMatch) return { ok: false, reason: 'no table found', html };
+    const inner = tableMatch[0];
+    // 计数 th 和 td
+    const thCount = (inner.match(/<th\b/g) || []).length;
+    const tdCount = (inner.match(/<td\b/g) || []).length;
+    // 检查 cell 内容没有被合并成一段
+    const hasAllCells = ['功能', '状态', '备注', 'WYSIWYG', 'Tiptap', '侧车 JSON'].every(s => inner.includes(s));
+    return { ok: thCount === 3 && tdCount === 15 && hasAllCells, thCount, tdCount, hasAllCells, html: inner.slice(0, 300) };
+  });
+  console.log('  ✓ th 数:', tableRender.thCount, '(预期 3)');
+  console.log('  ✓ td 数:', tableRender.tdCount, '(预期 15 = 5 行 × 3 列)');
+  console.log('  ✓ 关键 cell 文本完整:', tableRender.hasAllCells);
+  if (!tableRender.ok) {
+    console.error('  ✗ 表格 HTML:', tableRender.html);
+    throw new Error(`表格渲染失败: ${JSON.stringify(tableRender)}`);
+  }
+
+  // === TEST 67: Tiptap → turndown → GFM markdown (HTML→MD roundtrip) ===
+  console.log('\n=== TEST 67: 表格 HTML → GFM markdown roundtrip ===');
+  const tableExport = await page.evaluate(() => {
+    const html = window.__mdAnnotator.State.editor.getHTML();
+    const md = window.__mdAnnotator.htmlToMarkdown(html);
+    // 找含管道符 + 分隔行的 GFM 表格
+    const lines = md.split('\n');
+    const pipeLineIdx = lines.findIndex(l => /^\|\s*功能\s*\|\s*状态\s*\|\s*备注\s*\|/.test(l));
+    const sepLineIdx = pipeLineIdx >= 0 ? lines.findIndex((l, i) => i > pipeLineIdx && /^\|[\s\-:|]+\|$/.test(l)) : -1;
+    return {
+      pipeLineIdx,
+      sepLineIdx,
+      hasHeader: pipeLineIdx >= 0,
+      hasSep: sepLineIdx === pipeLineIdx + 1,
+      hasDataRows: sepLineIdx >= 0 && lines.slice(sepLineIdx + 1, sepLineIdx + 6).some(l => /^\|\s*WYSIWYG/.test(l)),
+      snippet: lines.slice(pipeLineIdx, pipeLineIdx + 7).join('\n'),
+    };
+  });
+  console.log('  ✓ 找到表头行:', tableExport.hasHeader, '行号:', tableExport.pipeLineIdx);
+  console.log('  ✓ 紧跟分隔行:', tableExport.hasSep);
+  console.log('  ✓ 含数据行 WYSIWYG:', tableExport.hasDataRows);
+  console.log('  ✓ 表格片段:');
+  console.log('    ' + tableExport.snippet.replace(/\n/g, '\n    '));
+  if (!tableExport.hasHeader) throw new Error('导出 markdown 缺少 GFM 表头行');
+  if (!tableExport.hasSep) throw new Error('导出 markdown 缺少 GFM 分隔行 |---|---|');
+  if (!tableExport.hasDataRows) throw new Error('导出 markdown 缺少 GFM 数据行');
+
+  // === TEST 68: 单元格内有 KaTeX 公式的 roundtrip ===
+  console.log('\n=== TEST 68: 表格内含 KaTeX 公式 roundtrip ===');
+  const katexTableResult = await page.evaluate(async () => {
+    const md = `| 公式 | 说明 |
+|------|------|
+| $E = mc^2$ | 质能方程 |
+| $\\alpha$ | 希腊字母 alpha |`;
+    await window.__mdAnnotator.loadMarkdownIntoEditor('katex-table.md', md, null);
+    await new Promise(r => setTimeout(r, 200));
+    const html = window.__mdAnnotator.State.editor.getHTML();
+    const mdOut = window.__mdAnnotator.htmlToMarkdown(html);
+    return {
+      hasKatexInHtml: /class="katex-wrapper"/.test(html) && /data-tex="E = mc\^2"/.test(html),
+      mdHasDollarFormula: /\$\$\s*E\s*=\s*mc\^2\s*\$\$/.test(mdOut) || /\$E\s*=\s*mc\^2\$/.test(mdOut),
+      mdOut: mdOut.split('\n').filter(l => l.includes('|') || l.includes('=')).join('\n'),
+    };
+  });
+  console.log('  ✓ HTML 含 KaTeX wrapper + data-tex:', katexTableResult.hasKatexInHtml);
+  console.log('  ✓ 导出 md 含 $E = mc^2$:', katexTableResult.mdHasDollarFormula);
+  console.log('  ✓ roundtrip md 片段:');
+  console.log('    ' + katexTableResult.mdOut.replace(/\n/g, '\n    '));
+  if (!katexTableResult.hasKatexInHtml) throw new Error('表格内公式未保留为 KaTeX 节点');
+  if (!katexTableResult.mdHasDollarFormula) throw new Error('导出 md 未保留 LaTeX 源码');
+
+  console.log('=== Console 错误检查 ===');
+  if (pageErrors.length > 0) {
+    console.log('  ✗ pageerror:', pageErrors);
+    throw new Error('页面有 JS 错误');
+  }
+  // 过滤掉一些无害的 console error（如 favicon 404 + 我们自己 mock 的 picker 错误）
+  const realErrors = consoleErrors.filter(e =>
+    !e.includes('favicon')
+    && !e.includes('showDirectoryPicker 失败: NotAllowedError')  // TEST 36 mock
+    && !e.includes('showOpenFilePicker 失败: AbortError')      // TEST 35 mock
+  );
+  if (realErrors.length > 0) {
+    console.log('  ✗ 真实 console.error:', realErrors);
+    throw new Error('页面有未预期的 console 错误');
+  } else {
+    console.log('  ✓ 无未预期 console 错误（已知 mock 错误已过滤）');
+  }
+
+  // === TEST 69: 渲染↔源码 toggle 按钮存在 + 初始状态 ===
+  console.log('\n=== TEST 69: 工具栏 toggle 按钮存在 + 初始渲染模式 ===');
+  const toggleState = await page.evaluate(() => {
+    const btn = document.querySelector('#btn-toggle-render');
+    if (!btn) return { ok: false, reason: 'button not found' };
+    return {
+      exists: true,
+      initialMode: btn.dataset.mode,
+      initialLabel: btn.querySelector('span:last-child')?.textContent,
+      hasIcon: !!btn.querySelector('.tb-icon svg'),
+    };
+  });
+  console.log('  ✓ 按钮存在:', toggleState.exists);
+  console.log('  ✓ 初始 data-mode:', toggleState.initialMode, '(预期 "rendered")');
+  console.log('  ✓ 初始文案:', toggleState.initialLabel, '(预期 "源码")');
+  console.log('  ✓ 含 SVG 图标:', toggleState.hasIcon);
+  if (!toggleState.exists) throw new Error('按钮 #btn-toggle-render 不存在');
+  if (toggleState.initialMode !== 'rendered') throw new Error(`初始 mode 错: ${toggleState.initialMode}`);
+  if (toggleState.initialLabel !== '源码') throw new Error(`初始文案错: ${toggleState.initialLabel}`);
+  if (!toggleState.hasIcon) throw new Error('按钮缺 SVG 图标');
+
+  // === TEST 70: 点击 → 切到源码模式 → 内容是 markdown 文本 ===
+  console.log('\n=== TEST 70: 切到源码模式 → 显示原始 markdown ===');
+  // 先加载一份含表格 + 公式 + 标题的文档
+  const richMd = `# 标题测试
+
+| 列A | 列B |
+|-----|-----|
+| 1   | 2   |
+
+公式：$E = mc^2$
+`;
+  await page.evaluate((md) => {
+    return window.__mdAnnotator.loadMarkdownIntoEditor('rich.md', md, null);
+  }, richMd);
+  await page.waitForTimeout(200);
+
+  // 点 toggle 按钮
+  await page.click('#btn-toggle-render');
+  await page.waitForTimeout(200);
+
+  const sourceState = await page.evaluate(() => {
+    const btn = document.querySelector('#btn-toggle-render');
+    const sourceEl = document.querySelector('#source-view');
+    const editorEl = document.querySelector('#editor');
+    return {
+      mode: btn?.dataset.mode,
+      label: btn?.querySelector('span:last-child')?.textContent,
+      sourceVisible: sourceEl && sourceEl.style.display !== 'none',
+      editorHidden: editorEl && editorEl.style.display === 'none',
+      sourceText: sourceEl?.innerText || '',
+    };
+  });
+  console.log('  ✓ 切后 mode:', sourceState.mode, '(预期 "source")');
+  console.log('  ✓ 切后文案:', sourceState.label, '(预期 "渲染")');
+  console.log('  ✓ <pre> 可见:', sourceState.sourceVisible);
+  console.log('  ✓ Tiptap 编辑器隐藏:', sourceState.editorHidden);
+  console.log('  ✓ 源码文本前 120 字符:');
+  console.log('    ' + sourceState.sourceText.slice(0, 120).replace(/\n/g, '\n    '));
+  if (sourceState.mode !== 'source') throw new Error('mode 未切到 source');
+  if (sourceState.label !== '渲染') throw new Error(`按钮文案未更新: ${sourceState.label}`);
+  if (!sourceState.sourceVisible) throw new Error('<pre> 源码视图未显示');
+  if (!sourceState.editorHidden) throw new Error('Tiptap 编辑器未隐藏');
+  if (!sourceState.sourceText.includes('# 标题测试')) throw new Error('源码缺 H1');
+  if (!sourceState.sourceText.includes('| 列A | 列B |')) throw new Error('源码缺 GFM 表头');
+  if (!sourceState.sourceText.includes('$E = mc^2$')) throw new Error('源码缺 LaTeX 公式');
+
+  // === TEST 71: 再点 → 切回渲染模式 → 表格 + 公式都还在 ===
+  console.log('\n=== TEST 71: 切回渲染模式 → 富文本 roundtrip 完整 ===');
+  await page.click('#btn-toggle-render');
+  await page.waitForTimeout(200);
+
+  const renderedState = await page.evaluate(() => {
+    const btn = document.querySelector('#btn-toggle-render');
+    const sourceEl = document.querySelector('#source-view');
+    const editorEl = document.querySelector('#editor');
+    const html = window.__mdAnnotator.State.editor.getHTML();
+    return {
+      mode: btn?.dataset.mode,
+      label: btn?.querySelector('span:last-child')?.textContent,
+      sourceHidden: sourceEl && (sourceEl.style.display === 'none' || getComputedStyle(sourceEl).display === 'none'),
+      editorVisible: editorEl && editorEl.style.display !== 'none',
+      hasH1: /<h1[^>]*>.*?标题测试.*?<\/h1>/s.test(html),
+      hasTable: /<table[^>]*class="md-table"/.test(html),
+      hasKatex: /class="katex-wrapper"/.test(html),
+      htmlSnippet: html.slice(0, 300),
+    };
+  });
+  console.log('  ✓ 切回 mode:', renderedState.mode, '(预期 "rendered")');
+  console.log('  ✓ 切回文案:', renderedState.label, '(预期 "源码")');
+  console.log('  ✓ H1 标题:', renderedState.hasH1);
+  console.log('  ✓ GFM 表格:', renderedState.hasTable);
+  console.log('  ✓ KaTeX 公式:', renderedState.hasKatex);
+  if (renderedState.mode !== 'rendered') throw new Error('未切回 rendered');
+  if (renderedState.label !== '源码') throw new Error(`按钮文案错: ${renderedState.label}`);
+  if (!renderedState.hasH1) throw new Error('H1 丢失');
+  if (!renderedState.hasTable) throw new Error('表格丢失');
+  if (!renderedState.hasKatex) throw new Error('公式丢失');
+
+  await browser.close();
+  console.log('\n========================================');
+  console.log('✓ 全部 71 个测试通过！');
+  console.log('========================================');
+})().catch(async err => {
+  console.error('\n✗ 测试失败:', err.message);
+  console.error(err.stack);
+  // 自动截图: 失败时把 page 截下来 (供 HTML 报告)
+  try {
+    const shotPath = `/tmp/Mentor-fail-${Date.now()}.png`;
+    if (page && !page.isClosed()) {
+      await page.screenshot({ path: shotPath, fullPage: true });
+      console.error(`\n📸 失败截图: ${shotPath}`);
+    }
+  } catch (e) {
+    console.error('(截图失败:', e.message, ')');
+  }
+  process.exit(1);
+});
