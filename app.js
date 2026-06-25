@@ -2203,15 +2203,21 @@ function openHelp() {
   if (!btn || !popover) return;
   popover.classList.remove('hidden');
   btn.classList.add('is-active');
-  // 动态定位箭头: 指向 ? 按钮中心
-  // popover 自身靠 right:0 贴齐 title-group 右边缘, 箭头需指向 ? 按钮
-  // 公式: arrow right = popover_width - (btn_center_x - popover_left)
-  const popRect = popover.getBoundingClientRect();
+  // 动态定位 popover + 箭头: 都用 viewport 坐标 (position: fixed)
+  const popWidth = 340;
+  const margin = 16;  // 距视窗边缘最小距离
   const btnRect = btn.getBoundingClientRect();
   const btnCenterX = btnRect.left + btnRect.width / 2;
-  const arrowRight = popRect.right - btnCenterX;
-  // 防止箭头超出 popover 边界 (min 8px from edge)
-  const safe = Math.max(8, Math.min(popRect.width - 20, arrowRight));
+  const btnBottomY = btnRect.bottom;
+  // popover 水平居中对齐到按钮, 但不超出视窗
+  let popLeft = btnCenterX - popWidth / 2;
+  popLeft = Math.max(margin, Math.min(window.innerWidth - popWidth - margin, popLeft));
+  const popTop = btnBottomY + 10;  // 按钮下方 10px
+  popover.style.left = popLeft + 'px';
+  popover.style.top = popTop + 'px';
+  // 箭头: 相对 popover 左边缘, 对齐按钮中心
+  const arrowRightFromPop = (popLeft + popWidth) - btnCenterX;
+  const safe = Math.max(12, Math.min(popWidth - 20, arrowRightFromPop));
   const arrow = popover.querySelector('.help-popover-arrow');
   if (arrow) arrow.style.right = safe + 'px';
   // 让 popover 立刻响应键盘 Esc

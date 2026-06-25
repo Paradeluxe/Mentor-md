@@ -297,7 +297,7 @@ code {
   padding: 0;
   border-radius: 50%;
   font-weight: 600;
-  margin-right: 2px;
+  margin-right: 4px;  /* 与后面的 sep + 新建 按钮有间距 */
 }
 .help-btn:hover {
   color: var(--accent);
@@ -308,11 +308,11 @@ code {
   color: var(--panel);
 }
 
-/* 帮助弹窗 (popover, 绝对定位在按钮下方) */
+/* 帮助弹窗 (position: fixed, 位置完全由 JS 算, 跟随 ? 按钮) */
 .help-popover {
-  position: absolute;
-  top: calc(100% + 10px);
-  right: 0;
+  position: fixed;
+  top: 0;
+  left: 0;
   width: 340px;
   max-width: calc(100vw - 32px);
   background: var(--panel);
