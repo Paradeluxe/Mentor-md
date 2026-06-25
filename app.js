@@ -2166,6 +2166,36 @@ function renderAuthorChip() {
   }
 }
 
+// 帮助 popover 控制
+function isHelpOpen() {
+  const popover = document.querySelector('#help-popover');
+  return popover && !popover.classList.contains('hidden');
+}
+function openHelp() {
+  const btn = document.querySelector('#help-btn');
+  const popover = document.querySelector('#help-popover');
+  if (!btn || !popover) return;
+  popover.classList.remove('hidden');
+  btn.classList.add('is-active');
+  // 让 popover 立刻响应键盘 Esc
+  setTimeout(() => {
+    const closeBtn = popover.querySelector('.help-popover-close');
+    if (closeBtn) closeBtn.focus();
+  }, 50);
+}
+function closeHelp() {
+  const btn = document.querySelector('#help-btn');
+  const popover = document.querySelector('#help-popover');
+  if (!btn || !popover) return;
+  popover.classList.add('hidden');
+  btn.classList.remove('is-active');
+  btn.focus();  // 关闭后焦点回到按钮, 方便继续按 ? 键
+}
+function toggleHelp() {
+  if (isHelpOpen()) closeHelp();
+  else openHelp();
+}
+
 // 弹作者输入框
 // options.firstTime=true  -> 首次进入 (强引导, 文案不同, 不能 esc 关闭)
 // options.firstTime=false -> 手动修改 (轻量, 可 esc/cancel)
@@ -2348,6 +2378,45 @@ function updateToolbarState() {
       }
     } catch (e) {}
     btn.classList.toggle('is-active', isActive);
+  });
+
+  // 帮助按钮 - 点击切换 popover
+  const helpBtn = $('#help-btn');
+  if (helpBtn) {
+    helpBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleHelp();
+    });
+  }
+  // popover 内关闭按钮
+  const helpCloseBtn = document.querySelector('#help-popover .help-popover-close');
+  if (helpCloseBtn) {
+    helpCloseBtn.addEventListener('click', closeHelp);
+  }
+  // 点外部关闭
+  document.addEventListener('mousedown', (e) => {
+    if (!isHelpOpen()) return;
+    const popover = document.querySelector('#help-popover');
+    const btn = document.querySelector('#help-btn');
+    if (popover && !popover.contains(e.target) && btn && !btn.contains(e.target)) {
+      closeHelp();
+    }
+  });
+  // Esc 关闭 (全局键盘监听)
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && isHelpOpen()) {
+      closeHelp();
+      e.preventDefault();
+    }
+    // ? 键 (Shift+/) 切换 (但不能在输入框/可编辑元素中触发)
+    if ((e.key === '?' || (e.key === '/' && e.shiftKey)) && !isHelpOpen()) {
+      const tag = (e.target?.tagName || '').toLowerCase();
+      const isEditable = e.target?.isContentEditable || tag === 'input' || tag === 'textarea';
+      if (!isEditable) {
+        toggleHelp();
+        e.preventDefault();
+      }
+    }
   });
 }
 

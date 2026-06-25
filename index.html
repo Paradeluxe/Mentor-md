@@ -71,6 +71,20 @@
     <div class="tb-group" id="title-group">
       <span id="current-file-name">未打开文档</span>
       <span id="dirty-indicator" class="dirty-dot" title="有未保存修改"></span>
+      <button id="help-btn" class="help-btn" data-act="toggle-help" title="使用帮助 (H)" aria-label="使用帮助">?</button>
+      <div id="help-popover" class="help-popover hidden" role="tooltip">
+        <div class="help-popover-arrow"></div>
+        <h3>Mentor 使用提示</h3>
+        <ul>
+          <li><strong>选区批注:</strong> 拖选任意文字 → 点 <kbd>批注</kbd> 按钮 → 侧栏建批注线程</li>
+          <li><strong>嵌套回复:</strong> 在批注线程里继续回复, 像 docx 一样对话</li>
+          <li><strong>解决 / 重新打开:</strong> 批注可以标记为已解决, 需要时再打开</li>
+          <li><strong>侧车存储:</strong> 批注存在 <code>xxx.md.annotations.json</code>, 源 .md 保持干净</li>
+          <li><strong>保存:</strong> <kbd>Ctrl</kbd>+<kbd>S</kbd> 下载两个文件; Chrome/Edge 可授权直接写回原位置</li>
+        </ul>
+        <p class="help-popover-footer">快捷键: <kbd>Ctrl</kbd>+<kbd>B</kbd> 加粗 · <kbd>Ctrl</kbd>+<kbd>I</kbd> 斜体 · <kbd>Ctrl</kbd>+<kbd>S</kbd> 保存</p>
+        <button class="help-popover-close" data-act="close-help" aria-label="关闭">×</button>
+      </div>
       <button id="author-chip" class="author-chip" data-act="edit-author" title="点击修改作者名">
         <span class="author-chip-icon" aria-hidden="true">👤</span>
         <span id="author-chip-name">未设置</span>
@@ -101,14 +115,7 @@
       <div id="editor"></div>
       <div id="empty-editor-hint" class="empty-hint">
         <h2>Mentor</h2>
-        <p>一个支持 docx 风格批注的 Markdown WYSIWYG 编辑器。</p>
-        <ul>
-          <li>拖选任意文字 → 点 <kbd>批注</kbd> 按钮 → 侧栏建批注线程</li>
-          <li>支持嵌套回复 (threaded reply)</li>
-          <li>支持 <em>解决</em> / <em>重新打开</em> 批注</li>
-          <li>批注存 <code>xxx.md.annotations.json</code> 侧车文件</li>
-        </ul>
-        <p class="hint">从工具栏 [打开文件] 开始。</p>
+        <p class="hint">从工具栏 <strong>打开文件</strong> 开始 · 需要帮助点右上角 <strong>?</strong></p>
       </div>
       <!-- 浮动批注按钮，选中文本后出现 -->
       <div id="float-comment-btn" class="float-btn hidden">
