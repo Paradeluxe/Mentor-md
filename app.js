@@ -2203,6 +2203,17 @@ function openHelp() {
   if (!btn || !popover) return;
   popover.classList.remove('hidden');
   btn.classList.add('is-active');
+  // 动态定位箭头: 指向 ? 按钮中心
+  // popover 自身靠 right:0 贴齐 title-group 右边缘, 箭头需指向 ? 按钮
+  // 公式: arrow right = popover_width - (btn_center_x - popover_left)
+  const popRect = popover.getBoundingClientRect();
+  const btnRect = btn.getBoundingClientRect();
+  const btnCenterX = btnRect.left + btnRect.width / 2;
+  const arrowRight = popRect.right - btnCenterX;
+  // 防止箭头超出 popover 边界 (min 8px from edge)
+  const safe = Math.max(8, Math.min(popRect.width - 20, arrowRight));
+  const arrow = popover.querySelector('.help-popover-arrow');
+  if (arrow) arrow.style.right = safe + 'px';
   // 让 popover 立刻响应键盘 Esc
   setTimeout(() => {
     const closeBtn = popover.querySelector('.help-popover-close');

@@ -330,11 +330,11 @@ code {
   from { opacity: 0; transform: translateY(-4px); }
   to { opacity: 1; transform: translateY(0); }
 }
-/* popover 顶部小箭头 (指向 ? 按钮) */
+/* popover 顶部小箭头 (位置由 JS 动态计算, 始终指向 ? 按钮中心) */
 .help-popover-arrow {
   position: absolute;
   top: -6px;
-  right: 56px;  /* 对齐 ? 按钮 (按钮宽 22px + 间距, 在 author chip 左 2px) */
+  right: 12px;  /* fallback 位置, JS openHelp() 会覆盖为精确值 */
   width: 12px;
   height: 12px;
   background: var(--panel);
