@@ -1513,9 +1513,9 @@ async function openFiles() {
     try {
       const handles = await window.showOpenFilePicker({
         multiple: true,
-        // 同时接受 .md 和 .annotations.json (让用户能一次选两个文件加载批注)
+        // 同时接受 .md 和 .annotations.json, 让 user 一次选两个文件自动加载批注
         types: [{
-          description: 'Markdown 与批注侧车',
+          description: 'Markdown (.md) + 批注侧车 (.annotations.json)',
           accept: {
             'text/markdown': ['.md', '.markdown'],
             'application/json': ['.json'],
@@ -1540,10 +1540,10 @@ async function openFiles() {
       // 把 sidecar (如有) 传给 openFromHandle
       await openFromHandle(mdHandle, sidecarHandle);
       renderFileTreeFromHandles(handles);
-      // 提示: 如果只选 .md 没选 sidecar, 引导用户用文件夹模式或同时选 2 个文件
+      // 提示: 如果只选 .md 没选 sidecar, 引导用户用 Ctrl+多选 (单文件 picker 模式无法反查父目录)
       if (!sidecarHandle && /\.md(markdown)?$/i.test(mdHandle.name)) {
         setTimeout(() => {
-          showToast('未找到批注侧车, 请用 Ctrl+点选同时选 .md + .annotations.json, 或用"打开文件夹"', 5000);
+          showToast('提示: 按住 Ctrl 再选 .annotations.json 可加载批注 (同名, 同目录)', 6000);
         }, 200);
       }
       const statusMsg = sidecarHandle
@@ -2338,7 +2338,6 @@ function promptAuthor(options = {}) {
 function setupToolbar() {
   $('#btn-new').addEventListener('click', newDocument);
   $('#btn-open-files').addEventListener('click', openFiles);
-  $('#btn-open-folder').addEventListener('click', openFolder);
   // 打开文件夹: 已合并到左侧空文件栏点击 (setupEmptyTreeClick), 工具栏不再需要按钮
   $('#btn-save').addEventListener('click', saveCurrent);
   $('#btn-save-as').addEventListener('click', () => {

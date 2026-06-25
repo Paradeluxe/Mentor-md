@@ -50,7 +50,7 @@ def hello():
 表格示例：
 
 | 功能 | 状态 | 备注 |
-|------|------|------|
+| --- | --- | --- |
 | WYSIWYG | ✅ | 基于 Tiptap |
 | 选区批注 | ✅ | 基于 ProseMirror mark |
 | 嵌套回复 | ✅ | Threaded |
