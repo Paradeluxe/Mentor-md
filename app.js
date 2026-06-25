@@ -216,6 +216,99 @@ const HandleStore = {
   },
 };
 
+
+// 1.6 批注本地存储 (按文件名存, 不需要 sidecar 文件也能跨会话恢复)
+const AnnotationStore = {
+  DB_NAME: 'Mentor-annotations',
+  DB_VERSION: 2,  // 升到 2, 强制 upgradeneeded 修复之前 DB 已存在但 store 缺失的状态
+  _db: null,
+
+  async open() {
+    if (this._db) return this._db;
+    return new Promise((resolve, reject) => {
+      const req = indexedDB.open(this.DB_NAME, this.DB_VERSION);
+      req.onupgradeneeded = e => {
+        const db = e.target.result;
+        // 创建 annotations store (如果不存在)
+        if (!db.objectStoreNames.contains('annotations')) {
+          db.createObjectStore('annotations', { keyPath: 'name' });
+        }
+      };
+      req.onsuccess = () => {
+        this._db = req.result;
+        const stores = Array.from(this._db.objectStoreNames);
+        console.log('[IDB] open ok, db version', this._db.version, 'stores:', stores);
+        if (stores.includes('annotations')) {
+          resolve(this._db);
+        } else {
+          console.warn('[IDB] annotations store 缺失, 强制删除并重建');
+          this._db.close();
+          this._db = null;
+          const del = indexedDB.deleteDatabase(this.DB_NAME);
+          del.onsuccess = () => {
+            const req2 = indexedDB.open(this.DB_NAME, this.DB_VERSION);
+            req2.onupgradeneeded = e2 => {
+              e2.target.result.createObjectStore('annotations', { keyPath: 'name' });
+            };
+            req2.onsuccess = () => { this._db = req2.result; console.log('[IDB] 重建完成'); resolve(req2.result); };
+            req2.onerror = () => reject(req2.error);
+          };
+          del.onerror = () => reject(del.error);
+        }
+      };
+      req.onerror = () => reject(req.error);
+    });
+  },
+
+  async put(name, sidecar) {
+    const db = await this.open();
+    return new Promise((resolve, reject) => {
+      try {
+        const tx = db.transaction('annotations', 'readwrite');
+        const store = tx.objectStore('annotations');
+        store.put({ name, sidecar, updatedAt: Date.now() });
+        tx.oncomplete = resolve;
+        tx.onerror = () => reject(tx.error);
+        tx.onabort = () => reject(new Error('tx aborted: ' + tx.error?.message));
+      } catch (e) {
+        // store 缺失 (旧 IDB 异常), 强制删除重建再 put
+        console.warn('[IDB] put 失败, store 缺失, 重建:', e.message);
+        this._db?.close();
+        this._db = null;
+        const del = indexedDB.deleteDatabase(this.DB_NAME);
+        del.onsuccess = () => {
+          this.open().then(db2 => {
+            const tx2 = db2.transaction('annotations', 'readwrite');
+            tx2.objectStore('annotations').put({ name, sidecar, updatedAt: Date.now() });
+            tx2.oncomplete = resolve;
+            tx2.onerror = () => reject(tx2.error);
+          }).catch(reject);
+        };
+        del.onerror = () => reject(del.error);
+      }
+    });
+  },
+
+  async get(name) {
+    const db = await this.open();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction('annotations', 'readonly');
+      const req = tx.objectStore('annotations').get(name);
+      req.onsuccess = () => resolve(req.result || null);
+      req.onerror = () => reject(req.error);
+    });
+  },
+
+  async list() {
+    const db = await this.open();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction('annotations', 'readonly');
+      const req = tx.objectStore('annotations').getAll();
+      req.onsuccess = () => resolve(req.result || []);
+      req.onerror = () => reject(req.error);
+    });
+  },
+};
 const md = new MarkdownIt({ html: false, linkify: true, breaks: false });
 
 // ============================================================
@@ -1578,7 +1671,17 @@ async function openFilesLegacy() {
     renderFileTreeFromList(files);
     const file = files[0];
     const content = await file.text();
-    const annotations = await tryLoadSidecar(file.name, file);
+    // 加载批注: 1) fileList 中的 sidecar 2) IDB 本地缓存
+    let annotations = await tryLoadSidecar(file.name, file);
+    if (!annotations) {
+      try {
+        const cached = await AnnotationStore.get(file.name);
+        if (cached?.sidecar?.annotations) {
+          annotations = cached.sidecar;
+          console.log(`[IDB] legacy 流程恢复 ${annotations.annotations.length} 个批注`);
+        }
+      } catch (e) { console.warn('AnnotationStore.get 失败:', e); }
+    }
     await loadMarkdownIntoEditor(file.name, content, annotations);
     if (files.length > 1) setStatus(`已加载 ${files.length} 个文件`, '保存将下载');
   };
@@ -1656,25 +1759,34 @@ async function openFolderLegacy() {
 async function openFromHandle(fileHandle, sidecarHandle = null) {
   const file = await fileHandle.getFile();
   const content = await file.text();
-  // 加载侧车: 优先级 1) 文件夹模式 (folderHandle) 2) 显式传入的 sidecar handle
+  // 加载批注: 优先级 1) 文件夹模式 2) 显式 sidecar handle 3) IDB 本地缓存 (新!)
+  // 这样 user 只需打开 .md, 批注自动从 IDB 恢复, 永远不需要操心 sidecar 文件
   const sidecarName = file.name.replace(/\.md$/i, '') + '.annotations.json';
   let annotations = null;
   if (State.folderHandle) {
-    // 文件夹模式: 通过 folderHandle 找同目录的 sidecar
     try {
       const sh = await State.folderHandle.getFileHandle(sidecarName);
       const sf = await sh.getFile();
       annotations = JSON.parse(await sf.text());
-    } catch (e) {
-      // 侧车不存在是正常的
-    }
+    } catch (e) {}
   } else if (sidecarHandle) {
-    // 单文件模式: 用户在 picker 中同时选了 md + sidecar
     try {
       const sf = await sidecarHandle.getFile();
       annotations = JSON.parse(await sf.text());
     } catch (e) {
       showToast(`侧车 JSON 解析失败: ${e.message}`);
+    }
+  }
+  // 兜底: IDB 本地缓存 (用户重开 .md 时, 之前保存的批注自动恢复)
+  if (!annotations) {
+    try {
+      const cached = await AnnotationStore.get(file.name);
+      if (cached && cached.sidecar && cached.sidecar.annotations) {
+        annotations = cached.sidecar;
+        console.log(`[IDB] 从本地缓存恢复 ${cached.sidecar.annotations.length} 个批注 (${file.name})`);
+      }
+    } catch (e) {
+      console.warn('AnnotationStore.get 失败:', e);
     }
   }
   await loadMarkdownIntoEditor(file.name, content, annotations);
@@ -2086,6 +2198,13 @@ async function saveCurrent() {
   State.currentFile.content = mdText;
   State.currentFile.annotations = sidecar;
   markClean();
+
+  // 同时存到 IDB 本地缓存 (即使下载模式, 下次重开同一 .md 也能加载批注)
+  try {
+    console.log('[IDB] put start:', State.currentFile.name, sidecar.annotations?.length, 'anns');
+    await AnnotationStore.put(State.currentFile.name, sidecar);
+    console.log('[IDB] put OK');
+  } catch (e) { console.warn('[IDB] put 失败:', e); }
 
   // 3. 尝试用 handle 写回原位置
   const result = await tryWriteBack(mdText, sidecarText, sidecarName);
@@ -2591,7 +2710,7 @@ window.__mdAnnotator = {
   HandleStore,
   loadMarkdownIntoEditor,
   newDocument,
-  saveCurrent: async () => { /* 测试用 */ },
+  saveCurrent,
   tryWriteBack,
   tryReconnect,
   promptAuthor,
@@ -2780,6 +2899,7 @@ window.__mdAnnotator = {
   getEditorHTML: () => State.editor.getHTML(),
   // 当前用户身份 (id 永不变, name 可改)
   getCurrentUser: () => ({ id: State.authorId, name: State.author }),
+  listAnnotations: () => AnnotationStore.list(),
   // 兼容老 setAuthor: string 设 name; object {id, name} 设完整身份
   setAuthor: (arg) => {
     if (typeof arg === 'string') {
