@@ -1054,7 +1054,6 @@ function setRenderMode(mode) {
   const btn = $('#btn-toggle-render');
   const editorPane = $('#editor-pane');
   const tiptapEl = $('#editor');
-  const hintEl = $('#empty-editor-hint');
   let sourceEl = $('#source-view');
 
   if (mode === 'source') {
@@ -1074,12 +1073,11 @@ function setRenderMode(mode) {
         State.currentFile.content = sourceEl.innerText;
         markDirty();
       });
-      editorPane.insertBefore(sourceEl, hintEl);
+      editorPane.appendChild(sourceEl);
     }
     sourceEl.innerText = md;
     tiptapEl.style.display = 'none';
     sourceEl.style.display = 'block';
-    hintEl.style.display = 'none';
     // 按钮文案: 当前是源码，点它切回渲染
     btn.dataset.mode = 'source';
     btn.title = '切换为渲染视图';
@@ -1094,7 +1092,6 @@ function setRenderMode(mode) {
       sourceEl.style.display = 'none';
     }
     tiptapEl.style.display = '';
-    hintEl.style.display = '';
     btn.dataset.mode = 'rendered';
     btn.title = '切换为源码视图';
     btn.querySelector('span:last-child').textContent = '源码';
@@ -1237,7 +1234,6 @@ function loadMarkdownIntoEditor(name, content, annotationsData = null) {
     dirty: false,
   };
   markClean();
-  $('#empty-editor-hint').classList.remove('is-shown');
   $('#current-file-name').textContent = name;
   renderCommentList();
   renderOutline();
@@ -2165,7 +2161,6 @@ function newDocument() {
   State.annotations = [];
   State.currentFile = { name: 'untitled.md', content: '', annotations: null, dirty: true };
   markDirty();
-  $('#empty-editor-hint').classList.remove('is-shown');
   renderCommentList();
   renderOutline();
   setStatus('新建空白文档');
@@ -2494,7 +2489,6 @@ async function boot() {
   // 初次同步 chip 显示
   renderAuthorChip();
 
-  $('#empty-editor-hint').classList.add('is-shown');
 
   // 检测浏览器兼容性，状态栏提示
   const browserNote = FS_API.browserNote();
