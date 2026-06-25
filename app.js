@@ -1540,6 +1540,12 @@ async function openFiles() {
       // 把 sidecar (如有) 传给 openFromHandle
       await openFromHandle(mdHandle, sidecarHandle);
       renderFileTreeFromHandles(handles);
+      // 提示: 如果只选 .md 没选 sidecar, 引导用户用文件夹模式或同时选 2 个文件
+      if (!sidecarHandle && /\.md(markdown)?$/i.test(mdHandle.name)) {
+        setTimeout(() => {
+          showToast('未找到批注侧车, 请用 Ctrl+点选同时选 .md + .annotations.json, 或用"打开文件夹"', 5000);
+        }, 200);
+      }
       const statusMsg = sidecarHandle
         ? `${mdHandle.name} + 批注已加载`
         : (handles.length > 1
@@ -1603,7 +1609,8 @@ async function openFolder() {
       State.folderHandle = folderHandle;
       State.saveMode = 'handle';
       State.fileHandles = entries.map(e => e.handle);
-      await HandleStore.putFolder(folderHandle.name, folderHandle);
+      // 持久化 handle (失败也不致命, 关闭浏览器后无法重连而已)
+      try { await HandleStore.putFolder(folderHandle.name, folderHandle); } catch (e) { console.warn('putFolder 失败:', e); }
       renderFileTreeFromHandles(entries.map(e => e.handle), folderHandle);
       // 打开第一个
       await openFromHandle(entries[0].handle);
@@ -2331,6 +2338,7 @@ function promptAuthor(options = {}) {
 function setupToolbar() {
   $('#btn-new').addEventListener('click', newDocument);
   $('#btn-open-files').addEventListener('click', openFiles);
+  $('#btn-open-folder').addEventListener('click', openFolder);
   // 打开文件夹: 已合并到左侧空文件栏点击 (setupEmptyTreeClick), 工具栏不再需要按钮
   $('#btn-save').addEventListener('click', saveCurrent);
   $('#btn-save-as').addEventListener('click', () => {
