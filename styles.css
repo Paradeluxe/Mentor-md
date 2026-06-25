@@ -285,8 +285,21 @@ code {
   border-style: dashed;
   color: var(--text-3);
 }
-.author-chip-icon { font-size: 12px; line-height: 1; }
-.author-chip-edit { font-size: 10px; opacity: 0.5; transition: opacity 0.12s; }
+/* Optical alignment: 头像头部视觉重心偏高, 整体微下移对齐 baseline
+   铅笔斜向笔尖偏右下, 微上移对齐 baseline */
+.author-chip-icon {
+  font-size: 12px;
+  line-height: 1;
+  position: relative;
+  top: 1.5px;  /* optical: 头像头部偏上, 整体下移对齐文字 baseline */
+}
+.author-chip-edit {
+  font-size: 10px;
+  opacity: 0.5;
+  transition: opacity 0.12s;
+  position: relative;
+  top: 1px;   /* optical: 铅笔下移对齐 (vision 反馈需下移) */
+}
 .author-chip:hover .author-chip-edit { opacity: 0.85; }
 
 /* 帮助按钮 — 圆形, 与 author chip 同系列 */
