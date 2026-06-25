@@ -1556,11 +1556,10 @@ async function openFiles() {
     } catch (e) {
       if (e.name === 'AbortError') return; // 用户取消
       console.error('showOpenFilePicker 失败:', e);
-      showToast('打开失败: ' + e.message);
-      return;
+      // 不弹'打开失败' (太凶), 静默 fallback 到 legacy input 让用户仍能选
     }
   }
-  // Fallback: <input type="file">
+  // Fallback: <input type="file"> (Picker 失败 / 浏览器不支持)
   await openFilesLegacy();
 }
 
@@ -2102,6 +2101,10 @@ async function saveCurrent() {
     downloadFile(sidecarName, sidecarText);
     showToast('已下载 ✓ (浏览器不支持或未授权)');
     setStatus('已下载', `${State.currentFile.name} + ${sidecarName}`);
+    // 提醒: 下次重开时按 Ctrl+多选 .md + .annotations.json 才能加载批注
+    setTimeout(() => {
+      showToast('提示: 下次打开时按 Ctrl 多选 .md + .annotations.json 自动加载批注', 7000);
+    }, 1000);
   }
 }
 
