@@ -118,7 +118,8 @@ const State = {
   currentFile: null,        // { name, path, handle?, content, annotations, dirty, folderHandle? }
   annotations: [],          // 当前文档所有批注 thread
   activeThreadId: null,     // 当前在侧栏高亮的 thread
-  author: localStorage.getItem('Mentor:author') || '',
+  authorId: localStorage.getItem('Mentor:authorId') || '',   // 用户唯一 ID, 永不改变
+  author: localStorage.getItem('Mentor:author') || '',       // 显示名, 可改
   filterOpen: true,
   filterResolved: false,
   folderHandle: null,       // 当前文件夹 handle（FileSystemDirectoryHandle）
@@ -491,6 +492,31 @@ function escapeHtml(s) {
   return s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
+
+
+// 规范化 author 字段: 老数据可能是字符串, 新数据是 {id, name} 对象
+// 返回 {id, name} 统一格式
+function normalizeAuthor(a) {
+  if (!a) return { id: '', name: '匿名' };
+  if (typeof a === 'string') return { id: '', name: a || '匿名' };
+  if (typeof a === 'object') {
+    return { id: a.id || '', name: a.name || '匿名' };
+  }
+  return { id: '', name: '匿名' };
+}
+
+// 取 author 显示名 (兼容字符串/对象)
+function authorName(a) {
+  return normalizeAuthor(a).name;
+}
+
+// 取 author id (兼容字符串/对象) - 字符串时返回空字符串
+function authorId(a) {
+  if (!a) return '';
+  if (typeof a === 'object') return a.id || '';
+  return '';
+}
+
 function nowISO() { return new Date().toISOString(); }
 function formatTime(iso) {
   const d = new Date(iso);
@@ -719,7 +745,7 @@ function createAnnotationThread(from, to, text) {
     createdAt: nowISO(),
     comments: [{
       id: commentId,
-      author: State.author,
+      author: { id: State.authorId, name: State.author },
       body: '',
       createdAt: nowISO(),
     }],
@@ -753,7 +779,7 @@ function addReply(threadId, body) {
   if (!thread || !body.trim()) return;
   const comment = {
     id: uuid(),
-    author: State.author,
+    author: { id: State.authorId, name: State.author },
     body: body.trim(),
     createdAt: nowISO(),
   };
@@ -854,7 +880,7 @@ function renderCommentList() {
         <div class="comment-quote">${escapeHtml((thread.text || '').slice(0, 100))}${(thread.text || '').length > 100 ? '…' : ''}</div>
         <div class="comment-item">
           <div class="comment-meta">
-            <span class="comment-author">${escapeHtml(first.author || '匿名')}</span>
+            <span class="comment-author">${escapeHtml(authorName(first.author))}</span>
             <span>${formatTime(first.createdAt)}</span>
           </div>
           ${first.body ? `<div class="comment-body">${escapeHtml(first.body)}</div>` : `
@@ -868,7 +894,7 @@ function renderCommentList() {
           ${replies.map(r => `
             <div class="comment-reply">
               <div class="comment-meta">
-                <span class="comment-author">${escapeHtml(r.author || '匿名')}</span>
+                <span class="comment-author">${escapeHtml(authorName(r.author))}</span>
                 <span>${formatTime(r.createdAt)}</span>
               </div>
               <div class="comment-body">${escapeHtml(r.body)}</div>
@@ -2010,7 +2036,7 @@ async function saveCurrent() {
     version: '1',
     document: State.currentFile.name,
     updatedAt: nowISO(),
-    author: State.author,
+    author: { id: State.authorId, name: State.author },
     annotations: State.annotations.map(t => ({
       threadId: t.threadId,
       text: t.text,
@@ -2271,7 +2297,7 @@ function setupToolbar() {
     downloadFile(State.currentFile.name, State.currentFile.content || htmlToMarkdown(State.editor.getHTML()));
     const sidecarName = State.currentFile.name.replace(/\.md$/i, '') + '.annotations.json';
     const sidecar = {
-      version: '1', document: State.currentFile.name, updatedAt: nowISO(), author: State.author,
+      version: '1', document: State.currentFile.name, updatedAt: nowISO(), author: { id: State.authorId, name: State.author },
       annotations: State.annotations.map(t => ({
         threadId: t.threadId,
         text: t.text,
@@ -2443,6 +2469,11 @@ async function boot() {
   if (chip) {
     chip.addEventListener('click', () => promptAuthor({ firstTime: false }));
   }
+  // 首次访问: 自动生成 authorId (永不变, 用来区分同名用户)
+  if (!State.authorId) {
+    State.authorId = uuid();
+    localStorage.setItem('Mentor:authorId', State.authorId);
+  }
   // 初次同步 chip 显示
   renderAuthorChip();
 
@@ -2593,7 +2624,7 @@ window.__mdAnnotator = {
           annotationCount: State.annotations.length,
           pendingCount: this.getPending().length,
           saveMode: State.saveMode,
-          author: State.author,
+          author: { id: State.authorId, name: State.author },
         };
       },
 
@@ -2697,5 +2728,23 @@ window.__mdAnnotator = {
   },
   getAnnotations: () => State.annotations,
   getEditorHTML: () => State.editor.getHTML(),
-  setAuthor: name => { State.author = name; localStorage.setItem('Mentor:author', name); },
+  // 当前用户身份 (id 永不变, name 可改)
+  getCurrentUser: () => ({ id: State.authorId, name: State.author }),
+  // 兼容老 setAuthor: string 设 name; object {id, name} 设完整身份
+  setAuthor: (arg) => {
+    if (typeof arg === 'string') {
+      State.author = arg;
+      localStorage.setItem('Mentor:author', arg);
+    } else if (arg && typeof arg === 'object') {
+      if (arg.name !== undefined) {
+        State.author = arg.name;
+        localStorage.setItem('Mentor:author', arg.name);
+      }
+      if (arg.id) {
+        State.authorId = arg.id;
+        localStorage.setItem('Mentor:authorId', arg.id);
+      }
+    }
+    renderAuthorChip();
+  },
 };
