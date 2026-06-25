@@ -249,30 +249,37 @@ code {
 .dirty-dot { width: 6px; height: 6px; border-radius: 50%; background: transparent; }
 .dirty-dot.is-dirty { background: var(--warning); }
 
-/* 作者名 chip — 工具栏右上, 点击改作者 */
-.author-chip {
+/* 工具栏 chip 系列 (author-chip + help-btn 共享 design tokens) */
+.author-chip,
+.help-btn {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  padding: 3px 8px;
   border: 1px solid var(--border-warm);
-  border-radius: 999px;
   background: var(--panel-2);
   color: var(--text-2);
   font-size: 12px;
   font-family: inherit;
   cursor: pointer;
   transition: background 0.12s, border-color 0.12s, color 0.12s;
-  margin-right: 4px;
 }
-.author-chip:hover {
+.author-chip:hover,
+.help-btn:hover {
   background: var(--panel-3);
   border-color: var(--border-warm-medium);
   color: var(--text);
 }
-.author-chip:focus-visible {
+.author-chip:focus-visible,
+.help-btn:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
+}
+
+/* 作者名 chip — pill 风格 */
+.author-chip {
+  gap: 5px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  margin-right: 4px;
 }
 .author-chip.is-anonymous {
   border-style: dashed;
@@ -282,33 +289,18 @@ code {
 .author-chip-edit { font-size: 10px; opacity: 0.5; transition: opacity 0.12s; }
 .author-chip:hover .author-chip-edit { opacity: 0.85; }
 
-/* 帮助按钮 (右上角, 在 author chip 左边) */
+/* 帮助按钮 — 圆形, 与 author chip 同系列 */
 .help-btn {
-  display: inline-flex;
-  align-items: center;
   justify-content: center;
   width: 22px;
   height: 22px;
   padding: 0;
-  border: 1px solid var(--border-warm);
   border-radius: 50%;
-  background: var(--panel-2);
-  color: var(--text-2);
-  font-size: 12px;
   font-weight: 600;
-  font-family: inherit;
-  cursor: pointer;
   margin-right: 2px;
-  transition: background 0.12s, border-color 0.12s, color 0.12s, transform 0.12s;
 }
 .help-btn:hover {
-  background: var(--panel-3);
-  border-color: var(--border-warm-medium);
   color: var(--accent);
-}
-.help-btn:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
 }
 .help-btn.is-active {
   background: var(--accent);
@@ -325,9 +317,9 @@ code {
   max-width: calc(100vw - 32px);
   background: var(--panel);
   border: 1px solid var(--border-warm-medium);
-  border-radius: 10px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12), 0 2px 6px rgba(0, 0, 0, 0.06);
-  padding: 18px 20px 14px;
+  border-radius: 12px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.14), 0 4px 12px rgba(0, 0, 0, 0.08);
+  padding: 22px 22px 14px;
   z-index: 50;
   font-size: 13px;
   line-height: 1.55;
@@ -354,7 +346,7 @@ code {
   font-size: 14px;
   font-weight: 600;
   letter-spacing: -0.1px;
-  margin-bottom: 10px;
+  margin-bottom: 12px;
   color: var(--text);
 }
 .help-popover ul {
@@ -952,7 +944,7 @@ code {
 #empty-editor-hint { display: none; }
 #empty-editor-hint.is-shown { display: block; }
 
-/* 浮动批注按钮 (Cursor 风格: shadow-as-border + inset highlight) */
+/* 浮动批注按钮 (Linear/Notion 风格: pill + shadow-as-border + 暖色) */
 .float-btn {
   position: absolute;
   z-index: 100;
@@ -989,7 +981,7 @@ code {
 }
 .float-btn button:hover { background: var(--danger); transform: scale(1.05); }
 
-/* ============ Mark 删除 popover (active mark 顶部, Linear/Notion 风格) ============ */
+/* ============ Mark 删除 popover (active mark 顶部, pill 风格) ============ */
 .mark-delete-popover {
   position: absolute;
   z-index: 100;
@@ -998,9 +990,10 @@ code {
   gap: 1px;
   background: var(--panel);
   color: var(--text-2);
+  border: 1px solid var(--border-warm);
   border-radius: 9999px;
   padding: 1px;
-  box-shadow: 0 0 0 1px var(--border-warm), 0 2px 4px rgba(0, 0, 0, 0.08);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.04);
   transform: translateX(-50%);
   transition: opacity 0.12s ease;
 }
@@ -1206,7 +1199,7 @@ code {
   letter-spacing: 0.02px;
 }
 
-/* ============ Modal (Cursor 化: 暖色 shadow-as-border) ============ */
+/* ============ Modal (统一视觉: 与 help popover 共享 design tokens) ============ */
 .modal {
   position: fixed;
   inset: 0;
@@ -1216,19 +1209,29 @@ code {
   justify-content: center;
   z-index: 1000;
   backdrop-filter: blur(2px);
+  animation: modal-fade-in 0.16s ease-out;
 }
+@keyframes modal-fade-in { from { opacity: 0; } to { opacity: 1; } }
 .modal-content {
   background: var(--panel);
-  padding: 28px;
+  padding: 24px;
+  border: 1px solid var(--border-warm-medium);
   border-radius: 12px;
-  min-width: 380px;
-  box-shadow: 0 0 0 1px var(--border-warm), 0 28px 70px rgba(0, 0, 0, 0.14), 0 14px 32px rgba(0, 0, 0, 0.1);
+  min-width: 360px;
+  max-width: calc(100vw - 32px);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.14), 0 4px 12px rgba(0, 0, 0, 0.08);
+  animation: modal-pop-in 0.18s ease-out;
+}
+@keyframes modal-pop-in {
+  from { opacity: 0; transform: scale(0.96) translateY(4px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
 }
 .modal-content h3 {
-  margin-bottom: 8px;
-  font-size: 1.1em;
+  margin-bottom: 6px;
+  font-size: 14px;
   font-weight: 600;
   letter-spacing: -0.1px;
+  color: var(--text);
 }
 .modal-content p {
   margin-bottom: 14px;
@@ -1238,53 +1241,63 @@ code {
 }
 .modal-content input[type="text"] {
   width: 100%;
-  padding: 8px 10px;
-  border: none;
-  border-radius: 6px;
+  padding: 8px 12px;
+  border: 1px solid var(--border-warm);
+  border-radius: 8px;
   font-family: inherit;
-  font-size: 14px;
+  font-size: 13.5px;
   letter-spacing: 0.02px;
   background: var(--panel-2);
   color: var(--text);
   outline: none;
-  box-shadow: var(--shadow-ring);
+  transition: border-color 0.12s, background 0.12s;
 }
-.modal-content input[type="text"]:focus { box-shadow: var(--shadow-ring-hover); }
+.modal-content input[type="text"]:focus {
+  border-color: var(--accent);
+  background: var(--panel);
+}
 .modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18px; }
 .modal-actions button {
-  padding: 6px 16px;
-  border: none;
+  padding: 6px 14px;
+  border: 1px solid var(--border-warm);
   border-radius: 6px;
-  background: var(--panel-3);
+  background: var(--panel);
   color: var(--text);
   font-size: 13px;
   font-weight: 500;
   letter-spacing: 0.02px;
-  box-shadow: var(--shadow-ring);
-  transition: background 0.1s ease, color 0.1s ease;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
+  font-family: inherit;
 }
-.modal-actions button:hover { background: var(--panel-2); }
+.modal-actions button:hover {
+  background: var(--panel-2);
+  border-color: var(--border-warm-medium);
+}
 .modal-actions button.modal-btn-primary,
 .modal-actions button.primary {
-  background: var(--text);
+  background: var(--accent);
+  border-color: var(--accent);
   color: var(--panel);
 }
 .modal-actions button.modal-btn-primary:hover,
 .modal-actions button.primary:hover {
   background: var(--accent);
-  color: var(--panel);
+  border-color: var(--accent);
+  filter: brightness(0.92);
 }
 .modal-actions button.modal-btn-secondary {
   background: transparent;
+  border-color: transparent;
   color: var(--text-2);
 }
 .modal-actions button.modal-btn-secondary:hover {
   background: var(--panel-2);
+  border-color: transparent;
   color: var(--text);
 }
-.modal-actions button.primary:hover { background: var(--accent); color: white; }
 
-/* ============ Toast ============ */
+/* ============ Toast (统一视觉: pill 风格) ============ */
 .toast {
   position: fixed;
   bottom: 30px;
@@ -1297,7 +1310,7 @@ code {
   font-size: 12.5px;
   letter-spacing: 0.04px;
   z-index: 2000;
-  box-shadow: 0 0 0 1px var(--border-warm), 0 14px 32px rgba(0, 0, 0, 0.14), 0 4px 12px rgba(0, 0, 0, 0.08);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12), 0 2px 6px rgba(0, 0, 0, 0.06);
   animation: toast-in 0.2s ease-out;
 }
 @keyframes toast-in { from { opacity: 0; transform: translate(-50%, 10px); } to { opacity: 1; transform: translate(-50%, 0); } }
