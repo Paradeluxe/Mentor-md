@@ -71,6 +71,11 @@
     <div class="tb-group" id="title-group">
       <span id="current-file-name">未打开文档</span>
       <span id="dirty-indicator" class="dirty-dot" title="有未保存修改"></span>
+      <button id="author-chip" class="author-chip" data-act="edit-author" title="点击修改作者名">
+        <span class="author-chip-icon" aria-hidden="true">👤</span>
+        <span id="author-chip-name">未设置</span>
+        <span class="author-chip-edit" aria-hidden="true">✏️</span>
+      </button>
     </div>
   </header>
 
@@ -139,14 +144,15 @@
   </footer>
 </div>
 
-<!-- 浮动"作者"输入框 (首次使用) -->
+<!-- 浮动"作者"输入框 (首次使用 / 修改作者) -->
 <div id="author-modal" class="modal hidden">
   <div class="modal-content">
-    <h3>设置作者名</h3>
-    <p>批注将使用此作者名（可随时修改）：</p>
-    <input type="text" id="author-input" placeholder="例如：张三" />
+    <h3 id="author-modal-title">先认识一下</h3>
+    <p id="author-modal-desc">告诉 Mentor 你的名字, 之后所有批注会标注作者. 也可以留空用"匿名".</p>
+    <input type="text" id="author-input" placeholder="例如：张三" autofocus />
     <div class="modal-actions">
-      <button id="author-save">确定</button>
+      <button id="author-cancel" class="modal-btn-secondary">稍后设置</button>
+      <button id="author-save" class="modal-btn-primary">开始使用</button>
     </div>
   </div>
 </div>

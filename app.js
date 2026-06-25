@@ -1233,119 +1233,193 @@ function findAnnotationRange(doc, annotation) {
   const prefix = annotation.prefix || '';
   const suffix = annotation.suffix || '';
   // 收集 doc 中所有 text node 的 (pos, text)
+  // 同时构建 joined (textBetween) 字符串用于 prefix/suffix 算法
   const segments = [];
   doc.descendants((node, pos) => {
     if (node.isText) segments.push({ pos, text: node.text });
   });
   if (segments.length === 0) return null;
-  // 用 textBetween(space 分隔) 拼 joined, 跟 createAnnotationThread 算 prefix/suffix 时用的格式一致
   const joined = doc.textBetween(0, doc.content.size, ' ');
-  // posAtOffset: 把 "joined 字符 offset" 翻译回 "ProseMirror pos"
-  // 简单粗暴: joined 跟 segments 总文本长度通常不同 (textBetween 加了空格), 重新扫一遍 segments 找最近 pos
-  // 策略: 从前往后扫 segments, 估算 joined 字符串里的位置
-  // joined 字符数 ≈ segments 字符总数 + 块间空格 (blockCount - 1)
   const segTotalLen = segments.reduce((sum, s) => sum + s.text.length, 0);
-  const posAtOffset = (offset) => {
-    // 找 offset 落在哪个 text node
-    // 算法: 用 textBetween(0, pos, ' ') 反推 pos
-    // 但 textBetween 是 O(n), 多次调用太慢
-    // 替代: 按 segments 顺序, 估算 offset 在 segments 里的对应位置
-    // joined 字符串 = segments[0].text + ' ' + segments[1].text + ' ' + ...
-    // offset 通过: 累计 segments[i].text.length + 1 (空格)
-    let acc = 0;
-    for (let i = 0; i < segments.length; i++) {
-      const segLen = segments[i].text.length;
-      const joinedSegLen = segLen + (i < segments.length - 1 ? 1 : 0);  // +1 空格 (除最后一段)
-      if (offset < acc + joinedSegLen) {
-        // offset 落在 joined 里第 i 段 (含前面的空格)
-        // 算回 segments 里的 offset
-        const offsetInJoinedSeg = offset - acc;
-        const inSegOffset = Math.max(0, Math.min(segLen, offsetInJoinedSeg));
-        return segments[i].pos + inSegOffset;
+
+  // 核心查找函数: 直接在 segments 内部用 text.indexOf 找, 不依赖 joined offset 翻译
+  // 优先 P0 (精确 text 唯一匹配), 降级 P1/P2/P3 (用 prefix/suffix)
+  // 返回 { from, to, fuzzy } 或 null
+
+  // findInSegments: 在所有 text node 中找 searchStr 出现位置
+  // searchFromIdx: 从第 N 个 text node 开始找 (0-indexed), 用于 "跳过已匹配位置"
+  // 返回: { foundNodeIdx, inSegOffset } 或 null
+  const findInSegments = (searchStr, searchFromNodeIdx = 0) => {
+    if (!searchStr) return null;
+    for (let i = searchFromNodeIdx; i < segments.length; i++) {
+      const idx = segments[i].text.indexOf(searchStr);
+      if (idx !== -1) {
+        return { foundNodeIdx: i, inSegOffset: idx };
       }
-      acc += joinedSegLen;
     }
-    return segments[segments.length - 1].pos + segments[segments.length - 1].text.length;
+    return null;
   };
+
+  // 找第 N 次出现 (0-indexed): 用于多标注定位同一文本
+  const findNthOccurrence = (searchStr, n) => {
+    if (!searchStr) return null;
+    let count = 0;
+    for (let i = 0; i < segments.length; i++) {
+      const text = segments[i].text;
+      let searchFrom = 0;
+      while (searchFrom < text.length) {
+        const idx = text.indexOf(searchStr, searchFrom);
+        if (idx === -1) break;
+        if (count === n) {
+          return { foundNodeIdx: i, inSegOffset: idx };
+        }
+        count++;
+        searchFrom = idx + 1;
+      }
+    }
+    return null;
+  };
+
+  // posAtOffset: 仍需保留 (P1/P2 算法返回 joined offset, 需要翻译)
+  // 关键修正: textBetween 的 ' ' 分隔只在 block 间插空格, 不在 inline 间插
+  // 所以 joined = segments[0].text + (block 间空格, 数量 = blocks - 1) + segments[1].text + ...
+  // 但 segments 之间不一定是 block 边界! heading 自身是一个 block,内含 1 text node
+  // 所以 segments 数 = block 数, joined 用 ' ' join 完全等于 textBetween
+  // 用 binary search 验证 textBetween(0, midPos, ' ') 与 joined midPos 前缀的关系
+  const posAtOffset = (offset) => {
+    // 二分搜索: 找 midPos 使得 doc.textBetween(0, midPos, ' ').length >= offset
+    // 然后调整 midPos 使其精确
+    if (offset <= 0) return segments[0]?.pos || 0;
+    let lo = 0, hi = doc.content.size;
+    while (lo < hi) {
+      const mid = Math.floor((lo + hi) / 2);
+      const len = doc.textBetween(0, mid, ' ').length;
+      if (len < offset) lo = mid + 1;
+      else hi = mid;
+    }
+    return lo;
+  };
+
   // P1-A: 内部 helper - 返回 range 对象, fuzzy=true 表示降级匹配
   const makeRange = (from, to, fuzzy) => {
     const r = { from: posAtOffset(from), to: posAtOffset(to) };
     if (fuzzy) r.fuzzy = true;
     return r;
   };
-  // === P0 精确 text 匹配 (旧数据兼容: 无 prefix/suffix 的批注) ===
+  // === P0 精确 text 匹配 ===
+  // 直接在 segments 内部用 indexOf 找 (不依赖 joined offset 翻译)
+  // 优先第一个出现;有 prefix/suffix 时, 如果 text 多次出现, 用 prefix 辅助选最匹配的
   if (text) {
-    const idx = joined.indexOf(text);
-    if (idx !== -1) {
-      return makeRange(idx, idx + text.length, false);
+    const first = findInSegments(text);
+    if (first) {
+      // 检查 text 在整个 doc 中是否唯一 (跨 segments)
+      let totalOccurrences = 0;
+      for (const seg of segments) {
+        let searchFrom = 0;
+        while ((searchFrom = seg.text.indexOf(text, searchFrom)) !== -1) {
+          totalOccurrences++;
+          searchFrom += 1;
+        }
+      }
+      const isUnique = totalOccurrences === 1;
+      if (isUnique) {
+        // P0 唯一, 直接返回 ProseMirror pos (精确)
+        return {
+          from: segments[first.foundNodeIdx].pos + first.inSegOffset,
+          to: segments[first.foundNodeIdx].pos + first.inSegOffset + text.length,
+          fuzzy: false,
+        };
+      }
+      // 不唯一时, 只有在没有 prefix/suffix 才 fallback 到第一个匹配
+      if (!prefix && !suffix) {
+        return {
+          from: segments[first.foundNodeIdx].pos + first.inSegOffset,
+          to: segments[first.foundNodeIdx].pos + first.inSegOffset + text.length,
+          fuzzy: false,
+        };
+      }
+      // 有 prefix/suffix, 让 P1-P3 算法决定
     }
   }
 
-  // === P1 prefix + suffix 拼接 (text 改了也能定位 - C 方案核心) ===
-  // 用 prefix 末 5 字符 + suffix 前 5 字符当"指纹", 找在 joined 里的位置
+  // === P1 prefix + suffix 拼接定位 ===
+  // 直接在 segments 内部找 prefix+suffix 拼接边界
   if (prefix && suffix) {
+    // 策略: 找 prefix 末 N 字符出现在哪个 segment, 然后检查 suffix 前 M 字符是否在同一段或后续段
     const pTail = prefix.slice(-5);
     const sHead = suffix.slice(0, 5);
     if (pTail && sHead) {
-      // 找 prefix 末 5 字符的位置
-      let pIdx = -1;
-      let searchFrom = 0;
-      while (true) {
-        const idx = joined.indexOf(pTail, searchFrom);
-        if (idx === -1) break;
-        // 检查 suffix 前 5 字符是否在 prefix 末之后
-        const sIdx = joined.indexOf(sHead, idx + pTail.length);
-        if (sIdx !== -1) {
-          pIdx = idx;
-          break;
+      for (let i = 0; i < segments.length; i++) {
+        const seg = segments[i];
+        let searchFrom = 0;
+        while (searchFrom < seg.text.length) {
+          const pIdx = seg.text.indexOf(pTail, searchFrom);
+          if (pIdx === -1) break;
+          // pIdx 是 pTail 起点, text 起点 = pIdx + pTail.length
+          // 但 text 在创建时可能改了, 我们用 text.length 估算 text 起点
+          const estTextStart = pIdx + pTail.length;
+          // 检查 sHead 是否在该 text 之后 (在同一段或后续段)
+          const sSearchFromInSeg = estTextStart;
+          let sIdx = seg.text.indexOf(sHead, sSearchFromInSeg);
+          let sFoundSegIdx = i;
+          let sFoundInSegOffset = sIdx;
+          // 如果当前段没找到, 跳到下一段继续找 (sHead 可能在下一段)
+          if (sIdx === -1 && i + 1 < segments.length) {
+            sFoundSegIdx = i + 1;
+            sFoundInSegOffset = segments[i + 1].text.indexOf(sHead);
+            if (sFoundInSegOffset !== -1) {
+              // sHead 在下一段开头 - 跳过 segments 间空格 (1 字符偏移)
+              // text 起点跨段, 我们让 text from 落在 pTail 之后 (即使有点偏差)
+              // 简化处理: 直接返回 pTail 后位置作为 from, 标 fuzzy
+              return {
+                from: seg.pos + estTextStart,
+                to: seg.pos + estTextStart + text.length,
+                fuzzy: true,
+              };
+            }
+          } else if (sIdx !== -1) {
+            // sHead 在同一段内
+            return {
+              from: seg.pos + estTextStart,
+              to: seg.pos + estTextStart + text.length,
+              fuzzy: true,
+            };
+          }
+          searchFrom = pIdx + 1;
         }
-        searchFrom = idx + 1;
-      }
-      if (pIdx !== -1) {
-        // 找到了 prefix 末 + suffix 前 的位置
-        // from = prefix 末 之后 (text 起点, 但 text 已变用估算)
-        // 估算 text 起点 = suffix 前 5 字符 之前 text 长度
-        // 简化: 假设 text 长度还是原长度, from = sHead 位置 - text 长度
-        const sIdx = joined.indexOf(sHead, pIdx + pTail.length);
-        const estTextStart = sIdx - text.length;
-        return makeRange(Math.max(0, estTextStart), sIdx, true);  // P1 降级
       }
     }
   }
 
-  // === P2 fallback: prefix 末 5 字符 + text 前缀 (改字 + 前后文都在) ===
+  // === P2 prefix 末 5 字符 + text 前缀 (跨段用 text 起点找) ===
   if (text && prefix && prefix.length >= 5) {
     const pTail = prefix.slice(-5);
     const tHead = text.slice(0, Math.min(text.length, 5));
-    const idx = joined.indexOf(pTail + tHead);
-    if (idx !== -1) {
-      const start = idx + pTail.length;
-      return makeRange(start, start + text.length, true);  // P2 降级
+    const combined = pTail + tHead;
+    const found = findInSegments(combined);
+    if (found) {
+      return {
+        from: segments[found.foundNodeIdx].pos + found.inSegOffset + pTail.length,
+        to: segments[found.foundNodeIdx].pos + found.inSegOffset + pTail.length + text.length,
+        fuzzy: true,
+      };
     }
   }
 
-  // === P2 prefix + suffix 拼接 (text 改了也能定位) ===
-  // 找到 prefix 和 suffix 拼接的边界, text 长度仍用 ann.text.length
+  // === P3 prefix + suffix 完整拼接 ===
   if (prefix && suffix) {
-    const idx = joined.indexOf(prefix + suffix);
-    if (idx !== -1) {
-      const start = idx + prefix.length;
-      return makeRange(start, start + text.length, true);  // P2 降级
+    const combined = prefix + suffix;
+    const found = findInSegments(combined);
+    if (found) {
+      return {
+        from: segments[found.foundNodeIdx].pos + found.inSegOffset + prefix.length,
+        to: segments[found.foundNodeIdx].pos + found.inSegOffset + prefix.length + text.length,
+        fuzzy: true,
+      };
     }
   }
 
-  // === P3 prefix 末 10 字符 + text 子串匹配 ===
-  // 注意: 没 prefix 时, P3 跳过 (防止模糊匹配错位)
-  if (text && prefix && prefix.length >= 5) {
-    const shortPrefix = prefix.slice(-10);
-    const idx = joined.indexOf(shortPrefix + text.slice(0, Math.min(text.length, 10)));
-    if (idx !== -1) {
-      const start = idx + shortPrefix.length;
-      return { from: posAtOffset(start), to: posAtOffset(start + text.length) };
-    }
-  }
-
-  // === P4 全失败: 返回 null (失效, 标 invalid) ===
+  // === P4 全失败 ===
   return null;
 }
 
@@ -1940,6 +2014,9 @@ async function saveCurrent() {
     annotations: State.annotations.map(t => ({
       threadId: t.threadId,
       text: t.text,
+      // P-anchor: 保存 prefix/suffix 让重新打开时仍能定位 (P1/P2 算法依赖)
+      prefix: t.prefix || '',
+      suffix: t.suffix || '',
       resolved: t.resolved,
       createdAt: t.createdAt,
       comments: t.comments,
@@ -2071,27 +2148,83 @@ function newDocument() {
 // ============================================================
 // 9. 作者管理
 // ============================================================
-function promptAuthor() {
+
+// 同步工具栏右上 author chip 显示
+function renderAuthorChip() {
+  const chip = document.querySelector('#author-chip');
+  const name = document.querySelector('#author-chip-name');
+  if (!chip || !name) return;
+  const a = (State.author || '').trim();
+  if (a) {
+    name.textContent = a;
+    chip.classList.remove('is-anonymous');
+    chip.title = `当前作者: ${a}\n点击修改作者名`;
+  } else {
+    name.textContent = '未设置';
+    chip.classList.add('is-anonymous');
+    chip.title = '点击设置作者名 (留空用匿名)';
+  }
+}
+
+// 弹作者输入框
+// options.firstTime=true  -> 首次进入 (强引导, 文案不同, 不能 esc 关闭)
+// options.firstTime=false -> 手动修改 (轻量, 可 esc/cancel)
+function promptAuthor(options = {}) {
+  const { firstTime = false } = options;
   return new Promise(resolve => {
     const modal = $('#author-modal');
     const input = $('#author-input');
-    input.value = State.author;
+    const title = $('#author-modal-title');
+    const desc = $('#author-modal-desc');
+    const saveBtn = $('#author-save');
+    const cancelBtn = $('#author-cancel');
+
+    // 根据场景切换文案
+    if (firstTime) {
+      title.textContent = '先认识一下';
+      desc.textContent = '告诉 Mentor 你的名字, 之后所有批注会标注作者. 也可以留空用"匿名".';
+      saveBtn.textContent = '开始使用';
+      cancelBtn.style.display = '';  // 首次也允许跳过
+    } else {
+      title.textContent = '修改作者名';
+      desc.textContent = '新的作者名将用于今后所有批注. 已存在的批注不受影响.';
+      saveBtn.textContent = '保存';
+      cancelBtn.style.display = '';  // 修改可取消
+    }
+
+    input.value = State.author || '';
     modal.classList.remove('hidden');
-    setTimeout(() => input.focus(), 50);
-    const handler = () => {
-      const v = input.value.trim();
-      if (v) {
-        State.author = v;
-        localStorage.setItem('Mentor:author', v);
-        modal.classList.add('hidden');
-        $('#author-save').removeEventListener('click', handler);
-        input.removeEventListener('keydown', keyHandler);
-        resolve();
-      }
+    setTimeout(() => { input.focus(); input.select(); }, 50);
+
+    const close = (resolved) => {
+      modal.classList.add('hidden');
+      saveBtn.removeEventListener('click', saveHandler);
+      cancelBtn.removeEventListener('click', cancelHandler);
+      input.removeEventListener('keydown', keyHandler);
+      modal.removeEventListener('click', backdropHandler);
+      renderAuthorChip();
+      resolve(resolved);
     };
-    const keyHandler = e => { if (e.key === 'Enter') handler(); };
-    $('#author-save').addEventListener('click', handler);
+
+    const saveHandler = () => {
+      const v = input.value.trim() || '匿名';  // 空值 fallback 到"匿名"
+      State.author = v;
+      localStorage.setItem('Mentor:author', v);
+      close(true);
+    };
+    const cancelHandler = () => close(false);
+    const keyHandler = e => {
+      if (e.key === 'Enter') saveHandler();
+      if (e.key === 'Escape' && !firstTime) cancelHandler();  // 首次 Esc 等同"稍后设置"
+    };
+    const backdropHandler = e => {
+      if (e.target === modal) cancelHandler();  // 点背景关闭
+    };
+
+    saveBtn.addEventListener('click', saveHandler);
+    cancelBtn.addEventListener('click', cancelHandler);
     input.addEventListener('keydown', keyHandler);
+    modal.addEventListener('click', backdropHandler);
   });
 }
 
@@ -2109,7 +2242,16 @@ function setupToolbar() {
     const sidecarName = State.currentFile.name.replace(/\.md$/i, '') + '.annotations.json';
     const sidecar = {
       version: '1', document: State.currentFile.name, updatedAt: nowISO(), author: State.author,
-      annotations: State.annotations,
+      annotations: State.annotations.map(t => ({
+        threadId: t.threadId,
+        text: t.text,
+        // P-anchor: 保留 prefix/suffix 让 reload 时仍能精确定位
+        prefix: t.prefix || '',
+        suffix: t.suffix || '',
+        resolved: t.resolved,
+        createdAt: t.createdAt,
+        comments: t.comments,
+      })),
     };
     downloadFile(sidecarName, JSON.stringify(sidecar, null, 2));
     showToast('已下载两个文件');
@@ -2226,6 +2368,15 @@ async function boot() {
   setupTreeActionDelegation();
   setupEmptyTreeClick();
   setupTreeSearch();
+
+  // 工具栏 author chip 点击 → 弹修改 modal
+  const chip = document.querySelector('#author-chip');
+  if (chip) {
+    chip.addEventListener('click', () => promptAuthor({ firstTime: false }));
+  }
+  // 初次同步 chip 显示
+  renderAuthorChip();
+
   $('#empty-editor-hint').classList.add('is-shown');
 
   // 检测浏览器兼容性，状态栏提示
@@ -2234,6 +2385,12 @@ async function boot() {
     setStatus('浏览器兼容性提示', browserNote);
   } else {
     setStatus('就绪', '打开或新建 .md 开始批注');
+  }
+
+  // 首次进入: 延迟 400ms 弹作者 modal (让 UI 先稳定再引导)
+  const isFirstTime = !localStorage.getItem('Mentor:author');
+  if (isFirstTime) {
+    setTimeout(() => promptAuthor({ firstTime: true }), 400);
   }
 
   // 尝试自动重连上次文件

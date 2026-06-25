@@ -249,6 +249,39 @@ code {
 .dirty-dot { width: 6px; height: 6px; border-radius: 50%; background: transparent; }
 .dirty-dot.is-dirty { background: var(--warning); }
 
+/* 作者名 chip — 工具栏右上, 点击改作者 */
+.author-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border: 1px solid var(--border-warm);
+  border-radius: 999px;
+  background: var(--panel-2);
+  color: var(--text-2);
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
+  margin-right: 4px;
+}
+.author-chip:hover {
+  background: var(--panel-3);
+  border-color: var(--border-warm-medium);
+  color: var(--text);
+}
+.author-chip:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.author-chip.is-anonymous {
+  border-style: dashed;
+  color: var(--text-3);
+}
+.author-chip-icon { font-size: 12px; line-height: 1; }
+.author-chip-edit { font-size: 10px; opacity: 0.5; transition: opacity 0.12s; }
+.author-chip:hover .author-chip-edit { opacity: 0.85; }
+
 /* ============ Main panes (三栏布局) ============ */
 #main {
   display: grid;
@@ -1094,9 +1127,23 @@ code {
   transition: background 0.1s ease, color 0.1s ease;
 }
 .modal-actions button:hover { background: var(--panel-2); }
+.modal-actions button.modal-btn-primary,
 .modal-actions button.primary {
   background: var(--text);
   color: var(--panel);
+}
+.modal-actions button.modal-btn-primary:hover,
+.modal-actions button.primary:hover {
+  background: var(--accent);
+  color: var(--panel);
+}
+.modal-actions button.modal-btn-secondary {
+  background: transparent;
+  color: var(--text-2);
+}
+.modal-actions button.modal-btn-secondary:hover {
+  background: var(--panel-2);
+  color: var(--text);
 }
 .modal-actions button.primary:hover { background: var(--accent); color: white; }
 

@@ -37,6 +37,10 @@ function log(label, ...rest) { console.log(`  ${pad(label, 28)} ${rest.join(' ')
     // 禁用浏览器缓存 (避免 Chromium headless CSS 缓存坑)
     bypassCSP: true,
   });
+  // 预置 author, 跳过首次 modal
+  await context.addInitScript(() => {
+    try { localStorage.setItem('Mentor:author', 'Stress Tester'); } catch (e) {}
+  });
   const page = await context.newPage();
 
   // 拦截所有 response 加 no-cache

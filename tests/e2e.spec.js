@@ -14,6 +14,10 @@ const SAMPLE_ANN = JSON.parse(fs.readFileSync(path.join(ROOT, 'test-data/sample.
 (async () => {
   const browser = await chromium.launch({ headless: true });
   const context = await browser.newContext({ viewport: { width: 1400, height: 900 } });
+  // 在任何 page 脚本运行前预设 author, 避免首次弹 modal 干扰测试
+  await context.addInitScript(() => {
+    try { localStorage.setItem('Mentor:author', '测试作者'); } catch (e) {}
+  });
   const page = await context.newPage();
 
   // 收集 console 错误
