@@ -1513,23 +1513,39 @@ async function openFiles() {
     try {
       const handles = await window.showOpenFilePicker({
         multiple: true,
+        // 同时接受 .md 和 .annotations.json (让用户能一次选两个文件加载批注)
         types: [{
-          description: 'Markdown',
-          accept: { 'text/markdown': ['.md', '.markdown'] },
+          description: 'Markdown 与批注侧车',
+          accept: {
+            'text/markdown': ['.md', '.markdown'],
+            'application/json': ['.json'],
+          },
         }],
         excludeAcceptAllOption: false,
       });
       if (handles.length === 0) return;
-      // 第一个直接打开；其他进文件列表
+      // 分类: 主 .md + 可选 sidecar .annotations.json
+      // 用户可一次选 2 个文件 (my.md + my.annotations.json), sidecar 会被加载
+      const mdHandle = handles.find(h => /\.md(markdown)?$/i.test(h.name)) || handles[0];
+      const sidecarHandle = handles.find(h =>
+        /\.annotations\.json$/i.test(h.name) &&
+        h.name.replace(/\.annotations\.json$/i, '').toLowerCase() ===
+        mdHandle.name.replace(/\.md(markdown)?$/i, '').toLowerCase()
+      );
       State.fileHandles = handles;
       State.fileList = null;
       // 单文件模式：没有 folderHandle，保存时下载
       State.folderHandle = null;
       State.saveMode = 'download';
-      await openFromHandle(handles[0]);
+      // 把 sidecar (如有) 传给 openFromHandle
+      await openFromHandle(mdHandle, sidecarHandle);
       renderFileTreeFromHandles(handles);
-      if (handles.length > 1) setStatus(`已加载 ${handles.length} 个文件`, '保存时下载文件');
-      else setStatus('已加载', `${handles[0].name} (保存将下载)`);
+      const statusMsg = sidecarHandle
+        ? `${mdHandle.name} + 批注已加载`
+        : (handles.length > 1
+          ? `${mdHandle.name} (${handles.length - 1} 个其他文件, 仅 .md 加载批注)`
+          : `${mdHandle.name} (保存将下载)`);
+      setStatus('已加载', statusMsg);
       return;
     } catch (e) {
       if (e.name === 'AbortError') return; // 用户取消
@@ -1546,7 +1562,7 @@ async function openFilesLegacy() {
   const input = document.createElement('input');
   input.type = 'file';
   input.multiple = true;
-  input.accept = '.md,.markdown,.txt';
+  input.accept = '.md,.markdown,.txt,.json';  // 接受 .json 以便同时选 sidecar
   input.onchange = async () => {
     const files = Array.from(input.files);
     if (files.length === 0) return;
@@ -1631,19 +1647,28 @@ async function openFolderLegacy() {
 }
 
 // --- 通过 FileSystemFileHandle 打开文件
-async function openFromHandle(fileHandle) {
+async function openFromHandle(fileHandle, sidecarHandle = null) {
   const file = await fileHandle.getFile();
   const content = await file.text();
-  // 尝试加载侧车
+  // 加载侧车: 优先级 1) 文件夹模式 (folderHandle) 2) 显式传入的 sidecar handle
   const sidecarName = file.name.replace(/\.md$/i, '') + '.annotations.json';
   let annotations = null;
   if (State.folderHandle) {
+    // 文件夹模式: 通过 folderHandle 找同目录的 sidecar
     try {
-      const sidecarHandle = await State.folderHandle.getFileHandle(sidecarName);
-      const sidecarFile = await sidecarHandle.getFile();
-      annotations = JSON.parse(await sidecarFile.text());
+      const sh = await State.folderHandle.getFileHandle(sidecarName);
+      const sf = await sh.getFile();
+      annotations = JSON.parse(await sf.text());
     } catch (e) {
       // 侧车不存在是正常的
+    }
+  } else if (sidecarHandle) {
+    // 单文件模式: 用户在 picker 中同时选了 md + sidecar
+    try {
+      const sf = await sidecarHandle.getFile();
+      annotations = JSON.parse(await sf.text());
+    } catch (e) {
+      showToast(`侧车 JSON 解析失败: ${e.message}`);
     }
   }
   await loadMarkdownIntoEditor(file.name, content, annotations);
@@ -1709,7 +1734,9 @@ function renderFileTreeFromHandles(handles, folderHandle = State.folderHandle) {
   // 同步 dirty 圆点
   updateTreeDirtyDots();
   // 重新应用搜索过滤
-  filterTree($('#tree-search').value);
+  // 重新应用搜索过滤 (tree-search 元素已隐藏, 安全调用)
+  const searchInput = $('#tree-search');
+  filterTree(searchInput ? searchInput.value : '');
 }
 
 // --- 从 file list 渲染（legacy fallback）— 修复 preexisting bug
@@ -1741,7 +1768,9 @@ function renderFileTreeFromList(files) {
     });
   });
   updateTreeDirtyDots();
-  filterTree($('#tree-search').value);
+  // 重新应用搜索过滤 (tree-search 元素已隐藏, 安全调用)
+  const searchInput = $('#tree-search');
+  filterTree(searchInput ? searchInput.value : '');
 }
 
 // ============================================================
