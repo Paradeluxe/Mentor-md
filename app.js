@@ -711,7 +711,8 @@ function initEditor() {
     content: '',
     onUpdate: ({ editor, transaction }) => {
       // P3-A: 切 active thread 的 dispatch 用 setMeta 标记, 视为 UI 同步不算 dirty
-      if (transaction?.getMeta('__activeMarkSync')) {
+      // P-2: 表格跨 cell 拖选 setSelection 也是 UI 同步, 同样不算 dirty
+      if (transaction?.getMeta('__activeMarkSync') || transaction?.getMeta('__tableDragSelect')) {
         // 仍然刷新侧栏 (highlight 已经 dispatch 了, renderCommentList 由 highlightActiveMark 自己触发)
         return;
       }
@@ -725,6 +726,92 @@ function initEditor() {
     onSelectionUpdate: ({ editor }) => {
       handleSelectionChange();
     },
+  });
+  // P-2: 表格内跨 cell 拖选 - 浏览器原生 table 把 selection 限制在单 cell 内
+  // 拦截 mouseup, 检测是否跨 cell 拖拽意图, 用 setTextSelection 强制跨 cell 选区
+  setupTableDragCapture(editorEl);
+}
+
+// ============================================================
+// 4.5 表格跨 cell 拖选拦截
+// ============================================================
+// 浏览器原生 <table> 行为: mousedown 锁定一个 cell, 拖拽只在 cell 内扩展 selection.
+// mouseup 时如果鼠标在另一 cell, 用户视觉上"拖过 3 cell"但 PM selection 只在最后 cell 内.
+// 拦截逻辑: 记录 mousedown cell + mouseup cell, 跨 cell 时用 CellSelection.create() 创建多 cell 选区.
+// 之后 createAnnotationThread 检测到 CellSelection, 给每个 cell 一段独立 mark (共享 threadId).
+function setupTableDragCapture(editorEl) {
+  if (!editorEl) return;
+  let downCellInfo = null;  // { cellPos, contentStart, contentEnd }
+  let isDragging = false;
+
+  // helper: 找 dom cell 对应的 PM cell node pos (cell.pos)
+  // 返回 { cellPos, contentStart, contentEnd }
+  // cellPos 必须是 depth=2 位置 (parent=tableRow, nodeAfter=cell) - CellSelection.create 需要这种位置
+  function findCellPos(domCell) {
+    if (!domCell || !State.editor) return null;
+    try {
+      const pos = State.editor.view.posAtDOM(domCell, 0);
+      const $pos = State.editor.state.doc.resolve(pos);
+      // 找 tableCell/Header ancestor depth
+      let cellDepth = -1;
+      for (let d = $pos.depth; d > 0; d--) {
+        const t = $pos.node(d).type.name;
+        if (t === 'tableCell' || t === 'tableHeader') { cellDepth = d; break; }
+      }
+      if (cellDepth < 0) return null;
+      // $pos.before(cellDepth) = position before cell node = cell start position (depth=cellDepth-1, parent=tableRow)
+      const cellPos = $pos.before(cellDepth);
+      return {
+        cellPos,
+        contentStart: $pos.start(cellDepth),
+        contentEnd: $pos.end(cellDepth),
+      };
+    } catch (e) {
+      return null;
+    }
+  }
+
+  editorEl.addEventListener('mousedown', (e) => {
+    const cell = e.target.closest('td, th');
+    if (!cell) { downCellInfo = null; isDragging = false; return; }
+    downCellInfo = findCellPos(cell);
+    isDragging = !!downCellInfo;
+  });
+
+  editorEl.addEventListener('mouseup', (e) => {
+    if (!isDragging || !downCellInfo) { isDragging = false; return; }
+    isDragging = false;
+    const upCell = e.target.closest('td, th');
+    if (!upCell || !State.editor) return;
+    const upInfo = findCellPos(upCell);
+    if (!upInfo) return;
+    // 同一 cell - 不需要干预, PM 默认 selection 已 OK
+    if (downCellInfo.cellPos === upInfo.cellPos) return;
+    // 跨 cell: 用 Tiptap 提供的 setCellSelection command
+    // (Tiptap 2.1.13 的 editor.commands.setCellSelection({anchorCell, headCell}) 创建 CellSelection)
+    // 注意: anchorCell 必须是 depth=2 的 position (parent=tableRow), 不是 cell content 内的 pos
+    try {
+      const ok = State.editor.commands.setCellSelection({
+        anchorCell: downCellInfo.cellPos,
+        headCell: upInfo.cellPos,
+      });
+      if (!ok) throw new Error('setCellSelection returned false');
+      // dispatch a follow-up tr with meta for selectionUpdate propagation
+      const tr = State.editor.state.tr;
+      tr.setMeta('__tableDragSelect', true);
+      State.editor.view.dispatch(tr);
+      setStatus('提示', `已选中多单元格, 批注将覆盖全部文字`);
+    } catch (err) {
+      console.warn('[tableDrag] CellSelection 失败, 退回单 cell:', err);
+      // 退回: 选区只到起始 cell 全文
+      try {
+        State.editor.chain()
+          .focus()
+          .setTextSelection({ from: downCellInfo.contentStart, to: downCellInfo.contentEnd })
+          .setMeta('__tableDragSelect', true)
+          .run();
+      } catch (e) { /* ignore */ }
+    }
   });
 }
 
@@ -762,16 +849,77 @@ function handleSelectionChange() {
   }
 
   if (empty || from === to) {
-    btn.classList.add('hidden');
+    // CellSelection 不是 empty (覆盖多 cell), 不在这里 return
+    const isCellSel = State.editor.state.selection.forEachCell
+      && State.editor.state.selection.$anchorCell
+      && State.editor.state.selection.$headCell;
+    if (!isCellSel) {
+      btn.classList.add('hidden');
+      return;
+    }
+  }
+  // CellSelection (多 cell 选区): 直接显示按钮, 不做跨 cell fallback
+  const sel = State.editor.state.selection;
+  const isCellSel = sel.forEachCell && sel.$anchorCell && sel.$headCell;
+  if (isCellSel) {
+    try {
+      // 按钮定位到选区起点 cell 顶部
+      const start = editor.view.coordsAtPos(sel.from);
+      const editorPane = $('#editor-pane');
+      const paneRect = editorPane.getBoundingClientRect();
+      const top = start.top - paneRect.top + editorPane.scrollTop - 32;
+      const left = start.left - paneRect.left + editorPane.scrollLeft;
+      btn.style.top = `${Math.max(0, top)}px`;
+      btn.style.left = `${left}px`;
+      btn.classList.remove('hidden');
+    } catch (e) {
+      btn.classList.add('hidden');
+    }
     return;
   }
   // 选区必须在同一 block 内（mark 不能跨 block）
+  // 例外: table 内跨 cell 选区 → 自动缩进到起始 cell 内, 批注落在第一个 cell
   const $from = editor.state.doc.resolve(from);
   const $to = editor.state.doc.resolve(to);
   if ($from.parent !== $to.parent) {
-    btn.classList.add('hidden');
-    setStatus('提示', '批注暂不支持跨段落选区，请选单段内文字');
-    return;
+    // 找 from 所在的 tableCell / tableHeader (从最深处往上, depth 1 是 paragraph)
+    let fromCell = null;
+    let fromCellDepth = -1;
+    for (let d = $from.depth; d > 0; d--) {
+      const t = $from.node(d).type.name;
+      if (t === 'tableCell' || t === 'tableHeader') { fromCell = t; fromCellDepth = d; break; }
+    }
+    if (fromCell) {
+      // 跨 cell: 缩进到起始 cell 的内容范围
+      const cellNode = $from.node(fromCellDepth);
+      const cellStart = $from.start(fromCellDepth);             // cell 内容的实际开始
+      const cellContentEnd = cellStart + cellNode.content.size; // cell 内容的实际结束 (exclusive)
+      const cellEnd = cellContentEnd - 1;                       // cell 内最后一个字符位置 (inclusive)
+      let newFrom = Math.max(from, cellStart);
+      let newTo = Math.min(to, cellEnd);
+      // 钳制后空选区 (例如 from 已在 cell 末尾字符): 退而选整个 cell
+      if (newFrom >= newTo) {
+        newFrom = cellStart;
+        newTo = cellEnd;
+        if (newFrom >= newTo) {
+          btn.classList.add('hidden');
+          setStatus('提示', '所选单元格为空');
+          return;
+        }
+      }
+      // 把选区临时缩进到 cell 内 (用于本次定位 + 创建批注)
+      try {
+        editor.chain().setTextSelection({ from: newFrom, to: newTo }).run();
+        setStatus('提示', '批注已自动落到起始单元格');
+      } catch (e) {
+        btn.classList.add('hidden');
+        return;
+      }
+    } else {
+      btn.classList.add('hidden');
+      setStatus('提示', '批注暂不支持跨段落选区，请选单段内文字');
+      return;
+    }
   }
 
   // 定位按钮：选区上沿
@@ -791,7 +939,19 @@ function handleSelectionChange() {
 
 function setupFloatCommentButton() {
   $('#float-comment-btn button').addEventListener('click', () => {
-    const { from, to } = State.editor.state.selection;
+    const sel = State.editor.state.selection;
+    if (sel.empty && (!sel.$anchor || !sel.$head)) return;
+    // 判断是不是 CellSelection (多 cell 选区)
+    // 注: Tiptap/PM 编译后构造函数名被 minify 为 "M", 需同时检查原型 forEachCell 特征
+    const isCellSel = sel.constructor && (
+      sel.constructor.name === 'CellSelection' ||
+      (sel.forEachCell && sel.$anchorCell && sel.$headCell)
+    );
+    if (isCellSel) {
+      handleCreateMultiCellAnnotation(sel);
+      return;
+    }
+    const { from, to } = sel;
     if (from === to) return;
     const text = State.editor.state.doc.textBetween(from, to, ' ');
     if (!State.author) {
@@ -875,12 +1035,83 @@ function createAnnotationThread(from, to, text) {
   emitAI('threadChange', { threadId, change: 'create', thread });
 }
 
+// 处理多 cell 选区 (CellSelection) 的批注创建
+// CellSelection 覆盖 N 个 cell, 给每个 cell 一段独立 mark (共享 threadId)
+function handleCreateMultiCellAnnotation(cellSel) {
+  if (!State.author) {
+    promptAuthor().then(() => {
+      if (State.author) handleCreateMultiCellAnnotation(cellSel);
+    });
+    return;
+  }
+  // 收集每个 cell 的内容范围
+  const ranges = [];
+  let totalText = '';
+  cellSel.forEachCell((node, pos) => {
+    // node 是 cell node, pos 是 cell 在 doc 中的绝对位置
+    const from = pos + 1;  // cell 内容起点
+    const to = pos + node.nodeSize - 1;  // cell 内容末尾 (inclusive)
+    if (from < to) {
+      ranges.push({ from, to });
+      totalText += State.editor.state.doc.textBetween(from, to, ' ') + ' ';
+    }
+  });
+  if (ranges.length === 0) {
+    showToast('所选单元格为空', 2000);
+    return;
+  }
+  const text = totalText.trim() || '(空)';
+  const threadId = uuid();
+  const commentId = uuid();
+  // prefix/suffix 基于第一个 cell 文字
+  const docText = State.editor.state.doc.textBetween(0, State.editor.state.doc.content.size, ' ');
+  const { prefix, suffix } = computeContext(ranges[0].from === cellSel.from ? text : text, docText);
+  const thread = {
+    threadId,
+    range: ranges[0],       // 主 range 用于 activeMark 等单点逻辑
+    ranges,                 // 多 cell 范围数组 (table multi-cell annotation)
+    text,
+    prefix,
+    suffix,
+    resolved: false,
+    createdAt: nowISO(),
+    comments: [{
+      id: commentId,
+      author: { id: State.authorId, name: State.author },
+      body: '',
+      createdAt: nowISO(),
+    }],
+  };
+  State.annotations.push(thread);
+  // 给每个 cell 加 mark
+  applyAnnotationMarksMultiCell(threadId, ranges);
+  // 清理 CellSelection (回到普通光标, 防止后续 markDirty 误判)
+  State.editor.commands.setTextSelection(ranges[0].from);
+  State.activeThreadId = threadId;
+  renderCommentList();
+  setTimeout(() => {
+    const ta = document.querySelector(`[data-thread-input="${threadId}"]`);
+    if (ta) ta.focus();
+  }, 50);
+  setStatus('已创建批注', `${ranges.length} 个单元格 · 线程 ${threadId.slice(0, 8)}`);
+  emitAI('threadChange', { threadId, change: 'create', thread });
+}
+
 function applyAnnotationMark(threadId, from, to) {
   const tr = State.editor.state.tr;
   tr.addMark(from, to, State.editor.schema.marks.annotation.create({ threadId, resolved: false }));
   State.editor.view.dispatch(tr);
   // 不调用 markDirty（这是结构性 mark 变化，已在 onUpdate 触发）
   // 但 markDirty 只在 doc 文本变化时——这里 mark 变化也会触发 onUpdate
+}
+
+function applyAnnotationMarksMultiCell(threadId, ranges) {
+  const tr = State.editor.state.tr;
+  const mark = State.editor.schema.marks.annotation.create({ threadId, resolved: false });
+  for (const r of ranges) {
+    tr.addMark(r.from, r.to, mark);
+  }
+  State.editor.view.dispatch(tr);
 }
 
 function addReply(threadId, body) {
@@ -2082,6 +2313,10 @@ async function handleTreeAction(action, name) {
   }
   if (action === 'reload') {
     // 重新读盘当前文件
+    // P-1: 如果当前打开的就是这个文件且有未保存修改, 弹窗确认
+    if (State.currentFile && State.currentFile.name === name && State.currentFile.dirty) {
+      if (!confirm(`当前文档有未保存修改，确定重新加载 "${name}" 吗？\n\n加载后未保存的修改会丢失。`)) return;
+    }
     if (State.folderHandle) {
       const handle = State.fileHandles.find(h => h.name === name);
       if (handle) {
