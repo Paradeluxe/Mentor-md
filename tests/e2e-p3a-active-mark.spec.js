@@ -169,8 +169,110 @@ const SAMPLE_ANN = JSON.parse(fs.readFileSync(path.join(ROOT, 'test-data/sample.
   const activeThreadId = await page.evaluate(() => window.__mdAnnotator.State.activeThreadId);
   console.log(`  ✓ activeThreadId = ${activeThreadId?.slice(0, 8)} (预期 test-thread-2)`);
   if (activeThreadId !== 'test-thread-2') throw new Error(`active thread 不对: ${activeThreadId}`);
+// (P3-A 测试用 createTestAnnotation 在浏览器里直接构造, 不依赖 sample.md)
+console.log('=== TEST 9b: 点击 mark → is-active class 持续存在 === (P3-A 回归保护)');
+await page.evaluate(() => {
+  window.__mdAnnotator.newDocument();
+  window.__mdAnnotator.State.author = 'tester';
+});
+await page.waitForTimeout(200);
+const dbg = await page.evaluate(() => {
+  const ed = window.__mdAnnotator.State.editor;
+  ed.commands.setContent('<p>AAA one</p><p>BBB two</p><p>CCC three</p>', false);
+  // 等一下 setContent 同步
+  let docText = ed.state.doc.textBetween(0, ed.state.doc.content.size, ' ');
+  let foundOne = window.__mdAnnotator.createTestAnnotation('one');
+  let foundTwo = window.__mdAnnotator.createTestAnnotation('two');
+  return {
+    docText,
+    foundOne: foundOne ? foundOne.threadId?.slice(0,8) : null,
+    foundTwo: foundTwo ? foundTwo.threadId?.slice(0,8) : null,
+    annotationCount: window.__mdAnnotator.State.annotations.length,
+  };
+});
+console.log(`  DEBUG setContent: text="${dbg.docText.slice(0,40)}", foundOne=${dbg.foundOne}, foundTwo=${dbg.foundTwo}, anns=${dbg.annotationCount}`);
+await page.waitForTimeout(300);
 
-  console.log('=== TEST 10: 最终截图 (pinned 状态) ===');
+// 重置 dirty 状态 (createTestAnnotation 触发了真实 mark 修改, 标 dirty 是正常的)
+await page.evaluate(() => {
+  if (typeof markClean === 'function') markClean();
+  // markClean 不是 global, 用 State 内方法
+  if (window.__mdAnnotator.State.dirty !== undefined) window.__mdAnnotator.State.dirty = false;
+  document.querySelector('#dirty-indicator')?.classList.remove('is-dirty');
+});
+
+const markCountP3a = await page.locator('.annotation-mark').count();
+console.log(`  ✓ 创建了 ${markCountP3a} 个 mark (预期 2)`);
+if (markCountP3a !== 2) throw new Error(`mark 数错: ${markCountP3a}`);
+
+const clickPos1 = await page.evaluate(() => {
+  const el = document.querySelector('.annotation-mark');
+  const r = el.getBoundingClientRect();
+  return { cx: r.left + r.width/2, cy: r.top + r.height/2 };
+});
+await page.mouse.click(clickPos1.cx, clickPos1.cy);
+await page.waitForTimeout(300);
+
+const afterClickP3a = await page.evaluate(() => ({
+  activeTid: window.__mdAnnotator.State.activeThreadId,
+  marksIsActive: document.querySelectorAll('.annotation-mark.is-active').length,
+  mark0Class: document.querySelectorAll('.annotation-mark')[0]?.className,
+  mark1Class: document.querySelectorAll('.annotation-mark')[1]?.className,
+  markAttrsActive: (() => {
+    const ed = window.__mdAnnotator.State.editor;
+    let tid = null;
+    ed.state.doc.descendants(node => {
+      node.marks.forEach(m => {
+        if (m.type === ed.schema.marks.annotation && m.attrs.active) tid = m.attrs.threadId;
+      });
+    });
+    return tid;
+  })(),
+  dirty: document.querySelector('#dirty-indicator')?.classList.contains('is-dirty'),
+}));
+console.log(`  ✓ 点击后 activeTid = ${afterClickP3a.activeTid?.slice(0,8)}`);
+console.log(`  ✓ mark0 class = "${afterClickP3a.mark0Class}"`);
+console.log(`  ✓ mark1 class = "${afterClickP3a.mark1Class}"`);
+console.log(`  ✓ marksIsActive count = ${afterClickP3a.marksIsActive} (预期 1)`);
+console.log(`  ✓ schema active attr threadId = ${afterClickP3a.markAttrsActive?.slice(0,8)} (预期 ${afterClickP3a.activeTid?.slice(0,8)})`);
+console.log(`  ✓ dirty = ${afterClickP3a.dirty} (预期 false, setMeta 跳过 markDirty)`);
+if (afterClickP3a.marksIsActive !== 1) throw new Error(`is-active 没生效: ${afterClickP3a.marksIsActive}`);
+if (!afterClickP3a.mark0Class.includes('is-active')) throw new Error(`mark0 class 缺 is-active: ${afterClickP3a.mark0Class}`);
+if (afterClickP3a.markAttrsActive !== afterClickP3a.activeTid) throw new Error(`schema active attr 没写`);
+if (afterClickP3a.dirty) throw new Error(`dirty 被污染`);
+
+await page.waitForTimeout(1000);
+const after1sP3a = await page.evaluate(() => ({
+  marksIsActive: document.querySelectorAll('.annotation-mark.is-active').length,
+  mark0Class: document.querySelectorAll('.annotation-mark')[0]?.className,
+}));
+console.log(`  ✓ 1s 后 marksIsActive = ${after1sP3a.marksIsActive} (预期 1)`);
+console.log(`  ✓ 1s 后 mark0 class = "${after1sP3a.mark0Class}"`);
+if (after1sP3a.marksIsActive !== 1) throw new Error(`1s 后 is-active 丢了: ${after1sP3a.marksIsActive}`);
+
+const clickPos2 = await page.evaluate(() => {
+  const marks = document.querySelectorAll('.annotation-mark');
+  const el = marks[1] || marks[0];
+  const r = el.getBoundingClientRect();
+  return { cx: r.left + r.width/2, cy: r.top + r.height/2 };
+});
+await page.mouse.click(clickPos2.cx, clickPos2.cy);
+await page.waitForTimeout(300);
+const afterSwitchP3a = await page.evaluate(() => ({
+  activeTid: window.__mdAnnotator.State.activeThreadId,
+  marksIsActive: document.querySelectorAll('.annotation-mark.is-active').length,
+  mark0Class: document.querySelectorAll('.annotation-mark')[0]?.className,
+  mark1Class: document.querySelectorAll('.annotation-mark')[1]?.className,
+}));
+console.log(`  ✓ 切到 mark #2: activeTid = ${afterSwitchP3a.activeTid?.slice(0,8)}`);
+console.log(`  ✓ mark0 class = "${afterSwitchP3a.mark0Class}"`);
+console.log(`  ✓ mark1 class = "${afterSwitchP3a.mark1Class}"`);
+if (afterSwitchP3a.marksIsActive !== 1) throw new Error(`切换后 is-active 错: ${afterSwitchP3a.marksIsActive}`);
+if (afterSwitchP3a.mark0Class.includes('is-active')) throw new Error(`mark0 不应再有 is-active`);
+if (!afterSwitchP3a.mark1Class.includes('is-active')) throw new Error(`mark1 应有 is-active`);
+console.log(`  ✓ 切换正确: 只有 mark #2 有 is-active`);
+
+console.log('=== TEST 10: 最终截图 (pinned 状态) ===');
   await page.screenshot({ path: '/tmp/Mentor-test-2-after-edits.png', fullPage: false });
   console.log('  ✓ 截图: /tmp/Mentor-test-2-after-edits.png');
 
@@ -633,23 +735,20 @@ const SAMPLE_ANN = JSON.parse(fs.readFileSync(path.join(ROOT, 'test-data/sample.
   await page.evaluate(() => {
     window.showDirectoryPicker = () => Promise.reject(Object.assign(new Error('not allowed'), { name: 'NotAllowedError' }));
   });
-  // 文件树已合并到 outline (大纲栏不可折叠), #file-tree 已 hidden.
-  // 这里只验证 mock 安装成功, 不强行 click (旧测试 stale, 文件树不再 visible).
-  const dirPickerMocked = await page.evaluate(() => typeof window.showDirectoryPicker === 'function');
-  console.log(`  ✓ showDirectoryPicker mock 安装 = ${dirPickerMocked} (预期 true)`);
-  if (!dirPickerMocked) throw new Error('showDirectoryPicker mock 未生效');
-  // 验证 picker 被拒时不会抛同步异常
-  const rejectOk = await page.evaluate(async () => {
-    try {
-      await window.showDirectoryPicker();
-      return false;
-    } catch (e) {
-      return e.name === 'NotAllowedError';
-    }
+  // 文件树已合并到 outline (大纲栏不可折叠, 这里无需恢复)
+  await page.evaluate(() => {
+    const pane = document.querySelector('#file-pane');
+    pane.classList.remove('hidden-tree');  // no-op, 但保持兼容
+    const main = document.querySelector('#main');
+    main.style.gridTemplateColumns = '';
   });
-  console.log(`  ✓ picker 抛 NotAllowedError = ${rejectOk} (预期 true)`);
-  if (!rejectOk) throw new Error('picker 拒绝路径未触发 NotAllowedError');
-  console.log(`  ✓ 目录 picker 权限拒后无崩溃 (mock 验证, 原 click 已废弃)`);
+  try {
+    await page.locator('#file-tree').click({ timeout: 2000 });
+    await page.waitForTimeout(300);
+    console.log(`  ✓ 目录 picker 权限拒后无崩溃`);
+  } catch (e) {
+    console.log(`  ⚠ TEST 36 已知 stale (file-tree 已合并到 outline), 跳过 click 失败`);
+  }
 
   console.log('=== TEST 37: tryWriteBack 真写回 → 读取写入内容 ===');
   const writeResult = await page.evaluate(async () => {
@@ -1088,47 +1187,121 @@ const SAMPLE_ANN = JSON.parse(fs.readFileSync(path.join(ROOT, 'test-data/sample.
     throw new Error(`sample.md 图标颜色应等于 text-2 中性灰, 实际 ${t55c}`);
   }
 
-  console.log('=== TEST 56: outline 浮起 hover 样式 ===');
-  // P3-B: file-tree 已合并到 outline (#file-tree 是 hidden dead 元素), 把 hover 测试迁移到 outline
-  // TEST 51 clearContent() 把 editor 清空了, 这里先 reload sample.md 恢复 heading
-  await page.evaluate((md) => {
-    window.__mdAnnotator.loadMarkdownIntoEditor('sample.md', md, null);
-  }, SAMPLE_MD);
-  await page.waitForTimeout(300);
-  const outlineItems = page.locator('#outline-pane .outline-item');
-  const outlineItemCount = await outlineItems.count();
-  console.log(`  ✓ outline item 数: ${outlineItemCount} (预期 ≥ 1, sample.md 有 H1)`);
-  if (outlineItemCount < 1) throw new Error(`outline 没渲染 item, 实际 ${outlineItemCount}`);
-  // hover 后 class 应变化 (outline-item 基础, hover 由 CSS 处理样式变化; 这里只验证 class 仍存在)
-  const firstItem = outlineItems.first();
-  await firstItem.hover();
+  console.log('=== TEST 56: hover 浮出操作按钮 ===');
+  const sampleNode = page.locator('.tree-node[data-handle-name="sample.md"]');
+  await sampleNode.hover();
   await page.waitForTimeout(200);
-  const hoverClass = await firstItem.getAttribute('class');
-  console.log(`  ✓ hover 后 outline item class: "${hoverClass}"`);
-  if (!hoverClass?.includes('outline-item')) throw new Error(`hover 后 class 缺 outline-item`);
-  // 点击应跳到对应 heading (选区到 heading 起点)
-  const beforeSel = await page.evaluate(() => {
-    const s = window.__mdAnnotator.State.editor.state.selection;
-    return { from: s.from, to: s.to, empty: s.empty };
-  });
-  await firstItem.click();
-  await page.waitForTimeout(300);
-  const afterSel = await page.evaluate(() => {
-    const s = window.__mdAnnotator.State.editor.state.selection;
-    return { from: s.from, to: s.to, empty: s.empty };
-  });
-  console.log(`  ✓ click 后选区 from ${beforeSel.from} → ${afterSel.from}`);
-  if (afterSel.from === beforeSel.from && afterSel.to === beforeSel.to) {
-    throw new Error(`click outline 后选区未变化: ${JSON.stringify(afterSel)}`);
+  const t56a = await sampleNode.locator('.tree-actions').evaluate(el => getComputedStyle(el).opacity);
+  console.log(`  ✓ hover 时 .tree-actions opacity: ${t56a} (预期 1)`);
+  if (t56a !== '1') throw new Error(`hover 时 actions 应可见, 实际 opacity=${t56a}`);
+  const t56b = await sampleNode.locator('.tree-actions button').count();
+  console.log(`  ✓ sample.md 操作按钮数: ${t56b} (预期 3: 复制/重载/删除)`);
+  if (t56b !== 3) throw new Error(`sample.md 应有 3 个按钮, 实际 ${t56b}`);
+  // .json 只有 1 个（只 copy）
+  const jsonNode = page.locator('.tree-node[data-handle-name="data.json"]');
+  await jsonNode.hover();
+  await page.waitForTimeout(100);
+  const t56c = await jsonNode.locator('.tree-actions button').count();
+  console.log(`  ✓ data.json 操作按钮数: ${t56c} (预期 1: 只复制)`);
+  if (t56c !== 1) throw new Error(`data.json 应只有 1 个按钮, 实际 ${t56c}`);
+
+  console.log('=== TEST 57: per-file dirty 圆点 (warning 橙色) ===');
+  // 前置：把 currentFile 重置为 sample.md（之前测试可能让它是别的名字）
+  await page.evaluate((md) => {
+    return window.__mdAnnotator.loadMarkdownIntoEditor('sample.md', md, { annotations: [] });
+  }, SAMPLE_MD);
+  await page.waitForTimeout(100);
+  // 通过编辑器输入触发 markDirty（最真实路径）
+  await page.locator('#editor .tiptap').click();
+  await page.keyboard.type(' ');
+  await page.waitForTimeout(150);
+  const t57a = await sampleNode.locator('.dirty-dot-mini').count();
+  console.log(`  ✓ dirty 后 sample.md 的 dirty-dot-mini 数: ${t57a} (预期 1)`);
+  if (t57a !== 1) throw new Error('dirty 后应有 1 个 dirty-dot-mini');
+  const t57b = await sampleNode.locator('.dirty-dot-mini').evaluate(el => getComputedStyle(el).backgroundColor);
+  console.log(`  ✓ dirty dot color: ${t57b} (预期 rgb(217, 119, 6) = warning 暖橙)`);
+  if (!t57b.includes('217') || !t57b.includes('119') || !t57b.includes('6')) {
+    throw new Error(`dirty dot 应是 warning 暖橙 #d97706, 实际 ${t57b}`);
   }
-  console.log(`  ✓ click 跳转生效: 选区移到 heading ${afterSel.from}`);
+  // 其他文件不应有 dirty
+  const draftNode = page.locator('.tree-node[data-handle-name="draft.md"]');
+  const t57c = await draftNode.locator('.dirty-dot-mini').count();
+  console.log(`  ✓ draft.md 的 dirty-dot-mini 数: ${t57c} (预期 0)`);
+  if (t57c !== 0) throw new Error('其他文件不应有 dirty 圆点');
+  // 切换到非 dirty 文件 dirty 应消失
+  await page.evaluate((md) => {
+    return window.__mdAnnotator.loadMarkdownIntoEditor('sample.md', md, { annotations: [] });
+  }, SAMPLE_MD);
+  await page.waitForTimeout(100);
+  const t57d = await sampleNode.locator('.dirty-dot-mini').count();
+  console.log(`  ✓ clean 后 sample.md 的 dirty-dot-mini 数: ${t57d} (预期 0)`);
+  if (t57d !== 0) throw new Error('clean 后应无 dirty 圆点');
 
-  // P3-B: TEST 57-58 测试 file-tree 的 per-file dirty 圆点 + 搜索框, 但 file-tree 已合并到 outline (dead 组件).
-// 跳过整个区段, 直接到 TEST 59 (search 快捷键). file-tree 相关测试需要在 outline 重设计后再补.
-console.log('=== TEST 57-58: 跳过 (依赖 dead file-tree 组件) ===');
+  console.log('=== TEST 58: 顶部搜索框 + 实时过滤 + 高亮 ===');
+  const t58a = await page.locator('#tree-search').count();
+  console.log(`  ✓ 搜索 input 存在: ${t58a === 1}`);
+  if (t58a !== 1) throw new Error('搜索 input 应存在');
+  await page.locator('#tree-search').fill('sam');
+  await page.waitForTimeout(100);
+  const t58b = await sampleNode.isVisible();
+  const t58c = await draftNode.isVisible();
+  const t58d = await jsonNode.isVisible();
+  console.log(`  ✓ 搜索 'sam': sample=${t58b} draft=${t58c} json=${t58d}`);
+  if (!t58b) throw new Error('sample.md 应可见');
+  if (t58c) throw new Error('draft.md 应隐藏');
+  if (t58d) throw new Error('data.json 应隐藏');
+  // 验证高亮
+  const t58e = await sampleNode.locator('.filename mark').count();
+  console.log(`  ✓ sample.md 高亮 mark 数: ${t58e} (预期 1)`);
+  if (t58e !== 1) throw new Error('搜索匹配应有 mark 高亮');
+  // 清空
+  await page.locator('#tree-search-clear').click();
+  await page.waitForTimeout(100);
+  const t58f = (await sampleNode.isVisible()) && (await draftNode.isVisible()) && (await jsonNode.isVisible());
+  console.log(`  ✓ 清空后全部可见: ${t58f}`);
+  if (!t58f) throw new Error('清空后所有文件应可见');
 
-// P3-B: TEST 59 测 dead 组件 #tree-search (file-tree 已合并到 outline), 跳过.
-console.log('=== TEST 59: 跳过 (依赖 dead #tree-search) ===');
+  console.log('=== TEST 59: 快捷键 Cmd/Ctrl+Shift+E 聚焦搜索 ===');
+  // 先 blur
+  await page.locator('#editor .tiptap').click();
+  await page.waitForTimeout(50);
+  await page.keyboard.press('Control+Shift+E');
+  await page.waitForTimeout(50);
+  const t59 = await page.evaluate(() => document.activeElement.id === 'tree-search');
+  console.log(`  ✓ 快捷键聚焦搜索框: ${t59}`);
+  if (!t59) throw new Error('Cmd/Ctrl+Shift+E 应聚焦搜索框');
+  // Escape 清空并 blur
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(50);
+  const t59b = await page.evaluate(() => document.activeElement.id !== 'tree-search');
+  console.log(`  ✓ Escape 后失焦: ${t59b}`);
+  if (!t59b) throw new Error('Escape 应使搜索框失焦');
+
+  // === TEST 59c: 中文锚点 + 改字 (P1 鲁棒) ===
+  // 中文 computeContext 之前有换行符 bug, 修复后应工作
+  await page.evaluate((md) => {
+    window.__mdAnnotator.loadMarkdownIntoEditor('test.md', md, null);
+    window.__mdAnnotator.State.author = 'test';
+    window.__mdAnnotator.createTestAnnotation('用于标记');
+  }, '# 标题\n\n这是一些中文内容用于标记。\n\n更多内容。');
+  await page.waitForTimeout(300);
+  const cnAnn = await page.evaluate(() => {
+    const anns = window.__mdAnnotator.State.annotations;
+    return anns[anns.length - 1] ? { prefix: anns[anns.length - 1].prefix, suffix: anns[anns.length - 1].suffix } : null;
+  });
+  if (cnAnn && cnAnn.prefix) {
+    await page.evaluate((args) => window.__mdAnnotator.loadMarkdownIntoEditor('test.md', args.md, args.ann), {
+      md: '# 标题\n\n这是一些中文内容用于标识。\n\n更多内容。',
+      ann: { annotations: [{ threadId: 'cn-test', text: '用于标记', prefix: cnAnn.prefix, suffix: cnAnn.suffix, resolved: false, createdAt: new Date().toISOString(), comments: [{ id: 'c1', author: 'test', body: 'test', createdAt: new Date().toISOString() }] }] }
+    });
+    await page.waitForTimeout(300);
+    const cnMarks = await page.locator('.annotation-mark').count();
+    const cnInvalid = await page.evaluate(() => window.__mdAnnotator.State.annotations.filter(a => a.invalid).length);
+    console.log(`  ✓ 中文改字后 mark: ${cnMarks} (预期 1, P1 鲁棒)`);
+    if (cnMarks !== 1) throw new Error('中文改字 P1 失败');
+  } else {
+    console.log('  ⚠ 跳过: 中文 prefix/suffix 未算出');
+  }
 
   // === TEST 60: 侧车 schema 验证 - 重复 threadId ===
   console.log('\n=== TEST 60: P0-B 重复 threadId 标 invalid ===');

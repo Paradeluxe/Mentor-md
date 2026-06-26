@@ -554,14 +554,25 @@ const AnnotationMark = Mark.create({
         parseHTML: el => el.getAttribute('data-resolved') === 'true',
         renderHTML: attrs => ({ 'data-resolved': attrs.resolved ? 'true' : 'false' }),
       },
+      // P3-A: 把 'is-active' 提升为 schema attr, 避免 ProseMirror view rebuild 时丢失
+      // highlightActiveMark 通过 setMark + dispatch 同步这个 attr, 切换瞬间 renderHTML
+      // 会输出 is-active class, 新 mark 元素天然带 class.
+      active: {
+        default: false,
+        parseHTML: el => el.classList.contains('is-active'),
+        renderHTML: attrs => attrs.active ? { 'data-active': 'true' } : {},
+      },
     };
   },
   parseHTML() {
     return [{ tag: 'span[data-thread-id]' }];
   },
-  renderHTML({ HTMLAttributes }) {
+  renderHTML({ HTMLAttributes, node }) {
+    // node.attrs 优先 (parseHTML 后), HTMLAttributes 是渲染时的合并结果
+    const resolved = HTMLAttributes['data-resolved'] === 'true' || node?.attrs?.resolved === true;
+    const active = HTMLAttributes['data-active'] === 'true' || node?.attrs?.active === true;
     return ['span', {
-      class: `annotation-mark${HTMLAttributes['data-resolved'] === 'true' ? ' is-resolved' : ''}`,
+      class: `annotation-mark${resolved ? ' is-resolved' : ''}${active ? ' is-active' : ''}`,
       ...HTMLAttributes,
     }, 0];
   },
@@ -698,7 +709,12 @@ function initEditor() {
       KatexBlock,
     ],
     content: '',
-    onUpdate: ({ editor }) => {
+    onUpdate: ({ editor, transaction }) => {
+      // P3-A: 切 active thread 的 dispatch 用 setMeta 标记, 视为 UI 同步不算 dirty
+      if (transaction?.getMeta('__activeMarkSync')) {
+        // 仍然刷新侧栏 (highlight 已经 dispatch 了, renderCommentList 由 highlightActiveMark 自己触发)
+        return;
+      }
       markDirty();
       // 文本变化时，需要重新解析已存在的批注 mark 位置（保持侧栏锚定）
       // 这里只刷新侧栏显示顺序，不动数据
@@ -1073,11 +1089,39 @@ function scrollToThread(threadId) {
 
 function highlightActiveMark() {
   const editor = State.editor;
+  if (!editor) return;
+  const targetTid = State.activeThreadId;
+  const markType = editor.schema.marks.annotation;
+  // P3-A: 不再 classList.remove/add, 而是用 setMark + dispatch 把 active attr 写进 schema
+  // 这样 ProseMirror view rebuild 后 renderHTML 自然输出 is-active class.
+  // 用 setMeta 标记这是 UI-only 切换, onUpdate 检测到不会标 dirty.
+  const tr = editor.state.tr;
+  let changed = false;
+  editor.state.doc.descendants((node, pos) => {
+    node.marks.forEach(m => {
+      if (m.type !== markType) return;
+      const shouldBeActive = m.attrs.threadId === targetTid;
+      if (!!m.attrs.active !== shouldBeActive) {
+        tr.removeMark(pos, pos + node.nodeSize, markType);
+        tr.addMark(pos, pos + node.nodeSize, markType.create({
+          threadId: m.attrs.threadId,
+          resolved: m.attrs.resolved,
+          active: shouldBeActive,
+        }));
+        changed = true;
+      }
+    });
+  });
+  if (changed) {
+    tr.setMeta('__activeMarkSync', true);
+    editor.view.dispatch(tr);
+  }
+  // 兼容旧路径: 即便没有 change (mark 已对), 也通过 CSS 选择器兜底加 class
+  // (例如首次解析侧车时还没经过 dispatch)
   const editorEl = editor.view.dom;
   editorEl.querySelectorAll('.annotation-mark').forEach(el => el.classList.remove('is-active'));
-  if (State.activeThreadId) {
-    const marks = editorEl.querySelectorAll(`.annotation-mark[data-thread-id="${State.activeThreadId}"]`);
-    marks.forEach(el => el.classList.add('is-active'));
+  if (targetTid) {
+    editorEl.querySelectorAll(`.annotation-mark[data-thread-id="${targetTid}"]`).forEach(el => el.classList.add('is-active'));
   }
   // 同步 mark-delete popover 位置
   positionMarkDeletePopover();
@@ -1633,12 +1677,6 @@ async function openFiles() {
       // 把 sidecar (如有) 传给 openFromHandle
       await openFromHandle(mdHandle, sidecarHandle);
       renderFileTreeFromHandles(handles);
-      // 提示: 如果只选 .md 没选 sidecar, 引导用户用 Ctrl+多选 (单文件 picker 模式无法反查父目录)
-      if (!sidecarHandle && /\.md(markdown)?$/i.test(mdHandle.name)) {
-        setTimeout(() => {
-          showToast('提示: 按住 Ctrl 再选 .annotations.json 可加载批注 (同名, 同目录)', 6000);
-        }, 200);
-      }
       const statusMsg = sidecarHandle
         ? `${mdHandle.name} + 批注已加载`
         : (handles.length > 1
@@ -2220,10 +2258,6 @@ async function saveCurrent() {
     downloadFile(sidecarName, sidecarText);
     showToast('已下载 ✓ (浏览器不支持或未授权)');
     setStatus('已下载', `${State.currentFile.name} + ${sidecarName}`);
-    // 提醒: 下次重开时按 Ctrl+多选 .md + .annotations.json 才能加载批注
-    setTimeout(() => {
-      showToast('提示: 下次打开时按 Ctrl 多选 .md + .annotations.json 自动加载批注', 7000);
-    }, 1000);
   }
 }
 
