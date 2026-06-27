@@ -1737,9 +1737,73 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
   console.log('  ✓ 纯正文选区按钮 hidden:', paraState.hidden, '(预期 false)');
   if (paraState.hidden) throw new Error('纯正文选区应显示按钮');
 
+  // === TEST 76: 重开文档 → 批注从 IDB 缓存恢复 (P-reload) ===
+  console.log('\n=== TEST 76: 重开文档 → IDB 缓存恢复批注 ===');
+  // 模拟: 加载文档 + 加批注 + 等待 debounce + 刷新 + 重新加载 (期望 IDB 恢复)
+  const reloadMd = `第一段用于测重开.
+
+第二段.`;
+  await page.evaluate((m) => window.__mdAnnotator.loadMarkdownIntoEditor('reload.md', m, null), reloadMd);
+  await page.waitForTimeout(300);
+
+  // 加批注
+  await page.evaluate(() => {
+    const editor = window.__mdAnnotator.State.editor;
+    let from = -1, to = -1;
+    editor.state.doc.descendants((node, pos) => {
+      if (node.isText && node.text === '第一段用于测重开.') { from = pos; to = pos + node.text.length; return false; }
+    });
+    editor.commands.setTextSelection({ from, to });
+    editor.view.dispatch(editor.state.tr.setSelection(editor.state.selection));
+  });
+  await page.waitForTimeout(200);
+  await page.locator('#float-comment-btn button').click();
+  await page.waitForTimeout(800);  // 等 debounce 500ms 完成
+
+  const afterCreate = await page.evaluate(() => ({
+    annotations: window.__mdAnnotator.State.annotations.length,
+    idbCacheSize: Object.keys(window.__mdAnnotator.State.idbCache).length,
+    idbCacheHasReload: !!window.__mdAnnotator.State.idbCache['reload.md'],
+    idbCacheAnnCount: window.__mdAnnotator.State.idbCache['reload.md']?.sidecar?.annotations?.length,
+  }));
+  console.log('  ✓ 创建批注后 annotations:', afterCreate.annotations);
+  console.log('  ✓ idbCache 大小:', afterCreate.idbCacheSize, '(预期 1)');
+  console.log('  ✓ idbCache["reload.md"] 存在:', afterCreate.idbCacheHasReload, '(预期 true)');
+  console.log('  ✓ idbCache 批注数:', afterCreate.idbCacheAnnCount, '(预期 1)');
+  if (afterCreate.idbCacheSize < 1) throw new Error('debounce 800ms 后 idbCache 应有数据');
+  if (afterCreate.idbCacheAnnCount !== 1) throw new Error(`idbCache 批注数错: ${afterCreate.idbCacheAnnCount}`);
+
+  // 模拟"刷新整页": 用 page.reload()
+  await page.reload({ waitUntil: 'networkidle' });
+  await page.waitForFunction(() => window.__mdAnnotator && window.__mdAnnotator.State.editor);
+  await page.waitForTimeout(500);
+
+  const afterReload = await page.evaluate(() => ({
+    idbCacheSize: Object.keys(window.__mdAnnotator.State.idbCache).length,
+    idbCacheHasReload: !!window.__mdAnnotator.State.idbCache['reload.md'],
+  }));
+  console.log('  ✓ reload 后 idbCache 仍存在:', afterReload.idbCacheHasReload, '(预期 true — 预热)');
+  if (!afterReload.idbCacheHasReload) throw new Error('reload 后 idbCache 应通过预热恢复');
+
+  // 重新加载文档 (null sidecar → 走 IDB fallback)
+  await page.evaluate((m) => window.__mdAnnotator.loadMarkdownIntoEditor('reload.md', m, null), reloadMd);
+  await page.waitForTimeout(500);
+
+  const final = await page.evaluate(() => ({
+    annotations: window.__mdAnnotator.State.annotations.length,
+    marks: document.querySelectorAll('.annotation-mark').length,
+    markText: document.querySelectorAll('.annotation-mark')[0]?.textContent,
+  }));
+  console.log('  ✓ 重开后 annotations:', final.annotations, '(预期 1)');
+  console.log('  ✓ 重开后 mark 数:', final.marks, '(预期 1)');
+  console.log('  ✓ mark 文本:', JSON.stringify(final.markText));
+  if (final.annotations !== 1) throw new Error(`重开应恢复 1 批注, 实际 ${final.annotations}`);
+  if (final.marks !== 1) throw new Error(`重开应恢复 1 mark, 实际 ${final.marks}`);
+  if (final.markText !== '第一段用于测重开.') throw new Error(`mark 文本错: "${final.markText}"`);
+
   await browser.close();
   console.log('\n========================================');
-  console.log('✓ 全部 75 个测试通过！');
+  console.log('✓ 全部 76 个测试通过！');
   console.log('========================================');
 })().catch(async err => {
   console.error('\n✗ 测试失败:', err.message);

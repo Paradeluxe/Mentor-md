@@ -128,6 +128,7 @@ const State = {
   fileMtime: null,          // P0-C: 主 .md 的 mtime (last save 时记录的)
   renderMode: 'rendered',   // 'rendered' = WYSIWYG 渲染; 'source' = 显示原始 markdown 源码
   savedSelection: null,     // P-sel: { from, to, text } — rendered→source 时保存, source→rendered 时尝试恢复
+  idbCache: {},             // P-reload: { [file.name]: { sidecar, updatedAt } } 启动时预热, loadMarkdownIntoEditor 同步读
 };
 
 // ============================================================
@@ -648,7 +649,43 @@ function markDirty() {
     $('#dirty-indicator').classList.add('is-dirty');
     $('#current-file-name').textContent = State.currentFile.name + ' ●';
     updateTreeDirtyDots();
+    // P-reload: 任何 dirty 变更都触发 IDB 缓存 debounce 写 (用户刷新前不存盘也能恢复批注)
+    scheduleIdbCacheWrite();
   }
+}
+
+// P-reload: debounce 500ms 写 IDB (markDirty 频繁触发, 不能每次都 await put)
+let _idbCacheWriteTimer = null;
+let _idbCacheWriting = false;
+function scheduleIdbCacheWrite() {
+  if (_idbCacheWriteTimer) clearTimeout(_idbCacheWriteTimer);
+  _idbCacheWriteTimer = setTimeout(async () => {
+    _idbCacheWriteTimer = null;
+    if (_idbCacheWriting) return;  // 防并发
+    if (!State.currentFile) return;
+    _idbCacheWriting = true;
+    try {
+      const sidecar = {
+        version: '1',
+        document: State.currentFile.name,
+        updatedAt: new Date().toISOString(),
+        author: { id: State.authorId, name: State.author },
+        annotations: State.annotations.map(t => ({
+          threadId: t.threadId,
+          text: t.text,
+          prefix: t.prefix || '',
+          suffix: t.suffix || '',
+          resolved: t.resolved || false,
+          createdAt: t.createdAt,
+          comments: t.comments,
+        })),
+      };
+      await AnnotationStore.put(State.currentFile.name, sidecar);
+      // 同步更新 idbCache (下次 loadMarkdownIntoEditor 同步读能命中)
+      State.idbCache[State.currentFile.name] = { sidecar, updatedAt: Date.now() };
+    } catch (e) { console.warn('[P-reload] debounce IDB put 失败:', e); }
+    finally { _idbCacheWriting = false; }
+  }, 500);
 }
 
 function markClean() {
@@ -1743,6 +1780,18 @@ function loadMarkdownIntoEditor(name, content, annotationsData = null) {
   const sourceEl = $('#source-view');
   if (State.renderMode === 'source' && sourceEl && sourceEl.style.display !== 'none') {
     content = sourceEl.innerText;
+  }
+  // P-reload: 如果调用方没传 annotationsData, 尝试从 IDB 缓存读取 (用户刷新前没存盘也能恢复)
+  // 这是入口点的统一 fallback — 调用方 (openFilesLegacy / openFromHandle / newDocument) 不必各自处理
+  if (!annotationsData) {
+    // 同步读 IDB (AnnotationStore.get 是 async, 但这里我们想用 sync 接口, 改用 dispatchEvent 后重 load)
+    // 改: 调用方应传 annotationsData; 如果没传, 我们直接同步 try 一次 (但 IDB 是 async, 跳过, 改用 onload)
+    // 实际方案: 暴露一个 sync 缓存层 — State.idbCache = { [name]: sidecar }, 启动时一次性预热
+    const cached = State.idbCache && State.idbCache[name];
+    if (cached?.sidecar?.annotations) {
+      annotationsData = cached.sidecar;
+      console.log(`[P-reload] IDB 恢复 ${annotationsData.annotations.length} 个批注 (${name})`);
+    }
   }
   const html = markdownToHtml(content);
   // Tiptap 的 setContent 会解析 HTML
@@ -3156,6 +3205,20 @@ async function boot() {
   // 初次同步 chip 显示
   renderAuthorChip();
 
+  // P-reload: 预热 IDB 缓存 (loadMarkdownIntoEditor 同步读, 不能用 await)
+  // 启动时一次性把所有缓存的 sidecar 同步到 State.idbCache
+  try {
+    const allKeys = await AnnotationStore.list();
+    if (allKeys && allKeys.length > 0) {
+      for (const entry of allKeys) {
+        // entry 可能是 {name, sidecar, updatedAt} 或其他 shape, 适配
+        if (entry && entry.name) {
+          State.idbCache[entry.name] = { sidecar: entry.sidecar, updatedAt: entry.updatedAt };
+        }
+      }
+      console.log(`[P-reload] IDB 预热 ${Object.keys(State.idbCache).length} 个文件`);
+    }
+  } catch (e) { console.warn('[P-reload] IDB 预热失败 (非阻塞):', e); }
 
   // 检测浏览器兼容性，状态栏提示
   const browserNote = FS_API.browserNote();
