@@ -85,7 +85,7 @@ const SAMPLE_ANN = JSON.parse(fs.readFileSync(path.join(ROOT, 'test-data/sample.
   if (afterCreateCount !== 3) throw new Error(`mark 数错: ${afterCreateCount}`);
 
   console.log('=== TEST 5: 添加回复 ===');
-  // 在新批注的输入框中输入
+  // 在新批注的输入框中输入 (P-card 修: 创建时不再有 placeholder, 输入直接成第一条)
   await page.evaluate((threadId) => {
     const ta = document.querySelector(`[data-thread-input="${threadId}"]`);
     ta.value = '这是测试回复';
@@ -95,8 +95,9 @@ const SAMPLE_ANN = JSON.parse(fs.readFileSync(path.join(ROOT, 'test-data/sample.
   const updatedThread = await page.evaluate((threadId) => {
     return window.__mdAnnotator.getAnnotations().find(t => t.threadId === threadId);
   }, newThread.threadId);
-  console.log(`  ✓ 线程回复数 = ${updatedThread.comments.length} (预期 2)`);
-  if (updatedThread.comments.length !== 2) throw new Error(`回复数错: ${updatedThread.comments.length}`);
+  console.log(`  ✓ 线程回复数 = ${updatedThread.comments.length} (预期 1 — P-card 修复后不再有 placeholder)`);
+  if (updatedThread.comments.length !== 1) throw new Error(`回复数错: ${updatedThread.comments.length}`);
+  if (updatedThread.comments[0].body !== '这是测试回复') throw new Error(`首条 body 错: ${updatedThread.comments[0].body}`);
 
   console.log('=== TEST 6: Toggle resolved ===');
   // 把第 1 个批注（已解决）切回未解决
@@ -2204,9 +2205,78 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
   console.log('  ✓ Esc 后菜单显示数:', menuAfterEsc, '(预期 0)');
   if (menuAfterEsc !== 0) throw new Error('Esc 应关闭 ⋯ 菜单');
 
+  // === TEST 81: Word 风格化验证 (P-card 提交后空 comment 修复) ===
+  console.log('\n=== TEST 81: Word 风格化 — 第一条 comment 是用户输入 ===');
+  // 模拟真实用户路径: 选区 → create → 输入 → submit
+  // 验证: comments[0] 应该是用户输入的 body, 不是空字符串
+  const freshMd = `第一段用于 word 化测试.`;
+  await page.evaluate((m) => window.__mdAnnotator.loadMarkdownIntoEditor('word-test.md', m, null), freshMd);
+  await page.waitForTimeout(200);
+  await page.evaluate(() => {
+    const editor = window.__mdAnnotator.State.editor;
+    let from = -1, to = -1;
+    editor.state.doc.descendants((node, pos) => {
+      if (node.isText && node.text === '第一段用于 word 化测试.') { from = pos; to = pos + 5; return false; }
+    });
+    editor.commands.setTextSelection({ from, to });
+    editor.view.dispatch(editor.state.tr.setSelection(editor.state.selection));
+  });
+  await page.waitForTimeout(200);
+  await page.locator('#float-comment-btn button').click();
+  await page.waitForTimeout(300);
+  // 输入并提交
+  const tid = await page.evaluate(() => window.__mdAnnotator.State.annotations[0]?.threadId);
+  await page.evaluate((threadId) => {
+    const ta = document.querySelector(`[data-thread-input="${threadId}"]`);
+    ta.value = '这是用户实际输入的批注内容';
+    document.querySelector(`[data-act="submit-reply"][data-thread="${threadId}"]`).click();
+  }, tid);
+  await page.waitForTimeout(300);
+  const wordState = await page.evaluate((threadId) => {
+    const t = window.__mdAnnotator.State.annotations.find(a => a.threadId === threadId);
+    return {
+      commentCount: t?.comments?.length,
+      firstBody: t?.comments?.[0]?.body,
+      prefixSet: !!t?.prefix,
+      suffixSet: !!t?.suffix,
+    };
+  }, tid);
+  console.log('  ✓ comment 数:', wordState.commentCount, '(预期 1)');
+  console.log('  ✓ 第一条 body:', JSON.stringify(wordState.firstBody), '(应是用户输入)');
+  console.log('  ✓ prefix 已设:', wordState.prefixSet, '(text 在 doc 开头时空, 正常)');
+  console.log('  ✓ suffix 已设:', wordState.suffixSet, '(预期 true)');
+  if (!wordState.suffixSet) throw new Error('suffix 必须在创建时立即算, 不能等用户输入');
+
+  // 真实路径测: 通过 ⋯ 菜单 resolve → filter 正确隐藏
+  console.log('  ✓ 通过 ⋯ 菜单 resolve → filter 正确隐藏');
+  // 重置 filter 状态 (前一个测试可能改过): filterOpen=true, filterResolved=false
+  await page.evaluate(() => {
+    const open = document.querySelector('#filter-open');
+    const resolved = document.querySelector('#filter-resolved');
+    if (!open.checked) { open.checked = true; open.dispatchEvent(new Event('change', { bubbles: true })); }
+    if (resolved.checked) { resolved.checked = false; resolved.dispatchEvent(new Event('change', { bubbles: true })); }
+  });
+  await page.waitForTimeout(150);
+  await page.locator(`.comment-thread[data-thread="${tid}"]`).hover();
+  await page.locator(`.comment-thread[data-thread="${tid}"] .comment-menu-btn`).click();
+  await page.waitForTimeout(150);
+  page.once('dialog', d => d.accept());
+  await page.locator('.comment-menu:not(.hidden) button[data-act="resolve"]').click();
+  await page.waitForTimeout(300);
+  const wordAfterResolve = await page.evaluate(() => ({
+    visibleCount: document.querySelectorAll('.comment-thread').length,  // filterOpen=true → resolved 隐藏
+    state: window.__mdAnnotator.State.annotations[0]?.resolved,
+    isPinned: !!document.querySelector('.comment-thread.is-pinned'),  // 隐藏但 pinned 显示
+  }));
+  console.log('  ✓ resolve 后侧栏可见数:', wordAfterResolve.visibleCount, '(预期 1 — 走 pinned 显示)');
+  console.log('  ✓ state.resolved:', wordAfterResolve.state);
+  console.log('  ✓ is-pinned 标记:', wordAfterResolve.isPinned, '(预期 true)');
+  if (wordAfterResolve.visibleCount !== 1) throw new Error(`resolve 后应 1 张 pinned 卡片, 实际 ${wordAfterResolve.visibleCount}`);
+  if (!wordAfterResolve.isPinned) throw new Error('resolve 后应标 is-pinned (filter 隐藏 → pinned 显示)');
+
   await browser.close();
   console.log('\n========================================');
-  console.log('✓ 全部 80 个测试通过！');
+  console.log('✓ 全部 81 个测试通过！');
   console.log('========================================');
 })().catch(async err => {
   console.error('\n✗ 测试失败:', err.message);

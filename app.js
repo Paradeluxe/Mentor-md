@@ -942,11 +942,13 @@ function handleSelectionChange() {
     activeMarkThreadId = (m1 && m1.attrs.threadId) || (m2 && m2.attrs.threadId);
   }
   if (activeMarkThreadId) {
+    // P-card: 总是 renderCommentList (即使 activeThreadId 没变, cursor 可能切到 mark 内不同位置)
+    // Word 风格: 侧栏状态实时跟随光标位置
     if (State.activeThreadId !== activeMarkThreadId) {
       State.activeThreadId = activeMarkThreadId;
-      highlightActiveMark();
-      renderCommentList(); // 重新渲染以 pinned 方式显示
     }
+    highlightActiveMark();
+    renderCommentList();
   }
 
   if (empty || from === to) {
@@ -1121,12 +1123,21 @@ function createAnnotationThread(from, to, text) {
     showToast('批注文字不能为空', 2000);
     return null;
   }
+  // 如果作者未设, 弹作者输入
+  if (!State.author) {
+    promptAuthor().then(() => {
+      if (State.author) createAnnotationThread(from, to, text);
+    });
+    return null;
+  }
   const threadId = uuid();
-  const commentId = uuid();
-  // 计算 prefix/suffix (用于鲁棒重定位)
-  // 重要: 用 doc.textBetween (渲染后), 不是 markdown 源 (避免空格/换行差异)
+  // 计算 prefix/suffix (鲁棒重定位用) — 必须立即算, 不能等用户输入第一条 comment
+  // 不然空 thread 的 prefix/suffix 都是空, reload 时 P0 找不到 → invalid
   const docText = State.editor.state.doc.textBetween(0, State.editor.state.doc.content.size, ' ');
   const { prefix, suffix } = computeContext(text, docText);
+  // P-card: Word 风格 — 创建时不要预先放空 comment
+  // comments 数组在用户输入第一条后由 addReply 写入 (跟 addReply 路径一致)
+  // 这样侧栏显示的就是用户实际输入, 不是空 placeholder
   const thread = {
     threadId,
     range: { from, to },
@@ -1135,12 +1146,7 @@ function createAnnotationThread(from, to, text) {
     suffix,                // text 后的上下文
     resolved: false,
     createdAt: nowISO(),
-    comments: [{
-      id: commentId,
-      author: { id: State.authorId, name: State.author },
-      body: '',
-      createdAt: nowISO(),
-    }],
+    comments: [],          // P-card fix: 初始空, 第一次 addReply 时填充
   };
   State.annotations.push(thread);
   // 在编辑器中加 mark
@@ -1443,7 +1449,10 @@ function renderCommentList() {
   const avatar = (name) => (name || '匿').trim().charAt(0).toUpperCase() || '?';
 
   list.innerHTML = visibleThreads.map(thread => {
-    const first = thread.comments?.[0] || { author: '匿名', body: '', createdAt: thread.createdAt || new Date().toISOString() };
+    // P-card: first comment — 已有用第一条, 没有 (刚创建) 用当前用户作 author 显示 reply-form
+    const first = thread.comments?.[0] || (thread.threadId === State.activeThreadId
+      ? { author: { id: State.authorId, name: State.author }, body: '', createdAt: nowISO() }
+      : { author: '匿名', body: '', createdAt: thread.createdAt || new Date().toISOString() });
     const replies = (thread.comments || []).slice(1);
     const isActive = State.activeThreadId === thread.threadId;
     const isPinnedThread = pinnedThread && thread.threadId === pinnedThread.threadId;
