@@ -122,6 +122,7 @@ const State = {
   author: localStorage.getItem('Mentor:author') || '',       // 显示名, 可改
   filterOpen: true,
   filterResolved: false,
+  showAllMarkup: true,        // P-marks: All Markup / No Markup 切换 (默认 true = 显示所有批注 + 气泡)
   folderHandle: null,       // 当前文件夹 handle（FileSystemDirectoryHandle）
   saveMode: 'unknown',      // 'handle' | 'download' | 'unknown'
   readOnlyMode: false,      // P0-A: 另一 tab 在编辑时启用只读 (Ctrl+S 禁用)
@@ -538,7 +539,9 @@ function extractCellText(cell) {
 //    把 docx 风格批注作为 inline mark 存到 ProseMirror
 //    mark 的 attrs: { threadId, resolved }
 // ============================================================
-import { Mark } from '@tiptap/core';
+import { Mark, Extension } from '@tiptap/core';
+import { Plugin, PluginKey } from 'prosemirror-state';
+import { Decoration, DecorationSet } from 'prosemirror-view';
 
 const AnnotationMark = Mark.create({
   name: 'annotation',
@@ -577,6 +580,66 @@ const AnnotationMark = Mark.create({
       class: `annotation-mark${resolved ? ' is-resolved' : ''}${active ? ' is-active' : ''}`,
       ...HTMLAttributes,
     }, 0];
+  },
+});
+
+// P-mark: 批注 mark 旁边浮出可点击的小气泡 (Word 视觉关键)
+// 用 ProseMirror Decoration.widget (不是 mark — mark 不能跨节点 + 不能 absolute position)
+// widget 在 mark 旁边 inline, 但通过 CSS transform 浮起来
+// 行为: 点气泡 → 跳转到侧栏对应 thread (跟 ⋯ 菜单的"跳转到批注处"等价)
+const annotationBubbleKey = new PluginKey('annotation-bubble');
+const AnnotationBubblePlugin = new Plugin({
+  key: annotationBubbleKey,
+  // 监听 setMeta 重算 decorations (State.showAllMarkup 变化)
+  state: {
+    init() { return { allMarkup: true }; },
+    apply(tr, prev) {
+      const meta = tr.getMeta(annotationBubbleKey);
+      if (meta) return meta;
+      return prev;
+    },
+  },
+  props: {
+    decorations(state) {
+      const pluginState = annotationBubbleKey.getState(state);
+      if (pluginState && pluginState.allMarkup === false) return DecorationSet.empty;
+      const { doc } = state;
+      const decorations = [];
+      // 收集每个 mark 的 position
+      const seenThreads = new Set();  // 一个 threadId 只一个气泡 (避免重叠, 用第一次出现的位置)
+      try {
+        doc.descendants((node, pos) => {
+          if (!node.isText) return;
+          const annMark = node.marks.find(m => m.type.name === 'annotation');
+          if (!annMark) return;
+          const threadId = annMark.attrs.threadId;
+          if (!threadId || seenThreads.has(threadId)) return;
+          seenThreads.add(threadId);
+          // 防御: 容错; 出错就跳过这一个 widget (不让 plugin 整体崩)
+          try {
+            decorations.push(Decoration.widget(pos, () => {
+              const el = document.createElement('span');
+              el.className = 'annotation-bubble';
+              return el;
+            }, { side: -1, ignoreSelection: true, stopEvent: () => true }));
+          } catch (err) {
+            console.warn('[AnnotationBubble] widget 创建失败:', err);
+          }
+        });
+      } catch (err) {
+        console.warn('[AnnotationBubble] descendants 失败:', err);
+      }
+      return DecorationSet.create(doc, decorations);
+    },
+  },
+});
+
+// Tiptap 包装: 把 PM Plugin 包装成 Tiptap Extension
+// Tiptap Editor 不直接接受 raw PM Plugin — 需要 Extension.create 加到 extensions 数组
+const AnnotationBubbleExtension = Extension.create({
+  name: 'annotation-bubble',
+  addProseMirrorPlugins() {
+    return [AnnotationBubblePlugin];
   },
 });
 
@@ -1541,6 +1604,26 @@ function renderCommentList() {
       renderCommentList();
     });
   });
+}
+
+// P-marks: 全局切换 helper — 改 State 后 dispatch 空 transaction 触发 Plugin 重算
+function refreshDecorations() {
+  if (State.editor && State.editor.view) {
+    // 用 setMeta(pluginKey, state) 通知 plugin 重算 decorations
+    const tr = State.editor.state.tr.setMeta(annotationBubbleKey, { allMarkup: State.showAllMarkup });
+    State.editor.view.dispatch(tr);
+  }
+}
+
+// P-marks: 切换 showAllMarkup
+function setShowAllMarkup(val) {
+  State.showAllMarkup = !!val;
+  // 同步 .tiptap.no-markup class (CSS 控制 mark 高亮 + 气泡显示)
+  const tiptap = document.querySelector('.tiptap');
+  if (tiptap) tiptap.classList.toggle('no-markup', !State.showAllMarkup);
+  // 同步 UI 控件状态
+  const cb = document.querySelector('#show-all-markup');
+  if (cb) cb.checked = State.showAllMarkup;
 }
 
 // P-card: 关闭所有 ⋯ 菜单
@@ -3160,6 +3243,10 @@ function setupToolbar() {
     State.filterResolved = e.target.checked;
     renderCommentList();
   });
+  // P-marks: All Markup / No Markup 切换 (Word 顶部同名按钮)
+  $('#show-all-markup').addEventListener('change', e => {
+    setShowAllMarkup(e.target.checked);
+  });
 
   // 文件树收起/展开功能已移除 — 大纲栏始终显示 (Word 风格, 不能折叠)
 
@@ -3180,9 +3267,35 @@ function setupToolbar() {
 
   // 键盘快捷键
   document.addEventListener('keydown', e => {
+    // P-key: Esc 关闭 ⋯ 菜单 (跟其他 popover 行为一致)
+    if (e.key === 'Escape') {
+      const hasOpenMenu = document.querySelector('.comment-menu:not(.hidden)');
+      if (hasOpenMenu) {
+        e.preventDefault();
+        closeAllCommentMenus();
+        return;
+      }
+    }
+    // Ctrl+S / Cmd+S → 保存
     if ((e.ctrlKey || e.metaKey) && e.key === 's') {
       e.preventDefault();
       saveCurrent();
+      return;
+    }
+    // P-key: Ctrl+Alt+M / Cmd+Alt+M → 选区加批注 (Word 默认)
+    // 选区在 paragraph/paragraph-跨段/cell/heading 已处理, 走 setupFloatCommentButton 里的 click
+    if ((e.ctrlKey || e.metaKey) && e.altKey && (e.key === 'm' || e.key === 'M')) {
+      e.preventDefault();
+      // 必须先有非空选区
+      const sel = State.editor.state.selection;
+      if (sel.empty) {
+        setStatus('提示', '请先选中文本, 再按 Ctrl+Alt+M 加批注');
+        return;
+      }
+      // 复用浮动按钮的 click 逻辑
+      const btn = document.querySelector('#float-comment-btn button');
+      if (btn) btn.click();
+      return;
     }
   });
 }
@@ -3282,6 +3395,8 @@ async function boot() {
   }
   // 初次同步 chip 显示
   renderAuthorChip();
+  // P-marks: 同步 .tiptap.no-markup class (默认 showAllMarkup=true, 不应加 class)
+  setShowAllMarkup(State.showAllMarkup);
 
   // P-reload: 预热 IDB 缓存 (loadMarkdownIntoEditor 同步读, 不能用 await)
   // 启动时一次性把所有缓存的 sidecar 同步到 State.idbCache

@@ -942,6 +942,67 @@ code {
 .tiptap .annotation-mark.is-active { background: var(--highlight-active); }
 .tiptap .annotation-mark.is-resolved { background: var(--resolved); border-bottom-color: var(--text-3); opacity: 0.7; }
 
+/* P-mark: 批注 mark 旁边的小气泡 (CSS 伪元素方案, 不依赖 widget decoration)
+   视觉: mark 末尾 ::after 生成一个小圆点 (💬 文字 emoji), 14×14 圆角方块
+   不可点击 (因为伪元素无 JS), 但视觉上跟 mark 一起移动 — 跟 Word 类似 */
+.annotation-mark {
+  position: relative;  /* 让 ::after 绝对定位以 mark 为锚 */
+}
+.annotation-mark::after {
+  content: "💬";
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  margin: 0 0 0 4px;
+  background: var(--accent, #f54e00);
+  color: #fff;
+  font-size: 9px;
+  line-height: 1;
+  border-radius: 4px;
+  cursor: help;
+  user-select: none;
+  vertical-align: -2px;
+  transform: translateY(-1px);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+  position: relative;
+  z-index: 1;
+  /* 不让浏览器选区选中气泡 */
+  -webkit-user-select: none;
+  user-select: none;
+  transition: transform 0.12s, background 0.12s, opacity 0.12s;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", sans-serif;
+}
+.annotation-mark:hover::after {
+  transform: translateY(-1px) scale(1.18);
+  background: #d94200;
+}
+/* Active (正在看这个 thread) — 用 accent 反色 (蓝底白字) */
+.annotation-mark.is-active::after {
+  background: var(--accent);
+  box-shadow: 0 0 0 2px var(--highlight-active, rgba(37, 99, 235, 0.25));
+}
+/* 解决后的气泡 — 灰底, 弱化 */
+.annotation-mark.is-resolved::after {
+  background: var(--resolved, #1f8a65);
+  opacity: 0.7;
+}
+.annotation-mark.is-resolved:hover::after {
+  opacity: 1;
+}
+
+/* P-marks: 当 showAllMarkup=false, 气泡 + mark 高亮都隐藏 (NO MARKUP 模式)
+   mark 仍是 mark (ProseMirror 内), 只是 CSS 让它透明 */
+.tiptap.no-markup .annotation-mark {
+  background: transparent !important;
+  border-bottom: none !important;
+  opacity: 1 !important;
+}
+.tiptap.no-markup .annotation-mark::after {
+  display: none !important;
+}
+
 /* 空编辑器提示 */
 .empty-hint { padding: 48px 24px; color: var(--text-2); text-align: center; }
 .empty-hint h2 {

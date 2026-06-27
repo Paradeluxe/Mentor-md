@@ -1973,9 +1973,240 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
   if (afterResolve.badgeInBody) throw new Error('徽章不应在 body-wrap 内 (会被折叠隐藏)');
   if (afterResolve.bodyDisplay !== 'none') throw new Error('折叠后 body-wrap 应 display:none');
 
+  // === TEST 78: 批注 mark 旁小气泡 (P-mark, CSS 伪元素方案) ===
+  console.log('\n=== TEST 78: 批注 mark 旁小气泡 (P-mark) ===');
+  // 用 sample.md (2 个批注) 验证 mark 渲染 + CSS 伪元素 ::after
+  const markState = await page.evaluate(() => {
+    const marks = document.querySelectorAll('.annotation-mark');
+    return {
+      count: marks.length,
+      first: marks[0] ? {
+        content: marks[0].textContent,
+        thread: marks[0].dataset.threadId?.slice(0, 8),
+        // 检查 ::after 伪元素是否被定义 (通过 getComputedStyle.content)
+        afterContent: getComputedStyle(marks[0], '::after').content,
+        afterDisplay: getComputedStyle(marks[0], '::after').display,
+        afterBg: getComputedStyle(marks[0], '::after').backgroundColor,
+        afterWidth: getComputedStyle(marks[0], '::after').width,
+        afterHeight: getComputedStyle(marks[0], '::after').height,
+      } : null,
+    };
+  });
+  console.log('  ✓ mark 数:', markState.count, '(预期 2 — sample.md 有 2 批注)');
+  console.log('  ✓ 第一个 mark:', JSON.stringify(markState.first));
+  if (markState.count !== 2) throw new Error(`应有 2 个 mark, 实际 ${markState.count}`);
+  if (!markState.first?.thread) throw new Error('mark 应绑定 threadId');
+  // ::after content 应该含 💬
+  if (!markState.first?.afterContent?.includes('💬')) throw new Error('::after 应含 💬');
+  if (markState.first?.afterDisplay === 'none') throw new Error('::after 不应被 display:none');
+  if (markState.first?.afterWidth !== '16px') throw new Error(`::after width 应 16px, 实际 ${markState.first?.afterWidth}`);
+  if (markState.first?.afterHeight !== '16px') throw new Error(`::after height 应 16px, 实际 ${markState.first?.afterHeight}`);
+
+  // 场景: mark 进入 active (cursor 落在 mark 内) → CSS ::after 状态变
+  // 先激活一个 thread
+  await page.evaluate(() => {
+    const editor = window.__mdAnnotator.State.editor;
+    const threadId = window.__mdAnnotator.State.annotations[0]?.threadId;
+    window.__mdAnnotator.State.activeThreadId = threadId;
+    // 同步 mark 状态 (用项目里已有 syncMarkActive helper)
+    // 简化为直接派发 setMark
+    const tr = editor.state.tr;
+    const markType = editor.schema.marks.annotation;
+    editor.state.doc.descendants((node, pos) => {
+      if (!node.isText) return;
+      const m = node.marks.find(mm => mm.type === markType && mm.attrs.threadId === threadId);
+      if (m) {
+        tr.removeMark(pos, pos + node.nodeSize, markType);
+        tr.addMark(pos, pos + node.nodeSize, markType.create({ ...m.attrs, active: true }));
+      }
+    });
+    tr.setMeta('__activeMarkSync', true);
+    editor.view.dispatch(tr);
+  });
+  await page.waitForTimeout(200);
+  const activeMark = await page.evaluate(() => {
+    const active = document.querySelector('.annotation-mark.is-active');
+    if (!active) return null;
+    return {
+      bg: getComputedStyle(active, '::after').backgroundColor,
+      boxShadow: getComputedStyle(active, '::after').boxShadow,
+    };
+  });
+  console.log('  ✓ active mark ::after bg:', activeMark?.bg);
+  console.log('  ✓ active mark ::after box-shadow:', activeMark?.boxShadow?.slice(0, 60));
+  if (!activeMark) throw new Error('应能找到 is-active mark');
+
+  // 场景: 解决后 ::after 颜色变绿
+  await page.evaluate(() => {
+    const editor = window.__mdAnnotator.State.editor;
+    const threadId = window.__mdAnnotator.State.annotations[0]?.threadId;
+    // 用 __mdAnnotator.toggleResolved 没暴露 — 直接改 state 模拟
+    const ann = window.__mdAnnotator.State.annotations.find(a => a.threadId === threadId);
+    if (ann) ann.resolved = true;
+    // 重写 mark: resolved
+    const tr = editor.state.tr;
+    const markType = editor.schema.marks.annotation;
+    editor.state.doc.descendants((node, pos) => {
+      if (!node.isText) return;
+      const m = node.marks.find(mm => mm.type === markType);
+      if (m && m.attrs.threadId === threadId) {
+        tr.removeMark(pos, pos + node.nodeSize, markType);
+        tr.addMark(pos, pos + node.nodeSize, markType.create({ ...m.attrs, resolved: true, active: false }));
+      }
+    });
+    tr.setMeta('__activeMarkSync', true);
+    editor.view.dispatch(tr);
+  });
+  await page.waitForTimeout(200);
+  const resolvedMark = await page.evaluate(() => {
+    const resolved = document.querySelector('.annotation-mark.is-resolved');
+    if (!resolved) return null;
+    return {
+      bg: getComputedStyle(resolved, '::after').backgroundColor,
+      opacity: getComputedStyle(resolved, '::after').opacity,
+    };
+  });
+  console.log('  ✓ resolved mark ::after bg:', resolvedMark?.bg);
+  console.log('  ✓ resolved mark ::after opacity:', resolvedMark?.opacity);
+  if (!resolvedMark) throw new Error('应能找到 is-resolved mark');
+
+  // === TEST 79: All Markup / No Markup 切换 (P-marks) ===
+  console.log('\n=== TEST 79: All Markup 切换 (P-marks) ===');
+  // 默认 showAllMarkup=true → mark 高亮存在 (CSS no-markup class 不在 .tiptap 上)
+  const beforeToggle = await page.evaluate(() => {
+    const tiptap = document.querySelector('.tiptap');
+    return {
+      hasNoMarkup: tiptap?.classList.contains('no-markup') || false,
+      firstMarkBg: getComputedStyle(document.querySelector('.annotation-mark')).backgroundColor,
+    };
+  });
+  console.log('  ✓ 切换前 .tiptap.no-markup:', beforeToggle.hasNoMarkup, '(预期 false)');
+  console.log('  ✓ 切换前 mark 背景色:', beforeToggle.firstMarkBg);
+  if (beforeToggle.hasNoMarkup) throw new Error('默认不应有 no-markup class');
+
+  // 取消勾选 All Markup → 触发 setShowAllMarkup(false)
+  await page.evaluate(() => {
+    const cb = document.querySelector('#show-all-markup');
+    cb.checked = false;
+    cb.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  await page.waitForTimeout(200);
+  const afterToggleOff = await page.evaluate(() => {
+    const tiptap = document.querySelector('.tiptap');
+    const mark = document.querySelector('.annotation-mark');
+    return {
+      hasNoMarkup: tiptap?.classList.contains('no-markup') || false,
+      state: window.__mdAnnotator.State.showAllMarkup,
+      // CSS 验证: no-markup 时 mark 背景透明
+      markBg: mark ? getComputedStyle(mark).backgroundColor : null,
+    };
+  });
+  console.log('  ✓ 关掉后 .tiptap.no-markup:', afterToggleOff.hasNoMarkup, '(预期 true)');
+  console.log('  ✓ State.showAllMarkup:', afterToggleOff.state, '(预期 false)');
+  console.log('  ✓ 关掉后 mark 背景:', afterToggleOff.markBg, '(应透明)');
+  if (!afterToggleOff.hasNoMarkup) throw new Error('关掉 All Markup 后 .tiptap 应有 no-markup');
+  if (afterToggleOff.state !== false) throw new Error('State.showAllMarkup 应为 false');
+  // 'rgba(0, 0, 0, 0)' 或 'transparent' 是透明
+  if (afterToggleOff.markBg !== 'rgba(0, 0, 0, 0)' && afterToggleOff.markBg !== 'transparent') {
+    throw new Error(`关掉 All Markup 后 mark 背景应透明, 实际 ${afterToggleOff.markBg}`);
+  }
+
+  // 重新勾选
+  await page.evaluate(() => {
+    const cb = document.querySelector('#show-all-markup');
+    cb.checked = true;
+    cb.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  await page.waitForTimeout(200);
+  const afterToggleOn = await page.evaluate(() => {
+    const tiptap = document.querySelector('.tiptap');
+    const mark = document.querySelector('.annotation-mark');
+    return {
+      hasNoMarkup: tiptap?.classList.contains('no-markup') || false,
+      markBg: mark ? getComputedStyle(mark).backgroundColor : null,
+    };
+  });
+  console.log('  ✓ 重新打开 .tiptap.no-markup:', afterToggleOn.hasNoMarkup, '(预期 false)');
+  console.log('  ✓ 重新打开 mark 背景:', afterToggleOn.markBg, '(应非透明)');
+  if (afterToggleOn.hasNoMarkup) throw new Error('重开 All Markup 后 no-markup 应消失');
+  if (afterToggleOn.markBg === 'rgba(0, 0, 0, 0)' || afterToggleOn.markBg === 'transparent') {
+    throw new Error('重开 All Markup 后 mark 背景应非透明');
+  }
+
+  // === TEST 80: Ctrl+Alt+M 快捷键 + Esc 关闭菜单 (P-key) ===
+  console.log('\n=== TEST 80: Ctrl+Alt+M 快捷键 + Esc 关闭 (P-key) ===');
+  // 加载新文档做测试
+  const keyMd = `第一段用于快捷键测试.
+
+第二段.`;
+  await page.evaluate((m) => window.__mdAnnotator.loadMarkdownIntoEditor('key.md', m, null), keyMd);
+  await page.waitForTimeout(300);
+
+  // 选 "第一段" — 模拟键盘选区
+  await page.evaluate(() => {
+    const editor = window.__mdAnnotator.State.editor;
+    let from = -1, to = -1;
+    editor.state.doc.descendants((node, pos) => {
+      if (node.isText && node.text === '第一段用于快捷键测试.') { from = pos; to = pos + 3; return false; }
+    });
+    editor.commands.setTextSelection({ from, to });
+    editor.view.dispatch(editor.state.tr.setSelection(editor.state.selection));
+  });
+  await page.waitForTimeout(200);
+
+  // 按 Ctrl+Alt+M (Windows/Linux)
+  await page.keyboard.down('Control');
+  await page.keyboard.down('Alt');
+  await page.keyboard.press('m');
+  await page.keyboard.up('Alt');
+  await page.keyboard.up('Control');
+  await page.waitForTimeout(300);
+
+  const afterKey = await page.evaluate(() => ({
+    annotations: window.__mdAnnotator.State.annotations.length,
+    marks: document.querySelectorAll('.annotation-mark').length,
+    // P-mark 气泡: CSS ::after, 不能直接 querySelectorAll. 改为查 mark 高亮背景
+    firstMarkBg: getComputedStyle(document.querySelector('.annotation-mark')).backgroundColor,
+  }));
+  console.log('  ✓ Ctrl+Alt+M 后 annotations:', afterKey.annotations, '(预期 1)');
+  console.log('  ✓ mark 数:', afterKey.marks);
+  console.log('  ✓ 首个 mark 高亮背景:', afterKey.firstMarkBg, '(非透明)');
+  if (afterKey.annotations !== 1) throw new Error(`Ctrl+Alt+M 应创建 1 批注, 实际 ${afterKey.annotations}`);
+  if (afterKey.marks !== 1) throw new Error(`应生成 1 mark, 实际 ${afterKey.marks}`);
+  if (afterKey.firstMarkBg === 'rgba(0, 0, 0, 0)' || afterKey.firstMarkBg === 'transparent') {
+    throw new Error('mark 背景应非透明 (All Markup 开启)');
+  }
+
+  // Esc 关菜单 — 先开一个 ⋯ 菜单
+  await page.evaluate(() => window.__mdAnnotator.State.activeThreadId = window.__mdAnnotator.State.annotations[0]?.threadId);
+  await page.waitForTimeout(100);
+  // 没有 ⋯ 菜单 因为刚刚批量创建 — 用 sample 文档测 Esc
+  await page.evaluate((args) => window.__mdAnnotator.loadMarkdownIntoEditor('sample.md', args.md, args.sidecar), { md: sampleMd, sidecar: sampleSidecar });
+  await page.waitForTimeout(500);
+  // 激活 filter-resolved 看 2 张卡
+  await page.evaluate(() => {
+    document.querySelector('#filter-resolved').checked = true;
+    document.querySelector('#filter-resolved').dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  await page.waitForTimeout(200);
+  // hover + 点 ⋯ 打开菜单
+  await page.locator('.comment-thread').first().hover();
+  await page.locator('.comment-thread').first().locator('.comment-menu-btn').click();
+  await page.waitForTimeout(200);
+  const menuBeforeEsc = await page.evaluate(() => document.querySelectorAll('.comment-menu:not(.hidden)').length);
+  console.log('  ✓ Esc 前菜单显示数:', menuBeforeEsc, '(预期 ≥ 1)');
+  if (menuBeforeEsc < 1) throw new Error('菜单应打开');
+
+  // 按 Esc
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(200);
+  const menuAfterEsc = await page.evaluate(() => document.querySelectorAll('.comment-menu:not(.hidden)').length);
+  console.log('  ✓ Esc 后菜单显示数:', menuAfterEsc, '(预期 0)');
+  if (menuAfterEsc !== 0) throw new Error('Esc 应关闭 ⋯ 菜单');
+
   await browser.close();
   console.log('\n========================================');
-  console.log('✓ 全部 77 个测试通过！');
+  console.log('✓ 全部 80 个测试通过！');
   console.log('========================================');
 })().catch(async err => {
   console.error('\n✗ 测试失败:', err.message);
