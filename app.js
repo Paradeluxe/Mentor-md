@@ -878,6 +878,16 @@ function handleSelectionChange() {
     }
     return;
   }
+  // P-h: 选区在 heading 节点内 → reject (不显示批注按钮)
+  // 原因: heading 是结构性元素, 批注应放在正文段落. 用户落位到 heading 大多是误触.
+  const $fromHead = editor.state.doc.resolve(from);
+  const $toHead = editor.state.doc.resolve(to);
+  if ($fromHead.parent.type.name === 'heading' || $toHead.parent.type.name === 'heading') {
+    btn.classList.add('hidden');
+    setStatus('提示', '批注不支持标题选区, 请选段落正文');
+    return;
+  }
+
   // 选区跨 block (多行) → 走多段批注 (每段各打 mark, 共享 threadId)
   // 跨 cell (table 内) → 走多 cell 批注 (每 cell 各打 mark, 共享 threadId)
   // 其他跨 block (heading / list item) → 仍然 reject

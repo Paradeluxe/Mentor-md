@@ -581,10 +581,11 @@ const SAMPLE_ANN = JSON.parse(fs.readFileSync(path.join(ROOT, 'test-data/sample.
 
   console.log('=== TEST 34: 浮动批注按钮 (💬) + 选区 ===');
   // 重置 + 加载 + 模拟选区
+  // P-h (06-27): heading 选区已 reject, 改用 paragraph 内容测批注按钮
   await page.evaluate(() => {
-    window.__mdAnnotator.loadMarkdownIntoEditor('float-test.md', '# Hello World', null);
+    window.__mdAnnotator.loadMarkdownIntoEditor('float-test.md', 'Hello World', null);
     window.__mdAnnotator.State.author = 'float-author';
-    // 模拟选区: 选中 "Hello" (positions 1-6)
+    // 模拟选区: 选中 "Hello" (paragraph 文本)
     const doc = window.__mdAnnotator.State.editor.state.doc;
     let helloStart = null, helloEnd = null;
     doc.descendants((node, pos) => {
@@ -1630,9 +1631,115 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
     window.__mdAnnotator.setAuthor('测试作者');
   });
 
+  // === TEST 75: 选区在 heading 内 → 不显示批注按钮 (P-h) ===
+  console.log('\n=== TEST 75: 选区在 heading 内 → 不显示批注按钮 ===');
+  const headingMd = `# H1 标题
+
+这是段落正文, 可以批注.
+
+## H2 标题
+
+更多段落.`;
+  await page.evaluate((md) => {
+    return window.__mdAnnotator.loadMarkdownIntoEditor('heading.md', md, null);
+  }, headingMd);
+  await page.waitForTimeout(200);
+
+  // 场景 1: 选中 H1 文字 → 按钮应隐藏
+  const h1Sel = await page.evaluate(() => {
+    const editor = window.__mdAnnotator.State.editor;
+    let from = -1, to = -1, parentType = '';
+    editor.state.doc.descendants((node, pos) => {
+      if (node.isText && node.text === 'H1 标题') {
+        from = pos;
+        to = pos + node.text.length;
+        // $pos.parent.type.name 才是 heading (text node 自身是 'text')
+        const $p = editor.state.doc.resolve(pos);
+        parentType = $p.parent.type.name;
+        return false;
+      }
+    });
+    editor.commands.setTextSelection({ from, to });
+    editor.view.dispatch(editor.state.tr.setSelection(editor.state.selection));
+    return { from, to, parentType };
+  });
+  await page.waitForTimeout(200);
+  const h1Btn = await page.evaluate(() => ({
+    hidden: document.querySelector('#float-comment-btn').classList.contains('hidden'),
+  }));
+  console.log('  ✓ H1 选区 $pos.parent.type:', h1Sel.parentType, '(预期 "heading")');
+  console.log('  ✓ H1 选区按钮 hidden:', h1Btn.hidden, '(预期 true)');
+  if (!h1Btn.hidden) throw new Error('H1 选区应隐藏批注按钮');
+
+  // 场景 2: 选中 H2 文字 → 按钮应隐藏
+  const h2Btn = await page.evaluate(() => {
+    const editor = window.__mdAnnotator.State.editor;
+    let from = -1, to = -1;
+    editor.state.doc.descendants((node, pos) => {
+      if (node.isText && node.text === 'H2 标题') {
+        from = pos;
+        to = pos + node.text.length;
+        return false;
+      }
+    });
+    editor.commands.setTextSelection({ from, to });
+    editor.view.dispatch(editor.state.tr.setSelection(editor.state.selection));
+    return { from, to };
+  });
+  await page.waitForTimeout(200);
+  const h2State = await page.evaluate(() => ({
+    hidden: document.querySelector('#float-comment-btn').classList.contains('hidden'),
+  }));
+  console.log('  ✓ H2 选区按钮 hidden:', h2State.hidden, '(预期 true)');
+  if (!h2State.hidden) throw new Error('H2 选区应隐藏批注按钮');
+
+  // 场景 3: 选区起点在 H1, 终点在正文段落 → 应隐藏 (任一端是 heading 即 reject)
+  const h1ParaSel = await page.evaluate(() => {
+    const editor = window.__mdAnnotator.State.editor;
+    let h1From = -1, h1To = -1, paraFrom = -1, paraTo = -1;
+    let seen = 0;
+    editor.state.doc.descendants((node, pos) => {
+      if (node.isText && node.text === 'H1 标题') { h1From = pos; h1To = pos + node.text.length; }
+      if (node.isText && node.text.includes('这是段落正文')) { paraFrom = pos + 3; paraTo = pos + 8; }  // "段落正" 5 字
+    });
+    // 选 H1 末尾到正文开头: from=h1To, to=paraTo
+    editor.commands.setTextSelection({ from: h1To, to: paraTo });
+    editor.view.dispatch(editor.state.tr.setSelection(editor.state.selection));
+    return { from: h1To, to: paraTo, text: editor.state.doc.textBetween(h1To, paraTo) };
+  });
+  await page.waitForTimeout(200);
+  const h1ParaState = await page.evaluate(() => ({
+    hidden: document.querySelector('#float-comment-btn').classList.contains('hidden'),
+  }));
+  console.log('  ✓ H1→正文跨块选区文本:', JSON.stringify(h1ParaSel.text));
+  console.log('  ✓ H1→正文按钮 hidden:', h1ParaState.hidden, '(预期 true — heading reject 优先)');
+  if (!h1ParaState.hidden) throw new Error('H1→正文选区应隐藏按钮 (heading reject 优先)');
+
+  // 场景 4: 选区全部在正文段落 → 按钮应正常显示 (反向断言)
+  const paraSel = await page.evaluate(() => {
+    const editor = window.__mdAnnotator.State.editor;
+    let from = -1, to = -1;
+    editor.state.doc.descendants((node, pos) => {
+      if (node.isText && node.text.includes('这是段落正文')) {
+        from = pos;
+        to = pos + node.text.length;
+        return false;
+      }
+    });
+    editor.commands.setTextSelection({ from, to });
+    editor.view.dispatch(editor.state.tr.setSelection(editor.state.selection));
+    return { from, to };
+  });
+  await page.waitForTimeout(200);
+  const paraState = await page.evaluate(() => ({
+    hidden: document.querySelector('#float-comment-btn').classList.contains('hidden'),
+  }));
+  console.log('  ✓ 纯正文选区按钮 hidden:', paraState.hidden, '(预期 false)');
+  if (paraState.hidden) throw new Error('纯正文选区应显示按钮');
+
   await browser.close();
   console.log('\n========================================');
-  console.log('✓ 全部 74 个测试通过！');
+  console.log('✓ 全部 75 个测试通过！');
   console.log('========================================');
 })().catch(async err => {
   console.error('\n✗ 测试失败:', err.message);
