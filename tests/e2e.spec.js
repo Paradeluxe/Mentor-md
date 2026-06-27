@@ -1392,7 +1392,7 @@ console.log('=== TEST 59: 跳过 (依赖 dead #tree-search) ===');
   if (!sourceState.sourceText.includes('$E = mc^2$')) throw new Error('源码缺 LaTeX 公式');
 
   // === TEST 71: 再点 → 切回渲染模式 → 表格 + 公式都还在 ===
-  console.log('\n=== TEST 71: 切回渲染模式 → 富文本 roundtrip 完整 ===');
+  console.log('=== TEST 71: 切回渲染模式 → 富文本 roundtrip 完整 ===');
   await page.click('#btn-toggle-render');
   await page.waitForTimeout(200);
 
@@ -1423,9 +1423,136 @@ console.log('=== TEST 59: 跳过 (依赖 dead #tree-search) ===');
   if (!renderedState.hasTable) throw new Error('表格丢失');
   if (!renderedState.hasKatex) throw new Error('公式丢失');
 
+  // === TEST 72: 选区持久化 — 选中文本后切源码, 源码里高亮; 切回渲染, 选区恢复 ===
+  console.log('\n=== TEST 72: 选区持久化 (rendered→source→rendered) ===');
+  // 加载一段含可识别子串的 markdown
+  const selMd = `# 选区测试
+
+WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范围）`;
+  await page.evaluate((md) => {
+    return window.__mdAnnotator.loadMarkdownIntoEditor('sel.md', md, null);
+  }, selMd);
+  await page.waitForTimeout(200);
+
+  // 选中文本 "选区级批注" (跨 paragraph 不可, 同段内 OK)
+  const selectResult = await page.evaluate(() => {
+    const editor = window.__mdAnnotator.State.editor;
+    let from = -1, to = -1;
+    editor.state.doc.descendants((node, pos) => {
+      if (node.isText && node.text.includes('选区级批注')) {
+        const idx = node.text.indexOf('选区级批注');
+        from = pos + idx;
+        to = pos + idx + '选区级批注'.length;
+        return false;
+      }
+    });
+    if (from < 0) return { ok: false, reason: '未找到 "选区级批注" 文本' };
+    editor.commands.setTextSelection({ from, to });
+    editor.view.dispatch(editor.state.tr.setSelection(editor.state.selection));
+    return { ok: true, from, to, selectedText: editor.state.doc.textBetween(from, to) };
+  });
+  console.log('  ✓ 选中结果:', JSON.stringify(selectResult));
+  if (!selectResult.ok) throw new Error(selectResult.reason);
+  await page.waitForTimeout(150);
+
+  // 切到源码 — 应看到 mark.source-selection 包住 "选区级批注"
+  await page.click('#btn-toggle-render');
+  await page.waitForTimeout(200);
+
+  const sourceMarkState = await page.evaluate(() => {
+    const sourceEl = document.querySelector('#source-view');
+    const marks = sourceEl?.querySelectorAll('mark.source-selection') || [];
+    const states = window.__mdAnnotator.State;
+    return {
+      markCount: marks.length,
+      markedText: marks[0]?.textContent || '',
+      sourceHTML: sourceEl?.innerHTML.slice(0, 400) || '',
+      savedSelection: states.savedSelection,
+    };
+  });
+  console.log('  ✓ mark.source-selection 个数:', sourceMarkState.markCount, '(预期 1)');
+  console.log('  ✓ 高亮文本:', JSON.stringify(sourceMarkState.markedText));
+  console.log('  ✓ State.savedSelection.text:', JSON.stringify(sourceMarkState.savedSelection?.text));
+  if (sourceMarkState.markCount !== 1) throw new Error(`mark 个数错: ${sourceMarkState.markCount} (预期 1)`);
+  if (sourceMarkState.markedText !== '选区级批注') throw new Error(`mark 文本错: "${sourceMarkState.markedText}"`);
+  if (sourceMarkState.savedSelection?.text !== '选区级批注') throw new Error(`State.savedSelection.text 错: "${sourceMarkState.savedSelection?.text}"`);
+
+  // 切回渲染 — 选区应恢复 (from < to, textBetween 等于原选中文本)
+  await page.click('#btn-toggle-render');
+  await page.waitForTimeout(200);
+
+  const restoredSel = await page.evaluate(() => {
+    const editor = window.__mdAnnotator.State.editor;
+    const sel = editor.state.selection;
+    const states = window.__mdAnnotator.State;
+    const editorEl = document.querySelector('#editor');
+    return {
+      from: sel.from,
+      to: sel.to,
+      empty: sel.empty,
+      text: editor.state.doc.textBetween(sel.from, sel.to, '\n', '\n'),
+      savedSelectionCleared: states.savedSelection === null,
+      editorHasFocus: document.activeElement === editorEl || editorEl?.contains(document.activeElement),
+    };
+  });
+  console.log('  ✓ 恢复后选区 from:', restoredSel.from, 'to:', restoredSel.to, 'empty:', restoredSel.empty);
+  console.log('  ✓ 恢复后选中文本:', JSON.stringify(restoredSel.text));
+  console.log('  ✓ State.savedSelection 已清空:', restoredSel.savedSelectionCleared);
+  console.log('  ✓ 编辑器获焦:', restoredSel.editorHasFocus);
+  if (restoredSel.empty) throw new Error('选区未恢复 (empty=true)');
+  if (restoredSel.text !== '选区级批注') throw new Error(`恢复后选中文本错: "${restoredSel.text}"`);
+  if (!restoredSel.savedSelectionCleared) throw new Error('State.savedSelection 未清空');
+  if (!restoredSel.editorHasFocus) throw new Error('切回渲染后编辑器未获焦, 选区不会视觉显示');
+
+  // === TEST 73: 编辑源码后切回渲染 → 不尝试恢复 (savedSelection 已被 input 清掉) ===
+  console.log('\n=== TEST 73: 源码编辑后切回渲染 → 选区不再恢复 ===');
+  // 重新加载, 选一段
+  await page.evaluate((md) => {
+    return window.__mdAnnotator.loadMarkdownIntoEditor('sel2.md', md, null);
+  }, selMd);
+  await page.waitForTimeout(200);
+  await page.evaluate(() => {
+    const editor = window.__mdAnnotator.State.editor;
+    let from = -1, to = -1;
+    editor.state.doc.descendants((node, pos) => {
+      if (node.isText && node.text.includes('WYSIWYG 编辑')) {
+        const idx = node.text.indexOf('WYSIWYG 编辑');
+        from = pos + idx;
+        to = pos + idx + 'WYSIWYG 编辑'.length;
+        return false;
+      }
+    });
+    editor.commands.setTextSelection({ from, to });
+    editor.view.dispatch(editor.state.tr.setSelection(editor.state.selection));
+  });
+  await page.waitForTimeout(150);
+  // 切到源码
+  await page.click('#btn-toggle-render');
+  await page.waitForTimeout(200);
+  // 模拟用户在源码里编辑 (触发 input 事件 → 清掉 savedSelection)
+  await page.evaluate(() => {
+    const sourceEl = document.querySelector('#source-view');
+    sourceEl.innerText = sourceEl.innerText + '\n<!-- user edit -->';
+    sourceEl.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await page.waitForTimeout(100);
+  // 切回渲染
+  await page.click('#btn-toggle-render');
+  await page.waitForTimeout(200);
+  const afterEditSel = await page.evaluate(() => {
+    const editor = window.__mdAnnotator.State.editor;
+    return {
+      empty: editor.state.selection.empty,
+      from: editor.state.selection.from,
+      to: editor.state.selection.to,
+    };
+  });
+  console.log('  ✓ 源码编辑后切回选区 empty:', afterEditSel.empty, '(预期 true — 不恢复)');
+  if (!afterEditSel.empty) throw new Error('源码编辑后选区不应恢复, 但恢复了');
+
   await browser.close();
   console.log('\n========================================');
-  console.log('✓ 全部 71 个测试通过！');
+  console.log('✓ 全部 73 个测试通过！');
   console.log('========================================');
 })().catch(async err => {
   console.error('\n✗ 测试失败:', err.message);

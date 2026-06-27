@@ -1644,3 +1644,11 @@ code {
 #source-view.source-view::selection {
   background: var(--highlight-active);
 }
+/* P-sel: 源码视图里高亮当前选区 (从渲染切过来时保存的) */
+#source-view.source-view mark.source-selection {
+  background: rgba(255, 215, 0, 0.32);  /* 暖黄高亮, 不抢焦 */
+  color: inherit;
+  padding: 0;
+  border-radius: 2px;
+  box-shadow: 0 0 0 1px rgba(255, 215, 0, 0.55);
+}

@@ -127,6 +127,7 @@ const State = {
   readOnlyMode: false,      // P0-A: 另一 tab 在编辑时启用只读 (Ctrl+S 禁用)
   fileMtime: null,          // P0-C: 主 .md 的 mtime (last save 时记录的)
   renderMode: 'rendered',   // 'rendered' = WYSIWYG 渲染; 'source' = 显示原始 markdown 源码
+  savedSelection: null,     // P-sel: { from, to, text } — rendered→source 时保存, source→rendered 时尝试恢复
 };
 
 // ============================================================
@@ -1560,6 +1561,16 @@ function setRenderMode(mode) {
 
   if (mode === 'source') {
     // 渲染 → 源码: 取当前 HTML → turndown → 放进 <pre>
+    // P-sel: 切之前先保存当前选区 (from/to + text), 让源码视图能高亮, 切回时尝试恢复
+    try {
+      const sel = State.editor.state.selection;
+      if (sel && !sel.empty && sel.from !== sel.to) {
+        const text = State.editor.state.doc.textBetween(sel.from, sel.to, '\n', '\n');
+        if (text) {
+          State.savedSelection = { from: sel.from, to: sel.to, text };
+        }
+      }
+    } catch (e) { /* 选区快照失败不影响切换 */ }
     const html = State.editor.getHTML();
     const md = htmlToMarkdown(html);
     if (!sourceEl) {
@@ -1570,26 +1581,34 @@ function setRenderMode(mode) {
       sourceEl.setAttribute('tabindex', '0');  // 让 <pre> 可获得键盘焦点（默认不可 focus）
       sourceEl.setAttribute('contenteditable', 'true');  // 显式声明可编辑（即使 <pre> 默认 plain text）
       // 编辑源码时（contenteditable）→ 标 dirty + 同步到 State.currentFile.content
+      // P-sel: 用户在源码里编辑了文本, saved selection 的位置失效, 清掉 (切回渲染不再尝试恢复)
       sourceEl.addEventListener('input', () => {
         if (!State.currentFile) return;
         State.currentFile.content = sourceEl.innerText;
         markDirty();
+        State.savedSelection = null;
       });
       editorPane.appendChild(sourceEl);
     }
-    sourceEl.innerText = md;
+    sourceEl.innerHTML = highlightSelectionInSource(md, State.savedSelection?.text);
     tiptapEl.style.display = 'none';
     sourceEl.style.display = 'block';
     // 按钮文案: 当前是源码，点它切回渲染
     btn.dataset.mode = 'source';
     btn.title = '切换为渲染视图';
     btn.querySelector('span:last-child').textContent = '渲染';
-    setStatus('源码模式', `已切换 (${md.length} 字符)`);
+    const selInfo = State.savedSelection
+      ? `已切换 (${md.length} 字符, 选区高亮: ${State.savedSelection.text.length} 字)`
+      : `已切换 (${md.length} 字符)`;
+    setStatus('源码模式', selInfo);
   } else {
     // 源码 → 渲染: 把 <pre> 内容 setContent 回编辑器
+    let savedText = null;
     if (sourceEl) {
       const md = sourceEl.innerText;
       const html = markdownToHtml(md);
+      // P-sel: 记下 saved text 准备恢复 (setContent 会清空 PM doc)
+      savedText = State.savedSelection?.text || null;
       State.editor.commands.setContent(html, false);
       sourceEl.style.display = 'none';
     }
@@ -1597,8 +1616,49 @@ function setRenderMode(mode) {
     btn.dataset.mode = 'rendered';
     btn.title = '切换为源码视图';
     btn.querySelector('span:last-child').textContent = '源码';
-    setStatus('渲染模式', '已切换回 WYSIWYG');
+    // P-sel: 尝试用 saved text 找回 PM pos, 恢复 setTextSelection
+    let restored = false;
+    if (savedText && State.savedSelection) {
+      try {
+        const found = findTextInDoc(State.editor.state.doc, savedText);
+        if (found) {
+          // 跨 cell 选区等情况 (range.to - range.from) 长度不一定等于 savedText.length,
+          // 用 savedSelection 原 from/to 长度更可靠
+          const len = State.savedSelection.to - State.savedSelection.from;
+          const to = found.from + Math.min(len, savedText.length);
+          // 关键: focus + setTextSelection 都要做, 否则浏览器不绘制选区 (activeElement 仍是按钮)
+          State.editor.commands.focus(found.from, { scrollIntoView: false });
+          State.editor.commands.setTextSelection({ from: found.from, to });
+          restored = true;
+        }
+      } catch (e) { /* 恢复失败无所谓, 用户可以重新选 */ }
+    }
+    State.savedSelection = null;
+    setStatus('渲染模式', restored ? '已切换回 WYSIWYG, 选区已恢复' : '已切换回 WYSIWYG');
   }
+}
+
+// P-sel: 在 markdown 文本中找到 savedSelectionText (首次出现), 用 <mark> 包起来
+// 转义顺序: 先 escape md 文本里的 < > &, 再插入 mark 标签, 避免 XSS / 误把 markdown 标解读成 HTML
+function highlightSelectionInSource(md, selectedText) {
+  const escaped = md
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+  if (!selectedText || !selectedText.trim()) return escaped;
+  // 同样的 escape 应用到 selectedText, 用于 indexOf
+  const needle = selectedText
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+  // 跨多行的 selection 文本在 <pre> 里可能含 \n, 先按段找
+  const idx = escaped.indexOf(needle);
+  if (idx === -1) return escaped;
+  return escaped.slice(0, idx) +
+    '<mark class="source-selection">' +
+    escaped.slice(idx, idx + needle.length) +
+    '</mark>' +
+    escaped.slice(idx + needle.length);
 }
 
 // 工具栏按钮图标: 用 MentorIcons.sourceMode / renderMode
