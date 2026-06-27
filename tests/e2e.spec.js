@@ -824,26 +824,29 @@ const SAMPLE_ANN = JSON.parse(fs.readFileSync(path.join(ROOT, 'test-data/sample.
   console.log(`  ✓ reply textarea 数 = ${replyFormCount} (预期 ≥ 1)`);
   if (replyFormCount < 1) throw new Error('新批注无 reply form');
 
-  console.log('=== TEST 44: 跨段落选区拦截（状态栏提示）===');
+  console.log('=== TEST 44: 跨段落选区 → 多段批注 (每段各打 mark, 共享 threadId) ===');
   await page.evaluate(() => {
-    window.__mdAnnotator.loadMarkdownIntoEditor('cross-para.md', 'Para 1\n\nPara 2 text', null);
+    window.__mdAnnotator.loadMarkdownIntoEditor('cross-para.md', 'Para 1 文字\n\nPara 2 文字', null);
   });
   await page.waitForTimeout(200);
   // 模拟跨段落选区: 从 Para 1 选到 Para 2
   await page.evaluate(() => {
     const editor = window.__mdAnnotator.State.editor;
-    const doc = editor.state.doc;
     // 找 Para 1 末尾 + Para 2 中间
-    editor.commands.setTextSelection({ from: 2, to: 12 });
-    // 触发 selection update
-    editor.view.dispatch(editor.state.tr.setSelection(editor.state.selection));
+    editor.commands.setTextSelection({ from: 2, to: 14 });
   });
   await page.waitForTimeout(150);
-  const floatHidden = await page.evaluate(() => {
-    return document.querySelector('#float-comment-btn').classList.contains('hidden');
+  // 跨段落选区时按钮应该显示 (新的多段批注功能)
+  const floatShown = await page.evaluate(() => {
+    return !document.querySelector('#float-comment-btn').classList.contains('hidden');
   });
-  console.log(`  ✓ 跨段落选区时浮动按钮隐藏 = ${floatHidden} (预期 true)`);
-  if (!floatHidden) throw new Error('跨段落选区未拦截浮动按钮');
+  console.log(`  ✓ 跨段落选区时浮动按钮显示 = ${floatShown} (预期 true)`);
+  if (!floatShown) throw new Error('跨段落选区应显示浮动按钮 (支持多段批注)');
+  // 验证状态栏提示
+  const statusText44 = await page.evaluate(() => {
+    return (document.querySelector('#status-left')?.textContent || '') + '|' + (document.querySelector('#status-right')?.textContent || '');
+  });
+  console.log(`  ✓ status = "${statusText44}"`);
 
   console.log('=== TEST 45: 批注 📍 跳转按钮 ===');
   // 创建一个新批注用于跳转

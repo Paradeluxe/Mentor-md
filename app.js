@@ -877,8 +877,9 @@ function handleSelectionChange() {
     }
     return;
   }
-  // 选区必须在同一 block 内（mark 不能跨 block）
-  // 例外: table 内跨 cell 选区 → 自动缩进到起始 cell 内, 批注落在第一个 cell
+  // 选区跨 block (多行) → 走多段批注 (每段各打 mark, 共享 threadId)
+  // 跨 cell (table 内) → 走多 cell 批注 (每 cell 各打 mark, 共享 threadId)
+  // 其他跨 block (heading / list item) → 仍然 reject
   const $from = editor.state.doc.resolve(from);
   const $to = editor.state.doc.resolve(to);
   if ($from.parent !== $to.parent) {
@@ -915,9 +916,13 @@ function handleSelectionChange() {
         btn.classList.add('hidden');
         return;
       }
+    } else if ($from.parent.type.name === 'paragraph' && $to.parent.type.name === 'paragraph') {
+      // 跨段落 (多行选区): 不 reject, 让 handleCreateMultiParagraphAnnotation 后续处理
+      // 按钮继续显示 (定位到 from 上沿)
     } else {
+      // 其他跨 block (heading, list item, blockquote) → reject
       btn.classList.add('hidden');
-      setStatus('提示', '批注暂不支持跨段落选区，请选单段内文字');
+      setStatus('提示', '批注暂不支持跨块选区, 请选段落内或跨段连续文字');
       return;
     }
   }
@@ -951,8 +956,15 @@ function setupFloatCommentButton() {
       handleCreateMultiCellAnnotation(sel);
       return;
     }
+    // 判断是不是跨段落多行选区 (PM 标记无法跨 block, 我们对每段各打 mark 共享 threadId)
     const { from, to } = sel;
     if (from === to) return;
+    const $from = State.editor.state.doc.resolve(from);
+    const $to = State.editor.state.doc.resolve(to);
+    if ($from.parent !== $to.parent && $from.parent.type.name === 'paragraph' && $to.parent.type.name === 'paragraph') {
+      handleCreateMultiParagraphAnnotation(from, to);
+      return;
+    }
     const text = State.editor.state.doc.textBetween(from, to, ' ');
     if (!State.author) {
       // 弹作者输入
@@ -1114,6 +1126,95 @@ function applyAnnotationMarksMultiCell(threadId, ranges) {
   State.editor.view.dispatch(tr);
 }
 
+// 处理多段 (跨段落) 选区的批注创建
+// 跨段: PM mark 不能跨 block. 收集经过的每个 paragraph 的 range, 给每段各打 mark (共享 threadId)
+// thread.ranges = [{from, to}, ...] (跟 multi-cell 一样用 ranges 数组存多段)
+function handleCreateMultiParagraphAnnotation(from, to) {
+  if (!State.author) {
+    promptAuthor().then(() => {
+      if (State.author) handleCreateMultiParagraphAnnotation(from, to);
+    });
+    return;
+  }
+  const ed = State.editor;
+  // 收集 from → to 之间的所有 paragraph range
+  // 关键: PM addMark(from, to) 要求 from/to 都是 inline 文本内的位置
+  // paragraph 节点结构: [open tag, text..., close tag]
+  //   pos = blockStart → open tag 位置
+  //   pos = blockStart + 1 → 第一个 text token 位置 (in)
+  //   pos = blockEnd - 1 → 最后一个 text token 位置 (in)
+  //   pos = blockEnd → close tag 位置
+  // 所以 PM addMark 接受的 [rFrom, rTo) 必须满足:
+  //   rFrom >= textStart (blockStart + 1)
+  //   rTo <= textEnd + 1 (blockEnd - 1 + 1 = blockEnd) — exclusive end 仍指向 close token!
+  //   实际上 rTo 必须 <= textEnd (即 blockEnd - 1), 否则 addMark 会跨越 paragraph close
+  // 修复: rTo = min(to, textEnd + 1) 后, 如果 to == textEnd + 1 (i.e. 选区延伸到 paragraph 末尾边界), clamp to textEnd
+  const ranges = [];
+  ed.state.doc.nodesBetween(from, to, (node, pos) => {
+    if (node.type.name === 'paragraph' && node.isTextblock) {
+      const blockStart = pos;
+      const blockEnd = pos + node.nodeSize;
+      const textStart = blockStart + 1;  // first text position (inclusive)
+      const textEnd = blockEnd - 1;     // last text position (inclusive)
+      const rFrom = Math.max(from, textStart);
+      // PM addMark 限制: rTo 不能跨过 paragraph close token (textEnd + 1 = blockEnd)
+      // 所以 rTo 必须 ≤ textEnd
+      const rTo = Math.min(to, textEnd + 1);
+      // 只要这段 paragraph 跟选区有重叠, 就记录一个 range
+      // (即使 rFrom == rTo, 仍代表该 paragraph 被"覆盖"了 - 哪怕只是边界)
+      if (rFrom <= rTo && rTo > textStart && rFrom <= textEnd) {
+        ranges.push({ from: rFrom, to: Math.max(rTo, rFrom) });  // 0 长度也保留
+      }
+    }
+  });
+  if (ranges.length === 0) {
+    showToast('所选段落为空', 2000);
+    return;
+  }
+  // 收集 text (跨段用 \n 分隔, doc.textBetween 会自动跨段拼接)
+  const text = ed.state.doc.textBetween(from, to, ' ');
+  const threadId = uuid();
+  const commentId = uuid();
+  const docText = ed.state.doc.textBetween(0, ed.state.doc.content.size, ' ');
+  const { prefix, suffix } = computeContext(text, docText);
+  const thread = {
+    threadId,
+    range: ranges[0],
+    ranges,
+    text,
+    prefix,
+    suffix,
+    resolved: false,
+    createdAt: nowISO(),
+    comments: [{
+      id: commentId,
+      author: { id: State.authorId, name: State.author },
+      body: '',
+      createdAt: nowISO(),
+    }],
+  };
+  State.annotations.push(thread);
+  // 每段各打 mark (跳过 0 长度 range, 因为 PM addMark 会 no-op)
+  const tr = ed.state.tr;
+  const mark = ed.schema.marks.annotation.create({ threadId, resolved: false });
+  for (const r of ranges) {
+    if (r.from < r.to) {
+      tr.addMark(r.from, r.to, mark);
+    }
+  }
+  ed.view.dispatch(tr);
+  // 回到普通光标
+  ed.commands.setTextSelection(ranges[0].from);
+  State.activeThreadId = threadId;
+  renderCommentList();
+  setTimeout(() => {
+    const ta = document.querySelector(`[data-thread-input="${threadId}"]`);
+    if (ta) ta.focus();
+  }, 50);
+  setStatus('已创建批注', `${ranges.length} 段 · 线程 ${threadId.slice(0, 8)}`);
+  emitAI('threadChange', { threadId, change: 'create', thread });
+}
+
 function addReply(threadId, body) {
   const thread = State.annotations.find(t => t.threadId === threadId);
   if (!thread || !body.trim()) return;
@@ -1208,6 +1309,28 @@ function renderCommentList() {
   }
   empty.classList.add('hidden');
 
+  // 调色板 - DESIGN.md 限制: 不要引入新色相, 只用 5 语义色组
+  // (中性 / 蓝 / 黄 / 状态 / 深色). 用户名字 hash → 8 色调色板
+  // 8 色是 hash 分布的 sweet spot (调色板小会冲突, 大需新色相)
+  const AVATAR_PALETTE = [
+    '#26251e', // 中性 (text)
+    '#2563eb', // 蓝 (accent)
+    '#f54e00', // 橙 (强调) — DESIGN.md accent
+    '#1f8a65', // 暖绿 (success)
+    '#d97706', // 暖橙 (warning)
+    '#cf2d56', // 暖红 (danger)
+    '#5b6cff', // 蓝紫 (蓝的变种, 跟 accent 区分)
+    '#0891b2', // 青 (蓝的变种, 增加 hash 分布)
+  ];
+  const avatarColor = (name) => {
+    const n = (name || '').trim();
+    if (!n) return AVATAR_PALETTE[0];
+    let h = 0;
+    for (let i = 0; i < n.length; i++) h = (h * 31 + n.charCodeAt(i)) >>> 0;
+    return AVATAR_PALETTE[h % AVATAR_PALETTE.length];
+  };
+  const avatar = (name) => (name || '匿').trim().charAt(0).toUpperCase() || '?';
+
   list.innerHTML = visibleThreads.map(thread => {
     const first = thread.comments?.[0] || { author: '匿名', body: '', createdAt: thread.createdAt || new Date().toISOString() };
     const replies = (thread.comments || []).slice(1);
@@ -1217,11 +1340,15 @@ function renderCommentList() {
       <div class="comment-thread ${isActive ? 'is-active' : ''} ${thread.resolved ? 'is-resolved' : ''} ${isPinnedThread ? 'is-pinned' : ''} ${thread.fuzzy ? 'is-fuzzy' : ''}" data-thread="${thread.threadId}">
         ${isPinnedThread ? '<div class="pinned-banner">📌 当前光标处 (filter 已隐藏)</div>' : ''}
         ${thread.fuzzy ? '<div class="fuzzy-banner">⚠ 位置可能偏移 - 请检查文档</div>' : ''}
-        <div class="comment-quote">${escapeHtml((thread.text || '').slice(0, 100))}${(thread.text || '').length > 100 ? '…' : ''}</div>
+        <div class="comment-quote" data-act="goto" data-thread="${thread.threadId}" title="点击跳转到批注处">
+          <span class="comment-quote-mark">"</span>
+          <span class="comment-quote-text">${escapeHtml((thread.text || '').slice(0, 200))}${(thread.text || '').length > 200 ? '…' : ''}</span>
+        </div>
         <div class="comment-item">
           <div class="comment-meta">
+            <span class="comment-avatar" style="background:${avatarColor(authorName(first.author))}">${escapeHtml(avatar(authorName(first.author)))}</span>
             <span class="comment-author">${escapeHtml(authorName(first.author))}</span>
-            <span>${formatTime(first.createdAt)}</span>
+            <span class="comment-time">${formatTime(first.createdAt)}</span>
           </div>
           ${first.body ? `<div class="comment-body">${escapeHtml(first.body)}</div>` : `
             <div class="comment-reply-form">
@@ -1234,15 +1361,16 @@ function renderCommentList() {
           ${replies.map(r => `
             <div class="comment-reply">
               <div class="comment-meta">
+                <span class="comment-avatar" style="background:${avatarColor(authorName(r.author))}">${escapeHtml(avatar(authorName(r.author)))}</span>
                 <span class="comment-author">${escapeHtml(authorName(r.author))}</span>
-                <span>${formatTime(r.createdAt)}</span>
+                <span class="comment-time">${formatTime(r.createdAt)}</span>
               </div>
               <div class="comment-body">${escapeHtml(r.body)}</div>
             </div>
           `).join('')}
           ${first.body ? `
             <details class="reply-toggle">
-              <summary style="font-size:11px;color:var(--muted);cursor:pointer;padding:4px 0;">↳ 回复</summary>
+              <summary>↳ 回复</summary>
               <div class="comment-reply-form">
                 <textarea data-thread-input="${thread.threadId}" placeholder="输入回复..."></textarea>
                 <div class="form-actions">
@@ -1250,12 +1378,18 @@ function renderCommentList() {
                 </div>
               </div>
             </details>
-          ` : ''}
-          <div class="comment-actions">
-            <button data-act="goto" data-thread="${thread.threadId}">📍 跳转</button>
-            <button data-act="resolve" data-thread="${thread.threadId}">${thread.resolved ? '↺ 重新打开' : '✓ 解决'}</button>
-            <button data-act="delete" data-thread="${thread.threadId}" class="danger">🗑 删除</button>
-          </div>
+            <div class="comment-actions">
+              <button data-act="goto" data-thread="${thread.threadId}" title="跳转到批注处">📍 跳转</button>
+              <button data-act="resolve" data-thread="${thread.threadId}" class="resolve-action" title="${thread.resolved ? '重新打开批注' : '解决批注'}">${thread.resolved ? '↺ 重新打开' : '✓ 解决'}</button>
+              <span class="spacer"></span>
+              <button data-act="delete" data-thread="${thread.threadId}" class="danger" title="删除批注">🗑</button>
+            </div>
+          ` : `
+            <div class="comment-actions">
+              <button data-act="goto" data-thread="${thread.threadId}" title="跳转到批注处">📍 跳转</button>
+              <button data-act="delete" data-thread="${thread.threadId}" class="danger" title="放弃此批注">放弃</button>
+            </div>
+          `}
         </div>
       </div>
     `;
