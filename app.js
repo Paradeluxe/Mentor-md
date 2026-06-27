@@ -2791,20 +2791,49 @@ function newDocument() {
 // 9. 作者管理
 // ============================================================
 
+// P-name: 从 authorId 派生短名 (UUID 前 8 字符, 去横线)
+// 用途: State.author 为空时, 用它做"默认显示名" — 让作者有 ID 后不会显示"未设置"
+function authorIdToShortName(id) {
+  if (!id) return '';
+  return String(id).replace(/-/g, '').slice(0, 8);
+}
+
+// P-name: 派生显示名 (display logic, 不要直接读写)
+// 优先 State.author (用户设置的真名) > authorId 短名 > '未设置'
+function displayName() {
+  const a = (State.author || '').trim();
+  if (a) return a;
+  const idShort = authorIdToShortName(State.authorId);
+  if (idShort) return idShort;
+  return '未设置';
+}
+
 // 同步工具栏右上 author chip 显示
 function renderAuthorChip() {
   const chip = document.querySelector('#author-chip');
   const name = document.querySelector('#author-chip-name');
   if (!chip || !name) return;
-  const a = (State.author || '').trim();
-  if (a) {
-    name.textContent = a;
+  const userSet = (State.author || '').trim();
+  if (userSet) {
+    // 用户设过名 → 显示真名, 移除 is-anonymous + is-id-derived
+    name.textContent = userSet;
     chip.classList.remove('is-anonymous');
-    chip.title = `当前作者: ${a}\n点击修改作者名`;
+    chip.classList.remove('is-id-derived');
+    chip.title = `当前作者: ${userSet}\n点击修改作者名`;
   } else {
-    name.textContent = '未设置';
-    chip.classList.add('is-anonymous');
-    chip.title = '点击设置作者名 (留空用匿名)';
+    // P-name: author 为空但 authorId 已有 → 派生短名 (不再是"未设置")
+    const idShort = authorIdToShortName(State.authorId);
+    if (idShort) {
+      name.textContent = idShort;
+      chip.classList.remove('is-anonymous');
+      chip.classList.add('is-id-derived');  // 视觉区分: 虚线边/提示"派生自 ID"
+      chip.title = `当前作者: ${idShort} (从 ID 派生, 未设置显示名)\n点击设置名字`;
+    } else {
+      name.textContent = '未设置';
+      chip.classList.add('is-anonymous');
+      chip.classList.remove('is-id-derived');
+      chip.title = '点击设置作者名 (留空用匿名)';
+    }
   }
 }
 
@@ -2896,9 +2925,16 @@ function promptAuthor(options = {}) {
     };
 
     const saveHandler = () => {
-      const v = input.value.trim() || '匿名';  // 空值 fallback 到"匿名"
-      State.author = v;
-      localStorage.setItem('Mentor:author', v);
+      const v = input.value.trim();
+      // P-name: 空值不写入"匿名" (旧的硬编码), 而是清空 State.author —
+      // 让 authorId 派生接管显示. 只有用户显式输入名字才覆盖.
+      if (v) {
+        State.author = v;
+        localStorage.setItem('Mentor:author', v);
+      } else {
+        State.author = '';
+        localStorage.removeItem('Mentor:author');
+      }
       close(true);
     };
     const cancelHandler = () => close(false);
@@ -3364,14 +3400,25 @@ window.__mdAnnotator = {
   getCurrentUser: () => ({ id: State.authorId, name: State.author }),
   listAnnotations: () => AnnotationStore.list(),
   // 兼容老 setAuthor: string 设 name; object {id, name} 设完整身份
+  // P-name: 空字符串视为清空 (与 promptAuthor saveHandler 一致), 让 authorId 派生接管
   setAuthor: (arg) => {
     if (typeof arg === 'string') {
-      State.author = arg;
-      localStorage.setItem('Mentor:author', arg);
+      if (arg.trim()) {
+        State.author = arg;
+        localStorage.setItem('Mentor:author', arg);
+      } else {
+        State.author = '';
+        localStorage.removeItem('Mentor:author');
+      }
     } else if (arg && typeof arg === 'object') {
       if (arg.name !== undefined) {
-        State.author = arg.name;
-        localStorage.setItem('Mentor:author', arg.name);
+        if (arg.name) {
+          State.author = arg.name;
+          localStorage.setItem('Mentor:author', arg.name);
+        } else {
+          State.author = '';
+          localStorage.removeItem('Mentor:author');
+        }
       }
       if (arg.id) {
         State.authorId = arg.id;

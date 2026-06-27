@@ -285,6 +285,12 @@ code {
   border-style: dashed;
   color: var(--text-3);
 }
+/* P-name: authorId 派生的显示名 — 用浅紫底 + 虚线边 (跟 is-anonymous 区分, 表示"有 ID 但没取名") */
+.author-chip.is-id-derived {
+  border-style: dashed;
+  background: rgba(124, 92, 240, 0.06);
+  color: var(--text-2);
+}
 /* Optical alignment: 头像头部视觉重心偏高, 整体微下移对齐 baseline
    铅笔斜向笔尖偏右下, 微上移对齐 baseline */
 .author-chip-icon {

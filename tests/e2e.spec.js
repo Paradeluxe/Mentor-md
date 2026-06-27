@@ -1550,9 +1550,89 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
   console.log('  ✓ 源码编辑后切回选区 empty:', afterEditSel.empty, '(预期 true — 不恢复)');
   if (!afterEditSel.empty) throw new Error('源码编辑后选区不应恢复, 但恢复了');
 
+  // === TEST 74: 用户名跟着 authorId 走 (P-name) ===
+  console.log('\n=== TEST 74: 用户名跟着 authorId 走 (P-name) ===');
+  // 场景 1: authorId 有值, author 为空 → chip 应显示 authorId 短名 (前 8 字符)
+  const idDerived = await page.evaluate(() => {
+    const fakeId = 'c2f97973-aaaa-bbbb-cccc-dddddddddddd';
+    // 模拟"有 ID 但没设名"状态: setAuthor({id, name: ''}) 会清空 author + 设 id
+    window.__mdAnnotator.setAuthor({ id: fakeId, name: '' });
+    const chip = document.querySelector('#author-chip');
+    return {
+      authorId: window.__mdAnnotator.State.authorId,
+      author: window.__mdAnnotator.State.author,
+      chipName: chip?.querySelector('#author-chip-name')?.textContent,
+      chipClasses: chip?.className,
+      localAuthor: localStorage.getItem('Mentor:author'),
+      localId: localStorage.getItem('Mentor:authorId'),
+    };
+  });
+  console.log('  ✓ authorId 截取 (无横线前 8 字符):', idDerived.authorId?.replace(/-/g, '').slice(0, 8));
+  console.log('  ✓ chip 显示文本:', idDerived.chipName);
+  console.log('  ✓ chip class:', idDerived.chipClasses);
+  console.log('  ✓ localStorage Mentor:author:', idDerived.localAuthor);
+  if (idDerived.chipName !== 'c2f97973') throw new Error(`chip 应显示 "c2f97973", 实际 "${idDerived.chipName}"`);
+  if (!idDerived.chipClasses.includes('is-id-derived')) throw new Error('chip 应有 is-id-derived class');
+  if (idDerived.localAuthor !== null) throw new Error(`清名后 localStorage 应为 null, 实际 "${idDerived.localAuthor}"`);
+
+  // 场景 2: setAuthor('Tony') → chip 应显示 'Tony' + 移除 is-id-derived
+  const setReal = await page.evaluate(() => {
+    window.__mdAnnotator.setAuthor('Tony');
+    const chip = document.querySelector('#author-chip');
+    return {
+      chipName: chip?.querySelector('#author-chip-name')?.textContent,
+      chipClasses: chip?.className,
+      localAuthor: localStorage.getItem('Mentor:author'),
+    };
+  });
+  console.log('  ✓ setAuthor("Tony") 后 chip:', setReal.chipName);
+  console.log('  ✓ chip class:', setReal.chipClasses);
+  console.log('  ✓ localStorage Mentor:author:', setReal.localAuthor);
+  if (setReal.chipName !== 'Tony') throw new Error(`chip 应显示 "Tony", 实际 "${setReal.chipName}"`);
+  if (setReal.chipClasses.includes('is-id-derived')) throw new Error('设名后应移除 is-id-derived');
+  if (setReal.chipClasses.includes('is-anonymous')) throw new Error('设名后应移除 is-anonymous');
+  if (setReal.localAuthor !== 'Tony') throw new Error(`localStorage 应为 "Tony", 实际 "${setReal.localAuthor}"`);
+
+  // 场景 3: setAuthor('') → chip 应回到 authorId 派生 (不再写"匿名"到 localStorage)
+  const clear = await page.evaluate(() => {
+    window.__mdAnnotator.setAuthor('');
+    const chip = document.querySelector('#author-chip');
+    return {
+      chipName: chip?.querySelector('#author-chip-name')?.textContent,
+      chipClasses: chip?.className,
+      localAuthor: localStorage.getItem('Mentor:author'),
+      stateAuthor: window.__mdAnnotator.State.author,
+    };
+  });
+  console.log('  ✓ setAuthor("") 后 chip:', clear.chipName);
+  console.log('  ✓ chip class:', clear.chipClasses);
+  console.log('  ✓ localStorage Mentor:author:', clear.localAuthor);
+  console.log('  ✓ State.author:', JSON.stringify(clear.stateAuthor));
+  if (clear.chipName !== 'c2f97973') throw new Error(`清名后应回到 "c2f97973", 实际 "${clear.chipName}"`);
+  if (clear.localAuthor !== null) throw new Error(`清名后 localStorage 应被删除, 实际 "${clear.localAuthor}"`);
+  if (clear.stateAuthor !== '') throw new Error(`清名后 State.author 应为空, 实际 "${clear.stateAuthor}"`);
+  if (!clear.chipClasses.includes('is-id-derived')) throw new Error('清名后应重新有 is-id-derived class');
+
+  // 场景 4: setAuthor('匿名') (用户显式输入) → 仍生效, 显示"匿名"
+  const explicitAnon = await page.evaluate(() => {
+    window.__mdAnnotator.setAuthor('匿名');
+    const chip = document.querySelector('#author-chip');
+    return {
+      chipName: chip?.querySelector('#author-chip-name')?.textContent,
+      localAuthor: localStorage.getItem('Mentor:author'),
+    };
+  });
+  console.log('  ✓ setAuthor("匿名") 后 chip:', explicitAnon.chipName);
+  if (explicitAnon.chipName !== '匿名') throw new Error(`用户显式输"匿名"应生效, 实际 "${explicitAnon.chipName}"`);
+
+  // 恢复测试用 author (其他后续测试可能依赖)
+  await page.evaluate(() => {
+    window.__mdAnnotator.setAuthor('测试作者');
+  });
+
   await browser.close();
   console.log('\n========================================');
-  console.log('✓ 全部 73 个测试通过！');
+  console.log('✓ 全部 74 个测试通过！');
   console.log('========================================');
 })().catch(async err => {
   console.error('\n✗ 测试失败:', err.message);
