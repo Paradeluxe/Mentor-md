@@ -1384,60 +1384,66 @@ function renderCommentList() {
     const replies = (thread.comments || []).slice(1);
     const isActive = State.activeThreadId === thread.threadId;
     const isPinnedThread = pinnedThread && thread.threadId === pinnedThread.threadId;
+    // P-card: 解决后默认折叠 (Word 风格), 只显示 quote + meta 一行. 通过 collapsed class 控制.
+    // 仍可点击展开 (与原 comment-quote 点击区合并).
+    const isCollapsed = thread.resolved;
     return `
-      <div class="comment-thread ${isActive ? 'is-active' : ''} ${thread.resolved ? 'is-resolved' : ''} ${isPinnedThread ? 'is-pinned' : ''} ${thread.fuzzy ? 'is-fuzzy' : ''}" data-thread="${thread.threadId}">
+      <div class="comment-thread ${isActive ? 'is-active' : ''} ${thread.resolved ? 'is-resolved' : ''} ${isPinnedThread ? 'is-pinned' : ''} ${thread.fuzzy ? 'is-fuzzy' : ''} ${isCollapsed ? 'is-collapsed' : ''}" data-thread="${thread.threadId}">
         ${isPinnedThread ? '<div class="pinned-banner">📌 当前光标处 (filter 已隐藏)</div>' : ''}
         ${thread.fuzzy ? '<div class="fuzzy-banner">⚠ 位置可能偏移 - 请检查文档</div>' : ''}
+        <!-- 卡片头: 引文 (可点击跳转) + ⋯ 菜单按钮 -->
         <div class="comment-quote" data-act="goto" data-thread="${thread.threadId}" title="点击跳转到批注处">
           <span class="comment-quote-mark">"</span>
           <span class="comment-quote-text">${escapeHtml((thread.text || '').slice(0, 200))}${(thread.text || '').length > 200 ? '…' : ''}</span>
+          ${thread.resolved ? '<span class="comment-resolved-badge">✓ 已解决</span>' : ''}
+          <button class="comment-menu-btn" data-act="toggle-menu" data-thread="${thread.threadId}" title="更多操作" aria-label="更多操作">⋯</button>
         </div>
-        <div class="comment-item">
-          <div class="comment-meta">
-            <span class="comment-avatar" style="background:${avatarColor(authorName(first.author))}">${escapeHtml(avatar(authorName(first.author)))}</span>
-            <span class="comment-author">${escapeHtml(authorName(first.author))}</span>
-            <span class="comment-time">${formatTime(first.createdAt)}</span>
-          </div>
-          ${first.body ? `<div class="comment-body">${escapeHtml(first.body)}</div>` : `
-            <div class="comment-reply-form">
-              <textarea data-thread-input="${thread.threadId}" placeholder="输入批注内容..."></textarea>
-              <div class="form-actions">
-                <button data-act="submit-reply" data-thread="${thread.threadId}" class="primary">提交</button>
-              </div>
+        <!-- ⋯ 弹窗菜单 (默认 hidden) -->
+        <div class="comment-menu hidden" data-menu-for="${thread.threadId}">
+          <button data-act="goto" data-thread="${thread.threadId}">📍 跳转到批注处</button>
+          <button data-act="resolve" data-thread="${thread.threadId}">${thread.resolved ? '↺ 重新打开' : '✓ 标记为已解决'}</button>
+          <button data-act="copy" data-thread="${thread.threadId}">📋 复制引文</button>
+          <div class="menu-sep"></div>
+          <button data-act="delete" data-thread="${thread.threadId}" class="menu-danger">🗑 删除批注</button>
+        </div>
+        <!-- 卡片体: 默认收起 (解决后), active 时展开. 用 details 保留原生折叠能力 -->
+        <div class="comment-body-wrap">
+          <div class="comment-item">
+            <div class="comment-meta">
+              <span class="comment-avatar" style="background:${avatarColor(authorName(first.author))}">${escapeHtml(avatar(authorName(first.author)))}</span>
+              <span class="comment-author">${escapeHtml(authorName(first.author))}</span>
+              <span class="comment-time" title="${escapeHtml(first.createdAt || '')}">${formatTime(first.createdAt)}</span>
             </div>
-          `}
-          ${replies.map(r => `
-            <div class="comment-reply">
-              <div class="comment-meta">
-                <span class="comment-avatar" style="background:${avatarColor(authorName(r.author))}">${escapeHtml(avatar(authorName(r.author)))}</span>
-                <span class="comment-author">${escapeHtml(authorName(r.author))}</span>
-                <span class="comment-time">${formatTime(r.createdAt)}</span>
-              </div>
-              <div class="comment-body">${escapeHtml(r.body)}</div>
-            </div>
-          `).join('')}
-          ${first.body ? `
-            <details class="reply-toggle">
-              <summary>↳ 回复</summary>
+            ${first.body ? `<div class="comment-body">${escapeHtml(first.body)}</div>` : `
               <div class="comment-reply-form">
-                <textarea data-thread-input="${thread.threadId}" placeholder="输入回复..."></textarea>
+                <textarea data-thread-input="${thread.threadId}" placeholder="输入批注内容..."></textarea>
                 <div class="form-actions">
                   <button data-act="submit-reply" data-thread="${thread.threadId}" class="primary">提交</button>
                 </div>
               </div>
-            </details>
-            <div class="comment-actions">
-              <button data-act="goto" data-thread="${thread.threadId}" title="跳转到批注处">📍 跳转</button>
-              <button data-act="resolve" data-thread="${thread.threadId}" class="resolve-action" title="${thread.resolved ? '重新打开批注' : '解决批注'}">${thread.resolved ? '↺ 重新打开' : '✓ 解决'}</button>
-              <span class="spacer"></span>
-              <button data-act="delete" data-thread="${thread.threadId}" class="danger" title="删除批注">🗑</button>
-            </div>
-          ` : `
-            <div class="comment-actions">
-              <button data-act="goto" data-thread="${thread.threadId}" title="跳转到批注处">📍 跳转</button>
-              <button data-act="delete" data-thread="${thread.threadId}" class="danger" title="放弃此批注">放弃</button>
-            </div>
-          `}
+            `}
+            ${replies.map(r => `
+              <div class="comment-reply">
+                <div class="comment-meta">
+                  <span class="comment-avatar" style="background:${avatarColor(authorName(r.author))}">${escapeHtml(avatar(authorName(r.author)))}</span>
+                  <span class="comment-author">${escapeHtml(authorName(r.author))}</span>
+                  <span class="comment-time" title="${escapeHtml(r.createdAt || '')}">${formatTime(r.createdAt)}</span>
+                </div>
+                <div class="comment-body">${escapeHtml(r.body)}</div>
+              </div>
+            `).join('')}
+            ${first.body ? `
+              <details class="reply-toggle" ${isActive ? 'open' : ''}>
+                <summary>↳ 回复</summary>
+                <div class="comment-reply-form">
+                  <textarea data-thread-input="${thread.threadId}" placeholder="输入回复..."></textarea>
+                  <div class="form-actions">
+                    <button data-act="submit-reply" data-thread="${thread.threadId}" class="primary">提交</button>
+                  </div>
+                </div>
+              </details>
+            ` : ''}
+          </div>
         </div>
       </div>
     `;
@@ -1457,24 +1463,96 @@ function renderCommentList() {
     });
   });
   list.querySelectorAll('[data-act="goto"]').forEach(btn => {
-    btn.addEventListener('click', () => scrollToThread(btn.dataset.thread));
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      scrollToThread(btn.dataset.thread);
+      closeAllCommentMenus();
+    });
   });
   list.querySelectorAll('[data-act="resolve"]').forEach(btn => {
-    btn.addEventListener('click', () => toggleResolved(btn.dataset.thread));
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      toggleResolved(btn.dataset.thread);
+      closeAllCommentMenus();
+    });
   });
   list.querySelectorAll('[data-act="delete"]').forEach(btn => {
-    btn.addEventListener('click', () => deleteThread(btn.dataset.thread));
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      deleteThread(btn.dataset.thread);
+      closeAllCommentMenus();
+    });
   });
-  // 点击 thread 高亮对应 mark
+  // P-card: 复制引文 → 用 navigator.clipboard
+  list.querySelectorAll('[data-act="copy"]').forEach(btn => {
+    btn.addEventListener('click', async e => {
+      e.stopPropagation();
+      const tid = btn.dataset.thread;
+      const thread = State.annotations.find(t => t.threadId === tid);
+      if (!thread) return;
+      const text = thread.text || '';
+      try {
+        await navigator.clipboard.writeText(text);
+        showToast('已复制引文到剪贴板', 1500);
+      } catch (err) {
+        // Fallback: 临时 textarea + execCommand
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        document.body.appendChild(ta);
+        ta.select();
+        try { document.execCommand('copy'); showToast('已复制引文', 1500); }
+        catch { showToast('复制失败, 请手动选中', 2000); }
+        document.body.removeChild(ta);
+      }
+      closeAllCommentMenus();
+    });
+  });
+  // P-card: ⋯ 按钮 → 切换菜单显示 (同卡片的菜单互斥, 跨卡片也互斥)
+  list.querySelectorAll('[data-act="toggle-menu"]').forEach(btn => {
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      const tid = btn.dataset.thread;
+      const menu = list.querySelector(`[data-menu-for="${tid}"]`);
+      if (!menu) return;
+      const isOpen = !menu.classList.contains('hidden');
+      // 关掉所有其他菜单
+      list.querySelectorAll('.comment-menu:not(.hidden)').forEach(m => {
+        if (m !== menu) m.classList.add('hidden');
+      });
+      // 切换当前
+      if (isOpen) menu.classList.add('hidden');
+      else menu.classList.remove('hidden');
+    });
+  });
+  // P-card: 解决后卡片可点击展开/折叠 (Word 风格)
   list.querySelectorAll('.comment-thread').forEach(el => {
     el.addEventListener('click', e => {
-      if (e.target.closest('button') || e.target.closest('textarea') || e.target.closest('details')) return;
+      // 交互区 (按钮/textarea/details summary) 不触发
+      if (e.target.closest('button') || e.target.closest('textarea') || e.target.closest('details summary')) return;
+      // 解决后的卡片: 第一次点击展开, 之后 (active) 跳转
+      if (el.classList.contains('is-resolved') && el.classList.contains('is-collapsed')) {
+        el.classList.remove('is-collapsed');
+        return;
+      }
+      // 正常卡片: 点击 → 跳转到批注处 (Word 风格: 整张卡片可点跳转)
       State.activeThreadId = el.dataset.thread;
       highlightActiveMark();
+      scrollToThread(el.dataset.thread);
       renderCommentList();
     });
   });
 }
+
+// P-card: 关闭所有 ⋯ 菜单
+function closeAllCommentMenus() {
+  document.querySelectorAll('.comment-menu:not(.hidden)').forEach(m => m.classList.add('hidden'));
+}
+// P-card: 全局 mousedown 检测 — 点 ⋯ 菜单外关菜单 (用 mousedown 跟其它 popover 行为一致)
+document.addEventListener('mousedown', e => {
+  if (!e.target.closest('.comment-menu') && !e.target.closest('[data-act="toggle-menu"]')) {
+    closeAllCommentMenus();
+  }
+});
 
 function scrollToThread(threadId) {
   const thread = State.annotations.find(t => t.threadId === threadId);

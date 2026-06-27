@@ -1057,13 +1057,15 @@ code {
 .comment-thread {
   background: var(--panel);
   border: none;
+  border-left: 3px solid var(--comment-bg, #d4a017);  /* P-card: 暖黄左 border (DESIGN.md) */
   border-radius: var(--rounded-md, 6px);
-  border-left: 3px solid var(--comment-bg);
-  margin-bottom: var(--spacing-md, 12px);
+  margin: 0 0 10px 0;
   padding: 0;
-  overflow: hidden;
+  position: relative;
+  overflow: visible;  /* P-card: 让 ⋯ 菜单弹窗不被 clip */
   transition: border-left-color 0.15s ease;
   box-shadow: 0 0 0 1px var(--border-warm);
+  cursor: pointer;  /* P-card: 整张卡片可点击跳转 (Word 风格) */
 }
 .comment-thread:hover {
   border-left-color: var(--highlight);
@@ -1138,6 +1140,7 @@ code {
 }
 .comment-quote-text {
   flex: 1;
+  min-width: 0;  /* P-card: 跟 badge + menu-btn 一起 flex 布局, 文字需要 shrink */
   font-size: var(--font-sm, 12.5px);
   color: var(--text-2);
   line-height: 1.45;
@@ -1150,6 +1153,135 @@ code {
   -webkit-box-orient: vertical;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* P-card: ⋯ 菜单按钮 (右上角, hover 才显) */
+.comment-menu-btn {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  border: none;
+  background: transparent;
+  color: var(--text-3);
+  font-size: 16px;
+  line-height: 1;
+  font-weight: 600;
+  cursor: pointer;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin: -2px 0 0 0;
+  opacity: 0;
+  transition: opacity 0.12s, background 0.12s, color 0.12s;
+  flex-shrink: 0;
+  user-select: none;
+}
+.comment-thread:hover .comment-menu-btn,
+.comment-menu-btn:focus-visible {
+  opacity: 1;
+}
+/* 已激活的卡片: 始终显示 ⋯ 按钮 (用户正在操作这张) */
+.comment-thread.is-active .comment-menu-btn {
+  opacity: 1;
+}
+.comment-menu-btn:hover {
+  background: var(--panel-3);
+  color: var(--text);
+}
+
+/* P-card: ⋯ 弹窗菜单 (绝对定位, 浮在卡片右上角) */
+.comment-menu {
+  position: absolute;
+  top: 36px;
+  right: 8px;
+  z-index: 50;
+  min-width: 180px;
+  background: var(--panel);
+  border-radius: 6px;
+  box-shadow: 0 0 0 1px var(--border-warm-medium), 0 8px 24px rgba(0, 0, 0, 0.12), 0 2px 6px rgba(0, 0, 0, 0.06);
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  font-size: 12.5px;
+}
+.comment-menu.hidden { display: none !important; }
+.comment-menu button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 10px;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: background 0.1s;
+  line-height: 1.3;
+}
+.comment-menu button:hover {
+  background: var(--panel-2);
+}
+.comment-menu button.menu-danger {
+  color: var(--danger);
+}
+.comment-menu button.menu-danger:hover {
+  background: rgba(207, 45, 86, 0.08);
+}
+.comment-menu .menu-sep {
+  height: 1px;
+  background: var(--border-warm);
+  margin: 3px 4px;
+}
+
+/* P-card: 解决后卡片折叠 (Word 风格) — 只显示 header, body-wrap 隐藏 */
+.comment-thread.is-collapsed .comment-body-wrap {
+  display: none;
+}
+/* 折叠卡片: hover 显示提示 (可点击展开) */
+.comment-thread.is-collapsed .comment-quote::after {
+  content: "点击展开";
+  position: absolute;
+  right: 38px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 10.5px;
+  color: var(--text-3);
+  opacity: 0;
+  transition: opacity 0.15s;
+  pointer-events: none;
+  font-weight: 500;
+}
+.comment-thread.is-collapsed:hover .comment-quote::after {
+  opacity: 0.7;
+}
+
+/* P-card: 已解决徽章 (在 quote 行内, 折叠时也可见)
+   颜色用 #1f8a65 绿色 (--resolved 是灰色用于 mark/fade, 不能复用) */
+.comment-resolved-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: #1f8a65;  /* 绿色文字 — 显式不用 var(--resolved) 那个灰色 */
+  background: rgba(31, 138, 101, 0.1);
+  padding: 2px 7px;
+  border-radius: 999px;
+  margin: 0 6px 0 0;
+  letter-spacing: 0.02em;
+  line-height: 1.3;
+  flex-shrink: 0;
+  user-select: none;
+}
+/* 折叠时也保持徽章可见 (跟 quote-text 同一行) */
+.comment-thread.is-collapsed .comment-resolved-badge {
+  margin-left: 0;
 }
 
 /* Comment item (single comment in thread) */

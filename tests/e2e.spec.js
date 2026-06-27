@@ -781,8 +781,10 @@ const SAMPLE_ANN = JSON.parse(fs.readFileSync(path.join(ROOT, 'test-data/sample.
   if (marksBefore !== 1) throw new Error('创建批注后 mark 不在 doc 中');
   // 接受 confirm 对话框（once）
   page.once('dialog', d => d.accept());
-  // 删除批注
-  await page.locator('.comment-thread button[data-act="delete"]').first().click();
+  // P-card: 删除批注需要先打开 ⋯ 菜单 (新版 word 风格)
+  await page.locator('.comment-thread button[data-act="toggle-menu"]').first().click();
+  await page.waitForTimeout(100);
+  await page.locator('.comment-menu button[data-act="delete"]').first().click();
   await page.waitForTimeout(200);
   const marksAfter = await page.evaluate(() => {
     let count = 0;
@@ -1801,9 +1803,179 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
   if (final.marks !== 1) throw new Error(`重开应恢复 1 mark, 实际 ${final.marks}`);
   if (final.markText !== '第一段用于测重开.') throw new Error(`mark 文本错: "${final.markText}"`);
 
+  // === TEST 77: 批注卡片 Word 风格化 (P-card) ===
+  console.log('\n=== TEST 77: 批注卡片 Word 风格化 (P-card) ===');
+  // 用 sample.md + sidecar (2 个批注)
+  const fs = require('fs');
+  const sampleMd = fs.readFileSync('/mnt/e/hermes_playground/Mentor/test-data/sample.md', 'utf-8');
+  const sampleSidecar = JSON.parse(fs.readFileSync('/mnt/e/hermes_playground/Mentor/test-data/sample.md.annotations.json', 'utf-8'));
+  await page.evaluate((args) => window.__mdAnnotator.loadMarkdownIntoEditor('sample.md', args.md, args.sidecar), { md: sampleMd, sidecar: sampleSidecar });
+  await page.waitForTimeout(500);
+
+  // 场景 1: ⋯ 菜单按钮存在 + 默认 opacity:0 (hover 才显)
+  const menuBtnState = await page.evaluate(() => {
+    const btn = document.querySelector('.comment-thread .comment-menu-btn');
+    if (!btn) return { ok: false, reason: '⋯ 按钮不存在' };
+    const cs = getComputedStyle(btn);
+    return { ok: true, opacity: cs.opacity, dataset: { act: btn.dataset.act, thread: btn.dataset.thread } };
+  });
+  console.log('  ✓ ⋯ 按钮存在:', menuBtnState.ok);
+  console.log('  ✓ ⋯ 按钮 opacity:', menuBtnState.opacity, '(默认 0)');
+  if (!menuBtnState.ok) throw new Error(menuBtnState.reason);
+  if (parseFloat(menuBtnState.opacity) > 0.1) throw new Error('⋯ 按钮默认应隐藏 (opacity=0)');
+
+  // 场景 2: hover 卡片 → ⋯ 按钮 opacity:1
+  const card = await page.locator('.comment-thread').first();
+  await card.hover();
+  await page.waitForTimeout(200);
+  const menuBtnOnHover = await page.evaluate(() => {
+    const btn = document.querySelector('.comment-thread:hover .comment-menu-btn') ||
+                document.querySelector('.comment-thread .comment-menu-btn');
+    return getComputedStyle(btn).opacity;
+  });
+  console.log('  ✓ hover 卡片后 ⋯ 按钮 opacity:', menuBtnOnHover, '(预期 1)');
+  if (parseFloat(menuBtnOnHover) < 0.9) throw new Error('hover 后 ⋯ 按钮应可见');
+
+  // 场景 3: 点击 ⋯ → 菜单显示
+  await page.locator('.comment-thread .comment-menu-btn').first().click();
+  await page.waitForTimeout(200);
+  const menuOpen = await page.evaluate(() => {
+    const menus = document.querySelectorAll('.comment-menu');
+    const visible = Array.from(menus).filter(m => !m.classList.contains('hidden'));
+    return { total: menus.length, visible: visible.length, firstVisibleText: visible[0]?.textContent?.slice(0, 80) };
+  });
+  console.log('  ✓ 菜单总数:', menuOpen.total, '(预期 ≥ 1)');
+  console.log('  ✓ 显示菜单数:', menuOpen.visible, '(预期 1)');
+  console.log('  ✓ 显示菜单内容前 80:', menuOpen.firstVisibleText);
+  if (menuOpen.visible !== 1) throw new Error('点 ⋯ 后应有 1 个菜单显示');
+
+  // 场景 4: 菜单有 4 个按钮: goto / resolve / copy / delete
+  const menuItems = await page.evaluate(() => {
+    const visibleMenu = document.querySelector('.comment-menu:not(.hidden)');
+    if (!visibleMenu) return [];
+    return Array.from(visibleMenu.querySelectorAll('button')).map(b => b.dataset.act);
+  });
+  console.log('  ✓ 菜单项:', menuItems);
+  const expectedActs = ['goto', 'resolve', 'copy', 'delete'];
+  if (JSON.stringify(menuItems) !== JSON.stringify(expectedActs)) throw new Error(`菜单项错: ${menuItems.join(',')}`);
+
+  // 场景 5: 点空白 → 菜单关闭
+  await page.mouse.click(700, 400);  // 点击中间空白
+  await page.waitForTimeout(200);
+  const menuAfterOutside = await page.evaluate(() => {
+    const visible = document.querySelectorAll('.comment-menu:not(.hidden)');
+    return visible.length;
+  });
+  console.log('  ✓ 点外部后菜单显示数:', menuAfterOutside, '(预期 0)');
+  if (menuAfterOutside !== 0) throw new Error('点外部菜单应关闭');
+
+  // 场景 6: 卡片整体可点击跳转 (Word 风格) — 点击卡片 meta 区
+  // sample 文档第 1 个 thread 是 unresolved (TEST 6 显示的) → 用它
+  const beforeGoto = await page.evaluate(() => {
+    const editor = window.__mdAnnotator.State.editor;
+    return {
+      activeThreadId: window.__mdAnnotator.State.activeThreadId,
+      sel: { from: editor.state.selection.from, to: editor.state.selection.to },
+    };
+  });
+  console.log('  ✓ 点击前 activeThreadId:', beforeGoto.activeThreadId?.slice(0, 8) || 'null');
+  // 点击第一个 thread 的引文区 (.comment-quote, 整张卡片任意非交互区都触发跳转)
+  await page.locator('.comment-thread').first().locator('.comment-quote-text').click();
+  await page.waitForTimeout(300);
+  const afterGoto = await page.evaluate(() => ({
+    activeThreadId: window.__mdAnnotator.State.activeThreadId,
+    selection: {
+      from: window.__mdAnnotator.State.editor.state.selection.from,
+      to: window.__mdAnnotator.State.editor.state.selection.to,
+    },
+  }));
+  console.log('  ✓ 点击卡片后 activeThreadId:', afterGoto.activeThreadId?.slice(0, 8));
+  console.log('  ✓ 点击后 selection from:', afterGoto.selection.from);
+  if (!afterGoto.activeThreadId) throw new Error('点卡片后 activeThreadId 应被设置');
+  if (afterGoto.selection.from === beforeGoto.sel.from) {
+    console.log('  ⚠ selection 没变 (可能 selectionUpdate 还没触发, 但 activeThreadId 变了算 OK)');
+  }
+
+  // 场景 7: 解决后卡片默认折叠 (is-collapsed) — body-wrap 隐藏
+  // 先勾 filter-resolved 看到 resolved 卡片 (TEST 6 默认只显示 unresolved)
+  await page.evaluate(() => {
+    document.querySelector('#filter-resolved').checked = true;
+    document.querySelector('#filter-resolved').dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  await page.waitForTimeout(200);
+  // 触发 resolve 走 ⋯ 菜单
+  const firstThread = await page.evaluate(() => {
+    const cards = document.querySelectorAll('.comment-thread');
+    return Array.from(cards).map(c => ({
+      threadId: c.dataset.thread,
+      isCollapsed: c.classList.contains('is-collapsed'),
+      isResolved: c.classList.contains('is-resolved'),
+      hasMenuBtn: !!c.querySelector('.comment-menu-btn'),
+      hasMenu: !!c.querySelector('.comment-menu'),
+    }));
+  });
+  console.log('  ✓ 卡片状态 (激活 filter 后):', JSON.stringify(firstThread));
+  // 应有 2 张卡: 1 个未解决 (filterOpen 已勾), 1 个已解决 (filterResolved 已勾)
+  if (firstThread.length !== 2) throw new Error(`激活 filter 后应 2 张卡, 实际 ${firstThread.length}`);
+  const resolvedCard = firstThread.find(c => c.isResolved);
+  const unresolvedCard = firstThread.find(c => !c.isResolved);
+  if (!resolvedCard) throw new Error('filter 后应能看到 resolved 卡片');
+  if (!unresolvedCard) throw new Error('filter 后应能看到 unresolved 卡片');
+  // resolved 卡片应自动 is-collapsed (Word 风格)
+  if (!resolvedCard.isCollapsed) throw new Error('resolved 卡片应默认折叠 (is-collapsed)');
+  if (unresolvedCard.isCollapsed) throw new Error('unresolved 卡片不应折叠');
+
+  // 场景 8: 点击折叠的卡片 → 展开 (Word 风格)
+  const resolvedThreadId = resolvedCard.threadId;
+  await page.evaluate((tid) => {
+    const card = document.querySelector(`.comment-thread[data-thread="${tid}"]`);
+    card.click();
+  }, resolvedThreadId);
+  await page.waitForTimeout(200);
+  const afterExpand = await page.evaluate((tid) => {
+    const card = document.querySelector(`.comment-thread[data-thread="${tid}"]`);
+    return {
+      isCollapsed: card.classList.contains('is-collapsed'),
+      bodyDisplay: getComputedStyle(card.querySelector('.comment-body-wrap')).display,
+    };
+  }, resolvedThreadId);
+  console.log('  ✓ 点折叠卡片后:', JSON.stringify(afterExpand));
+  if (afterExpand.isCollapsed) throw new Error('点折叠卡片应展开');
+  if (afterExpand.bodyDisplay === 'none') throw new Error('展开后 body-wrap 应可见');
+
+  // 场景 9: 解决一个未解决卡片 → 它应自动折叠 + 徽章出现在 quote 行 (P-card: 徽章在 quote 而非 body)
+  await page.locator(`.comment-thread[data-thread="${unresolvedCard.threadId}"]`).hover();
+  await page.locator(`.comment-thread[data-thread="${unresolvedCard.threadId}"] .comment-menu-btn`).click();
+  await page.waitForTimeout(150);
+  page.once('dialog', d => d.accept());
+  await page.locator('.comment-menu:not(.hidden) button[data-act="resolve"]').click();
+  await page.waitForTimeout(300);
+  const afterResolve = await page.evaluate((tid) => {
+    const card = document.querySelector(`.comment-thread[data-thread="${tid}"]`);
+    const badge = card.querySelector('.comment-resolved-badge');
+    const badgeInQuote = !!card.querySelector('.comment-quote .comment-resolved-badge');
+    const badgeInBody = !!card.querySelector('.comment-body-wrap .comment-resolved-badge');
+    return {
+      isCollapsed: card.classList.contains('is-collapsed'),
+      isResolved: card.classList.contains('is-resolved'),
+      hasBadge: !!badge,
+      badgeInQuote,
+      badgeInBody,
+      badgeText: badge?.textContent,
+      bodyDisplay: getComputedStyle(card.querySelector('.comment-body-wrap')).display,
+    };
+  }, unresolvedCard.threadId);
+  console.log('  ✓ 解决后:', JSON.stringify(afterResolve));
+  if (!afterResolve.isResolved) throw new Error('点 resolve 后应标 resolved');
+  if (!afterResolve.isCollapsed) throw new Error('解决后卡片应自动折叠');
+  if (!afterResolve.hasBadge) throw new Error('应有 ✓ 已解决 徽章');
+  if (!afterResolve.badgeInQuote) throw new Error('徽章应在 quote 行 (折叠时也可见)');
+  if (afterResolve.badgeInBody) throw new Error('徽章不应在 body-wrap 内 (会被折叠隐藏)');
+  if (afterResolve.bodyDisplay !== 'none') throw new Error('折叠后 body-wrap 应 display:none');
+
   await browser.close();
   console.log('\n========================================');
-  console.log('✓ 全部 76 个测试通过！');
+  console.log('✓ 全部 77 个测试通过！');
   console.log('========================================');
 })().catch(async err => {
   console.error('\n✗ 测试失败:', err.message);
