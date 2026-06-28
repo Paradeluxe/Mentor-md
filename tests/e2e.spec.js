@@ -2563,9 +2563,87 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
   if (silentFail.marksInDoc !== 0) throw new Error(`silent fail: mark 应消失, 实际 ${silentFail.marksInDoc}`);
   if (silentFail.fuzzyBanner < 1) throw new Error('silent fail: 应显示 fuzzy banner 提醒用户');
 
+  // === TEST 88: 删 mark 内文字 → mark 失效, ann 标 fuzzy (silent fail 修复) ===
+  console.log('\n=== TEST 88: 删 mark 内文字 → ann 标 fuzzy ===');
+  await page.evaluate((m) => window.__mdAnnotator.loadMarkdownIntoEditor('del-mark.md', m, null), 'dm 段一.');
+  await page.waitForTimeout(300);
+  await page.evaluate(() => {
+    const editor = window.__mdAnnotator.State.editor;
+    editor.commands.focus(3);
+    editor.commands.setTextSelection({ from: 3, to: 5 });
+  });
+  await page.waitForTimeout(200);
+  await page.locator('#float-comment-btn button').click();
+  await page.waitForTimeout(300);
+  await page.evaluate(() => {
+    const ta = document.querySelector('[data-thread-input]');
+    ta.value = 'dm body';
+    document.querySelector('button[data-act="submit-reply"]').click();
+  });
+  await page.waitForTimeout(300);
+  // 选 mark 内文字 + 删
+  await page.evaluate(() => {
+    const editor = window.__mdAnnotator.State.editor;
+    editor.commands.setTextSelection({ from: 3, to: 5 });
+    editor.commands.deleteSelection();
+  });
+  await page.waitForTimeout(500);
+  const delState = await page.evaluate(() => {
+    const ann = window.__mdAnnotator.State.annotations[0];
+    return {
+      fuzzy: ann?.fuzzy,
+      invalid: ann?.invalid,
+      invalidReason: ann?.invalidReason,
+      marksInDoc: document.querySelectorAll('.annotation-mark').length,
+    };
+  });
+  console.log('  删 mark 内文字后:', JSON.stringify(delState), '(fuzzy=true, invalid=true)');
+  if (!delState.fuzzy || !delState.invalid) throw new Error('删 mark 内文字: ann 应标 fuzzy=true, invalid=true');
+  if (delState.marksInDoc !== 0) throw new Error(`mark 应消失, 实际 ${delState.marksInDoc}`);
+
+  // === TEST 89: Ctrl+Z 撤销 addMark → ann 标 fuzzy (silent fail 修复) ===
+  console.log('\n=== TEST 89: Ctrl+Z 撤销 mark → ann 标 fuzzy ===');
+  await page.evaluate((m) => window.__mdAnnotator.loadMarkdownIntoEditor('undo-mark.md', m, null), 'um 段一.');
+  await page.waitForTimeout(300);
+  await page.evaluate(() => {
+    const editor = window.__mdAnnotator.State.editor;
+    editor.commands.focus(3);
+    editor.commands.setTextSelection({ from: 3, to: 5 });
+  });
+  await page.waitForTimeout(200);
+  await page.locator('#float-comment-btn button').click();
+  await page.waitForTimeout(300);
+  await page.evaluate(() => {
+    const ta = document.querySelector('[data-thread-input]');
+    ta.value = 'um body';
+    document.querySelector('button[data-act="submit-reply"]').click();
+  });
+  await page.waitForTimeout(300);
+  // focus editor + Ctrl+Z
+  await page.evaluate(() => {
+    const editor = window.__mdAnnotator.State.editor;
+    editor.view.focus();
+    editor.commands.focus('end');
+  });
+  await page.waitForTimeout(200);
+  await page.keyboard.press('Control+z');
+  await page.waitForTimeout(500);
+  const undoState = await page.evaluate(() => {
+    const ann = window.__mdAnnotator.State.annotations[0];
+    return {
+      fuzzy: ann?.fuzzy,
+      invalid: ann?.invalid,
+      invalidReason: ann?.invalidReason,
+      marksInDoc: document.querySelectorAll('.annotation-mark').length,
+    };
+  });
+  console.log('  Ctrl+Z 后:', JSON.stringify(undoState), '(fuzzy=true, invalid=true)');
+  if (!undoState.fuzzy || !undoState.invalid) throw new Error('Ctrl+Z: ann 应标 fuzzy=true, invalid=true');
+  if (undoState.marksInDoc !== 0) throw new Error(`mark 应消失, 实际 ${undoState.marksInDoc}`);
+
   await browser.close();
   console.log('\n========================================');
-  console.log('✓ 全部 87 个测试通过！');
+  console.log('✓ 全部 89 个测试通过！');
   console.log('========================================');
 })().catch(async err => {
   console.error('\n✗ 测试失败:', err.message);

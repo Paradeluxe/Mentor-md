@@ -717,6 +717,42 @@ function markDirty() {
   }
 }
 
+// P-mark-fix: 文档编辑后验证所有 ann 的 mark 位置
+// 防止: 删 mark 内文字 / Ctrl+Z 让 mark 消失但 ann.range stale → silent fail
+// 主动调 findAnnotationRange 重新定位, mark 不在 = 标 fuzzy/invalid
+function _validateMarksAfterEdit(editor) {
+  if (!State.annotations || State.annotations.length === 0) return;
+  const markType = editor.schema.marks.annotation;
+  let changed = false;
+  for (const ann of State.annotations) {
+    // 检查 ann 的 mark 实际是否在 doc 里 (按 threadId 精确匹配)
+    let markFound = false;
+    editor.state.doc.descendants((node, pos) => {
+      if (node.isText && node.marks.some(m => m.type === markType && m.attrs.threadId === ann.threadId)) {
+        markFound = true;
+        return false;
+      }
+    });
+    if (!markFound) {
+      // mark 不在 doc 里 → 标 fuzzy/invalid 提示用户
+      // 即使 findAnnotationRange 能找到 text, mark 也确实不在 (e.g. Ctrl+Z 撤销了 addMark)
+      if (!ann.fuzzy || !ann.invalid) {
+        ann.fuzzy = true;
+        ann.invalid = true;
+        ann.invalidReason = ann.invalidReason || 'mark-missing';
+        changed = true;
+      }
+    } else if (ann.invalid || ann.fuzzy) {
+      // mark 在 → 清除 invalid 标志
+      ann.fuzzy = false;
+      ann.invalid = false;
+      ann.invalidReason = undefined;
+      changed = true;
+    }
+  }
+  if (changed) renderCommentList();
+}
+
 // P-reload: debounce 500ms 写 IDB (markDirty 频繁触发, 不能每次都 await put)
 let _idbCacheWriteTimer = null;
 let _idbCacheWriting = false;
@@ -843,6 +879,10 @@ function initEditor() {
       renderCommentList();
       // 大纲同步
       renderOutline();
+      // P-mark-fix: 验证所有 ann 的 mark 位置仍然有效
+      // 删 mark 内文字 / Ctrl+Z 都会让 mark 消失但 ann 仍 stale
+      // 主动调 findAnnotationRange 重新定位, 标 fuzzy/invalid
+      _validateMarksAfterEdit(editor);
     },
     onSelectionUpdate: ({ editor }) => {
       handleSelectionChange();
@@ -2099,6 +2139,9 @@ function loadMarkdownIntoEditor(name, content, annotationsData = null) {
           positions.from, positions.to,
           State.editor.schema.marks.annotation.create({ threadId: ann.threadId, resolved: ann.resolved })
         );
+        // P-mark-fix: setMeta 避免 _validateMarksAfterEdit 清除 fuzzy 标记
+        // load path 一次性 addMark 多个 ann, onUpdate 触发会清 fuzzy
+        tr.setMeta('__activeMarkSync', true);
         State.editor.view.dispatch(tr);
       } else {
         // 找不到位置：保留批注数据但标失效
@@ -2219,8 +2262,6 @@ function findAnnotationRange(doc, annotation) {
     return r;
   };
   // === P0 精确 text 匹配 ===
-  // 直接在 segments 内部用 indexOf 找 (不依赖 joined offset 翻译)
-  // 优先第一个出现;有 prefix/suffix 时, 如果 text 多次出现, 用 prefix 辅助选最匹配的
   if (text) {
     const first = findInSegments(text);
     if (first) {
