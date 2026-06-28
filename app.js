@@ -722,6 +722,26 @@ let _idbCacheWriteTimer = null;
 let _idbCacheWriting = false;
 function scheduleIdbCacheWrite() {
   if (_idbCacheWriteTimer) clearTimeout(_idbCacheWriteTimer);
+  // P-reload: 立即把当前 sidecar 写一份到 cache (不让用户切文件后丢)
+  // 不等 debounce — 这样切文档前 cache 一定有当前 doc 的最新 sidecar
+  if (State.currentFile) {
+    const curSidecar = {
+      version: '1',
+      document: State.currentFile.name,
+      updatedAt: new Date().toISOString(),
+      author: { id: State.authorId, name: State.author },
+      annotations: State.annotations.map(t => ({
+        threadId: t.threadId,
+        text: t.text,
+        prefix: t.prefix || '',
+        suffix: t.suffix || '',
+        resolved: t.resolved || false,
+        createdAt: t.createdAt,
+        comments: t.comments,
+      })),
+    };
+    State.idbCache[State.currentFile.name] = { sidecar: curSidecar, updatedAt: Date.now() };
+  }
   _idbCacheWriteTimer = setTimeout(async () => {
     _idbCacheWriteTimer = null;
     if (_idbCacheWriting) return;  // 防并发
@@ -3754,7 +3774,15 @@ window.__mdAnnotator = {
   getEditorHTML: () => State.editor.getHTML(),
   // 当前用户身份 (id 永不变, name 可改)
   getCurrentUser: () => ({ id: State.authorId, name: State.author }),
-  listAnnotations: () => AnnotationStore.list(),
+  // P-reload: 同步列出所有 IDB 缓存 (返回 Object 不返回 Promise, 方便 console.log 检查)
+  listAnnotations() {
+    const out = {};
+    for (const name of Object.keys(State.idbCache || {})) {
+      // idbCache[name].sidecar.annotations (不是 .annotations)
+      out[name] = ((State.idbCache[name] || {}).sidecar?.annotations || []).map(a => a.threadId);
+    }
+    return out;
+  },
   // 兼容老 setAuthor: string 设 name; object {id, name} 设完整身份
   // P-name: 空字符串视为清空 (与 promptAuthor saveHandler 一致), 让 authorId 派生接管
   setAuthor: (arg) => {

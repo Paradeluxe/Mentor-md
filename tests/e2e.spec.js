@@ -2451,9 +2451,76 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
   console.log('  切源码+切回后:', JSON.stringify(yAfter));
   if (yAfter.marks !== 1) throw new Error(`切源码+切回后 mark 应仍 1 个, 实际 ${yAfter.marks} (Bug Y 未修复)`);
 
+  // === TEST 85: listAnnotations 同步返回 IDB 缓存 (P-reload) ===
+  console.log('\n=== TEST 85: listAnnotations 同步返回 ===');
+  await page.evaluate((m) => window.__mdAnnotator.loadMarkdownIntoEditor('list-test.md', m, null), 'l 段一.');
+  await page.waitForTimeout(300);
+  await page.evaluate(() => {
+    const editor = window.__mdAnnotator.State.editor;
+    editor.commands.focus(2);
+    editor.commands.setTextSelection({ from: 2, to: 4 });
+  });
+  await page.waitForTimeout(200);
+  await page.locator('#float-comment-btn button').click();
+  await page.waitForTimeout(300);
+  await page.evaluate(() => {
+    const ta = document.querySelector('[data-thread-input]');
+    ta.value = 'list body';
+    document.querySelector('button[data-act="submit-reply"]').click();
+  });
+  await page.waitForTimeout(800);  // 等 debounce 写 IDB
+  const listState = await page.evaluate(() => {
+    const result = window.__mdAnnotator.listAnnotations();
+    return { type: typeof result, isPromise: result instanceof Promise, keys: Object.keys(result), listTest: result['list-test.md'] };
+  });
+  console.log('  ✓ listAnnotations 类型:', listState.type, '(预期 object)');
+  console.log('  ✓ listAnnotations 不是 Promise:', !listState.isPromise);
+  console.log('  ✓ list-test.md threadIds:', JSON.stringify(listState.listTest), '(预期 1 个)');
+  if (listState.isPromise) throw new Error('listAnnotations 不应返回 Promise');
+  if (!Array.isArray(listState.listTest) || listState.listTest.length !== 1) {
+    throw new Error(`list-test.md 应有 1 个 threadId, 实际 ${JSON.stringify(listState.listTest)}`);
+  }
+
+  // === TEST 86: 切文档后切回 — mark 仍恢复 (Bug Π 修复) ===
+  console.log('\n=== TEST 86: 切文档后切回 mark 恢复 ===');
+  await page.evaluate((m) => window.__mdAnnotator.loadMarkdownIntoEditor('bug-pi-a.md', m, null), 'pi a 段一.');
+  await page.waitForTimeout(300);
+  await page.evaluate(() => {
+    const editor = window.__mdAnnotator.State.editor;
+    editor.commands.focus(4);
+    editor.commands.setTextSelection({ from: 4, to: 6 });
+  });
+  await page.waitForTimeout(200);
+  await page.locator('#float-comment-btn button').click();
+  await page.waitForTimeout(300);
+  await page.evaluate(() => {
+    const ta = document.querySelector('[data-thread-input]');
+    ta.value = 'pi a body';
+    document.querySelector('button[data-act="submit-reply"]').click();
+  });
+  await page.waitForTimeout(300);
+  // 切到其他文档
+  await page.evaluate((m) => window.__mdAnnotator.loadMarkdownIntoEditor('bug-pi-b.md', m, null), 'pi b 段一.');
+  await page.waitForTimeout(300);
+  // 切回 a.md (不带 sidecar, 应 fallback 到 idbCache)
+  await page.evaluate((m) => window.__mdAnnotator.loadMarkdownIntoEditor('bug-pi-a.md', m, null), 'pi a 段一.');
+  await page.waitForTimeout(800);  // 等 IDB 恢复
+  const piState = await page.evaluate(() => ({
+    annotations: window.__mdAnnotator.State.annotations.length,
+    marks: document.querySelectorAll('.annotation-mark').length,
+    body: window.__mdAnnotator.State.annotations[0]?.comments[0]?.body,
+  }));
+  console.log('  ✓ 切回 bug-pi-a.md:', JSON.stringify(piState), '(annotations=1, marks=1)');
+  if (piState.annotations !== 1 || piState.marks !== 1) {
+    throw new Error(`Bug Π: 切回 a.md 应有 1 个 mark, 实际 ${JSON.stringify(piState)}`);
+  }
+  if (piState.body !== 'pi a body') {
+    throw new Error(`Bug Π: body 应是 'pi a body', 实际 '${piState.body}'`);
+  }
+
   await browser.close();
   console.log('\n========================================');
-  console.log('✓ 全部 84 个测试通过！');
+  console.log('✓ 全部 86 个测试通过！');
   console.log('========================================');
 })().catch(async err => {
   console.error('\n✗ 测试失败:', err.message);
