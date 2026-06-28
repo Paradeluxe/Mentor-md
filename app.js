@@ -950,6 +950,17 @@ function handleSelectionChange() {
     highlightActiveMark();
     renderCommentList();
   }
+  // P-card: 同步 mark-delete-popover 状态 (selection 变化时 positionMarkDeletePopover 不一定被调)
+  // 选区非空 → 隐藏 popover (避免挡 #float-comment-btn)
+  // 选区空 + cursor 在 active mark 内 → 调用 positionMarkDeletePopover 重新定位并显示
+  const popover = $('#mark-delete-popover');
+  if (popover) {
+    if (!empty) {
+      if (!popover.classList.contains('hidden')) popover.classList.add('hidden');
+    } else if (State.activeThreadId) {
+      positionMarkDeletePopover();
+    }
+  }
 
   if (empty || from === to) {
     // CellSelection 不是 empty (覆盖多 cell), 不在这里 return
@@ -1378,6 +1389,9 @@ function deleteThread(threadId) {
   const editor = State.editor;
   const tr = editor.state.tr;
   const markType = editor.schema.marks.annotation;
+  // P-card: 记下原 selection 位置, 删除 mark 后强制 reset selection 让 handleSelectionChange 重跑
+  // 不然 mark 删了但 cursor 还在原位置 (selection 没变), handleSelectionChange 不触发, 按钮状态 stale
+  const oldSel = { from: editor.state.selection.from, to: editor.state.selection.to };
   editor.state.doc.descendants((node, pos) => {
     node.marks.forEach(m => {
       if (m.type === markType && m.attrs.threadId === threadId) {
@@ -1393,6 +1407,14 @@ function deleteThread(threadId) {
   renderCommentList();
   // 同步 mark-delete popover 隐藏
   positionMarkDeletePopover();
+  // P-card: 强制重设 selection (从 pos-1 → pos) 让 onSelectionUpdate 触发
+  // 即使 oldSel.from === 1 也要触发 (用先到 doc 末尾再回来)
+  try {
+    const size = editor.state.doc.content.size;
+    editor.commands.setTextSelection(0);
+    editor.commands.setTextSelection(size);
+    editor.commands.setTextSelection({ from: oldSel.from, to: oldSel.to });
+  } catch (e) { /* ignore */ }
   // AI 协作协议：通知
   emitAI('threadChange', { threadId, change: 'delete' });
 }
@@ -1719,6 +1741,13 @@ function positionMarkDeletePopover() {
     popover.classList.add('hidden');
     return;
   }
+  // P-card: 选区非空 (用户想新建批注) → 隐藏 mark-delete-popover, 避免遮挡 #float-comment-btn
+  // 选区为空 (cursor 只在 mark 上, 想删/跳转) → 显示 mark-delete-popover
+  const sel = State.editor?.state?.selection;
+  if (sel && !sel.empty) {
+    popover.classList.add('hidden');
+    return;
+  }
   // 找到 mark 的位置
   const editor = State.editor;
   let pos = null;
@@ -1823,10 +1852,40 @@ function setRenderMode(mode) {
     let savedText = null;
     if (sourceEl) {
       const md = sourceEl.innerText;
+      // P-mark: 保留所有 mark 位置信息 (text + threadId + resolved), setContent 后重新应用
+      // 不然切换源码再切回, 所有 mark 丢失 (Bug Y)
+      const markSnapshots = [];
+      const editor = State.editor;
+      editor.state.doc.descendants((node, pos) => {
+        node.marks.forEach(m => {
+          if (m.type === editor.schema.marks.annotation) {
+            markSnapshots.push({ threadId: m.attrs.threadId, resolved: m.attrs.resolved, text: node.text, from: pos });
+          }
+        });
+      });
       const html = markdownToHtml(md);
       // P-sel: 记下 saved text 准备恢复 (setContent 会清空 PM doc)
       savedText = State.savedSelection?.text || null;
       State.editor.commands.setContent(html, false);
+      // P-mark: setContent 后重新应用 annotation mark
+      // 用 text + findTextInDoc 定位, 标 fuzzy (内容可能略变)
+      if (markSnapshots.length > 0) {
+        const tr = editor.state.tr;
+        const markType = editor.schema.marks.annotation;
+        for (const snap of markSnapshots) {
+          if (!snap.text) continue;
+          const found = findTextInDoc(editor.state.doc, snap.text);
+          if (found) {
+            tr.addMark(found.from, found.from + snap.text.length, markType.create({
+              threadId: snap.threadId,
+              resolved: snap.resolved,
+              active: false,
+            }));
+          }
+        }
+        tr.setMeta('__activeMarkSync', true);  // 不标 dirty
+        editor.view.dispatch(tr);
+      }
       sourceEl.style.display = 'none';
     }
     tiptapEl.style.display = '';
@@ -1981,9 +2040,13 @@ function loadMarkdownIntoEditor(name, content, annotationsData = null) {
       schemaReport.warnings.forEach(w => showToast(`⚠ 侧车数据警告: ${w}`, 5000));
       console.warn('[P0-B] 侧车验证:', schemaReport);
     }
+    // P0-B fix: 单独跟踪已出现过的 threadId (实时 in-loop), 不依赖 schemaReport
+    // schemaReport 把所有重复 threadId 都加进 Set, 第 1 个 ann 也会被误标 dup
+    const seenThreadIds = new Set();
     for (const ann of annotationsData.annotations) {
-      // 重复 threadId 标 invalid
-      const isDuplicate = schemaReport.duplicates.has(ann.threadId);
+      // 重复 threadId 标 invalid (通过实时 count 判断, 不依赖 schemaReport — 后者会把所有重复的 threadId 都加进 Set, 导致首个也被标)
+      const isDuplicate = ann.threadId && seenThreadIds.has(ann.threadId);
+      if (ann.threadId) seenThreadIds.add(ann.threadId);
       // 缺关键字段标 invalid
       const isIncomplete = !ann.threadId || !ann.text;
       // 用 prefix+suffix+text 鲁棒定位 (4 优先级匹配)
@@ -2648,7 +2711,9 @@ function _validateSidecar(annotations) {
     report.warnings.push('annotations 不是数组');
     return report;
   }
-  const seenIds = new Map();  // threadId -> count
+  const seenIds = new Map();  // threadId -> 出现次数
+  // P0-B fix: 第一次出现的 threadId 合法, 后续出现的标 duplicate
+  // duplicates 只装"重复出现的 threadId", 让首次出现仍走 valid 路径
   annotations.forEach((ann, i) => {
     if (!ann) {
       report.warnings.push(`第 ${i + 1} 条批注为 null`);
@@ -2657,6 +2722,9 @@ function _validateSidecar(annotations) {
     if (!ann.threadId) {
       report.warnings.push(`第 ${i + 1} 条批注缺 threadId`);
     } else {
+      // P0-B fix: count 是进入前的次数 (之前出现几次)
+      // count === 0 → 本条是首次出现, 不标 dup, 走 valid 路径
+      // count >= 1 → 本条是第 2/3/... 次出现, 标 dup
       const count = seenIds.get(ann.threadId) || 0;
       seenIds.set(ann.threadId, count + 1);
       if (count >= 1) {
@@ -3668,6 +3736,19 @@ window.__mdAnnotator = {
     if (!found) return null;
     createAnnotationThread(found.from, found.to, text);
     return State.annotations[State.annotations.length - 1];
+  },
+  // 测试用: 直接调全局 deleteThread (跳过 confirm dialog)
+  _testDeleteThread(threadId) {
+    const thread = State.annotations.find(t => t.threadId === threadId);
+    if (!thread) return;
+    // 临时改写 confirm 返回 true
+    const origConfirm = window.confirm;
+    window.confirm = () => true;
+    try {
+      deleteThread(threadId);
+    } finally {
+      window.confirm = origConfirm;
+    }
   },
   getAnnotations: () => State.annotations,
   getEditorHTML: () => State.editor.getHTML(),

@@ -762,7 +762,18 @@ const SAMPLE_ANN = JSON.parse(fs.readFileSync(path.join(ROOT, 'test-data/sample.
     return window.__mdAnnotator.createTestAnnotation('text');
   });
   console.log(`  ✓ 创建批注: ${ann ? ann.threadId.slice(0, 8) : 'FAIL'}`);
-  // === 41a: mark-delete popover 在 active mark 上应出现 ===
+  // === 41a: mark-delete popover 在 active mark 上应出现 (cursor 移到 mark 内空选区) ===
+  // cursor 落 mark 内 (空选区) 时 popover 应显示
+  await page.evaluate(() => {
+    const editor = window.__mdAnnotator.State.editor;
+    let pos = -1;
+    editor.state.doc.descendants((node, p) => {
+      if (node.isText && node.text === 'text') { pos = p; return false; }
+    });
+    editor.commands.focus(pos);
+    editor.commands.setTextSelection(pos);
+  });
+  await page.waitForTimeout(200);
   const popoverCount = await page.locator('#mark-delete-popover').count();
   const popoverVisible41a = await page.evaluate(() => {
     const p = document.querySelector('#mark-delete-popover');
@@ -1150,10 +1161,14 @@ console.log('=== TEST 59: 跳过 (依赖 dead #tree-search) ===');
     return window.__mdAnnotator.loadMarkdownIntoEditor('dup.md', 'Some text with WYSIWYG editor here.', ann);
   }, dupSidecar);
   await page.waitForTimeout(300);
+  // P0-B fix: 第 1 个 dup-1 仍走 valid 路径 (count=0), 第 2 个标 invalid (count=1 → count+1=2)
   const dupInvalid = await page.evaluate(() => window.__mdAnnotator.State.annotations.filter(a => a.invalid).length);
-  console.log(`  ✓ 重复 threadId 标 invalid: ${dupInvalid} (预期 2)`);
-  if (dupInvalid !== 2) throw new Error('重复 threadId 应标 invalid');
-  const dupReason = await page.evaluate(() => window.__mdAnnotator.State.annotations[0].invalidReason);
+  const dupValid = await page.evaluate(() => window.__mdAnnotator.State.annotations.filter(a => !a.invalid).length);
+  console.log(`  ✓ 重复 threadId 标 invalid: ${dupInvalid} (预期 1 — 仅第 2 次标 invalid)`);
+  console.log(`  ✓ 第 1 次出现仍 valid: ${dupValid} (预期 1)`);
+  if (dupInvalid !== 1) throw new Error(`重复 threadId 应标 invalid 1 个, 实际 ${dupInvalid}`);
+  if (dupValid !== 1) throw new Error(`第 1 次出现应仍 valid, 实际 ${dupValid}`);
+  const dupReason = await page.evaluate(() => window.__mdAnnotator.State.annotations.find(a => a.invalid)?.invalidReason);
   if (dupReason !== 'duplicate-threadId') throw new Error(`失效原因应是 duplicate-threadId, 实际 ${dupReason}`);
 
   // === TEST 61: 缺字段标 invalid ===
@@ -1948,7 +1963,7 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
   await page.locator(`.comment-thread[data-thread="${unresolvedCard.threadId}"]`).hover();
   await page.locator(`.comment-thread[data-thread="${unresolvedCard.threadId}"] .comment-menu-btn`).click();
   await page.waitForTimeout(150);
-  page.once('dialog', d => d.accept());
+  // resolve 不触发 confirm (直接 toggle)
   await page.locator('.comment-menu:not(.hidden) button[data-act="resolve"]').click();
   await page.waitForTimeout(300);
   const afterResolve = await page.evaluate((tid) => {
@@ -2260,7 +2275,7 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
   await page.locator(`.comment-thread[data-thread="${tid}"]`).hover();
   await page.locator(`.comment-thread[data-thread="${tid}"] .comment-menu-btn`).click();
   await page.waitForTimeout(150);
-  page.once('dialog', d => d.accept());
+  // resolve 不触发 confirm dialog (直接 toggle), 这里不要 .once('dialog',...)
   await page.locator('.comment-menu:not(.hidden) button[data-act="resolve"]').click();
   await page.waitForTimeout(300);
   const wordAfterResolve = await page.evaluate(() => ({
@@ -2274,9 +2289,171 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
   if (wordAfterResolve.visibleCount !== 1) throw new Error(`resolve 后应 1 张 pinned 卡片, 实际 ${wordAfterResolve.visibleCount}`);
   if (!wordAfterResolve.isPinned) throw new Error('resolve 后应标 is-pinned (filter 隐藏 → pinned 显示)');
 
+  // === TEST 82: mark 内有选区 → mark-delete-popover 隐藏, 不挡 💬 按钮 (Bug 2 修复) ===
+  console.log('\n=== TEST 82: mark 内有选区 → mark-delete-popover 隐藏 ===');
+  await page.evaluate((m) => window.__mdAnnotator.loadMarkdownIntoEditor('b2.md', m, null), 'b2 一段文字内容.\n\nb2 二段.');
+  await page.waitForTimeout(300);
+  // 先创建一条 mark
+  await page.evaluate(() => {
+    const editor = window.__mdAnnotator.State.editor;
+    let from = -1, to = -1;
+    editor.state.doc.descendants((node, pos) => {
+      if (node.isText && node.text === 'b2 一段文字内容.') { from = pos; to = pos + node.text.length; return false; }
+    });
+    editor.commands.setTextSelection({ from, to });
+    editor.view.dispatch(editor.state.tr.setSelection(editor.state.selection));
+  });
+  await page.waitForTimeout(200);
+  await page.locator('#float-comment-btn button').click();
+  await page.waitForTimeout(300);
+  await page.evaluate(() => {
+    const ta = document.querySelector('[data-thread-input]');
+    ta.value = 'first mark';
+    document.querySelector('button[data-act="submit-reply"]').click();
+  });
+  await page.waitForTimeout(300);
+
+  // 选 mark 内某段 (选区非空) → mark-delete-popover 应隐藏
+  await page.evaluate(() => {
+    const editor = window.__mdAnnotator.State.editor;
+    let from = -1, to = -1;
+    editor.state.doc.descendants((node, pos) => {
+      if (node.isText && node.text === 'b2 一段文字内容.') { from = pos + 2; to = pos + 6; return false; }
+    });
+    editor.commands.setTextSelection({ from, to });
+    editor.view.dispatch(editor.state.tr.setSelection(editor.state.selection));
+  });
+  await page.waitForTimeout(200);
+  const b2State = await page.evaluate(() => ({
+    popoverHidden: document.querySelector('#mark-delete-popover')?.classList.contains('hidden'),
+    btnHidden: document.querySelector('#float-comment-btn')?.classList.contains('hidden'),
+    anns: window.__mdAnnotator.State.annotations.length,
+  }));
+  console.log('  ✓ mark 内有选区时 mark-delete-popover hidden:', b2State.popoverHidden, '(预期 true — 不挡 💬)');
+  console.log('  ✓ 💬 按钮 hidden:', b2State.btnHidden, '(预期 false)');
+  if (!b2State.popoverHidden) throw new Error('mark 内有选区时 mark-delete-popover 应隐藏, 避免遮挡 #float-comment-btn');
+  if (b2State.btnHidden) throw new Error('mark 内有选区时 💬 按钮应显示, 让用户新建批注');
+
+  // 测: cursor 移到 mark 内 (选区为空) → mark-delete-popover 应显示
+  await page.evaluate(() => {
+    const editor = window.__mdAnnotator.State.editor;
+    let pos = -1;
+    editor.state.doc.descendants((node, p) => {
+      if (node.isText && node.text === 'b2 一段文字内容.') { pos = p + 3; return false; }
+    });
+    editor.commands.setTextSelection(pos);
+    editor.view.dispatch(editor.state.tr.setSelection(editor.state.selection));
+  });
+  await page.waitForTimeout(200);
+  const b2Empty = await page.evaluate(() => ({
+    popoverHidden: document.querySelector('#mark-delete-popover')?.classList.contains('hidden'),
+    btnHidden: document.querySelector('#float-comment-btn')?.classList.contains('hidden'),
+  }));
+  console.log('  ✓ cursor 在 mark 内 (空选区) mark-delete-popover hidden:', b2Empty.popoverHidden, '(预期 false — 显示)');
+  console.log('  ✓ cursor 在 mark 内 💬 按钮 hidden:', b2Empty.btnHidden, '(预期 true)');
+  if (b2Empty.popoverHidden) throw new Error('cursor 在 mark 内 (空选区) mark-delete-popover 应显示');
+  if (!b2Empty.btnHidden) throw new Error('cursor 在 mark 内 💬 按钮应隐藏 (空选区不显示)');
+
+  // === TEST 83: 删除批注后 cursor 在原 mark 段内 → 💬 按钮应重新显示 (Bug ρ 修复) ===
+  console.log('\n=== TEST 83: 删除批注后 cursor 在段内 → 💬 显示 ===');
+  await page.evaluate((m) => window.__mdAnnotator.loadMarkdownIntoEditor('bug-rho.md', m, null), 'ρ 段落一.\n\nρ 段落二.');
+  await page.waitForTimeout(300);
+  // 选段 + 加批注 (cursor 在段一, selection 非空)
+  await page.evaluate(() => {
+    const editor = window.__mdAnnotator.State.editor;
+    let from = -1, to = -1;
+    editor.state.doc.descendants((node, pos) => {
+      if (node.isText && node.text === 'ρ 段落一.') { from = pos; to = pos + node.text.length; return false; }
+    });
+    editor.commands.focus(from);
+    editor.commands.setTextSelection({ from, to });
+  });
+  await page.waitForTimeout(400);  // 等 popover 隐藏 + 按钮 fade-in
+  const preCheck = await page.evaluate(() => ({
+    popoverHidden: document.querySelector('#mark-delete-popover')?.classList.contains('hidden'),
+    btnHidden: document.querySelector('#float-comment-btn')?.classList.contains('hidden'),
+  }));
+  console.log('  ✓ popover hidden:', preCheck.popoverHidden, ', btn hidden:', preCheck.btnHidden, '(均应 true/false)');
+  if (preCheck.btnHidden) throw new Error('选区非空时 💬 按钮应显示, 但 hidden');
+  if (!preCheck.popoverHidden) throw new Error('选区非空时 popover 应隐藏');
+  await page.locator('#float-comment-btn button').click();
+  await page.waitForTimeout(300);
+  await page.evaluate(() => {
+    const ta = document.querySelector('[data-thread-input]');
+    ta.value = 'ρ body';
+    document.querySelector('button[data-act="submit-reply"]').click();
+  });
+  await page.waitForTimeout(300);
+  // 现在 selection 仍在段一 (mark 内的文字)
+  // 删除 — 用 _testDeleteThread (跳过 confirm dialog)
+  const rhoTid = await page.evaluate(() => window.__mdAnnotator.State.annotations[0].threadId);
+  await page.evaluate((tid) => {
+    if (typeof window.__mdAnnotator._testDeleteThread === 'function') {
+      window.__mdAnnotator._testDeleteThread(tid);
+    } else {
+      throw new Error('_testDeleteThread not exposed');
+    }
+  }, rhoTid);
+  await page.waitForTimeout(300);
+  const rhoAfterDel = await page.evaluate(() => ({
+    anns: window.__mdAnnotator.State.annotations.length,
+    marks: document.querySelectorAll('.annotation-mark').length,
+    activeThreadId: window.__mdAnnotator.State.activeThreadId,
+    btnHidden: document.querySelector('#float-comment-btn').classList.contains('hidden'),
+    sel: { from: window.__mdAnnotator.State.editor.state.selection.from, to: window.__mdAnnotator.State.editor.state.selection.to, empty: window.__mdAnnotator.State.editor.state.selection.empty },
+  }));
+  console.log('  ✓ 删除后 anns:', rhoAfterDel.anns, 'marks:', rhoAfterDel.marks, 'activeThreadId:', rhoAfterDel.activeThreadId, '(均应为空)');
+  console.log('  ✓ 删除后 btn hidden:', rhoAfterDel.btnHidden, ', sel:', JSON.stringify(rhoAfterDel.sel));
+  if (rhoAfterDel.anns !== 0 || rhoAfterDel.marks !== 0 || rhoAfterDel.activeThreadId !== null) {
+    throw new Error(`删除后状态错: ${JSON.stringify(rhoAfterDel)}`);
+  }
+  if (rhoAfterDel.btnHidden) throw new Error('删除批注后 cursor 在段内 (selection 非空) 💬 应显示, 但仍 hidden');
+  if (rhoAfterDel.sel.empty) throw new Error('force reset 后 selection 应非空');
+
+  // === TEST 84: 切源码 → 切回 → mark 仍在 (Bug Y 修复) ===
+  console.log('\n=== TEST 84: 切源码 → 切回 → mark 仍在 ===');
+  await page.evaluate((m) => window.__mdAnnotator.loadMarkdownIntoEditor('y.md', m, null), 'y 段落一.\n\ny 段落二.');
+  await page.waitForTimeout(300);
+  // 加批注
+  await page.evaluate(() => {
+    const editor = window.__mdAnnotator.State.editor;
+    let from = -1, to = -1;
+    editor.state.doc.descendants((node, pos) => {
+      if (node.isText && node.text === 'y 段落一.') { from = pos; to = pos + node.text.length; return false; }
+    });
+    editor.commands.focus(from);
+    editor.commands.setTextSelection({ from, to });
+  });
+  await page.waitForTimeout(200);
+  await page.locator('#float-comment-btn button').click();
+  await page.waitForTimeout(300);
+  await page.evaluate(() => {
+    const ta = document.querySelector('[data-thread-input]');
+    ta.value = 'y body';
+    document.querySelector('button[data-act="submit-reply"]').click();
+  });
+  await page.waitForTimeout(300);
+  const yBefore = await page.evaluate(() => ({
+    anns: window.__mdAnnotator.State.annotations.length,
+    marks: document.querySelectorAll('.annotation-mark').length,
+  }));
+  console.log('  渲染模式:', JSON.stringify(yBefore));
+  // 切源码
+  await page.click('#btn-toggle-render');
+  await page.waitForTimeout(200);
+  // 切回渲染
+  await page.click('#btn-toggle-render');
+  await page.waitForTimeout(500);
+  const yAfter = await page.evaluate(() => ({
+    anns: window.__mdAnnotator.State.annotations.length,
+    marks: document.querySelectorAll('.annotation-mark').length,
+  }));
+  console.log('  切源码+切回后:', JSON.stringify(yAfter));
+  if (yAfter.marks !== 1) throw new Error(`切源码+切回后 mark 应仍 1 个, 实际 ${yAfter.marks} (Bug Y 未修复)`);
+
   await browser.close();
   console.log('\n========================================');
-  console.log('✓ 全部 81 个测试通过！');
+  console.log('✓ 全部 84 个测试通过！');
   console.log('========================================');
 })().catch(async err => {
   console.error('\n✗ 测试失败:', err.message);
