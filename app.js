@@ -1889,9 +1889,11 @@ function setRenderMode(mode) {
       State.editor.commands.setContent(html, false);
       // P-mark: setContent 后重新应用 annotation mark
       // 用 text + findTextInDoc 定位, 标 fuzzy (内容可能略变)
+      // P-mark-fix: 找不到位置时, 把 ann 标 fuzzy=true (range=null), 让侧栏显示 ⚠ fuzzy banner
       if (markSnapshots.length > 0) {
         const tr = editor.state.tr;
         const markType = editor.schema.marks.annotation;
+        const failedThreadIds = new Set();
         for (const snap of markSnapshots) {
           if (!snap.text) continue;
           const found = findTextInDoc(editor.state.doc, snap.text);
@@ -1901,10 +1903,24 @@ function setRenderMode(mode) {
               resolved: snap.resolved,
               active: false,
             }));
+          } else {
+            failedThreadIds.add(snap.threadId);
+            console.warn(`[P-mark] mark restore 失败: text="${snap.text.slice(0,20)}..." threadId=${snap.threadId.slice(0,8)}`);
           }
         }
         tr.setMeta('__activeMarkSync', true);  // 不标 dirty
         editor.view.dispatch(tr);
+        // P-mark-fix: mark 失败的 ann 在侧栏标 fuzzy (range 失效, 提醒用户检查)
+        if (failedThreadIds.size > 0) {
+          for (const ann of State.annotations) {
+            if (failedThreadIds.has(ann.threadId)) {
+              ann.fuzzy = true;
+              ann.invalid = true;
+              ann.invalidReason = ann.invalidReason || 'text-changed';  // 文档已改字, 位置失效
+            }
+          }
+          renderCommentList();  // 触发 fuzzy banner 显示
+        }
       }
       sourceEl.style.display = 'none';
     }

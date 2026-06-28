@@ -2518,9 +2518,54 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
     throw new Error(`Bug Π: body 应是 'pi a body', 实际 '${piState.body}'`);
   }
 
+  // === TEST 87: 切源码改字切回 → ann 标 fuzzy (P-mark silent fail 修复) ===
+  console.log('\n=== TEST 87: 切源码改字切回 → ann 标 fuzzy ===');
+  await page.evaluate((m) => window.__mdAnnotator.loadMarkdownIntoEditor('sil-fail.md', m, null), 's 一段.');
+  await page.waitForTimeout(300);
+  await page.evaluate(() => {
+    const editor = window.__mdAnnotator.State.editor;
+    editor.commands.focus(2);
+    editor.commands.setTextSelection({ from: 2, to: 4 });
+  });
+  await page.waitForTimeout(200);
+  await page.locator('#float-comment-btn button').click();
+  await page.waitForTimeout(300);
+  await page.evaluate(() => {
+    const ta = document.querySelector('[data-thread-input]');
+    ta.value = 'silent fail body';
+    document.querySelector('button[data-act="submit-reply"]').click();
+  });
+  await page.waitForTimeout(300);
+  // 切源码改字 (完全改字)
+  await page.click('#btn-toggle-render');
+  await page.waitForTimeout(200);
+  await page.evaluate(() => {
+    const sv = document.querySelector('#source-view');
+    sv.innerText = 's 完全不同.';
+    sv.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await page.waitForTimeout(300);
+  // 切回渲染
+  await page.click('#btn-toggle-render');
+  await page.waitForTimeout(500);
+  const silentFail = await page.evaluate(() => {
+    const ann = window.__mdAnnotator.State.annotations[0];
+    return {
+      fuzzy: ann?.fuzzy,
+      invalid: ann?.invalid,
+      invalidReason: ann?.invalidReason,
+      marksInDoc: document.querySelectorAll('.annotation-mark').length,
+      fuzzyBanner: document.querySelectorAll('.fuzzy-banner').length,
+    };
+  });
+  console.log('  改字切回后:', JSON.stringify(silentFail), '(fuzzy=true, invalid=true, marks=0, banner=1)');
+  if (!silentFail.fuzzy || !silentFail.invalid) throw new Error('silent fail 未修复: ann 应标 fuzzy=true, invalid=true');
+  if (silentFail.marksInDoc !== 0) throw new Error(`silent fail: mark 应消失, 实际 ${silentFail.marksInDoc}`);
+  if (silentFail.fuzzyBanner < 1) throw new Error('silent fail: 应显示 fuzzy banner 提醒用户');
+
   await browser.close();
   console.log('\n========================================');
-  console.log('✓ 全部 86 个测试通过！');
+  console.log('✓ 全部 87 个测试通过！');
   console.log('========================================');
 })().catch(async err => {
   console.error('\n✗ 测试失败:', err.message);
