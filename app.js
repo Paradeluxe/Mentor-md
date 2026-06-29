@@ -1456,6 +1456,13 @@ function toggleResolved(threadId) {
   const thread = State.annotations.find(t => t.threadId === threadId);
   if (!thread) return;
   thread.resolved = !thread.resolved;
+  // P-D20: 记录 resolved 时间 + user (Word 风格: "Resolved 2h ago")
+  if (thread.resolved) {
+    thread.resolvedAt = nowISO();
+    thread.resolvedBy = State.authorId || State.author || '';
+  } else {
+    // Reopen: 保留 resolvedAt 历史 (Word 也保留) — 不清
+  }
   // 同步更新 mark attrs（清掉旧 mark 加新的）
   const editor = State.editor;
   const tr = editor.state.tr;
@@ -1581,7 +1588,7 @@ function renderCommentList() {
         <div class="comment-quote" data-act="goto" data-thread="${thread.threadId}" title="点击跳转到批注处">
           <span class="comment-quote-mark">"</span>
           <span class="comment-quote-text">${escapeHtml((thread.text || '').slice(0, 200))}${(thread.text || '').length > 200 ? '…' : ''}</span>
-          ${thread.resolved ? '<span class="comment-resolved-badge">✓ 已解决</span>' : ''}
+          ${thread.resolved ? `<span class="comment-resolved-badge">✓ 已解决${thread.resolvedAt ? ' · ' + formatTime(thread.resolvedAt) : ''}</span>` : ''}
           <button class="comment-menu-btn" data-act="toggle-menu" data-thread="${thread.threadId}" title="更多操作" aria-label="更多操作">⋯</button>
         </div>
         <!-- ⋯ 弹窗菜单 (默认 hidden) -->
@@ -1636,6 +1643,16 @@ function renderCommentList() {
   }).join('');
 
   // 绑定事件
+  // P-D36: Cmd+Enter / Ctrl+Enter 提交 reply (Word 风格)
+  list.querySelectorAll('[data-thread-input]').forEach(ta => {
+    ta.addEventListener('keydown', (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+        e.preventDefault();
+        const tid = ta.getAttribute('data-thread-input');
+        if (ta.value.trim()) addReply(tid, ta.value);
+      }
+    });
+  });
   list.querySelectorAll('[data-act="submit-reply"]').forEach(btn => {
     btn.addEventListener('click', () => {
       const tid = btn.dataset.thread;

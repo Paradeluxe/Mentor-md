@@ -2750,9 +2750,102 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
   // 同 author 应同色
   if (d10[0].authorColor === d10[1].authorColor) throw new Error(`A/B authorColor index 相同 ${d10[0].authorColor}, 应不同`);
 
+  // === TEST 93: resolved 记录时间 + 显示 (P-D20 docx 一致) ===
+  // Word 行为: resolved 后显示 "Resolved 2h ago"
+  // Mentor 修复: toggleResolved 存 resolvedAt, 徽章显 "✓ 已解决 · 时间"
+  console.log('\n=== TEST 93: resolved 时间记录 + 显示 (docx 一致) ===');
+  await page.evaluate((m) => window.__mdAnnotator.loadMarkdownIntoEditor('d20-test.md', m, null), 'd20 段.');
+  await page.waitForTimeout(300);
+  await page.evaluate(() => {
+    const editor = window.__mdAnnotator.State.editor;
+    editor.commands.focus(3);
+    editor.commands.setTextSelection({ from: 3, to: 4 });
+  });
+  await page.waitForTimeout(200);
+  await page.locator('#float-comment-btn button').click();
+  await page.waitForTimeout(300);
+  await page.evaluate(() => {
+    const ta = document.querySelector('[data-thread-input]');
+    ta.value = 'd20 body';
+    document.querySelector('button[data-act="submit-reply"]').click();
+  });
+  await page.waitForTimeout(300);
+  // 解决
+  const tid20 = await page.evaluate(() => window.__mdAnnotator.State.annotations[0].threadId);
+  await page.locator(`.comment-thread[data-thread="${tid20}"]`).hover();
+  await page.waitForTimeout(200);
+  await page.locator(`.comment-thread[data-thread="${tid20}"] .comment-menu-btn`).click();
+  await page.waitForTimeout(200);
+  await page.locator('.comment-menu:not(.hidden) button[data-act="resolve"]').click();
+  await page.waitForTimeout(300);
+  const d20State = await page.evaluate(() => {
+    const a = window.__mdAnnotator.State.annotations[0];
+    const badge = document.querySelector('.comment-resolved-badge')?.textContent?.trim();
+    return {
+      resolved: a?.resolved,
+      resolvedAt: a?.resolvedAt,
+      resolvedBy: a?.resolvedBy,
+      badge,
+    };
+  });
+  console.log('  d20 解决后:', JSON.stringify(d20State));
+  if (!d20State.resolved) throw new Error('应 resolved=true');
+  if (!d20State.resolvedAt) throw new Error('应记录 resolvedAt (P-D20)');
+  if (!d20State.badge?.includes('已解决')) throw new Error('徽章应包含"已解决"');
+  if (!d20State.badge?.match(/\d{2}-\d{2}|\d{1,2}:\d{2}/)) {
+    throw new Error(`徽章应包含时间: "${d20State.badge}"`);
+  }
+  // Reopen → resolvedAt 保留 (Word 也保留)
+  await page.locator(`.comment-thread[data-thread="${tid20}"]`).hover();
+  await page.waitForTimeout(200);
+  await page.locator(`.comment-thread[data-thread="${tid20}"] .comment-menu-btn`).click();
+  await page.waitForTimeout(200);
+  await page.locator('.comment-menu:not(.hidden) button[data-act="resolve"]').click();
+  await page.waitForTimeout(300);
+  const d20Reopen = await page.evaluate(() => ({
+    resolved: window.__mdAnnotator.State.annotations[0]?.resolved,
+    resolvedAtKept: !!window.__mdAnnotator.State.annotations[0]?.resolvedAt,
+  }));
+  console.log('  d20 reopen 后:', JSON.stringify(d20Reopen));
+  if (d20Reopen.resolved) throw new Error('reopen 应 resolved=false');
+  if (!d20Reopen.resolvedAtKept) throw new Error('reopen 后 resolvedAt 应保留历史');
+
+  // === TEST 94: Cmd+Enter 提交 reply (P-D36 docx 一致) ===
+  // Word 行为: reply form 焦点时 Cmd+Enter 提交
+  // Mentor 修复: keydown 监听 Ctrl/Cmd+Enter
+  console.log('\n=== TEST 94: Cmd+Enter 提交 reply (docx 一致) ===');
+  await page.evaluate((m) => window.__mdAnnotator.loadMarkdownIntoEditor('d36-test.md', m, null), 'd36 段.');
+  await page.waitForTimeout(300);
+  await page.evaluate(() => {
+    const editor = window.__mdAnnotator.State.editor;
+    editor.commands.focus(3);
+    editor.commands.setTextSelection({ from: 3, to: 4 });
+  });
+  await page.waitForTimeout(200);
+  await page.locator('#float-comment-btn button').click();
+  await page.waitForTimeout(300);
+  // 输入 + Cmd+Enter
+  await page.evaluate(() => {
+    const ta = document.querySelector('[data-thread-input]');
+    if (ta) {
+      ta.value = 'Cmd+Enter 提交';
+      ta.focus();
+    }
+  });
+  await page.waitForTimeout(200);
+  await page.keyboard.press('Control+Enter');
+  await page.waitForTimeout(500);
+  const d36State = await page.evaluate(() => {
+    const a = window.__mdAnnotator.State.annotations[0];
+    return { comments: a?.comments?.length, firstBody: a?.comments?.[0]?.body };
+  });
+  console.log('  d36 Cmd+Enter 后:', JSON.stringify(d36State));
+  if (d36State.comments !== 1) throw new Error(`Cmd+Enter 应提交 1 comment, 实际 ${d36State.comments}`);
+  if (!d36State.firstBody?.includes('Cmd+Enter')) throw new Error('comment body 应含 "Cmd+Enter"');
+
   await browser.close();
   console.log('\n========================================');
-  console.log('✓ 全部 92 个测试通过！');
+  console.log('✓ 全部 94 个测试通过！');
   console.log('========================================');
 })().catch(async err => {
   console.error('\n✗ 测试失败:', err.message);
