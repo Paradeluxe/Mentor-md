@@ -126,6 +126,8 @@ const State = {
   // F18: reply 草稿持久 (Word 行为: 切文档再切回草稿保留)
   // key = threadId, value = textarea 内容
   replyDrafts: {},
+  // H2 fix: 解决卡片临时展开状态 (key = threadId, value = true), 仅 session 内
+  expandedThreadIds: {},
   folderHandle: null,       // 当前文件夹 handle（FileSystemDirectoryHandle）
   saveMode: 'unknown',      // 'handle' | 'download' | 'unknown'
   readOnlyMode: false,      // P0-A: 另一 tab 在编辑时启用只读 (Ctrl+S 禁用)
@@ -732,6 +734,18 @@ function syncFilterTabsFromCheckboxes() {
   document.querySelectorAll('.filter-tab').forEach(btn => {
     btn.classList.toggle('is-active', btn.dataset.filterTab === mode);
   });
+}
+
+// H1 fix: mark title 显示 thread preview (Word 风格 hover 提示)
+// 格式: "批注: <text>\n回复: <body> · <author> · <time>"
+// 重要: 不能在 editor DOM 内部用 setAttribute — 会触发 PM MutationObserver 重置 selection
+// 改用 wrapper: 给 .annotation-mark 父元素或兄弟元素加 title, 不在 mark 上
+function updateMarkTitles() {
+  // 不在 .annotation-mark 上 setAttribute (会触发 PM 重置 selection)
+  // 暂用 data-tooltip 属性 (同样会触发), 改用悬浮层 wrapper
+  // 简化方案: 跳过此特性, 留待 H1 v2
+  // 实际: 不调 setAttribute/title
+  return;
 }
 
 function showToast(msg, ms = 1800) {
@@ -1631,8 +1645,8 @@ function renderCommentList() {
     // pinned thread 也算 (用大写 P)
     const number = isPinnedThread ? 'P' : (idx + 1);
     // P-card: 解决后默认折叠 (Word 风格), 只显示 quote + meta 一行. 通过 collapsed class 控制.
-    // 仍可点击展开 (与原 comment-quote 点击区合并).
-    const isCollapsed = thread.resolved;
+    // H2 fix: 解决后点击展开 (临时 expanded 状态, 不持久).
+    const isCollapsed = thread.resolved && !State.expandedThreadIds?.[thread.threadId];
     return `
       <div class="comment-thread ${isActive ? 'is-active' : ''} ${thread.resolved ? 'is-resolved' : ''} ${isPinnedThread ? 'is-pinned' : ''} ${thread.fuzzy ? 'is-fuzzy' : ''} ${isCollapsed ? 'is-collapsed' : ''}" data-thread="${thread.threadId}">
         ${isPinnedThread ? '<div class="pinned-banner">📌 当前光标处 (filter 已隐藏)</div>' : ''}
@@ -1728,6 +1742,11 @@ function renderCommentList() {
   });
   list.querySelectorAll('[data-act="goto"]').forEach(btn => {
     btn.addEventListener('click', e => {
+      // H2 fix: 解决+折叠的卡片, 让 click 冒泡到 card click handler (展开而非跳转)
+      const card = btn.closest('.comment-thread');
+      if (card?.classList.contains('is-resolved') && card?.classList.contains('is-collapsed')) {
+        return;  // 不 stopPropagation, 让 card click handler 处理
+      }
       e.stopPropagation();
       scrollToThread(btn.dataset.thread);
       closeAllCommentMenus();
@@ -1789,13 +1808,17 @@ function renderCommentList() {
     });
   });
   // P-card: 解决后卡片可点击展开/折叠 (Word 风格)
+  // 折叠状态展开优先级高于跳转 (避免 "跳到看不见的 mark" 体验)
   list.querySelectorAll('.comment-thread').forEach(el => {
     el.addEventListener('click', e => {
       // 交互区 (按钮/textarea/details summary) 不触发
       if (e.target.closest('button') || e.target.closest('textarea') || e.target.closest('details summary')) return;
-      // 解决后的卡片: 第一次点击展开, 之后 (active) 跳转
+      // 解决后折叠的卡片: 第一次点击展开 (H2 fix)
       if (el.classList.contains('is-resolved') && el.classList.contains('is-collapsed')) {
-        el.classList.remove('is-collapsed');
+        const tid = el.dataset.thread;
+        if (!State.expandedThreadIds) State.expandedThreadIds = {};
+        State.expandedThreadIds[tid] = true;
+        renderCommentList();
         return;
       }
       // 正常卡片: 点击 → 跳转到批注处 (Word 风格: 整张卡片可点跳转)
@@ -3972,6 +3995,8 @@ window.__mdAnnotator = {
   getEditorHTML: () => State.editor.getHTML(),
   // 当前用户身份 (id 永不变, name 可改)
   getCurrentUser: () => ({ id: State.authorId, name: State.author }),
+  // P-H2: render comment list (用于测试 + 调试)
+  renderCommentList: () => renderCommentList(),
   // P-reload: 同步列出所有 IDB 缓存 (返回 Object 不返回 Promise, 方便 console.log 检查)
   listAnnotations() {
     const out = {};

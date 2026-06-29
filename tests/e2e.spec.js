@@ -3076,9 +3076,79 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
     throw new Error(`reopen 后 open 应 3, resolved 应 0, 实际 ${JSON.stringify(after100)}`);
   }
 
+  // === TEST 101: 解决后点击展开 (P-H2 docx 一致) ===
+  // Word 行为: 解决后点击折叠卡片, 展开内容 (临时状态)
+  // Mentor 修复: State.expandedThreadIds[tid] 持久, 防止 render 重置
+  console.log('\n=== TEST 101: 解决后点击展开 (docx 一致) ===');
+  // 清理之前 test 残留的 activeThreadId (避免 pinnedThread 干扰)
+  await page.evaluate(() => {
+    window.__mdAnnotator.State.activeThreadId = null;
+    window.__mdAnnotator.State.expandedThreadIds = {};
+  });
+  await page.evaluate((m) => window.__mdAnnotator.loadMarkdownIntoEditor('h2-test.md', m, null), 'h2 段一.');
+  await page.waitForTimeout(300);
+  await page.evaluate(() => {
+    const editor = window.__mdAnnotator.State.editor;
+    editor.commands.focus(3);
+    editor.commands.setTextSelection({ from: 3, to: 5 });
+  });
+  await page.waitForTimeout(200);
+  await page.locator('#float-comment-btn button').click();
+  await page.waitForTimeout(300);
+  await page.evaluate(() => {
+    const ta = document.querySelector('[data-thread-input]');
+    ta.value = 'h2 body';
+    document.querySelector('button[data-act="submit-reply"]').click();
+  });
+  await page.waitForTimeout(300);
+  // 解决
+  const tid101 = await page.evaluate(() => window.__mdAnnotator.State.annotations[0].threadId);
+  await page.locator(`.comment-thread[data-thread="${tid101}"]`).hover();
+  await page.waitForTimeout(200);
+  await page.locator(`.comment-thread[data-thread="${tid101}"] .comment-menu-btn`).click();
+  await page.waitForTimeout(200);
+  await page.locator('.comment-menu:not(.hidden) button[data-act="resolve"]').click();
+  await page.waitForTimeout(300);
+  // 此时 is-active + is-resolved, body 显示. 主动 deactivate 让 is-collapsed 生效
+  await page.evaluate(() => {
+    window.__mdAnnotator.State.activeThreadId = null;
+    window.__mdAnnotator.renderCommentList();
+  });
+  await page.waitForTimeout(200);
+  const beforeExpand = await page.evaluate(() => {
+    const t = document.querySelector('.comment-thread');
+    return {
+      collapsed: t?.classList.contains('is-collapsed'),
+      active: t?.classList.contains('is-active'),
+      bodyVisible: !!t?.querySelector('.comment-body-wrap')?.offsetHeight,
+    };
+  });
+  console.log('  解决后 (deactivated):', JSON.stringify(beforeExpand));
+  if (!beforeExpand.collapsed) throw new Error('解决后应 is-collapsed');
+  // 点击 quote (非 button 区域)
+  await page.evaluate((tid) => {
+    const quote = document.querySelector(`.comment-thread[data-thread="${tid}"] .comment-quote`);
+    quote.click();
+  }, tid101);
+  await page.waitForTimeout(300);
+  const afterExpand101 = await page.evaluate((tid) => {
+    const t = document.querySelector(`.comment-thread[data-thread="${tid}"]`);
+    return {
+      tid,
+      collapsed: t?.classList.contains('is-collapsed'),
+      expanded: window.__mdAnnotator.State.expandedThreadIds,
+      expandedForTid: window.__mdAnnotator.State.expandedThreadIds?.[tid],
+    };
+  }, tid101);
+  console.log('  点击 quote 后:', JSON.stringify(afterExpand101));
+  if (afterExpand101.collapsed) throw new Error('点击 quote 后应展开 (H2 fix)');
+  if (Object.keys(afterExpand101.expanded).length === 0) {
+    throw new Error('expandedThreadIds 应有值');
+  }
+
   await browser.close();
   console.log('\n========================================');
-  console.log('✓ 全部 100 个测试通过！');
+  console.log('✓ 全部 101 个测试通过！');
   console.log('========================================');
 })().catch(async err => {
   console.error('\n✗ 测试失败:', err.message);
