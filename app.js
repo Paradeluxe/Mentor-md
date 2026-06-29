@@ -567,6 +567,13 @@ const AnnotationMark = Mark.create({
         parseHTML: el => el.classList.contains('is-active'),
         renderHTML: attrs => attrs.active ? { 'data-active': 'true' } : {},
       },
+      // P-D10: mark 颜色按 author 分配 (Word 8 色自动)
+      // 8 色循环分配, 同 author 同色, 用 inline style 设置 background
+      authorColor: {
+        default: 0,
+        parseHTML: el => parseInt(el.getAttribute('data-author-color') || '0', 10),
+        renderHTML: attrs => ({ 'data-author-color': String(attrs.authorColor || 0) }),
+      },
     };
   },
   parseHTML() {
@@ -1297,9 +1304,29 @@ function handleCreateMultiCellAnnotation(cellSel) {
   emitAI('threadChange', { threadId, change: 'create', thread });
 }
 
+// P-D10: 简单字符串 hash (用于 authorId 派生, 同名 → 同色)
+function simpleHashString(s) {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
+  return Math.abs(h);
+}
+
+// P-D10: 根据 authorId 算 8 色 color index (Word 行为: 同 author 同色)
+function authorColorIndex(authorId) {
+  if (!authorId) return 0;
+  let h = 0;
+  for (let i = 0; i < authorId.length; i++) h = (h * 31 + authorId.charCodeAt(i)) | 0;
+  return Math.abs(h) % 8;
+}
+
 function applyAnnotationMark(threadId, from, to) {
   const tr = State.editor.state.tr;
-  tr.addMark(from, to, State.editor.schema.marks.annotation.create({ threadId, resolved: false }));
+  tr.addMark(from, to, State.editor.schema.marks.annotation.create({
+    threadId,
+    resolved: false,
+    // P-D10: addMark 时带 authorColor (从 state 算)
+    authorColor: authorColorIndex(State.authorId || threadId),
+  }));
   State.editor.view.dispatch(tr);
   // 不调用 markDirty（这是结构性 mark 变化，已在 onUpdate 触发）
   // 但 markDirty 只在 doc 文本变化时——这里 mark 变化也会触发 onUpdate
@@ -1307,7 +1334,12 @@ function applyAnnotationMark(threadId, from, to) {
 
 function applyAnnotationMarksMultiCell(threadId, ranges) {
   const tr = State.editor.state.tr;
-  const mark = State.editor.schema.marks.annotation.create({ threadId, resolved: false });
+  // P-D10: 同步 authorColor
+  const mark = State.editor.schema.marks.annotation.create({
+    threadId,
+    resolved: false,
+    authorColor: authorColorIndex(State.authorId || threadId),
+  });
   for (const r of ranges) {
     tr.addMark(r.from, r.to, mark);
   }
@@ -2081,6 +2113,13 @@ function renderOutline() {
 // --- 从 .md 加载到编辑器
 // --- 从 .md 加载到编辑器
 function loadMarkdownIntoEditor(name, content, annotationsData = null) {
+  // D3 docx 一致性: 切文档时, 如果当前文档 dirty, 弹"是否保存" (Word 行为)
+  // 注意: IDB 兜底已经防止数据丢失, 但 Word 仍会让用户主动选择
+  if (State.currentFile && State.currentFile.dirty && State.currentFile.name !== name) {
+    if (!confirm(`当前文档 "${State.currentFile.name}" 有未保存修改, 确定切换吗?\n(批注会保存到本地, 刷新页面可恢复)`)) {
+      return false;  // 用户取消, 不切换
+    }
+  }
   // 如果当前是源码模式，先把 <pre> 的最新内容写回 content（避免被覆盖）
   const sourceEl = $('#source-view');
   if (State.renderMode === 'source' && sourceEl && sourceEl.style.display !== 'none') {
@@ -2137,7 +2176,12 @@ function loadMarkdownIntoEditor(name, content, annotationsData = null) {
         const tr = State.editor.state.tr;
         tr.addMark(
           positions.from, positions.to,
-          State.editor.schema.marks.annotation.create({ threadId: ann.threadId, resolved: ann.resolved })
+          State.editor.schema.marks.annotation.create({
+            threadId: ann.threadId,
+            resolved: ann.resolved,
+            // P-D10: load path 用 ann 作者 authorId 算 color
+            authorColor: authorColorIndex((ann.comments?.[0]?.author?.id) || ann.threadId),
+          })
         );
         // P-mark-fix: setMeta 避免 _validateMarksAfterEdit 清除 fuzzy 标记
         // load path 一次性 addMark 多个 ann, onUpdate 触发会清 fuzzy
@@ -3847,9 +3891,12 @@ window.__mdAnnotator = {
       if (arg.trim()) {
         State.author = arg;
         localStorage.setItem('Mentor:author', arg);
+        // 注意: 不动 authorId. P-D10 颜色按当前 authorId 算 (稳定 ID hash).
+        // 清名 → authorId 保持, 派生显示, 同色 (稳定).
       } else {
         State.author = '';
         localStorage.removeItem('Mentor:author');
+        // authorId 留原值 (派生接管 — authorId 不会变, 之前用 name 派生)
       }
     } else if (arg && typeof arg === 'object') {
       if (arg.name !== undefined) {

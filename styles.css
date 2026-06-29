@@ -940,6 +940,31 @@ code {
 }
 .tiptap .annotation-mark:hover { background: #fde68a; }
 .tiptap .annotation-mark.is-active { background: var(--highlight-active); }
+
+/* P-D10: mark 颜色按 author 8 色分配 (Word docx 一致)
+   authorColor 0-7, 8 种颜色循环, 同 author 同色
+   data-author-color 0 默认暖黄, 1-7 调色板 */
+.tiptap .annotation-mark[data-author-color="1"] { background: #fde2e2; border-bottom-color: #ef4444; }  /* 粉红 */
+.tiptap .annotation-mark[data-author-color="2"] { background: #dcfce7; border-bottom-color: #22c55e; }  /* 绿 */
+.tiptap .annotation-mark[data-author-color="3"] { background: #dbeafe; border-bottom-color: #3b82f6; }  /* 蓝 */
+.tiptap .annotation-mark[data-author-color="4"] { background: #fef3c7; border-bottom-color: #d97706; }  /* 橙 */
+.tiptap .annotation-mark[data-author-color="5"] { background: #ede9fe; border-bottom-color: #7c3aed; }  /* 紫 */
+.tiptap .annotation-mark[data-author-color="6"] { background: #fce7f3; border-bottom-color: #db2777; }  /* 桃 */
+.tiptap .annotation-mark[data-author-color="7"] { background: #cffafe; border-bottom-color: #0891b2; }  /* 青 */
+.tiptap .annotation-mark[data-author-color="1"]:hover { background: #fecaca; }
+.tiptap .annotation-mark[data-author-color="2"]:hover { background: #bbf7d0; }
+.tiptap .annotation-mark[data-author-color="3"]:hover { background: #bfdbfe; }
+.tiptap .annotation-mark[data-author-color="4"]:hover { background: #fde68a; }
+.tiptap .annotation-mark[data-author-color="5"]:hover { background: #ddd6fe; }
+.tiptap .annotation-mark[data-author-color="6"]:hover { background: #fbcfe8; }
+.tiptap .annotation-mark[data-author-color="7"]:hover { background: #a5f3fc; }
+.tiptap .annotation-mark[data-author-color="1"].is-active { background: #fca5a5; }
+.tiptap .annotation-mark[data-author-color="2"].is-active { background: #86efac; }
+.tiptap .annotation-mark[data-author-color="3"].is-active { background: #93c5fd; }
+.tiptap .annotation-mark[data-author-color="4"].is-active { background: #fcd34d; }
+.tiptap .annotation-mark[data-author-color="5"].is-active { background: #c4b5fd; }
+.tiptap .annotation-mark[data-author-color="6"].is-active { background: #f9a8d4; }
+.tiptap .annotation-mark[data-author-color="7"].is-active { background: #67e8f9; }
 .tiptap .annotation-mark.is-resolved { background: var(--resolved); border-bottom-color: var(--text-3); opacity: 0.7; }
 
 /* P-mark: 批注 mark 旁边的小气泡 (CSS 伪元素方案, 不依赖 widget decoration)

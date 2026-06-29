@@ -14,11 +14,12 @@ const SAMPLE_ANN = JSON.parse(fs.readFileSync(path.join(ROOT, 'test-data/sample.
 (async () => {
   const browser = await chromium.launch({ headless: true });
   const context = await browser.newContext({ viewport: { width: 1400, height: 900 } });
-  // 在任何 page 脚本运行前预设 author, 避免首次弹 modal 干扰测试
+  const page = await context.newPage();
+  // P-D3: 全局接受 confirm dialog (D3 fix: 切文档时弹 "是否保存")
+  page.on('dialog', d => d.accept());
   await context.addInitScript(() => {
     try { localStorage.setItem('Mentor:author', '测试作者'); } catch (e) {}
   });
-  const page = await context.newPage();
 
   // 收集 console 错误
   const consoleErrors = [];
@@ -116,8 +117,6 @@ const SAMPLE_ANN = JSON.parse(fs.readFileSync(path.join(ROOT, 'test-data/sample.
   if (resolvedCount !== 2 || unresolvedCount !== 1) throw new Error(`resolved 状态错`);
 
   console.log('=== TEST 7: 删除批注 ===');
-  // 自动确认对话框
-  page.once('dialog', d => d.accept());
   const beforeDelete = await page.locator('.annotation-mark').count();
   await page.evaluate(() => {
     const btn = document.querySelector('[data-act="delete"]');
@@ -791,8 +790,6 @@ const SAMPLE_ANN = JSON.parse(fs.readFileSync(path.join(ROOT, 'test-data/sample.
   });
   console.log(`  ✓ ProseMirror doc 中 annotation mark 数 = ${marksBefore} (预期 1)`);
   if (marksBefore !== 1) throw new Error('创建批注后 mark 不在 doc 中');
-  // 接受 confirm 对话框（once）
-  page.once('dialog', d => d.accept());
   // P-card: 删除批注需要先打开 ⋯ 菜单 (新版 word 风格)
   await page.locator('.comment-thread button[data-act="toggle-menu"]').first().click();
   await page.waitForTimeout(100);
@@ -2641,9 +2638,121 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
   if (!undoState.fuzzy || !undoState.invalid) throw new Error('Ctrl+Z: ann 应标 fuzzy=true, invalid=true');
   if (undoState.marksInDoc !== 0) throw new Error(`mark 应消失, 实际 ${undoState.marksInDoc}`);
 
+  // === TEST 90: 切文档时 dirty 弹 confirm (D3 docx 一致性) ===
+  console.log('\n=== TEST 90: 切文档 dirty 弹 confirm (docx 一致) ===');
+  await page.evaluate((m) => window.__mdAnnotator.loadMarkdownIntoEditor('d3-test.md', m, null), 'd3 段一.');
+  await page.waitForTimeout(300);
+  // 编辑让 dirty
+  await page.evaluate(() => {
+    const editor = window.__mdAnnotator.State.editor;
+    editor.commands.insertContentAt(editor.state.doc.content.size - 1, ' 修改');
+  });
+  await page.waitForTimeout(300);
+  const d3Dirty = await page.evaluate(() => window.__mdAnnotator.State.currentFile?.dirty);
+  console.log('  d3-test.md dirty:', d3Dirty);
+  // 切到 d3-other.md, 应该弹 confirm (被全局 handler accept)
+  // 验证 load 成功 (dialog accepted → load 继续)
+  await page.evaluate((m) => window.__mdAnnotator.loadMarkdownIntoEditor('d3-other.md', m, null), 'd3 other 段.');
+  await page.waitForTimeout(500);
+  const d3After = await page.evaluate(() => ({
+    name: window.__mdAnnotator.State.currentFile?.name,
+    docText: window.__mdAnnotator.State.editor.state.doc.textContent,
+  }));
+  console.log('  切到 d3-other.md 后:', JSON.stringify(d3After));
+  if (d3After.name !== 'd3-other.md') throw new Error(`D3 fix 失败: 应切到 d3-other.md, 实际 ${d3After.name}`);
+
+  // === TEST 91: 同一位置多次批注 (PM mark 限制 — 预期行为) ===
+  // Word 行为: mark 多重叠加 (XML commentRangeStart w:id 多重), 颜色混合
+  // Mentor 限制: PM mark 单 instance per pos, addMark 覆盖 threadId → 1 mark 渲染
+  // 这是 PM 数据结构限制, 不是 bug. 此测试记录预期行为.
+  console.log('\n=== TEST 91: 同位置多次批注 (PM 限制, 单 mark 渲染) ===');
+  await page.evaluate((m) => window.__mdAnnotator.loadMarkdownIntoEditor('d7-test.md', m, null), 'd7 重叠.');
+  await page.waitForTimeout(300);
+  for (let i = 0; i < 3; i++) {
+    await page.evaluate(() => {
+      const editor = window.__mdAnnotator.State.editor;
+      editor.commands.focus(3);
+      editor.commands.setTextSelection({ from: 3, to: 5 });
+    });
+    await page.waitForTimeout(200);
+    await page.locator('#float-comment-btn button').click();
+    await page.waitForTimeout(300);
+    await page.evaluate((idx) => {
+      const ta = document.querySelector('[data-thread-input]');
+      ta.value = `d7 #${idx + 1}`;
+      document.querySelector('button[data-act="submit-reply"]').click();
+    }, i);
+    await page.waitForTimeout(300);
+  }
+  const d7State = await page.evaluate(() => ({
+    anns: window.__mdAnnotator.State.annotations.length,
+    marks: document.querySelectorAll('.annotation-mark').length,
+  }));
+  console.log('  d7 3 批注同位置:', JSON.stringify(d7State), '(PM 限制: 1 mark, 3 ann state)');
+  if (d7State.anns !== 3) throw new Error(`ann 应 3 个, 实际 ${d7State.anns}`);
+  // PM 限制导致 mark 只有 1, 这是已知限制, 见 comment
+
+  // === TEST 92: mark 颜色按 author 分配 (P-D10 docx 一致) ===
+  // Word 行为: 8 色按 author 自动分配, 同 author 同色
+  // Mentor: authorColor = authorColorIndex(authorId) % 8
+  // 注: setAuthor(string) 不改 authorId (保持 P-name 一致性), 用 setAuthor({id,name}) 切不同 user
+  console.log('\n=== TEST 92: mark 颜色按 author (8 色) ===');
+  await page.evaluate((m) => window.__mdAnnotator.loadMarkdownIntoEditor('d10-test.md', m, null), 'a 段一.\n\nb 段二.');
+  await page.waitForTimeout(300);
+  // A 加批注
+  await page.evaluate(() => {
+    window.__mdAnnotator.setAuthor({ id: 'userA-id-fixed', name: 'A' });
+  });
+  await page.waitForTimeout(200);
+  await page.evaluate(() => {
+    const editor = window.__mdAnnotator.State.editor;
+    editor.commands.focus(2);
+    editor.commands.setTextSelection({ from: 2, to: 4 });
+  });
+  await page.waitForTimeout(200);
+  await page.locator('#float-comment-btn button').click();
+  await page.waitForTimeout(300);
+  await page.evaluate(() => {
+    const ta = document.querySelector('[data-thread-input]');
+    ta.value = 'A body';
+    document.querySelector('button[data-act="submit-reply"]').click();
+  });
+  await page.waitForTimeout(300);
+  // B 加批注
+  await page.evaluate(() => {
+    window.__mdAnnotator.setAuthor({ id: 'userB-id-fixed', name: 'B' });
+  });
+  await page.waitForTimeout(200);
+  await page.evaluate(() => {
+    const editor = window.__mdAnnotator.State.editor;
+    editor.commands.focus(9);
+    editor.commands.setTextSelection({ from: 9, to: 11 });
+  });
+  await page.waitForTimeout(200);
+  await page.locator('#float-comment-btn button').click();
+  await page.waitForTimeout(300);
+  await page.evaluate(() => {
+    const ta = document.querySelector('[data-thread-input]');
+    ta.value = 'B body';
+    document.querySelector('button[data-act="submit-reply"]').click();
+  });
+  await page.waitForTimeout(300);
+  const d10 = await page.evaluate(() => {
+    const marks = Array.from(document.querySelectorAll('.annotation-mark'));
+    return marks.map(m => ({
+      bg: getComputedStyle(m).backgroundColor,
+      authorColor: m.getAttribute('data-author-color'),
+    }));
+  });
+  console.log('  d10 mark 颜色 (P-D10):', JSON.stringify(d10), '(A/B 应不同色)');
+  if (d10.length !== 2) throw new Error(`应有 2 mark, 实际 ${d10.length}`);
+  if (d10[0].bg === d10[1].bg) throw new Error(`A/B 同色 ${d10[0].bg} — D10 fix 失败, 应不同`);
+  // 同 author 应同色
+  if (d10[0].authorColor === d10[1].authorColor) throw new Error(`A/B authorColor index 相同 ${d10[0].authorColor}, 应不同`);
+
   await browser.close();
   console.log('\n========================================');
-  console.log('✓ 全部 89 个测试通过！');
+  console.log('✓ 全部 92 个测试通过！');
   console.log('========================================');
 })().catch(async err => {
   console.error('\n✗ 测试失败:', err.message);
