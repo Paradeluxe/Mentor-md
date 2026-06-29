@@ -2843,9 +2843,133 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
   if (d36State.comments !== 1) throw new Error(`Cmd+Enter 应提交 1 comment, 实际 ${d36State.comments}`);
   if (!d36State.firstBody?.includes('Cmd+Enter')) throw new Error('comment body 应含 "Cmd+Enter"');
 
+  // === TEST 95: 侧栏按 doc 位置排序 (P-F7 docx 一致) ===
+  // Word 行为: 侧栏 thread 按 doc 位置排序, 不按创建时间
+  // Mentor 修复: renderCommentList sorted by range.from asc
+  console.log('\n=== TEST 95: 侧栏按 doc 位置排序 (docx 一致) ===');
+  await page.evaluate((m) => window.__mdAnnotator.loadMarkdownIntoEditor('f7-test.md', m, null), 'A 一.\n\nB 二.\n\nC 三.');
+  await page.waitForTimeout(300);
+  // 倒序加: C, A, B
+  for (const text of ['C 三.', 'A 一.', 'B 二.']) {
+    await page.evaluate((t) => {
+      const editor = window.__mdAnnotator.State.editor;
+      let pos = -1;
+      editor.state.doc.descendants((n, p) => { if (n.isText && n.text === t) { pos = p; return false; }});
+      editor.commands.focus(pos);
+      editor.commands.setTextSelection({ from: pos, to: pos + 3 });
+    }, text);
+    await page.waitForTimeout(200);
+    await page.locator('#float-comment-btn button').click();
+    await page.waitForTimeout(300);
+    await page.evaluate((t) => {
+      const ta = document.querySelector('[data-thread-input]');
+      ta.value = `c_${t}`;
+      document.querySelector('button[data-act="submit-reply"]').click();
+    }, text);
+    await page.waitForTimeout(300);
+  }
+  const f7Order = await page.evaluate(() => {
+    const threads = Array.from(document.querySelectorAll('.comment-thread'));
+    return threads.map(t => t.querySelector('.comment-quote-text')?.textContent?.trim());
+  });
+  console.log('  侧栏顺序 (倒序创建, 应 doc 位置升序):', JSON.stringify(f7Order));
+  if (!f7Order[0]?.startsWith('A 一')) throw new Error(`侧栏第 1 应 "A 一...", 实际 "${f7Order[0]}"`);
+  if (!f7Order[1]?.startsWith('B 二')) throw new Error(`侧栏第 2 应 "B 二...", 实际 "${f7Order[1]}"`);
+  if (!f7Order[2]?.startsWith('C 三')) throw new Error(`侧栏第 3 应 "C 三...", 实际 "${f7Order[2]}"`);
+
+  // === TEST 96: 侧栏 thread 数字标号 (P-F20 docx 一致) ===
+  // Word 行为: 侧栏 thread 显 1, 2, 3 数字
+  // Mentor 修复: renderCommentList 加 .comment-number-badge
+  console.log('\n=== TEST 96: 侧栏 thread 数字标号 (docx 一致) ===');
+  await page.evaluate((m) => window.__mdAnnotator.loadMarkdownIntoEditor('f20-test.md', m, null), '一.\n\n二.\n\n三.');
+  await page.waitForTimeout(300);
+  for (const t of ['一.', '二.', '三.']) {
+    await page.evaluate((text) => {
+      const editor = window.__mdAnnotator.State.editor;
+      let pos = -1;
+      editor.state.doc.descendants((n, p) => { if (n.isText && n.text === text) { pos = p; return false; }});
+      editor.commands.focus(pos);
+      editor.commands.setTextSelection({ from: pos, to: pos + 1 });
+    }, t);
+    await page.waitForTimeout(200);
+    await page.locator('#float-comment-btn button').click();
+    await page.waitForTimeout(300);
+    await page.evaluate((text) => {
+      const ta = document.querySelector('[data-thread-input]');
+      ta.value = `c_${text}`;
+      document.querySelector('button[data-act="submit-reply"]').click();
+    }, t);
+    await page.waitForTimeout(300);
+  }
+  const f20 = await page.evaluate(() => {
+    const badges = Array.from(document.querySelectorAll('.comment-number-badge'));
+    return badges.map(b => b.getAttribute('data-number'));
+  });
+  console.log('  thread 数字:', JSON.stringify(f20));
+  if (f20[0] !== '1' || f20[1] !== '2' || f20[2] !== '3') {
+    throw new Error(`thread 数字应 [1, 2, 3], 实际 [${f20.join(', ')}]`);
+  }
+
+  // === TEST 97: reply 草稿持久 (P-F18 docx 一致) ===
+  // Word 行为: 切文档再切回草稿保留
+  // Mentor 修复: State.replyDrafts[threadId] 存 + 恢复
+  console.log('\n=== TEST 97: reply 草稿持久 (docx 一致) ===');
+  await page.evaluate((m) => window.__mdAnnotator.loadMarkdownIntoEditor('f18-test.md', m, null), 'f18 段.');
+  await page.waitForTimeout(300);
+  await page.evaluate(() => {
+    const editor = window.__mdAnnotator.State.editor;
+    editor.commands.focus(3);
+    editor.commands.setTextSelection({ from: 3, to: 4 });
+  });
+  await page.waitForTimeout(200);
+  await page.locator('#float-comment-btn button').click();
+  await page.waitForTimeout(300);
+  // 输半截草稿
+  await page.evaluate(() => {
+    const ta = document.querySelector('[data-thread-input]');
+    if (ta) { ta.value = '未完草稿'; ta.dispatchEvent(new Event('input', { bubbles: true })); }
+  });
+  await page.waitForTimeout(200);
+  const f18Before = await page.evaluate(() => ({
+    draftKeys: Object.keys(window.__mdAnnotator.State.replyDrafts || {}),
+    draftVal: window.__mdAnnotator.State.replyDrafts?.[window.__mdAnnotator.State.activeThreadId],
+  }));
+  console.log('  输草稿后:', JSON.stringify(f18Before));
+  if (f18Before.draftVal !== '未完草稿') throw new Error('草稿应存入 State.replyDrafts');
+  // 切到别的 doc 再切回
+  await page.evaluate((m) => window.__mdAnnotator.loadMarkdownIntoEditor('f18b-test.md', m, null), 'f18b 段.');
+  await page.waitForTimeout(500);
+  await page.evaluate((m) => window.__mdAnnotator.loadMarkdownIntoEditor('f18-test.md', m, null), 'f18 段.');
+  await page.waitForTimeout(500);
+  const f18After = await page.evaluate(() => ({
+    ta: document.querySelector('[data-thread-input]')?.value,
+  }));
+  console.log('  切回后:', JSON.stringify(f18After));
+  if (f18After.ta !== '未完草稿') throw new Error(`切回后草稿应保留, 实际 "${f18After.ta}"`);
+  // 提交后草稿应清
+  await page.evaluate(() => {
+    const ta = document.querySelector('[data-thread-input]');
+    if (ta) {
+      ta.value = '已完';
+      ta.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+  });
+  await page.waitForTimeout(200);
+  await page.evaluate(() => {
+    document.querySelector('button[data-act="submit-reply"]')?.click();
+  });
+  await page.waitForTimeout(500);
+  const f18Cleared = await page.evaluate(() => ({
+    draftKeys: Object.keys(window.__mdAnnotator.State.replyDrafts || {}),
+    comments: window.__mdAnnotator.State.annotations[0]?.comments?.length,
+  }));
+  console.log('  提交后:', JSON.stringify(f18Cleared));
+  if (f18Cleared.draftKeys.length !== 0) throw new Error('提交后草稿应清空');
+  if (f18Cleared.comments !== 1) throw new Error('应提交 1 comment');
+
   await browser.close();
   console.log('\n========================================');
-  console.log('✓ 全部 94 个测试通过！');
+  console.log('✓ 全部 97 个测试通过！');
   console.log('========================================');
 })().catch(async err => {
   console.error('\n✗ 测试失败:', err.message);

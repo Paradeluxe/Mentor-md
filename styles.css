@@ -1142,16 +1142,32 @@ code {
 /* === Comment thread card (DESIGN.md: 暖黄左 border, 6px 圆角, shadow-as-border) === */
 .comment-thread {
   background: var(--panel);
-  border: none;
+  position: relative;
   border-left: 3px solid var(--comment-bg, #d4a017);  /* P-card: 暖黄左 border (DESIGN.md) */
   border-radius: var(--rounded-md, 6px);
   margin: 0 0 10px 0;
   padding: 0;
-  position: relative;
   overflow: visible;  /* P-card: 让 ⋯ 菜单弹窗不被 clip */
   transition: border-left-color 0.15s ease;
   box-shadow: 0 0 0 1px var(--border-warm);
   cursor: pointer;  /* P-card: 整张卡片可点击跳转 (Word 风格) */
+}
+.comment-number-badge {
+  position: absolute;
+  top: 4px;
+  left: -10px;
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--bg);
+  background: var(--accent);
+  border-radius: 50%;
+  z-index: 2;
+  user-select: none;
 }
 .comment-thread:hover {
   border-left-color: var(--highlight);

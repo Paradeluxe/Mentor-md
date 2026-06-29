@@ -123,6 +123,9 @@ const State = {
   filterOpen: true,
   filterResolved: false,
   showAllMarkup: true,        // P-marks: All Markup / No Markup 切换 (默认 true = 显示所有批注 + 气泡)
+  // F18: reply 草稿持久 (Word 行为: 切文档再切回草稿保留)
+  // key = threadId, value = textarea 内容
+  replyDrafts: {},
   folderHandle: null,       // 当前文件夹 handle（FileSystemDirectoryHandle）
   saveMode: 'unknown',      // 'handle' | 'download' | 'unknown'
   readOnlyMode: false,      // P0-A: 另一 tab 在编辑时启用只读 (Ctrl+S 禁用)
@@ -1445,6 +1448,8 @@ function addReply(threadId, body) {
     createdAt: nowISO(),
   };
   thread.comments.push(comment);
+  // F18: 提交成功清草稿
+  delete State.replyDrafts[threadId];
   markDirty();
   renderCommentList();
   // AI 协作协议：通知监听者
@@ -1536,9 +1541,17 @@ function renderCommentList() {
     : null;
   const isPinned = activeThread && !filtered.includes(activeThread);
   const pinnedThread = isPinned ? activeThread : null;
+  // F7 docx 一致: 侧栏按 doc 位置排序 (Word 行为), range.from 升序
+  // invalid/fuzzy ann (range=null) 排在最后
+  const sorted = [...filtered].sort((a, b) => {
+    if (a.range == null && b.range == null) return 0;
+    if (a.range == null) return 1;
+    if (b.range == null) return -1;
+    return a.range.from - b.range.from;
+  });
   const visibleThreads = pinnedThread
-    ? [pinnedThread, ...filtered.filter(t => t.threadId !== pinnedThread.threadId)]
-    : filtered;
+    ? [pinnedThread, ...sorted.filter(t => t.threadId !== pinnedThread.threadId)]
+    : sorted;
 
   if (visibleThreads.length === 0) {
     list.innerHTML = '';
@@ -1569,7 +1582,7 @@ function renderCommentList() {
   };
   const avatar = (name) => (name || '匿').trim().charAt(0).toUpperCase() || '?';
 
-  list.innerHTML = visibleThreads.map(thread => {
+  list.innerHTML = visibleThreads.map((thread, idx) => {
     // P-card: first comment — 已有用第一条, 没有 (刚创建) 用当前用户作 author 显示 reply-form
     const first = thread.comments?.[0] || (thread.threadId === State.activeThreadId
       ? { author: { id: State.authorId, name: State.author }, body: '', createdAt: nowISO() }
@@ -1577,6 +1590,9 @@ function renderCommentList() {
     const replies = (thread.comments || []).slice(1);
     const isActive = State.activeThreadId === thread.threadId;
     const isPinnedThread = pinnedThread && thread.threadId === pinnedThread.threadId;
+    // F20 docx 一致: 侧栏 thread 加数字标号 (Word 风格 1, 2, 3)
+    // pinned thread 也算 (用大写 P)
+    const number = isPinnedThread ? 'P' : (idx + 1);
     // P-card: 解决后默认折叠 (Word 风格), 只显示 quote + meta 一行. 通过 collapsed class 控制.
     // 仍可点击展开 (与原 comment-quote 点击区合并).
     const isCollapsed = thread.resolved;
@@ -1584,6 +1600,7 @@ function renderCommentList() {
       <div class="comment-thread ${isActive ? 'is-active' : ''} ${thread.resolved ? 'is-resolved' : ''} ${isPinnedThread ? 'is-pinned' : ''} ${thread.fuzzy ? 'is-fuzzy' : ''} ${isCollapsed ? 'is-collapsed' : ''}" data-thread="${thread.threadId}">
         ${isPinnedThread ? '<div class="pinned-banner">📌 当前光标处 (filter 已隐藏)</div>' : ''}
         ${thread.fuzzy ? '<div class="fuzzy-banner">⚠ 位置可能偏移 - 请检查文档</div>' : ''}
+        <div class="comment-number-badge" data-number="${number}" title="批注 #${number}">${number}</div>
         <!-- 卡片头: 引文 (可点击跳转) + ⋯ 菜单按钮 -->
         <div class="comment-quote" data-act="goto" data-thread="${thread.threadId}" title="点击跳转到批注处">
           <span class="comment-quote-mark">"</span>
@@ -1645,10 +1662,17 @@ function renderCommentList() {
   // 绑定事件
   // P-D36: Cmd+Enter / Ctrl+Enter 提交 reply (Word 风格)
   list.querySelectorAll('[data-thread-input]').forEach(ta => {
+    // F18: 草稿持久 — 恢复 + input 监听
+    const tid = ta.getAttribute('data-thread-input');
+    if (State.replyDrafts[tid] && !ta.value) {
+      ta.value = State.replyDrafts[tid];
+    }
+    ta.addEventListener('input', () => {
+      State.replyDrafts[tid] = ta.value;
+    });
     ta.addEventListener('keydown', (e) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
         e.preventDefault();
-        const tid = ta.getAttribute('data-thread-input');
         if (ta.value.trim()) addReply(tid, ta.value);
       }
     });
