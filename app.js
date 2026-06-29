@@ -765,7 +765,7 @@ function markDirty() {
   if (State.currentFile) {
     State.currentFile.dirty = true;
     $('#dirty-indicator').classList.add('is-dirty');
-    $('#current-file-name').textContent = State.currentFile.name + ' ●';
+    $('#current-file-name').textContent = State.currentFile.name;
     updateTreeDirtyDots();
     // P-reload: 任何 dirty 变更都触发 IDB 缓存 debounce 写 (用户刷新前不存盘也能恢复批注)
     scheduleIdbCacheWrite();
@@ -1810,6 +1810,20 @@ function renderCommentList() {
   // P-card: 解决后卡片可点击展开/折叠 (Word 风格)
   // 折叠状态展开优先级高于跳转 (避免 "跳到看不见的 mark" 体验)
   list.querySelectorAll('.comment-thread').forEach(el => {
+    // K14 fix: card hover 高亮 doc 中对应的 mark (Word 行为: 鼠标悬停卡片 → 批注文字高亮)
+    el.addEventListener('mouseenter', () => {
+      const tid = el.dataset.thread;
+      if (!tid) return;
+      // 给 mark 临时加 hover class
+      const mark = document.querySelector(`.annotation-mark[data-thread-id="${tid}"]`);
+      if (mark) mark.classList.add('is-hover');
+    });
+    el.addEventListener('mouseleave', () => {
+      const tid = el.dataset.thread;
+      if (!tid) return;
+      const mark = document.querySelector(`.annotation-mark[data-thread-id="${tid}"]`);
+      if (mark) mark.classList.remove('is-hover');
+    });
     el.addEventListener('click', e => {
       // 交互区 (按钮/textarea/details summary) 不触发
       if (e.target.closest('button') || e.target.closest('textarea') || e.target.closest('details summary')) return;

@@ -1225,6 +1225,8 @@ code {
 .comment-thread:hover {
   border-left-color: var(--highlight);
 }
+/* K14 fix: card hover 高亮 doc 中对应的 mark (Word 行为) */
+.tiptap .annotation-mark.is-hover { background: #fde68a; }
 .comment-thread.is-active {
   border-left-color: var(--accent);
   box-shadow: 0 0 0 1px var(--accent);

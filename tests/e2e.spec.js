@@ -3146,9 +3146,74 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
     throw new Error('expandedThreadIds 应有值');
   }
 
+  // === TEST 102: 编辑后顶部 doc 名不带 ● 标记 (I12 docx 一致) ===
+  // Word 行为: 顶部 filename 永远是 pure name, dirty 状态用单独 indicator
+  // 之前 mentor: filename + ' ●' 一体 (混乱)
+  // 修复: 分离 dirty indicator (CSS .is-dirty 控制 .● 字符)
+  console.log('\n=== TEST 102: 顶部 doc 名不带 ● (docx 一致) ===');
+  await page.evaluate((m) => window.__mdAnnotator.loadMarkdownIntoEditor('i12-test.md', m, null), 'i12 段.');
+  await page.waitForTimeout(300);
+  await page.evaluate(() => {
+    const editor = window.__mdAnnotator.State.editor;
+    editor.commands.insertContentAt(editor.state.doc.content.size - 1, ' 修改');
+  });
+  await page.waitForTimeout(300);
+  const i12 = await page.evaluate(() => ({
+    name: document.querySelector('#current-file-name')?.textContent,
+    dirty: window.__mdAnnotator.State.currentFile?.dirty,
+  }));
+  console.log('  编辑后:', JSON.stringify(i12), '(应 name="i12-test.md" 不带 ●)');
+  if (i12.name?.includes('●')) throw new Error(`顶部 name 不应含 ●, 实际 "${i12.name}"`);
+  if (!i12.dirty) throw new Error('应 dirty=true');
+
+  // === TEST 103: card hover 高亮 doc 中对应 mark (K14 docx 一致) ===
+  // Word 行为: 鼠标悬停批注卡片 → 对应 doc 中批注文字高亮
+  // Mentor 修复: mouseenter/mouseleave + .is-hover class
+  console.log('\n=== TEST 103: card hover 高亮 mark (docx 一致) ===');
+  await page.evaluate((m) => window.__mdAnnotator.loadMarkdownIntoEditor('k14-test.md', m, null), 'k14 段.');
+  await page.waitForTimeout(300);
+  await page.evaluate(() => {
+    const editor = window.__mdAnnotator.State.editor;
+    editor.commands.focus(3);
+    editor.commands.setTextSelection({ from: 3, to: 4 });
+  });
+  await page.waitForTimeout(200);
+  await page.locator('#float-comment-btn button').click();
+  await page.waitForTimeout(300);
+  await page.evaluate(() => {
+    const ta = document.querySelector('[data-thread-input]');
+    ta.value = 'k14';
+    document.querySelector('button[data-act="submit-reply"]').click();
+  });
+  await page.waitForTimeout(300);
+  // hover 前: mark 无 is-hover
+  const k14Before = await page.evaluate(() => {
+    const m = document.querySelector('.annotation-mark');
+    return { hasHover: m?.classList.contains('is-hover') };
+  });
+  // hover 卡片
+  await page.locator('.comment-thread').first().hover();
+  await page.waitForTimeout(300);
+  const k14After = await page.evaluate(() => {
+    const m = document.querySelector('.annotation-mark');
+    return { hasHover: m?.classList.contains('is-hover') };
+  });
+  console.log('  k14 hover:', JSON.stringify({ before: k14Before, after: k14After }));
+  if (k14Before.hasHover) throw new Error('hover 前不应有 is-hover class');
+  if (!k14After.hasHover) throw new Error('hover 后应有 is-hover class (K14 fix)');
+  // leave
+  await page.evaluate(() => document.querySelector('.comment-thread').dispatchEvent(new MouseEvent('mouseleave', { bubbles: true })));
+  await page.waitForTimeout(300);
+  const k14Leave = await page.evaluate(() => {
+    const m = document.querySelector('.annotation-mark');
+    return { hasHover: m?.classList.contains('is-hover') };
+  });
+  console.log('  k14 leave:', JSON.stringify(k14Leave));
+  if (k14Leave.hasHover) throw new Error('mouseleave 后应清除 is-hover');
+
   await browser.close();
   console.log('\n========================================');
-  console.log('✓ 全部 101 个测试通过！');
+  console.log('✓ 全部 103 个测试通过！');
   console.log('========================================');
 })().catch(async err => {
   console.error('\n✗ 测试失败:', err.message);
