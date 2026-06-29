@@ -114,10 +114,15 @@
     <!-- 右：批注面板 -->
     <aside id="comment-pane">
       <div class="pane-header">
-        <span class="pane-title"><span class="pane-icon pane-icon-comment"></span><span>批注</span></span>
+        <span class="pane-title"><span class="pane-icon pane-icon-comment"></span><span>批注</span><span class="pane-count" id="comment-count" title="当前 doc 总批注数">0</span></span>
         <div class="filters">
-          <label><input type="checkbox" id="filter-open" checked /> 未解决</label>
-          <label><input type="checkbox" id="filter-resolved" /> 已解决</label>
+          <div class="filter-tabs" role="tablist">
+            <button class="filter-tab is-active" data-filter-tab="all" title="所有批注 (Word 风格 All tab)">全部 <span class="filter-tab-count" data-count-for="all">0</span></button>
+            <button class="filter-tab" data-filter-tab="open" title="未解决">未解决 <span class="filter-tab-count" data-count-for="open">0</span></button>
+            <button class="filter-tab" data-filter-tab="resolved" title="已解决">已解决 <span class="filter-tab-count" data-count-for="resolved">0</span></button>
+          </div>
+          <label class="filter-checkbox-fallback"><input type="checkbox" id="filter-open" checked /> 未解决</label>
+          <label class="filter-checkbox-fallback"><input type="checkbox" id="filter-resolved" /> 已解决</label>
           <label title="显示所有批注标记 + 气泡 (Word 顶部 'All Markup' 按钮)">
             <input type="checkbox" id="show-all-markup" checked /> All Markup
           </label>

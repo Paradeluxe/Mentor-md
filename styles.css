@@ -1124,7 +1124,60 @@ code {
   display: flex;
   flex-direction: column;
 }
-#comment-pane .filters { font-size: 11.5px; font-weight: 400; display: flex; gap: 10px; }
+#comment-pane .filters { font-size: 11.5px; font-weight: 400; display: flex; flex-direction: column; gap: 6px; }
+#comment-pane .filters .filter-tabs {
+  display: flex;
+  gap: 2px;
+  border-bottom: 1px solid var(--border-warm);
+  padding-bottom: 4px;
+  margin-bottom: 2px;
+}
+#comment-pane .filters .filter-tab {
+  background: transparent;
+  border: none;
+  padding: 4px 10px;
+  font-size: 11.5px;
+  color: var(--text-2);
+  cursor: pointer;
+  border-radius: 4px 4px 0 0;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  transition: color 0.15s, border-color 0.15s;
+}
+#comment-pane .filters .filter-tab:hover { color: var(--text); }
+#comment-pane .filters .filter-tab.is-active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+  font-weight: 500;
+}
+#comment-pane .filters .filter-tab-count {
+  display: inline-block;
+  min-width: 16px;
+  padding: 0 4px;
+  margin-left: 2px;
+  font-size: 10px;
+  background: var(--bg-2);
+  border-radius: 8px;
+  text-align: center;
+  color: var(--text-2);
+}
+#comment-pane .filters .filter-tab.is-active .filter-tab-count {
+  background: var(--accent);
+  color: var(--bg);
+}
+#comment-pane .pane-count {
+  display: inline-block;
+  min-width: 18px;
+  padding: 1px 6px;
+  margin-left: 6px;
+  font-size: 10.5px;
+  font-weight: 500;
+  background: var(--bg-2);
+  color: var(--text-2);
+  border-radius: 9px;
+  text-align: center;
+  vertical-align: middle;
+}
 #comment-pane .filters label {
   display: flex;
   align-items: center;

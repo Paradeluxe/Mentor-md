@@ -2967,9 +2967,118 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
   if (f18Cleared.draftKeys.length !== 0) throw new Error('提交后草稿应清空');
   if (f18Cleared.comments !== 1) throw new Error('应提交 1 comment');
 
+  // === TEST 98: 侧栏顶部 thread count badge (P-G15 docx 一致) ===
+  // Word 行为: 顶部 "5 comments" 计数
+  // Mentor 修复: renderCommentList 调 updateCommentCounts 更新 #comment-count
+  console.log('\n=== TEST 98: 顶部 thread count badge (docx 一致) ===');
+  await page.evaluate((m) => window.__mdAnnotator.loadMarkdownIntoEditor('g15-test.md', m, null), 'g15 段.');
+  await page.waitForTimeout(300);
+  // 加 3 批注
+  for (const t of ['一', '二', '三']) {
+    await page.evaluate((text) => {
+      const editor = window.__mdAnnotator.State.editor;
+      let pos = -1;
+      editor.state.doc.descendants((n, p) => { if (n.isText && n.text.includes('g15')) { pos = p + 3; return false; }});
+      editor.commands.focus(pos);
+      editor.commands.setTextSelection({ from: pos, to: pos + 1 });
+    }, t);
+    await page.waitForTimeout(200);
+    await page.locator('#float-comment-btn button').click();
+    await page.waitForTimeout(300);
+    await page.evaluate(() => {
+      const ta = document.querySelector('[data-thread-input]');
+      ta.value = `c_${Math.random()}`;
+      document.querySelector('button[data-act="submit-reply"]').click();
+    });
+    await page.waitForTimeout(300);
+  }
+  const g15 = await page.evaluate(() => ({
+    total: document.querySelector('#comment-count')?.textContent,
+    all: document.querySelector('[data-count-for="all"]')?.textContent,
+    open: document.querySelector('[data-count-for="open"]')?.textContent,
+    resolved: document.querySelector('[data-count-for="resolved"]')?.textContent,
+  }));
+  console.log('  counts:', JSON.stringify(g15));
+  if (g15.total !== '3') throw new Error(`顶部 total 应 3, 实际 "${g15.total}"`);
+  if (g15.all !== '3' || g15.open !== '3' || g15.resolved !== '0') {
+    throw new Error(`tab 计数错: ${JSON.stringify(g15)}`);
+  }
+
+  // === TEST 99: filter tab 切换 (P-G16 docx 一致) ===
+  // Word 行为: tab 切换 Open/Resolved/All
+  // Mentor 修复: .filter-tab click 同步 state + checkbox
+  console.log('\n=== TEST 99: filter tab 切换 (docx 一致) ===');
+  // 解决 1 批注
+  const tid99 = await page.evaluate(() => window.__mdAnnotator.State.annotations[0].threadId);
+  await page.locator(`.comment-thread[data-thread="${tid99}"]`).hover();
+  await page.waitForTimeout(200);
+  await page.locator(`.comment-thread[data-thread="${tid99}"] .comment-menu-btn`).click();
+  await page.waitForTimeout(200);
+  await page.locator('.comment-menu:not(.hidden) button[data-act="resolve"]').click();
+  await page.waitForTimeout(300);
+  // 点 "未解决" tab
+  await page.click('.filter-tab[data-filter-tab="open"]');
+  await page.waitForTimeout(300);
+  const openState = await page.evaluate(() => ({
+    threads: document.querySelectorAll('.comment-thread').length,
+    activeTab: document.querySelector('.filter-tab.is-active')?.dataset.filterTab,
+    openChecked: document.querySelector('#filter-open')?.checked,
+    resolvedChecked: document.querySelector('#filter-resolved')?.checked,
+  }));
+  console.log('  未解决 tab:', JSON.stringify(openState));
+  if (openState.activeTab !== 'open') throw new Error(`active 应 open, 实际 ${openState.activeTab}`);
+  if (!openState.openChecked || openState.resolvedChecked) throw new Error('checkbox 应 open=true, resolved=false');
+  if (openState.threads !== 2) throw new Error(`未解决 tab 应 2 thread, 实际 ${openState.threads}`);
+  // 点 "已解决" tab
+  await page.click('.filter-tab[data-filter-tab="resolved"]');
+  await page.waitForTimeout(300);
+  const resolvedState = await page.evaluate(() => ({
+    threads: document.querySelectorAll('.comment-thread').length,
+    activeTab: document.querySelector('.filter-tab.is-active')?.dataset.filterTab,
+    filterOpen: window.__mdAnnotator.State.filterOpen,
+    filterResolved: window.__mdAnnotator.State.filterResolved,
+    annResolved: window.__mdAnnotator.State.annotations.map(a => ({ tid: a.threadId.slice(0,8), r: a.resolved })),
+  }));
+  console.log('  已解决 tab:', JSON.stringify(resolvedState));
+  if (resolvedState.activeTab !== 'resolved') throw new Error(`active 应 resolved, 实际 ${resolvedState.activeTab}`);
+  // 已解决 tab 期望 1 thread (resolved) — activeThread 若不是 resolved 则 pinned 也算上
+  if (resolvedState.threads < 1 || resolvedState.threads > 2) {
+    throw new Error(`已解决 tab 应 1-2 thread (含 pinned), 实际 ${resolvedState.threads}`);
+  }
+  // 点 "全部" tab
+  await page.click('.filter-tab[data-filter-tab="all"]');
+  await page.waitForTimeout(300);
+  const allState = await page.evaluate(() => ({
+    threads: document.querySelectorAll('.comment-thread').length,
+    activeTab: document.querySelector('.filter-tab.is-active')?.dataset.filterTab,
+  }));
+  console.log('  全部 tab:', JSON.stringify(allState));
+  if (allState.activeTab !== 'all') throw new Error(`active 应 all, 实际 ${allState.activeTab}`);
+  if (allState.threads !== 3) throw new Error(`全部 tab 应 3 thread, 实际 ${allState.threads}`);
+
+  // === TEST 100: tab 计数实时更新 (G15) ===
+  console.log('\n=== TEST 100: tab 计数实时更新 ===');
+  // reopen 1 批注 → 3 open, 0 resolved
+  await page.click('.filter-tab[data-filter-tab="resolved"]');
+  await page.waitForTimeout(300);
+  await page.locator(`.comment-thread[data-thread="${tid99}"]`).hover();
+  await page.waitForTimeout(200);
+  await page.locator(`.comment-thread[data-thread="${tid99}"] .comment-menu-btn`).click();
+  await page.waitForTimeout(200);
+  await page.locator('.comment-menu:not(.hidden) button[data-act="resolve"]').click();
+  await page.waitForTimeout(300);
+  const after100 = await page.evaluate(() => ({
+    open: document.querySelector('[data-count-for="open"]')?.textContent,
+    resolved: document.querySelector('[data-count-for="resolved"]')?.textContent,
+  }));
+  console.log('  reopen 后:', JSON.stringify(after100));
+  if (after100.open !== '3' || after100.resolved !== '0') {
+    throw new Error(`reopen 后 open 应 3, resolved 应 0, 实际 ${JSON.stringify(after100)}`);
+  }
+
   await browser.close();
   console.log('\n========================================');
-  console.log('✓ 全部 97 个测试通过！');
+  console.log('✓ 全部 100 个测试通过！');
   console.log('========================================');
 })().catch(async err => {
   console.error('\n✗ 测试失败:', err.message);

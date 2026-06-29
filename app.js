@@ -703,6 +703,37 @@ function formatTime(iso) {
   return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
+// G15: 更新侧栏顶 thread count + tab 计数 (Word 风格 "5 comments")
+function updateCommentCounts() {
+  const all = State.annotations.length;
+  const open = State.annotations.filter(a => !a.resolved).length;
+  const resolved = State.annotations.filter(a => a.resolved).length;
+  const total = $('#comment-count');
+  if (total) total.textContent = all;
+  const allBtn = document.querySelector('[data-count-for="all"]');
+  if (allBtn) allBtn.textContent = all;
+  const openBtn = document.querySelector('[data-count-for="open"]');
+  if (openBtn) openBtn.textContent = open;
+  const resolvedBtn = document.querySelector('[data-count-for="resolved"]');
+  if (resolvedBtn) resolvedBtn.textContent = resolved;
+}
+
+// G16: sync filter tabs active class + checkbox state (Word 风格 All/Open/Resolved tab)
+function syncFilterTabsFromCheckboxes() {
+  const open = $('#filter-open');
+  const res = $('#filter-resolved');
+  if (open) open.checked = State.filterOpen;
+  if (res) res.checked = State.filterResolved;
+  let mode = 'open';
+  if (State.filterOpen && State.filterResolved) mode = 'all';
+  else if (!State.filterOpen && State.filterResolved) mode = 'resolved';
+  else if (State.filterOpen && !State.filterResolved) mode = 'open';
+  else mode = 'none';
+  document.querySelectorAll('.filter-tab').forEach(btn => {
+    btn.classList.toggle('is-active', btn.dataset.filterTab === mode);
+  });
+}
+
 function showToast(msg, ms = 1800) {
   const t = $('#toast');
   t.textContent = msg;
@@ -1556,9 +1587,15 @@ function renderCommentList() {
   if (visibleThreads.length === 0) {
     list.innerHTML = '';
     empty.classList.remove('hidden');
+    updateCommentCounts();
+    syncFilterTabsFromCheckboxes();
     return;
   }
   empty.classList.add('hidden');
+
+  // G15 + G16: 更新 thread count + tab 状态
+  updateCommentCounts();
+  syncFilterTabsFromCheckboxes();
 
   // 调色板 - DESIGN.md 限制: 不要引入新色相, 只用 5 语义色组
   // (中性 / 蓝 / 黄 / 状态 / 深色). 用户名字 hash → 8 色调色板
@@ -3473,14 +3510,33 @@ function setupToolbar() {
     });
   });
 
-  // 批注过滤
-  $('#filter-open').addEventListener('change', e => {
-    State.filterOpen = e.target.checked;
-    renderCommentList();
-  });
-  $('#filter-resolved').addEventListener('change', e => {
-    State.filterResolved = e.target.checked;
-    renderCommentList();
+  // 批注过滤 (G16: tabs 已替代 checkbox, 留 fallback)
+  const filterOpenEl = $('#filter-open');
+  if (filterOpenEl) {
+    filterOpenEl.addEventListener('change', e => {
+      State.filterOpen = e.target.checked;
+      syncFilterTabsFromCheckboxes();
+      renderCommentList();
+    });
+  }
+  const filterResolvedEl = $('#filter-resolved');
+  if (filterResolvedEl) {
+    filterResolvedEl.addEventListener('change', e => {
+      State.filterResolved = e.target.checked;
+      syncFilterTabsFromCheckboxes();
+      renderCommentList();
+    });
+  }
+  // G16: filter tab click
+  document.querySelectorAll('.filter-tab').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const mode = btn.dataset.filterTab;
+      if (mode === 'all') { State.filterOpen = true; State.filterResolved = true; }
+      else if (mode === 'open') { State.filterOpen = true; State.filterResolved = false; }
+      else if (mode === 'resolved') { State.filterOpen = false; State.filterResolved = true; }
+      syncFilterTabsFromCheckboxes();
+      renderCommentList();
+    });
   });
   // P-marks: All Markup / No Markup 切换 (Word 顶部同名按钮)
   $('#show-all-markup').addEventListener('change', e => {
