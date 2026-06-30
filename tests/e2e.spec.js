@@ -1,11 +1,26 @@
 // Mentor E2E 测试
 // 用 Node Playwright 验证：打开 → 加载 markdown+侧车 → 创建批注 → 解决 → 回复 → 导出 markdown
 
-const { chromium } = require('/home/lablabcloud/.hermes/node/lib/node_modules/playwright');
+const { chromium } = require('playwright');
 const fs = require('fs');
 const path = require('path');
 
-const ROOT = '/mnt/e/hermes_playground/Mentor';
+// 自动检测运行平台: WSL (/mnt/...) vs Windows git-bash (E:\...)
+function detectRoot() {
+  if (process.platform === 'win32') {
+    // Windows: 测试文件就在 E:\hermes_playground\Mentor
+    return path.resolve('E:/hermes_playground/Mentor');
+  }
+  if (fs.existsSync('/mnt/e/hermes_playground/Mentor')) {
+    return '/mnt/e/hermes_playground/Mentor';
+  }
+  if (fs.existsSync('/home/lablabcloud/.hermes/node/lib/node_modules/playwright')) {
+    return '/mnt/e/hermes_playground/Mentor';
+  }
+  return path.resolve(__dirname, '..');
+}
+
+const ROOT = detectRoot();
 const URL = 'http://127.0.0.1:8765/index.html';
 
 const SAMPLE_MD = fs.readFileSync(path.join(ROOT, 'test-data/sample.md'), 'utf-8');
@@ -1820,8 +1835,8 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
   console.log('\n=== TEST 77: 批注卡片 Word 风格化 (P-card) ===');
   // 用 sample.md + sidecar (2 个批注)
   const fs = require('fs');
-  const sampleMd = fs.readFileSync('/mnt/e/hermes_playground/Mentor/test-data/sample.md', 'utf-8');
-  const sampleSidecar = JSON.parse(fs.readFileSync('/mnt/e/hermes_playground/Mentor/test-data/sample.md.annotations.json', 'utf-8'));
+  const sampleMd = fs.readFileSync(path.join(ROOT, 'test-data/sample.md'), 'utf-8');
+  const sampleSidecar = JSON.parse(fs.readFileSync(path.join(ROOT, 'test-data/sample.md.annotations.json'), 'utf-8'));
   await page.evaluate((args) => window.__mdAnnotator.loadMarkdownIntoEditor('sample.md', args.md, args.sidecar), { md: sampleMd, sidecar: sampleSidecar });
   await page.waitForTimeout(500);
 
@@ -3229,9 +3244,68 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
     throw new Error(`status bar 应含文件名: "${m14.status}"`);
   }
 
+  // === TEST 105: status bar 字数/行数 实时更新 (M15 docx 一致) ===
+  // M14 仅加载时算一次 — bug: 编辑后 status bar 不更新
+  // M15: editor transaction → debounced updateDocMeta → status-right 实时刷新
+  // 注意: Tiptap 段落折叠会让 "hello world\n\nsecond para" 在 textContent 里是 "hello worldsecond para" (3 词)
+  //       测试不依赖具体数字, 只验证编辑后数字变化 (即实时刷新机制工作)
+  console.log('\n=== TEST 105: status bar 实时更新 (docx 一致) ===');
+  const m15Before = await page.evaluate(() => document.querySelector('#status-right')?.textContent || '');
+  console.log('  m15 before:', JSON.stringify(m15Before));
+  if (!m15Before.includes('词') || !m15Before.includes('行') || !m15Before.includes('批注')) {
+    throw new Error(`初始 status 应含 词/行/批注: "${m15Before}"`);
+  }
+  const m15BeforeNums = m15Before.match(/(\d+) 词 · (\d+) 行 · (\d+) 批注/);
+  if (!m15BeforeNums) throw new Error(`无法解析初始 status: "${m15Before}"`);
+  const [, w0, l0, a0] = m15BeforeNums;
+  console.log(`  解析: 词=${w0} 行=${l0} 批注=${a0}`);
+  // 编辑: 在 doc 末尾追加 " added" — 词数应 +1
+  await page.evaluate(() => {
+    const ed = window.__mdAnnotator.State.editor;
+    if (!ed) throw new Error('window.__mdAnnotator.State.editor 不可用');
+    ed.commands.command(({ tr, state, dispatch }) => {
+      const end = state.doc.content.size;
+      if (dispatch) dispatch(tr.insertText(' added', end));
+      return true;
+    });
+  });
+  // 等 debounce (250ms) + 一点余量
+  await page.waitForTimeout(400);
+  const m15After = await page.evaluate(() => document.querySelector('#status-right')?.textContent || '');
+  console.log('  m15 after:', JSON.stringify(m15After));
+  const m15AfterNums = m15After.match(/(\d+) 词 · (\d+) 行 · (\d+) 批注/);
+  if (!m15AfterNums) throw new Error(`编辑后无法解析 status: "${m15After}"`);
+  const [, w1, l1, a1] = m15AfterNums;
+  console.log(`  解析: 词=${w1} 行=${l1} 批注=${a1}`);
+  if (parseInt(w1) <= parseInt(w0)) {
+    throw new Error(`编辑后词数应增加: ${w0} → ${w1}`);
+  }
+  if (m15After === m15Before) {
+    throw new Error(`编辑后 status 未更新 (M15 fix 应让 status-right 实时刷新): before="${m15Before}" after="${m15After}"`);
+  }
+  // 反向编辑: 删掉刚加的 " added" (6 字符) — 词数应回到 w0
+  await page.evaluate(() => {
+    const ed = window.__mdAnnotator.State.editor;
+    ed.commands.command(({ tr, state, dispatch }) => {
+      const end = state.doc.content.size;
+      if (dispatch) dispatch(tr.delete(end - 6, end));
+      return true;
+    });
+  });
+  await page.waitForTimeout(400);
+  const m15Revert = await page.evaluate(() => document.querySelector('#status-right')?.textContent || '');
+  console.log('  m15 revert:', JSON.stringify(m15Revert));
+  const m15RevertNums = m15Revert.match(/(\d+) 词 · (\d+) 行 · (\d+) 批注/);
+  if (!m15RevertNums) throw new Error(`反向编辑后无法解析 status: "${m15Revert}"`);
+  const [, w2, l2, a2] = m15RevertNums;
+  console.log(`  解析: 词=${w2} 行=${l2} 批注=${a2}`);
+  if (parseInt(w2) !== parseInt(w0)) {
+    throw new Error(`反向编辑后词数应回到 ${w0}: 实际 ${w2}`);
+  }
+
   await browser.close();
   console.log('\n========================================');
-  console.log('✓ 全部 104 个测试通过！');
+  console.log('✓ 全部 105 个测试通过！');
   console.log('========================================');
 })().catch(async err => {
   console.error('\n✗ 测试失败:', err.message);

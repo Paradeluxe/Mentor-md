@@ -10,5 +10,8 @@
   },
   "scripts_comment": "Run 'npm run test' for plain console, 'npm run test:report' for HTML report",
   "author": "",
-  "license": "MIT"
+  "license": "MIT",
+  "dependencies": {
+    "playwright": "^1.61.1"
+  }
 }

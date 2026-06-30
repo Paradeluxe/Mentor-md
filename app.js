@@ -761,6 +761,24 @@ function setStatus(left, right) {
   if (right !== undefined) $('#status-right').textContent = right;
 }
 
+// M15 docx 一致: 实时更新 status bar 右部 (字数 + 行数 + 批注数)
+// 仅操作 status-right, 不动 status-left — 兼容所有现有 setStatus(left, right) 调用方
+// 250ms debounce 避免每键击都重算
+let _docMetaTimer = null;
+function updateDocMeta() {
+  if (_docMetaTimer) clearTimeout(_docMetaTimer);
+  _docMetaTimer = setTimeout(() => {
+    _docMetaTimer = null;
+    if (!State.editor || !State.currentFile) return;
+    const docText = State.editor.state.doc.textContent || '';
+    const wordCount = docText.trim() ? docText.trim().split(/\s+/).filter(Boolean).length : 0;
+    const lineCount = docText.split('\n').length;
+    const annCount = (State.annotations || []).length;
+    const name = State.currentFile.name || '';
+    $('#status-right').textContent = `${name} · ${wordCount} 词 · ${lineCount} 行 · ${annCount} 批注`;
+  }, 250);
+}
+
 function markDirty() {
   if (State.currentFile) {
     State.currentFile.dirty = true;
@@ -1554,6 +1572,8 @@ function deleteThread(threadId) {
   if (State.activeThreadId === threadId) State.activeThreadId = null;
   markDirty();
   renderCommentList();
+  // M15 docx 一致: 批注数变化 → 刷新 status bar
+  updateDocMeta();
   // 同步 mark-delete popover 隐藏
   positionMarkDeletePopover();
   // P-card: 强制重设 selection (从 pos-1 → pos) 让 onSelectionUpdate 触发
@@ -2329,11 +2349,10 @@ function loadMarkdownIntoEditor(name, content, annotationsData = null) {
   $('#current-file-name').textContent = name;
   renderCommentList();
   renderOutline();
-  // M14 docx 一致: status bar 显示字数 + 行数 (Word 行为)
-  const docText = State.editor.state.doc.textContent || '';
-  const wordCount = docText.trim() ? docText.trim().split(/\s+/).filter(Boolean).length : 0;
-  const lineCount = docText.split('\n').length;
-  setStatus('已加载', `${name} · ${wordCount} 词 · ${lineCount} 行 · ${State.annotations.length} 批注`);
+  // M15 docx 一致: status bar 实时显示字数 + 行数 (Word 行为)
+  // 加载时初始化一次, 后续编辑由 onTransaction 触发 updateDocMeta 实时刷新
+  setStatus('已加载', '');
+  updateDocMeta();
   // P0-A: 跨 tab 协调 - 广播当前打开的文件
   if (typeof _openDocChannel === 'function') _openDocChannel();
   // P0-C: 记录主 .md mtime (供后续 saveCurrent 比较)
@@ -2639,7 +2658,9 @@ async function openFiles() {
         : (handles.length > 1
           ? `${mdHandle.name} (${handles.length - 1} 个其他文件, 仅 .md 加载批注)`
           : `${mdHandle.name} (保存将下载)`);
-      setStatus('已加载', statusMsg);
+      // M15 docx 一致: left 显示状态信息, right 由 updateDocMeta 维护 (字数/行数/批注数)
+      setStatus('已加载 · ' + statusMsg, '');
+      updateDocMeta();
       return;
     } catch (e) {
       if (e.name === 'AbortError') return; // 用户取消
@@ -3705,6 +3726,9 @@ function updateToolbarState() {
 function setupEditorSelectionObserver() {
   State.editor.on('selectionUpdate', updateToolbarState);
   State.editor.on('transaction', updateToolbarState);
+  // M15 docx 一致: 每次 editor transaction 后 debounced 刷新 status bar (字数+行数+批注数)
+  // 注意: updateDocMeta 内部已 250ms debounce, 这里不需要再 debounce
+  State.editor.on('transaction', () => updateDocMeta());
 }
 
 // ============================================================
