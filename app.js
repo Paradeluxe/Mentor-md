@@ -2329,7 +2329,11 @@ function loadMarkdownIntoEditor(name, content, annotationsData = null) {
   $('#current-file-name').textContent = name;
   renderCommentList();
   renderOutline();
-  setStatus('已加载', `${name} (${State.annotations.length} 批注)`);
+  // M14 docx 一致: status bar 显示字数 + 行数 (Word 行为)
+  const docText = State.editor.state.doc.textContent || '';
+  const wordCount = docText.trim() ? docText.trim().split(/\s+/).filter(Boolean).length : 0;
+  const lineCount = docText.split('\n').length;
+  setStatus('已加载', `${name} · ${wordCount} 词 · ${lineCount} 行 · ${State.annotations.length} 批注`);
   // P0-A: 跨 tab 协调 - 广播当前打开的文件
   if (typeof _openDocChannel === 'function') _openDocChannel();
   // P0-C: 记录主 .md mtime (供后续 saveCurrent 比较)

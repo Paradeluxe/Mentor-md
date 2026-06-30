@@ -3211,9 +3211,27 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
   console.log('  k14 leave:', JSON.stringify(k14Leave));
   if (k14Leave.hasHover) throw new Error('mouseleave 后应清除 is-hover');
 
+  // === TEST 104: status bar 显示字数 + 行数 (M14 docx 一致) ===
+  // Word 行为: 底部 status bar 显示 "1,234 词 · 5 行"
+  // Mentor 修复: loadMarkdownIntoEditor 算 wordCount + lineCount
+  console.log('\n=== TEST 104: status bar 字数 (docx 一致) ===');
+  await page.evaluate((m) => window.__mdAnnotator.loadMarkdownIntoEditor('m14-test.md', m, null), 'hello world\n\nsecond para');
+  await page.waitForTimeout(300);
+  const m14 = await page.evaluate(() => ({
+    status: document.querySelector('#status-right')?.textContent,
+  }));
+  console.log('  m14 status:', JSON.stringify(m14));
+  // 3 词 (hello, world, second, para = 4 actually, "world" "second" "para" + "hello" = 4. "second" "para" 2 + "hello" "world" 2 = 4)
+  if (!m14.status?.includes('词') || !m14.status?.includes('行')) {
+    throw new Error(`status bar 应含 "词" 和 "行": "${m14.status}"`);
+  }
+  if (!m14.status?.includes('m14-test.md')) {
+    throw new Error(`status bar 应含文件名: "${m14.status}"`);
+  }
+
   await browser.close();
   console.log('\n========================================');
-  console.log('✓ 全部 103 个测试通过！');
+  console.log('✓ 全部 104 个测试通过！');
   console.log('========================================');
 })().catch(async err => {
   console.error('\n✗ 测试失败:', err.message);
