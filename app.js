@@ -4074,6 +4074,17 @@ window.__mdAnnotator = {
     createAnnotationThread(found.from, found.to, text);
     return State.annotations[State.annotations.length - 1];
   },
+  // 测试用: 用已知 from/to 创建批注 (绕开 findTextInDoc, 允许跨 node 选区)
+  _testCreateAnnotation(from, to, text) {
+    if (!from || !to || !text) return null;
+    createAnnotationThread(from, to, text);
+    return State.annotations[State.annotations.length - 1];
+  },
+  // 测试用: 直接 toggle resolved (跳过 UI)
+  _testToggleResolved(threadId) {
+    toggleResolved(threadId);
+    return true;
+  },
   // 测试用: 直接调全局 deleteThread (跳过 confirm dialog)
   _testDeleteThread(threadId) {
     const thread = State.annotations.find(t => t.threadId === threadId);
