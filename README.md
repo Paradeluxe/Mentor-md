@@ -310,6 +310,35 @@ pending.forEach(t => {
 - [ ] 主题切换（深色模式）
 - [ ] 文件监视 — 文件被外部修改时提示重载
 
+## 已完成 (v1.x)
+
+### M15 — Status bar 实时更新 (docx 一致)
+
+- Status bar 加载时显示文件名 + 字数 + 行数 + 批注数
+- 编辑后实时刷新（debounced 250ms via updateDocMeta）
+- 实现：`app.js` `updateDocMeta()` 函数 + 4 处 hook（加载/创建批注/编辑 transaction/解决批注）
+- 测试：TEST 104 (加载时) + TEST 105 (实时更新) in `e2e.spec.js`
+
+### P3-A — Mark active class 持久化 (P3-A 回归保护)
+
+- 点击 mark → 该 mark 标 is-active class，其他取消
+- Schema attr `active` 同步到 PM state，刷新不丢
+- 实现：`app.js` `highlightActiveMark()` 双 pass（先清后设）+ `setupAnnotationMarkClickObserver()` mousedown 拦截
+- 关键 fix：removeMark/addMark 不能在同 descendants callback 内连续做，会位置错位
+- 关键 fix：mousedown 时主动 setTextSelection + focus 触发 onSelectionUpdate
+- 测试：`e2e-p3a-active-mark.spec.js` 全 56 个 test
+
+### P-multi-para — 多段批注 status 提示
+
+- 跨段落选区 → 创建多段批注 → status-left 显示 "已创建多段批注" (单段保持 "已创建批注")
+- 修复 pre-existing baseline: e2e-multi-paragraph 5/6 → 6/6
+- 测试：`e2e-multi-paragraph.spec.js`
+
+### 平台兼容
+
+- e2e tests 在 WSL + Windows git-bash 都能跑（detectRoot 自动检测）
+- 修过的 WSL hardcoded path 文件：`e2e.spec.js`, `e2e-p3a-active-mark.spec.js`, `e2e-long.spec.js`
+
 ---
 
 ## 许可

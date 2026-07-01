@@ -150,21 +150,22 @@ const URL = 'http://127.0.0.1:8765/index.html';
   });
   record('Active thread 边框 = accent orange', activeBorder && activeBorder.includes('245, 78, 0'), `border=${activeBorder}`);
 
-  // 8. 验证 resolve button 现在是中性色, 不是绿色
+  // 8. 验证 resolve button 在 menu popover 里, 文字色不是绿色
+  // (产品改用 menu popover 后, 旧的 .comment-actions .resolve-action CSS 已无对应元素, 这里改为 menu 内的 resolve)
   const resolveColor = await page.evaluate(() => {
-    const t = document.querySelector('.comment-actions button.resolve-action');
+    const t = document.querySelector('.comment-menu button[data-act="resolve"]');
     if (!t) return null;
     return window.getComputedStyle(t).color;
   });
   record('Resolve 按钮文字色 = 中性 (非绿色)', resolveColor && !resolveColor.includes('31, 138, 101'), `color=${resolveColor}`);
 
-  // 9. 验证 delete button icon-only
+  // 9. 验证 delete button 在 menu popover 里, 有 "🗑 删除批注" 文字
   const deleteBtn = await page.evaluate(() => {
-    const t = document.querySelector('.comment-actions button.danger');
+    const t = document.querySelector('.comment-menu button[data-act="delete"]');
     if (!t) return null;
     return t.textContent.trim();
   });
-  record('Delete 按钮 = icon only (无文字)', deleteBtn === '🗑', `text="${deleteBtn}"`);
+  record('Delete 按钮含文字 (🗑 删除批注)', deleteBtn && deleteBtn.includes('删除批注'), `text="${deleteBtn}"`);
 
   // 10. 验证 quote-mark 在 3 个 thread 都存在
   const quoteMarkAll = await page.evaluate(() => document.querySelectorAll('.comment-quote-mark').length);

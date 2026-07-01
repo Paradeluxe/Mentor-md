@@ -3,11 +3,25 @@
 // 测量: 加载耗时 / mark 数 / 大纲数 / console 错误 / 滚动 FPS / TOC 跳转 / 创建批注
 // 输出: 详细的 stress 报告 + 3 张截图 (首屏/中段/末段)
 
-const { chromium } = require('/home/lablabcloud/.hermes/node/lib/node_modules/playwright');
+const { chromium } = require('playwright');
 const fs = require('fs');
 const path = require('path');
 
-const ROOT = '/mnt/e/hermes_playground/Mentor';
+// 自动检测运行平台: WSL (/mnt/...) vs Windows git-bash (E:\...)
+function detectRoot() {
+  if (process.platform === 'win32') {
+    return path.resolve('E:/hermes_playground/Mentor');
+  }
+  if (fs.existsSync('/mnt/e/hermes_playground/Mentor')) {
+    return '/mnt/e/hermes_playground/Mentor';
+  }
+  if (fs.existsSync('/home/lablabcloud/.hermes/node/lib/node_modules/playwright')) {
+    return '/mnt/e/hermes_playground/Mentor';
+  }
+  return path.resolve(__dirname, '..');
+}
+
+const ROOT = detectRoot();
 const URL = 'http://127.0.0.1:8765/index.html';
 const SHOT_DIR = path.join(ROOT, 'tests/screenshots');
 

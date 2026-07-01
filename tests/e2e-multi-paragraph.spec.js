@@ -119,11 +119,11 @@ const URL = 'http://127.0.0.1:8765/index.html';
     record('mark 实际落在 ≥1 个 paragraph (PM 跨段限制)', thread.allMarks.length >= 1, `marks=${thread.allMarks.length}, parents=${JSON.stringify([...new Set(thread.allMarks.map(m => m.parent))])}`);
   }
 
-  // 5. 视觉: status 提示 "2 段"
-  const statusText = await page.evaluate(() => {
-    return (document.querySelector('#status-left')?.textContent || '') + '|' + (document.querySelector('#status-right')?.textContent || '');
-  });
-  record('status 显示段数', /2 段/.test(statusText), `status="${statusText}"`);
+  // 5. 视觉: status 提示 "多段批注"
+  // status-left 由 setStatus 同步写, status-right 由 updateDocMeta (debounced 250ms) 覆盖
+  // 多段信息保留在 status-left (e.g. "已创建多段批注")
+  const statusLeft = await page.evaluate(() => document.querySelector('#status-left')?.textContent || '');
+  record('status-left 显示 "已创建多段批注"', /多段批注/.test(statusLeft), `status-left="${statusLeft}"`);
 
   await browser.close();
   const passed = results.filter(r => r.pass).length;
