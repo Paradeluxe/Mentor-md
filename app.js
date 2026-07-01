@@ -1298,6 +1298,8 @@ function createAnnotationThread(from, to, text) {
   // 高亮新批注
   State.activeThreadId = threadId;
   renderCommentList();
+  // P-card: 显示 mark-delete popover 让用户能立即删除
+  positionMarkDeletePopover();
   // 自动聚焦新批注的输入框
   setTimeout(() => {
     const ta = document.querySelector(`[data-thread-input="${threadId}"]`);
@@ -1497,7 +1499,7 @@ function handleCreateMultiParagraphAnnotation(from, to) {
     const ta = document.querySelector(`[data-thread-input="${threadId}"]`);
     if (ta) ta.focus();
   }, 50);
-  setStatus('已创建批注', `${ranges.length} 段 · 线程 ${threadId.slice(0, 8)}`);
+  setStatus(ranges.length > 1 ? '已创建多段批注' : '已创建批注', `${ranges.length} 段 · 线程 ${threadId.slice(0, 8)}`);
   emitAI('threadChange', { threadId, change: 'create', thread });
 }
 
@@ -1927,23 +1929,44 @@ function highlightActiveMark() {
   // P3-A: 不再 classList.remove/add, 而是用 setMark + dispatch 把 active attr 写进 schema
   // 这样 ProseMirror view rebuild 后 renderHTML 自然输出 is-active class.
   // 用 setMeta 标记这是 UI-only 切换, onUpdate 检测到不会标 dirty.
+  // P3-A fix: 用 plugin-style 双向遍历 — 先把所有 active 标为 false, 再给 targetTid 加 true.
+  // 原来的 removeMark/addMark 在同一 descendants callback 内会因 tr 已变而位置错位.
   const tr = editor.state.tr;
   let changed = false;
+  // Pass 1: 清除所有 active
   editor.state.doc.descendants((node, pos) => {
+    if (!node.isText) return;
     node.marks.forEach(m => {
       if (m.type !== markType) return;
-      const shouldBeActive = m.attrs.threadId === targetTid;
-      if (!!m.attrs.active !== shouldBeActive) {
+      if (m.attrs.active) {
         tr.removeMark(pos, pos + node.nodeSize, markType);
         tr.addMark(pos, pos + node.nodeSize, markType.create({
           threadId: m.attrs.threadId,
           resolved: m.attrs.resolved,
-          active: shouldBeActive,
+          active: false,
         }));
         changed = true;
       }
     });
   });
+  // Pass 2: 给 targetTid 标 active=true
+  if (targetTid) {
+    editor.state.doc.descendants((node, pos) => {
+      if (!node.isText) return;
+      node.marks.forEach(m => {
+        if (m.type !== markType) return;
+        if (m.attrs.threadId === targetTid && !m.attrs.active) {
+          tr.removeMark(pos, pos + node.nodeSize, markType);
+          tr.addMark(pos, pos + node.nodeSize, markType.create({
+            threadId: m.attrs.threadId,
+            resolved: m.attrs.resolved,
+            active: true,
+          }));
+          changed = true;
+        }
+      });
+    });
+  }
   if (changed) {
     tr.setMeta('__activeMarkSync', true);
     editor.view.dispatch(tr);
@@ -2245,8 +2268,7 @@ function renderOutline() {
   });
 }
 
-// --- 从 .md 加载到编辑器
-// --- 从 .md 加载到编辑器
+// 从 .md 加载到编辑器
 function loadMarkdownIntoEditor(name, content, annotationsData = null) {
   // D3 docx 一致性: 切文档时, 如果当前文档 dirty, 弹"是否保存" (Word 行为)
   // 注意: IDB 兜底已经防止数据丢失, 但 Word 仍会让用户主动选择
@@ -3731,6 +3753,37 @@ function setupEditorSelectionObserver() {
   State.editor.on('transaction', () => updateDocMeta());
 }
 
+// P3-A fix: mousedown 在 .annotation-mark 上时主动触发 PM selection + active 切换
+// 问题: page.mouse.click / 真实用户点击 mark 时, PM 内部有时不会自动把 selection 移到该位置
+// (尤其 mark 元素没监听 onMouseDown). 结果 State.activeThreadId 不更新, highlightActiveMark 不跑.
+function setupAnnotationMarkClickObserver() {
+  const editorEl = State.editor.view.dom;
+  editorEl.addEventListener('mousedown', (e) => {
+    const markEl = e.target.closest && e.target.closest('.annotation-mark');
+    if (!markEl) return;
+    const threadId = markEl.getAttribute('data-thread-id');
+    if (!threadId) return;
+    // 找该 threadId mark 的 pos, 用 setTextSelection 把 cursor 放进去
+    const editor = State.editor;
+    const markType = editor.schema.marks.annotation;
+    let pos = null;
+    editor.state.doc.descendants((node, p) => {
+      if (pos !== null) return false;
+      if (!node.isText) return;
+      const m = node.marks.find(mm => mm.type === markType && mm.attrs.threadId === threadId);
+      if (m) pos = p;
+    });
+    if (pos === null) return;
+    // 把 cursor 设到该 mark 内部 (中间位置避免光标到边缘)
+    const targetPos = pos + Math.floor((pos + 1 - pos) / 2) || pos;
+    editor.commands.setTextSelection(targetPos);
+    // 主动 set activeThreadId + dispatch highlight (兜底, 防止 selectionUpdate 没触发)
+    State.activeThreadId = threadId;
+    highlightActiveMark();
+    renderCommentList();
+  });
+}
+
 // ============================================================
 // 11. 启动
 // ============================================================
@@ -3739,6 +3792,7 @@ async function boot() {
   setupToolbar();
   setupFloatCommentButton();
   setupEditorSelectionObserver();
+  setupAnnotationMarkClickObserver();
   setupTreeActionDelegation();
   setupEmptyTreeClick();
   setupTreeSearch();
