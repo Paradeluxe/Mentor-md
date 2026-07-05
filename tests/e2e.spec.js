@@ -3620,9 +3620,49 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
     console.log('  ✓ 切换无旧值闪现');
   }
 
+  // === TEST 114: P1 #10 AI 署名可动态配置 ===
+  console.log('=== TEST 114: AI 署名可配置 ===');
+  {
+    const r = await page.evaluate(async () => {
+      const F = window.__mdAnnotator;
+      const before = F.ai.__meta.author;
+      // 改署名
+      F.ai.__meta.setAuthor('MyCoPilot');
+      const after = F.ai.__meta.author;
+      // 用新署名 addReply
+      const tid = 'auth-test-' + Date.now();
+      F.State.annotations.push({
+        threadId: tid,
+        range: { from: 0, to: 5 },
+        text: 'sample',
+        prefix: '', suffix: '', resolved: false,
+        createdAt: new Date().toISOString(),
+        comments: [],
+      });
+      const replyResult = F.ai.reply(tid, 'test reply');
+      const replyAuthor = replyResult.comment?.author;
+      // listThreads 应能识别新署名为 "已回复"
+      const threads = F.ai.listThreads();
+      const ourThread = threads.find(t => t.threadId === tid);
+      // 还原署名
+      F.ai.__meta.setAuthor(before);
+      return {
+        before, afterSet: after, replyAuthor,
+        needsReply: ourThread?.needsReply,
+      };
+    });
+    console.log(`  ✓ 改前署名: ${r.before}`);
+    console.log(`  ✓ 改后署名: ${r.afterSet} (预期 MyCoPilot)`);
+    console.log(`  ✓ 新 reply 用了新署名: ${r.replyAuthor} (预期 MyCoPilot)`);
+    if (r.afterSet !== 'MyCoPilot') throw new Error(`setAuthor 失败: ${r.afterSet}`);
+    if (r.replyAuthor !== 'MyCoPilot') throw new Error(`reply 未用新署名: ${r.replyAuthor}`);
+    if (r.needsReply !== false) throw new Error(`MyCoPilot 已 reply, needsReply 应 false, 实际 ${r.needsReply}`);
+    console.log('  ✓ 改署名后的 reply 在 needsReply 检测中被识别为 "已答"');
+  }
+
   await browser.close();
   console.log('\n========================================');
-  console.log('✓ 全部 113 个测试通过！');
+  console.log('✓ 全部 114 个测试通过！');
   console.log('========================================');
 })().catch(async err => {
   console.error('\n✗ 测试失败:', err.message);

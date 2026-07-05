@@ -3993,14 +3993,25 @@ window.__mdAnnotator = {
   renderFileTreeFromList: () => renderFilePaneCurrent(),
   // AI 协作协议：结构化 API（不让 AI 通过 UI 模拟点击）
   ai: (() => {
-    const AI_AUTHOR = 'AI Reviewer';
+    // P1 #10: 默认署名是 'AI Reviewer', 但用户可以在 settings 改 ai.author
+    // 所有 reply 操作都用 ai.author (动态)
+    let AI_AUTHOR = 'AI Reviewer';
     const MAX_BODY = 5000;
     const PROTOCOL = 'ai-collab-v1';
+
+    function setAuthor(name) {
+      if (typeof name === 'string' && name.trim()) {
+        AI_AUTHOR = name.trim();
+        return true;
+      }
+      return false;
+    }
 
     return {
       __meta: {
         protocol: PROTOCOL,
-        author: AI_AUTHOR,
+        get author() { return AI_AUTHOR; },
+        setAuthor,
         maxBody: MAX_BODY,
         capabilities: {
           canRead: true,
