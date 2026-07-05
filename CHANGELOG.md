@@ -4,6 +4,12 @@
 
 ## v2.1 (2026-07-05) — 当前活跃开发
 
+### Feature: P0 #3 AI reply 并发锁 + 内容去重
+- `app.js`: `ai.reply` 改 async + `Map<threadId, Promise>` 锁合并并发调用 (议长+参议同 threadId+body → 1 条 comment)
+- 2s 内 body 内容去重 (幂等返回原 comment + `dedup: true`)
+- 测试: TEST 116 (并发合并 + 串行 dedup + 不同 body 新建)
+- 修复: TEST 109 / TEST 114 测试侧 `await F.ai.reply()` 缺失
+
 ### Feature: 双击 KaTeX 弹源码输入框
 - `app.js`: `setupKatexDblClick` + `openEditModal` + `applyKatexEdit`
 - 公式 atomic 不可直接编辑, 双击 → modal → `setNodeMarkup` 改 tex
@@ -59,10 +65,12 @@
 - `index.html` 帮助 popup 新增 "单 .md 模式" + "跨刷新重连" 项
 
 ### 测试
-- v1: 105 → v2: 114 tests pass (107 + 7 新增 TEST 106-114)
+- v1: 105 → v2: 116 tests pass (114 + 1 新增 TEST 116 + 修复 TEST 109/114 await)
 - p3a-active-mark: 56 tests pass
-- e2e-soak: SOAK PASS, 0 error
+- e2e-annotation-overlap: 34/34
+- e2e-comment-pane: 10/10
 - verify-fixes: 13/13 pass
+- e2e-soak: SOAK PASS, 0 error
 - 6 个小 spec: 各自 pass
 
 ---

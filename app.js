@@ -4025,6 +4025,12 @@ window.__mdAnnotator = {
       return false;
     }
 
+    // P0 #3: 阻止议长+参议并发 reply 产生重复内容
+    // 1) Map<threadId, Promise> 锁: 同 threadId 第 2 个调用 await 同一 Promise, 不产生第 2 条 comment
+    // 2) 2s 内 body 内容去重: 防止 sleep + re-send
+    const _replyLock = new Map();  // threadId -> Promise<{ok, comment|error}>
+    const _DEDUP_WINDOW_MS = 2000;
+
     return {
       __meta: {
         protocol: PROTOCOL,
@@ -4121,7 +4127,7 @@ window.__mdAnnotator = {
        * @param {string} [opts.author] - 自定义作者名（默认 'AI Reviewer'）
        * @returns {{ ok: boolean, comment?: object, error?: string }}
        */
-      reply(threadId, body, opts = {}) {
+      async reply(threadId, body, opts = {}) {
         // 1. 验证参数
         if (typeof threadId !== 'string' || !threadId) {
           return { ok: false, error: 'threadId 必须为非空字符串' };
@@ -4137,37 +4143,59 @@ window.__mdAnnotator = {
           return { ok: false, error: `body 超过最大长度 ${MAX_BODY}` };
         }
 
-        // 2. 查找 thread
-        const thread = State.annotations.find(t => t.threadId === threadId);
-        if (!thread) {
-          return { ok: false, error: `thread 不存在: ${threadId}` };
-        }
-        if (thread.resolved) {
-          return { ok: false, error: 'thread 已 resolved，无法回复（请用户 reopen）' };
+        // 2. 锁合并: 同 threadId 的第 2 个调用复用第 1 个的 Promise (合并而非拒绝)
+        // 这是关键 — 防止议长 + 参议两个 AI 同时 reply 都用相同 threadId + body 时推 2 条 comment
+        if (_replyLock.has(threadId)) {
+          return _replyLock.get(threadId);
         }
 
-        // 3. 构造 comment
-        const author = (opts.author && typeof opts.author === 'string' && opts.author.trim())
-                       ? opts.author.trim()
-                       : AI_AUTHOR;
-        const comment = {
-          id: uuid(),
-          author,
-          body: trimmed,
-          createdAt: nowISO(),
-        };
+        const promise = (async () => {
+          // 3. 查 thread + 状态
+          const thread = State.annotations.find(t => t.threadId === threadId);
+          if (!thread) {
+            return { ok: false, error: `thread 不存在: ${threadId}` };
+          }
+          if (thread.resolved) {
+            return { ok: false, error: 'thread 已 resolved，无法回复（请用户 reopen）' };
+          }
 
-        // 4. 保存（直接 push，绕过 addReply 因为它会用 State.author）
+          // 4. 内容去重: 最后一条 comment body 相同 + createdAt 在 2s 内 → 幂等返回
+          // 防止 sleep + accidentally re-reply
+          const lastComment = thread.comments?.[thread.comments.length - 1];
+          if (lastComment && lastComment.body === trimmed) {
+            const ms = Date.now() - new Date(lastComment.createdAt).getTime();
+            if (ms < _DEDUP_WINDOW_MS) {
+              return { ok: true, comment: lastComment, dedup: true };
+            }
+          }
+
+          // 5. 构造 + push
+          const author = (opts.author && typeof opts.author === 'string' && opts.author.trim())
+                         ? opts.author.trim()
+                         : AI_AUTHOR;
+          const comment = {
+            id: uuid(),
+            author,
+            body: trimmed,
+            createdAt: nowISO(),
+          };
+          try {
+            thread.comments.push(comment);
+            markDirty();
+            renderCommentList();
+            emitAI('newComment', { threadId, comment });
+            emitAI('threadChange', { threadId, change: 'reply', comment });
+            return { ok: true, comment };
+          } catch (e) {
+            return { ok: false, error: 'reply 失败: ' + e.message };
+          }
+        })();
+
+        _replyLock.set(threadId, promise);
         try {
-          thread.comments.push(comment);
-          markDirty();
-          renderCommentList();
-          // 触发监听
-          emitAI('newComment', { threadId, comment });
-          emitAI('threadChange', { threadId, change: 'reply', comment });
-          return { ok: true, comment };
-        } catch (e) {
-          return { ok: false, error: 'reply 失败: ' + e.message };
+          return await promise;
+        } finally {
+          _replyLock.delete(threadId);
         }
       },
 

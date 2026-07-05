@@ -3368,7 +3368,7 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
         comments: [],
       });
       // 调用 AI reply API 加一条带 XSS 的 body
-      const r1 = F.ai.reply(tid, '<img src=x onerror="window.__XSS_TRIGGERED=true">click me<script>alert(1)</script>');
+      const r1 = await F.ai.reply(tid, '<img src=x onerror="window.__XSS_TRIGGERED=true">click me<script>alert(1)</script>');
       F.renderCommentList();
       // 检查
       const list = document.querySelector('#comment-list');
@@ -3639,8 +3639,8 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
         createdAt: new Date().toISOString(),
         comments: [],
       });
-      const replyResult = F.ai.reply(tid, 'test reply');
-      const replyAuthor = replyResult.comment?.author;
+      const replyResult = await F.ai.reply(tid, 'test reply');
+            const replyAuthor = replyResult.comment?.author;
       // listThreads 应能识别新署名为 "已回复"
       const threads = F.ai.listThreads();
       const ourThread = threads.find(t => t.threadId === tid);
@@ -3700,12 +3700,59 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
     if (restored.fpLeft !== 0) throw new Error(`展开应 fpLeft=0, 实际 ${restored.fpLeft}`);
     if (restored.expandBtnVisible) throw new Error('展开后浮起按钮应隐藏');
     console.log('  ✓ 文件栏 Ctrl+[ 收起 + 展开 双向 + 浮起按钮联动正确');
-  }
+      }
 
-  await browser.close();
-  console.log('\n========================================');
-  console.log('✓ 全部 115 个测试通过！');
-  console.log('========================================');
+      // === TEST 116: P0 #3 reply 锁 — 议长+参议并发 reply 合并去重 ===
+      console.log('=== TEST 116: P0 #3 reply 锁合并 + 内容去重 ===');
+      {
+        const r = await page.evaluate(async () => {
+          const F = window.__mdAnnotator;
+          const tid = 'lock-test-' + Date.now();
+          // 注入 thread
+          F.State.annotations.push({
+            threadId: tid,
+            range: { from: 0, to: 5 },
+            text: 'sample',
+            prefix: '', suffix: '', resolved: false,
+            createdAt: new Date().toISOString(),
+            comments: [],
+          });
+          // A) 并发 3 个 reply (同一 threadId + body) — 应合并为 1 条 comment
+          const concurrent = await Promise.all([
+            F.ai.reply(tid, '议长+参议同 body'),
+            F.ai.reply(tid, '议长+参议同 body'),
+            F.ai.reply(tid, '议长+参议同 body'),
+          ]);
+          const t = F.State.annotations.find(x => x.threadId === tid);
+          const cmtCount = t.comments.length;
+          const cmtIds = concurrent.map(c => c.comment?.id);
+          const sameId = cmtIds[0] && cmtIds.every(id => id === cmtIds[0]);
+
+          // B) 内容去重 — 串行同 body 第 2 次应 hit dedup (返回同一 comment id)
+          const r1 = await F.ai.reply(tid, 'serial-dedup-body');
+          const r2 = await F.ai.reply(tid, 'serial-dedup-body');
+          const r3 = await F.ai.reply(tid, 'different-body');
+          const serialDedup = r1.comment.id === r2.comment.id && r2.dedup === true;
+          const differentOk = r3.comment.id !== r1.comment.id && !r3.dedup;
+          const finalCount = t.comments.length;
+
+          return { cmtCount, sameId, serialDedup, differentOk, finalCount };
+        });
+        if (r.cmtCount !== 1) throw new Error(`并发 3 reply 应合并为 1 条 comment, 实际 ${r.cmtCount}`);
+        if (!r.sameId) throw new Error('并发 reply 返回的 comment id 应相同');
+        if (!r.serialDedup) throw new Error(`串行同 body 应 dedup, r1.id === r2.id 且 r2.dedup=true`);
+        if (!r.differentOk) throw new Error('串行不同 body 应产生新 comment');
+        if (r.finalCount !== 3) throw new Error(`最终 comment 数应为 3 (1 并发 + 1 dedup + 1 新 body), 实际 ${r.finalCount}`);
+        console.log(`  ✓ 并发 3 reply 合并为 1 条 comment (id 相同)`);
+        console.log(`  ✓ 串行同 body 2s 内 dedup (返回原 comment + dedup=true)`);
+        console.log(`  ✓ 串行不同 body 正常新 comment`);
+        console.log(`  ✓ finalCount=${r.finalCount} (预期 3)`);
+      }
+
+      await browser.close();
+      console.log('\n========================================');
+      console.log('✓ 全部 116 个测试通过！');
+      console.log('========================================');
 })().catch(async err => {
   console.error('\n✗ 测试失败:', err.message);
   console.error(err.stack);
