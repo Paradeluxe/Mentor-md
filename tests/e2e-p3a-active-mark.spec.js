@@ -355,11 +355,11 @@ console.log('=== TEST 10: 最终截图 (pinned 状态) ===');
     const mockHandle = { name: 'test-folder', _isMock: true };
     await HandleStore.putFolder('test-folder', mockHandle);
     const got = await HandleStore.getFolder('test-folder');
-    await HandleStore.putLastFile('test-folder', 'test.md');
+    await HandleStore.putLastFile('test.md');
     const last = await HandleStore.getLastFile();
     return {
       putGetOk: got && got._isMock === true,
-      lastOk: last && last.folderPath === 'test-folder' && last.fileName === 'test.md',
+      lastOk: last && last.fileName === 'test.md' && !last.folderPath,
       list: await HandleStore.listFolders(),
     };
   });

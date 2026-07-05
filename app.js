@@ -142,7 +142,7 @@ const State = {
 // ============================================================
 const HandleStore = {
   DB_NAME: 'Mentor-handles',
-  DB_VERSION: 1,
+  DB_VERSION: 2,  // v2 (2026-07-05): add 'files' object store for single-file handle persistence; folder mode removed
   _db: null,
 
   async open() {
@@ -151,11 +151,21 @@ const HandleStore = {
       const req = indexedDB.open(this.DB_NAME, this.DB_VERSION);
       req.onupgradeneeded = e => {
         const db = e.target.result;
-        if (!db.objectStoreNames.contains('folders')) {
-          db.createObjectStore('folders', { keyPath: 'path' });
+        const oldVersion = e.oldVersion;
+        if (oldVersion < 1) {
+          // 创建 v1 stores (folder mode legacy; 现在没用但保留数据)
+          if (!db.objectStoreNames.contains('folders')) {
+            db.createObjectStore('folders', { keyPath: 'path' });
+          }
+          if (!db.objectStoreNames.contains('lastFile')) {
+            db.createObjectStore('lastFile', { keyPath: 'id' });
+          }
         }
-        if (!db.objectStoreNames.contains('lastFile')) {
-          db.createObjectStore('lastFile', { keyPath: 'id' });
+        if (oldVersion < 2) {
+          // v2: 新增 files store (单 .md 模式 handle 持久化)
+          if (!db.objectStoreNames.contains('files')) {
+            db.createObjectStore('files', { keyPath: 'name' });
+          }
         }
       };
       req.onsuccess = () => { this._db = req.result; resolve(req.result); };
@@ -163,63 +173,75 @@ const HandleStore = {
     });
   },
 
-  async putFolder(path, handle) {
-    const db = await this.open();
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction('folders', 'readwrite');
-      tx.objectStore('folders').put({ path, handle, updatedAt: Date.now() });
-      tx.oncomplete = resolve;
-      tx.onerror = () => reject(tx.error);
-    });
-  },
-
+  // --- v1 legacy folder-mode 方法 (保留但不调用) ---
+  async putFolder(path, handle) { return this._putInStore('folders', { path, handle, updatedAt: Date.now() }); },
   async getFolder(path) {
     const db = await this.open();
     return new Promise((resolve, reject) => {
       const tx = db.transaction('folders', 'readonly');
       const req = tx.objectStore('folders').get(path);
       req.onsuccess = () => resolve(req.result ? req.result.handle : null);
-      req.onerror = () => reject(req.error);
-    });
-  },
-
-  async listFolders() {
-    const db = await this.open();
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction('folders', 'readonly');
-      const req = tx.objectStore('folders').getAll();
-      req.onsuccess = () => resolve(req.result.map(r => r.path));
-      req.onerror = () => reject(req.error);
-    });
-  },
-
-  async deleteFolder(path) {
-    const db = await this.open();
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction('folders', 'readwrite');
-      tx.objectStore('folders').delete(path);
-      tx.oncomplete = resolve;
       tx.onerror = () => reject(tx.error);
     });
   },
+  async listFolders() { return this._getAllFromStore('folders').then(rs => rs.map(r => r.path)); },
+  async deleteFolder(path) { return this._deleteFromStore('folders', path); },
 
-  async putLastFile(folderPath, fileName) {
+  // --- 单 .md 模式 (v2 新方法) ---
+  async putFile(name, handle) {
+    return this._putInStore('files', { name, handle, updatedAt: Date.now() });
+  },
+  async getFile(name) {
     const db = await this.open();
     return new Promise((resolve, reject) => {
-      const tx = db.transaction('lastFile', 'readwrite');
-      tx.objectStore('lastFile').put({ id: 'last', folderPath, fileName, updatedAt: Date.now() });
-      tx.oncomplete = resolve;
+      const tx = db.transaction('files', 'readonly');
+      const req = tx.objectStore('files').get(name);
+      req.onsuccess = () => resolve(req.result ? req.result.handle : null);
       tx.onerror = () => reject(tx.error);
     });
   },
+  async deleteFile(name) { return this._deleteFromStore('files', name); },
 
+  // --- lastFile (跨 reload 记住最后一次打开的 .md) ---
+  async putLastFile(fileName) {
+    return this._putInStore('lastFile', { id: 'last', fileName, updatedAt: Date.now() }, 'lastFile', 'id', 'last');
+  },
   async getLastFile() {
     const db = await this.open();
     return new Promise((resolve, reject) => {
       const tx = db.transaction('lastFile', 'readonly');
       const req = tx.objectStore('lastFile').get('last');
       req.onsuccess = () => resolve(req.result || null);
-      req.onerror = () => reject(req.error);
+      tx.onerror = () => reject(tx.error);
+    });
+  },
+
+  // --- 通用 helpers ---
+  async _putInStore(storeName, record) {
+    const db = await this.open();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(storeName, 'readwrite');
+      tx.objectStore(storeName).put(record);
+      tx.oncomplete = resolve;
+      tx.onerror = () => reject(tx.error);
+    });
+  },
+  async _getAllFromStore(storeName) {
+    const db = await this.open();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(storeName, 'readonly');
+      const req = tx.objectStore(storeName).getAll();
+      req.onsuccess = () => resolve(req.result || []);
+      tx.onerror = () => reject(tx.error);
+    });
+  },
+  async _deleteFromStore(storeName, key) {
+    const db = await this.open();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(storeName, 'readwrite');
+      tx.objectStore(storeName).delete(key);
+      tx.oncomplete = resolve;
+      tx.onerror = () => reject(tx.error);
     });
   },
 };
@@ -2667,19 +2689,15 @@ async function openFiles() {
         h.name.replace(/\.annotations\.json$/i, '').toLowerCase() ===
         mdHandle.name.replace(/\.md(markdown)?$/i, '').toLowerCase()
       );
-      State.fileHandles = handles;
-      State.fileList = null;
-      // 单文件模式：没有 folderHandle，保存时下载
-      State.folderHandle = null;
-      State.saveMode = 'download';
-      // 把 sidecar (如有) 传给 openFromHandle
       await openFromHandle(mdHandle, sidecarHandle);
-      renderFileTreeFromHandles(handles);
+      // 单 .md 模式: 持久化 handle, 直接进入 handle 模式 (可写回原位置)
+      State.saveMode = 'handle';
+      try { await HandleStore.putFile(mdHandle.name, mdHandle); } catch (e) { console.warn('putFile failed:', e); }
+      try { await HandleStore.putLastFile(mdHandle.name); } catch (e) { console.warn('putLastFile failed:', e); }
+      renderFilePaneCurrent();
       const statusMsg = sidecarHandle
         ? `${mdHandle.name} + 批注已加载`
-        : (handles.length > 1
-          ? `${mdHandle.name} (${handles.length - 1} 个其他文件, 仅 .md 加载批注)`
-          : `${mdHandle.name} (保存将下载)`);
+        : `${mdHandle.name} (Ctrl+S 直接保存到原位置)`;
       // M15 docx 一致: left 显示状态信息, right 由 updateDocMeta 维护 (字数/行数/批注数)
       setStatus('已加载 · ' + statusMsg, '');
       updateDocMeta();
@@ -2702,11 +2720,7 @@ async function openFilesLegacy() {
   input.onchange = async () => {
     const files = Array.from(input.files);
     if (files.length === 0) return;
-    State.fileList = files;
-    State.fileHandles = null;
-    State.folderHandle = null;
-    State.saveMode = 'download';
-    renderFileTreeFromList(files);
+    // 单 .md 模式: 只看第一个文件
     const file = files[0];
     const content = await file.text();
     // 加载批注: 1) fileList 中的 sidecar 2) IDB 本地缓存
@@ -2720,94 +2734,26 @@ async function openFilesLegacy() {
         }
       } catch (e) { console.warn('AnnotationStore.get 失败:', e); }
     }
-    await loadMarkdownIntoEditor(file.name, content, annotations);
-    if (files.length > 1) setStatus(`已加载 ${files.length} 个文件`, '保存将下载');
-  };
-  input.click();
-}
-
-// --- 打开文件夹
-async function openFolder() {
-  if (FS_API.supported) {
-    try {
-      const folderHandle = await window.showDirectoryPicker({
-        mode: 'readwrite',
-        id: 'md-annotator',
-      });
-      // 扫描 .md 文件
-      const entries = [];
-      for await (const [name, handle] of folderHandle.entries()) {
-        if (handle.kind === 'file' && /\.(md|markdown)$/i.test(name)) {
-          entries.push({ name, handle });
-        }
-      }
-      if (entries.length === 0) {
-        showToast('文件夹中没有 .md 文件');
-        return;
-      }
-      // 持久化 handle
-      State.folderHandle = folderHandle;
-      State.saveMode = 'handle';
-      State.fileHandles = entries.map(e => e.handle);
-      // 持久化 handle (失败也不致命, 关闭浏览器后无法重连而已)
-      try { await HandleStore.putFolder(folderHandle.name, folderHandle); } catch (e) { console.warn('putFolder 失败:', e); }
-      renderFileTreeFromHandles(entries.map(e => e.handle), folderHandle);
-      // 打开第一个
-      await openFromHandle(entries[0].handle);
-      await HandleStore.putLastFile(folderHandle.name, entries[0].handle.name);
-      setStatus(`已授权 ${folderHandle.name}`, `${entries.length} 个 .md 文件, Ctrl+S 直接保存到原位置`);
-      return;
-    } catch (e) {
-      if (e.name === 'AbortError') return;
-      console.error('showDirectoryPicker 失败:', e);
-      showToast('打开文件夹失败: ' + e.message);
-      return;
-    }
-  }
-  // Fallback: <input webkitdirectory>
-  await openFolderLegacy();
-}
-
-async function openFolderLegacy() {
-  const input = document.createElement('input');
-  input.type = 'file';
-  input.webkitdirectory = true;
-  input.multiple = true;
-  input.onchange = async () => {
-    const files = Array.from(input.files).filter(f => /\.(md|markdown)$/i.test(f.name));
-    if (files.length === 0) {
-      showToast('文件夹中没有 .md 文件');
-      return;
-    }
-    State.fileList = files;
-    State.fileHandles = null;
-    State.folderHandle = null;
+    // 单 .md 模式: 文件只能下载保存 (legacy fallback 没 handle)
     State.saveMode = 'download';
-    renderFileTreeFromList(files);
-    const file = files[0];
-    const content = await file.text();
-    const annotations = await tryLoadSidecar(file.name, file);
+    renderFilePaneCurrent();
     await loadMarkdownIntoEditor(file.name, content, annotations);
-    setStatus('已加载文件夹', `${files.length} 个 .md 文件 (保存将下载)`);
+    setStatus('已加载', `${file.name} (Ctrl+S 下载保存)`);
   };
   input.click();
 }
+
+// --- Folder mode removed (2026-07-05): 支持单 .md 模式 only
+// (openFolder / openFolderLegacy deleted; showDirectoryPicker no longer called)
 
 // --- 通过 FileSystemFileHandle 打开文件
 async function openFromHandle(fileHandle, sidecarHandle = null) {
   const file = await fileHandle.getFile();
   const content = await file.text();
-  // 加载批注: 优先级 1) 文件夹模式 2) 显式 sidecar handle 3) IDB 本地缓存 (新!)
-  // 这样 user 只需打开 .md, 批注自动从 IDB 恢复, 永远不需要操心 sidecar 文件
+  // 加载批注: 优先级 1) 显式 sidecar handle 2) IDB 本地缓存
   const sidecarName = file.name.replace(/\.md$/i, '') + '.annotations.json';
   let annotations = null;
-  if (State.folderHandle) {
-    try {
-      const sh = await State.folderHandle.getFileHandle(sidecarName);
-      const sf = await sh.getFile();
-      annotations = JSON.parse(await sf.text());
-    } catch (e) {}
-  } else if (sidecarHandle) {
+  if (sidecarHandle) {
     try {
       const sf = await sidecarHandle.getFile();
       annotations = JSON.parse(await sf.text());
@@ -2829,9 +2775,11 @@ async function openFromHandle(fileHandle, sidecarHandle = null) {
   }
   await loadMarkdownIntoEditor(file.name, content, annotations);
   State.currentFile.handle = fileHandle;
-  if (State.folderHandle) {
-    await HandleStore.putLastFile(State.folderHandle.name, file.name);
-  }
+  // 持久化 handle (刷新后自动重连)
+  try {
+    await HandleStore.putFile(file.name, fileHandle);
+    await HandleStore.putLastFile(file.name);
+  } catch (e) { console.warn('handle persist failed:', e); }
 }
 
 // --- 文件类型专属图标 (Cursor 风格 - 统一 SVG 图标库)
@@ -2860,70 +2808,20 @@ function treeNodeHTML(name, isActive) {
   </div>`;
 }
 
-// --- 从 handles 渲染文件树（folder mode）
-function renderFileTreeFromHandles(handles, folderHandle = State.folderHandle) {
+// --- 文件栏渲染 (单 .md 模式): 只显示当前文件名
+function renderFilePaneCurrent() {
   const tree = $('#file-tree');
-  tree.classList.remove('tree-empty');
-  const folderName = folderHandle ? folderHandle.name : '已授权文件';
-  let html = `<div class="tree-node tree-folder"><span class="icon icon-folder">${window.MentorIcons.folder}</span><span class="filename">${escapeHtml(folderName)}</span><span class="save-mode-badge">${State.saveMode === 'handle' ? `<span class="badge-check">${window.MentorIcons.check}</span> 已授权` : `<span class="badge-download">${window.MentorIcons.download}</span> 下载`}</span></div>`;
-  html += `<div class="tree-children">`;
-  for (const h of handles) {
-    const isActive = State.currentFile && State.currentFile.name === h.name;
-    html += treeNodeHTML(h.name, isActive);
-  }
-  html += `</div>`;
-  tree.innerHTML = html;
-  // 切换文件：直接绑 click
-  tree.querySelectorAll('.tree-node[data-handle-name]').forEach(el => {
-    el.addEventListener('click', async (e) => {
-      // 忽略 action 按钮上的点击（事件委托处理）
-      if (e.target.closest('.tree-actions')) return;
-      const name = el.dataset.handleName;
-      const handle = State.fileHandles.find(h => h.name === name);
-      if (!handle) return;
-      if (State.currentFile && State.currentFile.dirty && !confirm('当前文档有未保存修改，确定切换吗？')) return;
-      await openFromHandle(handle);
-      tree.querySelectorAll('.tree-node').forEach(n => n.classList.remove('is-active'));
-      el.classList.add('is-active');
-    });
-  });
-  // 同步 dirty 圆点
-  updateTreeDirtyDots();
-  // 重新应用搜索过滤
-  // 重新应用搜索过滤 (tree-search 元素已隐藏, 安全调用)
-  const searchInput = $('#tree-search');
-  filterTree(searchInput ? searchInput.value : '');
-}
-
-// --- 从 file list 渲染（legacy fallback）— 修复 preexisting bug
-function renderFileTreeFromList(files) {
-  const tree = $('#file-tree');
-  tree.classList.remove('tree-empty');
-  let html = `<div class="tree-node tree-folder"><span class="icon icon-folder">${window.MentorIcons.folder}</span><span class="filename">已下载</span><span class="save-mode-badge">${window.MentorIcons.download} 下载</span></div>`;
-  html += `<div class="tree-children">`;
-  for (const f of files) {
-    const isActive = State.currentFile && State.currentFile.name === f.name;
-    html += treeNodeHTML(f.name, isActive);
-  }
-  html += `</div>`;
-  tree.innerHTML = html;
-  // 切换文件：legacy 模式用 fileList 而不是 handles
-  tree.querySelectorAll('.tree-node[data-handle-name]').forEach(el => {
-    el.addEventListener('click', async (e) => {
-      if (e.target.closest('.tree-actions')) return;
-      const name = el.dataset.handleName;
-      const file = State.fileList.find(f => f.name === name);
-      if (!file) return;
-      if (State.currentFile && State.currentFile.dirty && !confirm('当前文档有未保存修改，确定切换吗？')) return;
-      const content = await file.text();
-      const annotations = await tryLoadSidecar(file.name, file);
-      await loadMarkdownIntoEditor(file.name, content, annotations);
-      State.currentFile.handle = null;
-      tree.querySelectorAll('.tree-node').forEach(n => n.classList.remove('is-active'));
-      el.classList.add('is-active');
-    });
-  });
-  updateTreeDirtyDots();
+  if (!tree) return;
+  const name = State.currentFile?.name || '未打开文档';
+  tree.classList.toggle('tree-empty', !State.currentFile);
+  const isHandle = State.saveMode === 'handle';
+  const badge = isHandle
+    ? `<span class="save-mode-badge"><span class="badge-check">${window.MentorIcons.check}</span> 已授权</span>`
+    : `<span class="save-mode-badge">${window.MentorIcons.download} 下载</span>`;
+  tree.innerHTML = `<div class="tree-node tree-folder"><span class="icon icon-folder">${window.MentorIcons.folder}</span><span class="filename">${escapeHtml(name)}</span>${badge}</div>`;
+  // 单文件模式下文件栏点击即重新打开 (等同于 reload)
+  const handle = () => openFiles();
+  tree.addEventListener('click', handle);
   // 重新应用搜索过滤 (tree-search 元素已隐藏, 安全调用)
   const searchInput = $('#tree-search');
   filterTree(searchInput ? searchInput.value : '');
@@ -2940,7 +2838,6 @@ let _docPeers = new Set();
 
 function _getDocPath() {
   if (!State.currentFile) return null;
-  if (State.folderHandle) return `Mentor:${State.folderHandle.name}/${State.currentFile.name}`;
   return `Mentor:single/${State.currentFile.name}`;
 }
 
@@ -3053,14 +2950,13 @@ function setupTreeActionDelegation() {
   });
 }
 
-// 空文件栏点击 → 打开文件夹 (替代工具栏 "打开文件夹" 按钮)
-// 只在 tree-empty 状态触发, 有文件时不拦截 file click
+// 文件栏空状态点击 → 打开文件 (单 .md 模式; 替代 folder mode)
 function setupEmptyTreeClick() {
   const tree = $('#file-tree');
   if (!tree) return;
   const handle = () => {
     if (!tree.classList.contains('tree-empty')) return;
-    openFolder();
+    openFiles();
   };
   tree.addEventListener('click', handle);
   // 键盘可达性: Enter / Space 触发
@@ -3068,15 +2964,15 @@ function setupEmptyTreeClick() {
     if (e.key === 'Enter' || e.key === ' ') {
       if (!tree.classList.contains('tree-empty')) return;
       e.preventDefault();
-      openFolder();
+      openFiles();
     }
   });
 }
 
 async function handleTreeAction(action, name) {
   if (action === 'copy') {
-    // 复制文件名 + 路径（folder 模式有完整路径，legacy 模式只有文件名）
-    const path = State.folderHandle ? `${State.folderHandle.name}/${name}` : name;
+    // 单 .md 模式: 只复制文件名
+    const path = name;
     try {
       await navigator.clipboard.writeText(path);
       showToast(`已复制路径: ${path}`);
@@ -3091,39 +2987,19 @@ async function handleTreeAction(action, name) {
     if (State.currentFile && State.currentFile.name === name && State.currentFile.dirty) {
       if (!confirm(`当前文档有未保存修改，确定重新加载 "${name}" 吗？\n\n加载后未保存的修改会丢失。`)) return;
     }
-    if (State.folderHandle) {
-      const handle = State.fileHandles.find(h => h.name === name);
-      if (handle) {
-        await openFromHandle(handle);
+    // 单 .md 模式: 当前文件就是它, 直接 reload
+    if (State.currentFile && State.currentFile.handle) {
+      try {
+        await openFromHandle(State.currentFile.handle);
         showToast(`已重新加载: ${name}`);
-      }
-    } else if (State.fileList) {
-      const file = State.fileList.find(f => f.name === name);
-      if (file) {
-        const content = await file.text();
-        const annotations = await tryLoadSidecar(file.name, file);
-        await loadMarkdownIntoEditor(file.name, content, annotations);
-        showToast(`已重新加载: ${name}`);
+      } catch (e) {
+        showToast('重新加载失败: ' + e.message);
       }
     }
     return;
   }
   if (action === 'delete') {
-    if (!confirm(`确定删除 "${name}" 吗？\n\n注意：\n- 仅删除 .md 文件，.annotations.json 侧车文件保留\n- 此操作无法撤销`)) return;
-    if (State.folderHandle && State.saveMode === 'handle') {
-      try {
-        await State.folderHandle.removeEntry(name);
-        // 从 State.fileHandles 中移除
-        State.fileHandles = State.fileHandles.filter(h => h.name !== name);
-        // 重新渲染 tree
-        renderFileTreeFromHandles(State.fileHandles, State.folderHandle);
-        showToast(`已删除: ${name}`);
-      } catch (e) {
-        showToast('删除失败: ' + e.message);
-      }
-    } else {
-      showToast('下载模式下无法直接删除文件');
-    }
+    showToast('单 .md 模式下请用操作系统删除文件');
     return;
   }
 }
@@ -3273,8 +3149,8 @@ async function saveCurrent() {
 // 写回原文件，返回 { handle: bool, error?: string }
 async function tryWriteBack(mdText, sidecarText, sidecarName) {
   // === P0-C: 跨编辑器 mtime 检测 - 防止覆盖外部修改 ===
-  // 单文件模式（通过 showOpenFilePicker 打开，无 folderHandle）：
-  if (State.currentFile && State.currentFile.handle && State.folderHandle == null) {
+  // 单 .md 模式 (Chrome/Edge File System Access API)
+  if (State.currentFile && State.currentFile.handle) {
     try {
       // 确认权限
       if (await State.currentFile.handle.queryPermission({ mode: 'readwrite' }) !== 'granted') {
@@ -3317,30 +3193,7 @@ async function tryWriteBack(mdText, sidecarText, sidecarName) {
     }
   }
 
-  // 文件夹模式：通过 folderHandle.getFileHandle 拿 fileHandle
-  if (State.folderHandle && State.currentFile) {
-    try {
-      // 确认文件夹权限
-      if (await State.folderHandle.queryPermission({ mode: 'readwrite' }) !== 'granted') {
-        const perm = await State.folderHandle.requestPermission({ mode: 'readwrite' });
-        if (perm !== 'granted') return { handle: false, error: '未授权文件夹写入' };
-      }
-      // 写主文件
-      const mdHandle = await State.folderHandle.getFileHandle(State.currentFile.name, { create: true });
-      const mdWritable = await mdHandle.createWritable();
-      await mdWritable.write(mdText);
-      await mdWritable.close();
-      // 写侧车
-      const sidecarHandle = await State.folderHandle.getFileHandle(sidecarName, { create: true });
-      const sidecarWritable = await sidecarHandle.createWritable();
-      await sidecarWritable.write(sidecarText);
-      await sidecarWritable.close();
-      return { handle: true };
-    } catch (e) {
-      if (e.name === 'NotAllowedError') return { handle: false, error: '权限被拒' };
-      return { handle: false, error: e.message };
-    }
-  }
+  // 单 .md 模式不支持文件夹: 没 handle 就 fallback 下载
 
   return { handle: false };
 }
@@ -3845,36 +3698,25 @@ async function boot() {
   await tryReconnect();
 }
 
-// 尝试从 IndexedDB 重连上次打开的文件夹/文件
+// 尝试从 IndexedDB 重连上次打开的 .md 文件
 async function tryReconnect() {
   try {
     const last = await HandleStore.getLastFile();
-    if (!last) return;
-    const folderHandle = await HandleStore.getFolder(last.folderPath);
-    if (!folderHandle) return;
-    // 确认权限
-    const perm = await folderHandle.queryPermission({ mode: 'readwrite' });
+    if (!last || !last.fileName) return;
+    const handle = await HandleStore.getFile(last.fileName);
+    if (!handle) return;
+    // 确认权限 (用户上次授权过的文件, 多数情况仍 granted; revoke 后需要重选)
+    let perm;
+    try { perm = await handle.queryPermission({ mode: 'readwrite' }); }
+    catch (e) { perm = 'prompt'; }
     if (perm !== 'granted') {
-      setStatus('上次文件夹未授权', `${last.folderPath} (重新打开以授权)`);
+      setStatus('上次文件未授权', `${last.fileName} (重新打开以授权)`);
       return;
     }
-    // 重新加载
-    State.folderHandle = folderHandle;
     State.saveMode = 'handle';
-    const entries = [];
-    for await (const [name, handle] of folderHandle.entries()) {
-      if (handle.kind === 'file' && /\.(md|markdown)$/i.test(name)) {
-        entries.push({ name, handle });
-      }
-    }
-    State.fileHandles = entries.map(e => e.handle);
-    renderFileTreeFromHandles(State.fileHandles, folderHandle);
-    // 找上次文件
-    const target = State.fileHandles.find(h => h.name === last.fileName);
-    if (target) {
-      await openFromHandle(target);
-      setStatus(`已重连 ${folderHandle.name}`, `${last.fileName} (Ctrl+S 直接保存)`);
-    }
+    await openFromHandle(handle);
+    renderFilePaneCurrent();
+    setStatus(`已重连 ${last.fileName}`, 'Ctrl+S 直接保存到原位置');
   } catch (e) {
     console.warn('重连失败:', e);
   }
@@ -3893,18 +3735,20 @@ window.__mdAnnotator = {
   tryWriteBack,
   tryReconnect,
   promptAuthor,
-  renderFileTreeFromHandles,
   openFromHandle,
   openFiles,
   openFilesLegacy,
-  openFolderLegacy,
   // HTML → markdown 内部 helper（暴露给 e2e 测试 + 第三方插件使用）
   htmlToMarkdown,
   // File pane 测试 API
   fileTypeIcon,
   filterTree,
-  renderFileTreeFromList,
+  renderFilePaneCurrent,
   handleTreeAction,
+  // Compatibility shims for tests written pre-folder-removal (2026-07-05):
+  // these now do nothing / no-op since renderFilePaneCurrent owns the pane
+  renderFileTreeFromHandles: () => renderFilePaneCurrent(),
+  renderFileTreeFromList: () => renderFilePaneCurrent(),
   // AI 协作协议：结构化 API（不让 AI 通过 UI 模拟点击）
   ai: (() => {
     const AI_AUTHOR = 'AI Reviewer';
