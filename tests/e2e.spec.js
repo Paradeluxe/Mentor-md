@@ -3345,9 +3345,64 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
     console.log('  ✓ P0-A 跨 tab 联动正常 (晚开 tab 触发 T1 readOnly — 这是修复的关键)');
   }
 
+  // === TEST 109: P0 #12 XSS guard — 批注 body 含 <img onerror> 不可被解析为 HTML ===
+  console.log('=== TEST 109: 批注 body 含恶意 HTML 不被解析 ===');
+  {
+    const xss = await page.evaluate(async () => {
+      const F = window.__mdAnnotator;
+      // 重置 filter 状态 (前序测试可能 toggle 过)
+      F.State.filterOpen = true;
+      F.State.filterResolved = false;
+      const md = F.State.editor.state.doc.textBetween(0, F.State.editor.state.doc.content.size, ' ');
+      // 直接调 ai.reply 把恶意 HTML 加为 reply body
+      const tid = 'xss-thread-' + Date.now();
+      // 手动 push thread (绕开 createAnnotationThread 的 promptAuthor 检查)
+      F.State.annotations.push({
+        threadId: tid,
+        range: { from: 0, to: 5 },
+        text: md.slice(0, 5) || '样本',
+        prefix: '',
+        suffix: '',
+        resolved: false,
+        createdAt: new Date().toISOString(),
+        comments: [],
+      });
+      // 调用 AI reply API 加一条带 XSS 的 body
+      const r1 = F.ai.reply(tid, '<img src=x onerror="window.__XSS_TRIGGERED=true">click me<script>alert(1)</script>');
+      F.renderCommentList();
+      // 检查
+      const list = document.querySelector('#comment-list');
+      const thread = list.querySelector(`[data-thread="${tid}"]`);
+      const replyBody = thread ? thread.querySelector('.comment-reply .comment-body, .comment-item .comment-body, .comment-body') : null;
+      return {
+        imgsFound: list ? list.querySelectorAll('img').length : 0,
+        triggered: !!window.__XSS_TRIGGERED,
+        threadExists: !!thread,
+        bodyInnerHtml: replyBody?.innerHTML || null,
+        bodyTextContent: replyBody?.textContent || null,
+        apiResult: r1,
+      };
+    });
+    console.log(`  ✓ threadExists = ${xss.threadExists}`);
+    console.log(`  ✓ reply API result: ${JSON.stringify(xss.apiResult)}`);
+    console.log(`  ✓ <img> 数 = ${xss.imgsFound} (预期 0)`);
+    console.log(`  ✓ onerror 触发 = ${xss.triggered} (预期 false)`);
+    console.log(`  ✓ body innerHTML (前 100): ${xss.bodyInnerHtml?.slice(0, 100)}`);
+    console.log(`  ✓ body textContent: ${xss.bodyTextContent?.slice(0, 80)}`);
+    if (xss.imgsFound !== 0) throw new Error(`XSS: ${xss.imgsFound} 个 img 元素被解析`);
+    if (xss.triggered) throw new Error('XSS: window.__XSS_TRIGGERED 被设置');
+    if (!xss.bodyInnerHtml?.includes('&lt;img')) {
+      throw new Error(`XSS: body HTML 未被 escape (实际: ${xss.bodyInnerHtml?.slice(0, 100)})`);
+    }
+    if (!xss.bodyInnerHtml?.includes('&lt;script&gt;')) {
+      throw new Error(`XSS: <script> 未被 escape`);
+    }
+    console.log('  ✓ body HTML 已 escape (img + script 都被 &lt; 包裹)');
+  }
+
   await browser.close();
   console.log('\n========================================');
-  console.log('✓ 全部 108 个测试通过！');
+  console.log('✓ 全部 109 个测试通过！');
   console.log('========================================');
 })().catch(async err => {
   console.error('\n✗ 测试失败:', err.message);
