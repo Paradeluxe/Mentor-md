@@ -17,6 +17,7 @@ __pycache__/
 tests/screenshots/*.png
 tests/report.html
 tests/long-stress-result.json
+tests/soak-logs/
 
 # 开发调试临时文件
 _outline-preview.html
