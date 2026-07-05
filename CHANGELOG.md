@@ -73,6 +73,11 @@
 - e2e-soak: SOAK PASS, 0 error
 - 6 个小 spec: 各自 pass
 
+### 测试: 真鼠标拖拽 + 边界压测
+- `e2e-mouse-drag.spec.js`: D1-D4 真鼠标拖拽选区 (PM selection 端点精确, 跨段落, 浮起按钮, 取消选区)
+- `e2e-mouse-drag-stress.spec.js`: 50 轮随机拖拽 (heading/paragraph/list/code/table/blockquote), seed=42/1/7/13/99
+- `e2e-mouse-drag-regression.spec.js`: 已知 flaky case (listItem/tableCell 端点 ±1-2 char 偏移, PM coordsAtPos 限制)
+
 ---
 
 ## v1 (2026-04 ~ 2026-06) — 早期开发
