@@ -2835,6 +2835,7 @@ let _docChannel = null;
 let _docChannelPath = null;
 let _instanceId = Math.random().toString(36).slice(2, 10);
 let _docPeers = new Set();
+let _docHeartbeatTimer = null;
 
 function _getDocPath() {
   if (!State.currentFile) return null;
@@ -2842,6 +2843,8 @@ function _getDocPath() {
 }
 
 function _closeDocChannel() {
+  // 重定向到 timer-cleanup 版本 (line ~2902)
+  if (typeof _closeDocChannelFull === 'function') return _closeDocChannelFull();
   if (_docChannel) {
     try { _docChannel.postMessage({ type: 'leave', instanceId: _instanceId }); } catch (e) {}
     _docChannel.close();
@@ -2860,26 +2863,61 @@ function _openDocChannel() {
   _docChannel.onmessage = (e) => {
     if (e.data.instanceId === _instanceId) return;
     if (e.data.type === 'ping') {
+      const isNewPeer = !_docPeers.has(e.data.instanceId);
       _docPeers.add(e.data.instanceId);
       _docChannel.postMessage({ type: 'pong', instanceId: _instanceId });
+      // 晚开 tab 的 fix: 收到新 peer 的 ping, 立即重新评估只读状态
+      // 否则早开 tab 不知道自己身边还有 tab 在编辑
+      if (isNewPeer) _reevaluateReadOnly();
     } else if (e.data.type === 'pong') {
+      const isNewPeer = !_docPeers.has(e.data.instanceId);
       _docPeers.add(e.data.instanceId);
+      if (isNewPeer) _reevaluateReadOnly();
     } else if (e.data.type === 'leave') {
       _docPeers.delete(e.data.instanceId);
+      // peer 离开 → 重新评估只读状态 (可能回到可写)
+      _reevaluateReadOnly();
     }
   };
   // 主动 ping, 等 300ms 看 peer
   _docChannel.postMessage({ type: 'ping', instanceId: _instanceId });
-  setTimeout(() => {
-    if (_docPeers.size > 0 && !State.readOnlyMode) {
-      State.readOnlyMode = true;
-      showToast(`⚠ 另一标签也在编辑此文件 (${_docPeers.size} 个), 已启用只读模式 (Ctrl+S 禁用)`, 6000);
-    }
-  }, 300);
+  setTimeout(_reevaluateReadOnly, 300);
+  // 每 5s 心跳一次, 防止长时间 idel 后 peer set 过期 (e.g. OS 休眠)
+  _docHeartbeatTimer = setInterval(() => {
+    if (_docChannel) _docChannel.postMessage({ type: 'ping', instanceId: _instanceId });
+  }, 5000);
 }
 
-// 关闭 tab 时广播 leave
-window.addEventListener('beforeunload', _closeDocChannel);
+// P0-A 修复: 任意 peer 数变化都触发重新评估 (而非只在 300ms 后一次)
+function _reevaluateReadOnly() {
+  const hasPeers = _docPeers.size > 0;
+  if (hasPeers && !State.readOnlyMode) {
+    State.readOnlyMode = true;
+    showToast(`⚠ 另一标签也在编辑此文件 (${_docPeers.size} 个), 已启用只读模式 (Ctrl+S 禁用)`, 6000);
+  } else if (!hasPeers && State.readOnlyMode) {
+    // 所有 peer 离开 → 解除只读
+    State.readOnlyMode = false;
+    showToast('✓ 所有标签都已关闭, 已恢复可写模式', 3000);
+  }
+}
+
+function _closeDocChannelFull() {
+  // 清除心跳计时器
+  if (typeof _docHeartbeatTimer !== 'undefined' && _docHeartbeatTimer) {
+    clearInterval(_docHeartbeatTimer);
+    _docHeartbeatTimer = null;
+  }
+  if (_docChannel) {
+    try { _docChannel.postMessage({ type: 'leave', instanceId: _instanceId }); } catch (e) {}
+    _docChannel.close();
+    _docChannel = null;
+    _docChannelPath = null;
+  }
+  _docPeers.clear();
+}
+
+// 关闭 tab 时广播 leave + 清理心跳
+window.addEventListener('beforeunload', _closeDocChannelFull);
 
 // ============================================================
 // P0-B: 侧车 schema 验证 - 检测重复 threadId / 缺字段
