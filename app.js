@@ -785,20 +785,30 @@ function setStatus(left, right) {
 
 // M15 docx 一致: 实时更新 status bar 右部 (字数 + 行数 + 批注数)
 // 仅操作 status-right, 不动 status-left — 兼容所有现有 setStatus(left, right) 调用方
-// 250ms debounce 避免每键击都重算
+// 250ms debounce 避免每键击都重算 — 但加载完成是 immediate, 不 debounce
 let _docMetaTimer = null;
-function updateDocMeta() {
+function updateDocMeta({immediate = false} = {}) {
+  // 立即刷新 (用于文档切换/加载完成)
+  if (immediate) {
+    if (_docMetaTimer) { clearTimeout(_docMetaTimer); _docMetaTimer = null; }
+    _doUpdateDocMeta();
+    return;
+  }
   if (_docMetaTimer) clearTimeout(_docMetaTimer);
   _docMetaTimer = setTimeout(() => {
     _docMetaTimer = null;
-    if (!State.editor || !State.currentFile) return;
-    const docText = State.editor.state.doc.textContent || '';
-    const wordCount = docText.trim() ? docText.trim().split(/\s+/).filter(Boolean).length : 0;
-    const lineCount = docText.split('\n').length;
-    const annCount = (State.annotations || []).length;
-    const name = State.currentFile.name || '';
-    $('#status-right').textContent = `${name} · ${wordCount} 词 · ${lineCount} 行 · ${annCount} 批注`;
-  }, 250);
+    _doUpdateDocMeta();
+  }, 200);
+}
+
+function _doUpdateDocMeta() {
+  if (!State.editor || !State.currentFile) return;
+  const docText = State.editor.state.doc.textContent || '';
+  const wordCount = docText.trim() ? docText.trim().split(/\s+/).filter(Boolean).length : 0;
+  const lineCount = docText.split('\n').length;
+  const annCount = (State.annotations || []).length;
+  const name = State.currentFile.name || '';
+  $('#status-right').textContent = `${name} · ${wordCount} 词 · ${lineCount} 行 · ${annCount} 批注`;
 }
 
 function markDirty() {
@@ -2471,6 +2481,9 @@ function renderOutline() {
 
 // 从 .md 加载到编辑器
 function loadMarkdownIntoEditor(name, content, annotationsData = null) {
+  // P1 #6: 立即清掉状态栏, 避免切换文档时短暂闪旧文件名
+  $('#status-right').textContent = '加载中...';
+  $('#current-file-name').textContent = name;
   // D3 docx 一致性: 切文档时, 如果当前文档 dirty, 弹"是否保存" (Word 行为)
   // 注意: IDB 兜底已经防止数据丢失, 但 Word 仍会让用户主动选择
   if (State.currentFile && State.currentFile.dirty && State.currentFile.name !== name) {
@@ -2575,7 +2588,7 @@ function loadMarkdownIntoEditor(name, content, annotationsData = null) {
   // M15 docx 一致: status bar 实时显示字数 + 行数 (Word 行为)
   // 加载时初始化一次, 后续编辑由 onTransaction 触发 updateDocMeta 实时刷新
   setStatus('已加载', '');
-  updateDocMeta();
+  updateDocMeta({ immediate: true });  // P1 #6: 文档切换时立即刷新 status bar (不走 200ms debounce)
   // P0-A: 跨 tab 协调 - 广播当前打开的文件
   if (typeof _openDocChannel === 'function') _openDocChannel();
   // P0-C: 记录主 .md mtime (供后续 saveCurrent 比较)
