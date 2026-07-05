@@ -516,6 +516,55 @@ code {
   overflow-y: auto;
   display: flex;
   flex-direction: column;
+  transition: margin-left 200ms ease, width 0s;
+}
+/* P1-FilePaneCollapse: 用户手动收起文件栏 (Ctrl+[ 或按钮) */
+body.file-pane-collapsed #file-pane {
+  margin-left: -260px;  /* 滑出左侧 */
+  border-right: none;
+}
+
+/* 收起按钮 — 折叠窗格 header 右上角 */
+.pane-collapse-btn {
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 4px 8px;
+  margin-left: auto;
+  border-radius: var(--rounded-sm);
+  transition: color 150ms;
+}
+.pane-collapse-btn:hover {
+  color: var(--danger);
+  background: var(--bg);
+}
+
+/* 浮起的 "展开" 按钮 (文件栏收起时出现, 贴在左边缘) */
+.expand-pane-btn {
+  position: fixed;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 100;
+  background: var(--panel);
+  color: var(--text-2);
+  border: 1px solid var(--border-warm);
+  border-left: none;
+  border-top-right-radius: var(--rounded-md);
+  border-bottom-right-radius: var(--rounded-md);
+  padding: 14px 6px;
+  cursor: pointer;
+  font-size: 16px;
+  font-weight: 600;
+  box-shadow: 2px 0 6px rgba(0,0,0,0.06);
+}
+.expand-pane-btn:hover {
+  color: var(--accent);
+}
+.expand-pane-btn.hidden {
+  display: none;
 }
 
 /* Tree search input — 极简 transparent + bottom border */

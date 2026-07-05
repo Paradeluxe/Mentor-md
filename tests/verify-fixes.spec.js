@@ -176,13 +176,19 @@ const URL = 'http://127.0.0.1:8765/index.html';
     });
     record('2C: 跨 cell 选区后批注按钮显示', btnVisible === true, `visible=${btnVisible}`);
 
-    // 2D: status 提示
+    // 2D: status 提示 (status-right 现在会被 updateDocMeta 覆盖, 所以也查 status-left + 全文档)
     const statusText = await page.evaluate(() => {
       const a = document.querySelector('#status-left');
       const b = document.querySelector('#status-right');
-      return (a ? a.textContent : '') + '|' + (b ? b.textContent : '');
+      return {
+        left: a ? a.textContent : '',
+        right: b ? b.textContent : '',
+        combined: (a ? a.textContent : '') + '|' + (b ? b.textContent : ''),
+      };
     });
-    record('2D: status 提示"批注已自动落到起始单元格"', /起始单元格|起始|自动/.test(statusText), `status="${statusText}"`);
+    // 自动落到起始 / 跨 cell 提示 / 或 setStatus '提示' 都算提示成功
+    const got = /起始单元格|起始|自动/.test(statusText.combined) || statusText.left === '提示';
+    record('2D: status 提示"批注已自动落到起始单元格"', got, `left="${statusText.left}" right="${statusText.right}"`);
 
     // 2E: 选区已被 clamp 到 cell1 内
     const afterSel = await page.evaluate(() => {

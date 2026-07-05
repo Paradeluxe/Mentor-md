@@ -3729,6 +3729,24 @@ function setupToolbar() {
       e.preventDefault();
       document.body.classList.toggle('comment-pane-open');
     }
+    // Ctrl+[ 收起/展开文件栏 (Word 风格 outline 收起)
+    if ((e.metaKey || e.ctrlKey) && e.key === '[') {
+      e.preventDefault();
+      toggleFilePane();
+    }
+  });
+
+  // P1-FilePaneCollapse: 文件栏收起按钮 + Ctrl+[ 快捷键
+  function toggleFilePane() {
+    const collapsed = document.body.classList.toggle('file-pane-collapsed');
+    const expandBtn = $('#expand-file-pane-btn');
+    if (expandBtn) expandBtn.classList.toggle('hidden', !collapsed);
+  }
+  // 绑所有 [data-act='toggle-file-pane'] 元素 (折叠按钮 + 浮起展开按钮)
+  document.addEventListener('click', (e) => {
+    if (e.target.closest('[data-act="toggle-file-pane"]')) {
+      toggleFilePane();
+    }
   });
 
   // Cmd+B 快捷键已移除 (大纲栏不可折叠, 释放给未来的加粗快捷键使用)

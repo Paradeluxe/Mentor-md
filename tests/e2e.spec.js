@@ -3660,9 +3660,51 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
     console.log('  ✓ 改署名后的 reply 在 needsReply 检测中被识别为 "已答"');
   }
 
+  // === TEST 115: 文件栏 Ctrl+[ 收起 + 浮起展开按钮 ===
+  console.log('=== TEST 115: 文件栏 Ctrl+[ 收起 + 浮起按钮 ===');
+  {
+    // 还原 1400 视窗
+    await page.setViewportSize({ width: 1400, height: 900 });
+    await page.waitForTimeout(200);
+    const before = await page.evaluate(() => {
+      const mainLeft = document.querySelector('#main').getBoundingClientRect().left;
+      const fpRect = document.querySelector('#file-pane').getBoundingClientRect();
+      return { mainLeft, fpLeft: fpRect.left, fpWidth: fpRect.width };
+    });
+    console.log(`  ✓ 收起前 file-pane.left = ${before.fpLeft}, width = ${before.fpWidth}`);
+    if (before.fpLeft > 5) throw new Error(`期望 file-pane 在左侧 (left≈0), 实际 ${before.fpLeft}`);
+
+    // Ctrl+[
+    await page.keyboard.press('Control+[');
+    await page.waitForTimeout(300);
+    const after = await page.evaluate(() => ({
+      collapsed: document.body.classList.contains('file-pane-collapsed'),
+      fpLeft: document.querySelector('#file-pane').getBoundingClientRect().left,
+      expandBtnVisible: !document.querySelector('#expand-file-pane-btn').classList.contains('hidden'),
+    }));
+    console.log(`  ✓ 收起后: collapsed=${after.collapsed} file-pane.left=${after.fpLeft}`);
+    console.log(`  ✓ 浮起展开按钮可见: ${after.expandBtnVisible}`);
+    if (!after.collapsed) throw new Error('Ctrl+[ 应加 file-pane-collapsed class');
+    if (after.fpLeft > -200) throw new Error(`收起后 file-pane 应左移 (<-200), 实际 ${after.fpLeft}`);
+    if (!after.expandBtnVisible) throw new Error('浮起展开按钮应可见');
+
+    // 再 Ctrl+[ 展开回
+    await page.keyboard.press('Control+[');
+    await page.waitForTimeout(300);
+    const restored = await page.evaluate(() => ({
+      collapsed: document.body.classList.contains('file-pane-collapsed'),
+      fpLeft: document.querySelector('#file-pane').getBoundingClientRect().left,
+      expandBtnVisible: !document.querySelector('#expand-file-pane-btn').classList.contains('hidden'),
+    }));
+    if (restored.collapsed) throw new Error('再 Ctrl+[ 应取消 collapsed');
+    if (restored.fpLeft !== 0) throw new Error(`展开应 fpLeft=0, 实际 ${restored.fpLeft}`);
+    if (restored.expandBtnVisible) throw new Error('展开后浮起按钮应隐藏');
+    console.log('  ✓ 文件栏 Ctrl+[ 收起 + 展开 双向 + 浮起按钮联动正确');
+  }
+
   await browser.close();
   console.log('\n========================================');
-  console.log('✓ 全部 114 个测试通过！');
+  console.log('✓ 全部 115 个测试通过！');
   console.log('========================================');
 })().catch(async err => {
   console.error('\n✗ 测试失败:', err.message);

@@ -88,7 +88,7 @@
     <aside id="file-pane">
       <div class="pane-header">
         <span class="pane-title"><span class="pane-icon pane-icon-outline"></span><span>大纲</span></span>
-        <!-- 收起按钮已移除: 大纲栏始终显示 (Word 风格) -->
+        <button class="pane-collapse-btn" data-act="toggle-file-pane" title="收起文件栏 (Ctrl+[)" aria-label="收起">‹</button>
       </div>
       <div id="outline-pane">
         <p class="outline-empty">打开文档以查看大纲</p>
@@ -96,6 +96,9 @@
       <!-- 文件树暂时隐藏,第三步砍 -->
       <div id="file-tree" class="hidden" style="display:none"></div>
     </aside>
+
+    <!-- 文件栏收起时, 浮起 "展开" 按钮 -->
+    <button id="expand-file-pane-btn" class="expand-pane-btn hidden" data-act="toggle-file-pane" title="展开文件栏 (Ctrl+[)" aria-label="展开">›</button>
 
     <!-- 浮起"展开"按钮已移除: 大纲栏始终显示,不需要展开按钮 -->
 
