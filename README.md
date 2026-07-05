@@ -37,18 +37,17 @@ python3 -m http.server 8765
 
 然后：
 
-1. 点工具栏 **📁 打开文件夹** → 选你的论文目录
-2. 浏览器会弹出授权提示 → 同意后**整个文件夹都被 Mentor 信任**
+1. 点工具栏 **📂 打开文件** → 选你的 .md (Chrome/Edge 可同时选 `my.md` + `my.annotations.json` 自动加载批注)
+2. 浏览器会弹出授权提示 → 同意后 Mentor 拿到此文件写权限
 3. 之后 `Ctrl+S` **直接写回原文件**，不需要任何下载
-4. **下次打开**自动重连上次文件夹（IndexedDB 记住了 handle）
+4. **下次打开**自动重连上次的 .md 并写回原位置（IndexedDB 记住了 handle）
 
 > **File System Access API** 是 Chrome/Edge 113+ 的能力。一次授权，长期有效。
 
 ### 方式 2：双击 `index.html` 直接打开
 
 浏览器直接打开 `file:///.../Mentor/index.html`。基本功能可用，但：
-- `📁 打开文件夹` 会走 `<input webkitdirectory>` fallback，保存需要下载
-- `📂 打开文件` 同样 fallback
+- `📂 打开文件` 走 `<input type="file">` fallback，保存会下载 .md + .annotations.json 两个文件到本地，需手动放回原目录
 
 ### 方式 3：Firefox / Safari
 
@@ -170,12 +169,20 @@ Mentor/
 
 ---
 
-## 已知限制 (v1)
+## 已知限制
 
 - ⚠️ 选区不能跨段落（ProseMirror mark 限制）
 - ⚠️ 公式编辑：KaTeX node 是 atomic（不可编辑内部），改公式源码需要删除再重输
 - ⚠️ Firefox/Safari：保存会下载两个文件，需手动放回 .md 同目录
 - ⚠️ 文本被改后批注可能位置失效（标 `invalid` 但不自动重新定位）
+
+## 单 .md 模式说明 (v2)
+
+支持单 .md 模式（无文件夹树）。Chrome/Edge 113+ 选中 .md 后可一授权长期写回原位置；Firefox/Safari 自动下载两个文件。多文件工作请用 OS 文件管理器切换。
+
+### 跨刷新重连
+
+`HandleStore.putFile(name, handle)` 持久化所选 .md 的 FS Access handle，刷新后 `tryReconnect()` 自动校验权限并恢复工作区。Chrome/Edge 在用户不主动撤销时，handle 永久可用。
 
 ---
 
@@ -191,7 +198,7 @@ python3 -m http.server 8765 &
 node tests/e2e.spec.js
 ```
 
-54 个测试覆盖（6 个 section）：基础数据流（19）+ UI 按钮 + 快捷键（15）+ 文件 IO 错误处理（6）+ 批注增强（5）+ 公式边界（3）+ UI 状态（4）+ 错误处理（2）。
+107 个测试覆盖：基础数据流 + UI 按钮 + 快捷键 + 文件 IO 错误处理 + 批注增强 + 公式边界 + UI 状态 + 错误处理 + 单 .md 模式重连 (TEST 106/107)。
 
 ### 调试
 
@@ -201,11 +208,12 @@ node tests/e2e.spec.js
 __mdAnnotator.State.editor              // 当前 Tiptap editor 实例
 __mdAnnotator.State.annotations         // 当前所有批注 thread
 __mdAnnotator.State.saveMode            // 'handle' | 'download'
-__mdAnnotator.State.folderHandle        // FileSystemDirectoryHandle (授权后)
+__mdAnnotator.State.currentFile.handle  // FileSystemFileHandle (单 .md 模式, Chrome/Edge)
 __mdAnnotator.FS_API.supported          // 浏览器是否支持 File System Access
 __mdAnnotator.HandleStore               // IndexedDB handle 持久化工具
-__mdAnnotator.HandleStore.listFolders() // 列出所有已授权文件夹
-__mdAnnotator.HandleStore.deleteFolder(path)  // 撤销某文件夹的授权
+__mdAnnotator.HandleStore.putFile(name, handle)  // 持久化单 .md handle
+__mdAnnotator.HandleStore.getFile(name)         // 读回 handle
+__mdAnnotator.HandleStore.putLastFile(fileName) // 记住最后一次打开的 .md
 __mdAnnotator.getEditorHTML()           // 导出 HTML
 __mdAnnotator.tryReconnect()            // 手动触发重连
 __mdAnnotator.setAuthor('你的名字')      // 设置作者
