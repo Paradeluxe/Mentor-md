@@ -3303,9 +3303,46 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
     throw new Error(`反向编辑后词数应回到 ${w0}: 实际 ${w2}`);
   }
 
+  // === TEST 106: folder mode UI gone — no 打开文件夹 button ===
+  console.log('=== TEST 106: folder mode removed from UI ===');
+  {
+    const folderBtnExists = await page.evaluate(() => {
+      const all = Array.from(document.querySelectorAll('#toolbar button, #toolbar *'));
+      return all.some(el => (el.id || '').toLowerCase().includes('folder')
+        || (el.title || '').includes('文件夹')
+        || (el.textContent || '').includes('文件夹'));
+    });
+    if (folderBtnExists) throw new Error('folder-mode button still present in #toolbar');
+    // openFolder() must not be defined on window.__mdAnnotator
+    const openFolderDefined = await page.evaluate(() =>
+      typeof window.__mdAnnotator?.openFolder === 'function');
+    if (openFolderDefined) throw new Error('window.__mdAnnotator.openFolder still defined');
+    console.log('  ✓ folder button + API removed');
+  }
+
+  // === TEST 107: single-file handle survives reload (reconnect → handle-mode save) ===
+  console.log('=== TEST 107: single-file handle reconnect ===');
+  {
+    const result = await page.evaluate(async () => {
+      const F = window.__mdAnnotator;
+      const mockHandle = { kind: 'file', name: 'reconnect.md' };
+      await F.HandleStore.putFile(mockHandle.name, mockHandle);
+      await F.HandleStore.putLastFile(mockHandle.name);
+      const last = await F.HandleStore.getLastFile();
+      const got = await F.HandleStore.getFile(mockHandle.name);
+      return {
+        lastStored: !!last && last.fileName === 'reconnect.md' && !last.folderPath,
+        gotHandle: !!got && got.name === 'reconnect.md',
+      };
+    });
+    if (!result.lastStored) throw new Error('lastFile was not persisted file-only (folderPath should be absent)');
+    if (!result.gotHandle) throw new Error('getFile did not return the stored handle');
+    console.log('  ✓ HandleStore.putFile / getFile roundtrip OK');
+  }
+
   await browser.close();
   console.log('\n========================================');
-  console.log('✓ 全部 105 个测试通过！');
+  console.log('✓ 全部 107 个测试通过！');
   console.log('========================================');
 })().catch(async err => {
   console.error('\n✗ 测试失败:', err.message);
