@@ -3706,6 +3706,18 @@ function setupToolbar() {
   });
   updateToggleBtnIcon();  // 初始图标
 
+  // 切换批注侧栏 (窄屏/手机备用入口)
+  $('#btn-toggle-comment-pane').addEventListener('click', () => {
+    document.body.classList.toggle('comment-pane-open');
+  });
+  // Ctrl+. 唤出/收下批注侧栏 (窄屏快捷键)
+  document.addEventListener('keydown', (e) => {
+    if ((e.metaKey || e.ctrlKey) && e.key === '.') {
+      e.preventDefault();
+      document.body.classList.toggle('comment-pane-open');
+    }
+  });
+
   // Cmd+B 快捷键已移除 (大纲栏不可折叠, 释放给未来的加粗快捷键使用)
   document.addEventListener('keydown', e => {
     if ((e.ctrlKey || e.metaKey) && !e.shiftKey && (e.key === 'b' || e.key === 'B')) {

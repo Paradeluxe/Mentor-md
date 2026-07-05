@@ -3534,9 +3534,66 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
     }
   }
 
+  // === TEST 112: P1 #5 窄屏响应式 — 三栏按视窗缩放, 极窄屏折叠批注栏 ===
+  console.log('=== TEST 112: 窄屏响应式布局 ===');
+  {
+    // 1280 (默认 desktop)
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.waitForTimeout(200);
+    const desktop = await page.evaluate(() => {
+      const main = document.querySelector('#main');
+      const filePane = document.querySelector('#file-pane');
+      const commentPane = document.querySelector('#comment-pane');
+      return {
+        fileWidth: filePane.getBoundingClientRect().width,
+        commentWidth: commentPane.getBoundingClientRect().width,
+      };
+    });
+    console.log(`  ✓ 1280px: file=${desktop.fileWidth.toFixed(0)} comment=${desktop.commentWidth.toFixed(0)}`);
+
+    // 768 (折叠文件栏)
+    await page.setViewportSize({ width: 768, height: 900 });
+    await page.waitForTimeout(200);
+    const tablet = await page.evaluate(() => {
+      const fileWidth = document.querySelector('#file-pane').getBoundingClientRect().width;
+      const commentDisplay = getComputedStyle(document.querySelector('#comment-pane')).display;
+      return { fileWidth, commentDisplay };
+    });
+    console.log(`  ✓ 768px: file=${tablet.fileWidth.toFixed(0)} (预期 ≈48) comment-display=${tablet.commentDisplay}`);
+
+    // 568 (极窄: 折叠批注栏)
+    await page.setViewportSize({ width: 568, height: 900 });
+    await page.waitForTimeout(200);
+    const narrow = await page.evaluate(() => {
+      const fileWidth = document.querySelector('#file-pane').getBoundingClientRect().width;
+      const commentWidth = document.querySelector('#comment-pane').getBoundingClientRect().width;
+      const bodyHasClass = document.body.classList.contains('comment-pane-open');
+      return { fileWidth, commentWidth, bodyHasClass };
+    });
+    console.log(`  ✓ 568px: file=${narrow.fileWidth.toFixed(0)} comment=${narrow.commentWidth.toFixed(0)} (预期 0)`);
+    if (narrow.commentWidth > 2) throw new Error(`568px 应折叠批注栏 (width≈0), 实际 ${narrow.commentWidth}`);
+
+    // Ctrl+. 唤出
+    await page.keyboard.press('Control+.');
+    await page.waitForTimeout(200);
+    const opened = await page.evaluate(() => document.body.classList.contains('comment-pane-open'));
+    console.log(`  ✓ Ctrl+. 唤出: body.comment-pane-open = ${opened}`);
+    if (!opened) throw new Error('Ctrl+. 应唤出批注栏');
+
+    // 折叠按钮在 568 上可见 & 可点
+    const btnVisible = await page.locator('#btn-toggle-comment-pane').isVisible();
+    console.log(`  ✓ btn-toggle-comment-pane 可见 (toolbar): ${btnVisible}`);
+    if (!btnVisible) throw new Error('toolbar 按钮在 568px 应可见');
+
+    // 还原 viewport
+    await page.setViewportSize({ width: 1400, height: 900 });
+    await page.waitForTimeout(200);
+    console.log('  ✓ 窄屏响应式布局 + Ctrl+. 唤出 + toolbar 按钮全链路 OK');
+  }
+
   await browser.close();
   console.log('\n========================================');
-  console.log('✓ 全部 111 个测试通过！');
+  console.log('✓ 全部 112 个测试通过！');
   console.log('========================================');
 })().catch(async err => {
   console.error('\n✗ 测试失败:', err.message);

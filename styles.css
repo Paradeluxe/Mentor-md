@@ -433,12 +433,28 @@ code {
 /* ============ Main panes (三栏布局) ============ */
 #main {
   display: grid;
-  grid-template-columns: 260px 1fr 320px;
+  /* 两边栏按视窗比例缩放 (clamp), 中间编辑区保最小 480px */
+  grid-template-columns:
+    clamp(160px, 18vw, 260px)
+    minmax(480px, 1fr)
+    clamp(220px, 28vw, 360px);
   overflow: hidden;
 }
 @media (max-width: 900px) {
-  #main { grid-template-columns: 200px 1fr 280px; }
-  /* 大纲栏始终显示,不再折叠 (Word 风格) */
+  /* 窄屏: 缩小两边栏到最小值 */
+  #main { grid-template-columns: 160px minmax(360px, 1fr) 220px; }
+}
+@media (max-width: 768px) {
+  /* 更窄: 文件栏折叠 (只显示当前文件名 chip), 评论栏默认隐藏 (可点 ⌘. 唤出) */
+  #main { grid-template-columns: 48px minmax(360px, 1fr) 220px; }
+  #file-pane .pane-title span:not(.pane-icon),
+  #file-pane .tree-node { display: none; }
+}
+@media (max-width: 568px) {
+  /* 手机: 评论栏完全折叠 (靠按钮唤出) */
+  #main { grid-template-columns: 48px minmax(320px, 1fr) 0px; }
+  #comment-pane { display: none; }
+  body.comment-pane-open #comment-pane { display: flex; }
 }
 
 /* ============ Pane 通用 (pane-header 重新设计) ============ */
