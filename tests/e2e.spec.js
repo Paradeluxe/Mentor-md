@@ -3400,9 +3400,51 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
     console.log('  ✓ body HTML 已 escape (img + script 都被 &lt; 包裹)');
   }
 
+  // === TEST 110: 双击 KaTeX 公式弹出源码输入框 (P1 #4) ===
+  console.log('=== TEST 110: 双击公式弹源码输入框, 改后保存 ===');
+  {
+    const r = await page.evaluate(async () => {
+      const F = window.__mdAnnotator;
+      // 重置 filter + 加载含公式的 md
+      F.State.filterOpen = true;
+      F.State.filterResolved = false;
+      const md = '# Title\n\n公式 $\\frac{1}{2}$ 已嵌入.';
+      F.loadMarkdownIntoEditor('math-edit.md', md, null);
+      await new Promise(r => setTimeout(r, 500));
+      const beforeTex = document.querySelector('.katex-wrapper')?.getAttribute('data-tex');
+      const wrap = document.querySelector('.katex-wrapper');
+      // 派发 dblclick
+      wrap?.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true }));
+      await new Promise(r => setTimeout(r, 300));
+      const modalShown = !document.querySelector('#author-modal').classList.contains('hidden');
+      const modalTitle = document.querySelector('#author-modal-title').textContent;
+      const inputVal = document.querySelector('#author-input').value;
+      // 改源码 + 保存
+      const newTex = 'x^2 + y^2 = z^2';
+      document.querySelector('#author-input').value = newTex;
+      document.querySelector('#author-save').click();
+      await new Promise(r => setTimeout(r, 500));
+      const afterTex = document.querySelector('.katex-wrapper')?.getAttribute('data-tex');
+      const modalClosed = document.querySelector('#author-modal').classList.contains('hidden');
+      return { beforeTex, modalShown, modalTitle, inputVal, newTex, afterTex, modalClosed };
+    });
+    console.log(`  ✓ 双击前 tex: ${JSON.stringify(r.beforeTex)}`);
+    console.log(`  ✓ modal 显示: ${r.modalShown} (预期 true)`);
+    console.log(`  ✓ modal title: ${r.modalTitle} (预期 "编辑公式 LaTeX 源码")`);
+    console.log(`  ✓ modal input 预设: ${JSON.stringify(r.inputVal)} (预期 "${r.beforeTex}")`);
+    if (!r.modalShown) throw new Error('双击公式应弹出 modal');
+    if (r.modalTitle !== '编辑公式 LaTeX 源码') throw new Error(`modal 标题错: ${r.modalTitle}`);
+    if (r.inputVal !== r.beforeTex) throw new Error(`modal input 值应等于原 tex (${r.beforeTex}), 实际 ${r.inputVal}`);
+    console.log(`  ✓ 保存后 tex: ${JSON.stringify(r.afterTex)} (预期 "${r.newTex}")`);
+    console.log(`  ✓ 保存后 modal 关闭: ${r.modalClosed} (预期 true)`);
+    if (r.afterTex !== r.newTex) throw new Error(`保存后 tex 应是 "${r.newTex}", 实际 "${r.afterTex}"`);
+    if (!r.modalClosed) throw new Error('保存后 modal 应关闭');
+    console.log('  ✓ KaTeX 双击编辑完整链路 OK');
+  }
+
   await browser.close();
   console.log('\n========================================');
-  console.log('✓ 全部 109 个测试通过！');
+  console.log('✓ 全部 110 个测试通过！');
   console.log('========================================');
 })().catch(async err => {
   console.error('\n✗ 测试失败:', err.message);

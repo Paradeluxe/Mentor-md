@@ -986,6 +986,8 @@ function initEditor() {
   // P-2: 表格内跨 cell 拖选 - 浏览器原生 table 把 selection 限制在单 cell 内
   // 拦截 mouseup, 检测是否跨 cell 拖拽意图, 用 setTextSelection 强制跨 cell 选区
   setupTableDragCapture(editorEl);
+  // P4-MathEdit: 双击 KaTeX 公式弹源码输入框 (公式被设计为 atomic, 源码不可直接编辑, 走 modal)
+  setupKatexDblClick(editorEl);
 }
 
 // ============================================================
@@ -1070,6 +1072,183 @@ function setupTableDragCapture(editorEl) {
     }
   });
 }
+
+// ============================================================
+// 4.6 双击 KaTeX 公式 — 弹出源码输入框 (P4-MathEdit)
+// ============================================================
+// 公式 atom 节点设 contenteditable=false, 不能直接编辑. 用 dblclick 唤出 modal.
+function setupKatexDblClick(editorEl) {
+  if (!editorEl) { console.warn('[MathEdit] no editorEl'); return; }  editorEl.addEventListener('dblclick', (e) => {    const target = e.target.closest('.katex-wrapper, .katex-wrapper-display');
+    if (!target) return;
+    e.preventDefault();
+    e.stopPropagation();
+    try {
+      editKatexInPlace(target);
+    } catch (err) {
+      console.warn('[MathEdit] dblclick handler error:', err);
+      showToast('公式编辑失败: ' + err.message);
+    }
+  });
+}
+
+function editKatexInPlace(target) {  // 遍历 doc 找 data-tex 匹配的 node (避开 posAtDOM 复杂语义)
+  const targetTex = target.getAttribute('data-tex') || '';
+  let foundNode = null;
+  let foundPos = null;
+  State.editor.state.doc.descendants((node, pos) => {
+    if (node.type.name === 'katex' || node.type.name === 'katexBlock') {
+      if (node.attrs.tex === targetTex) {
+        foundNode = node;
+        foundPos = pos;
+        return false;  // stop
+      }
+    }
+    return true;
+  });
+  if (!foundNode) {
+    // fallback: 第一个 katex node
+    State.editor.state.doc.descendants((node, pos) => {
+      if (node.type.name === 'katex' || node.type.name === 'katexBlock') {
+        foundNode = node;
+        foundPos = pos;
+        return false;
+      }
+      return true;
+    });
+  }
+  if (!foundNode) {
+    console.warn('[MathEdit] no katex node found in doc');
+    return;
+  }
+  openEditModal(foundNode, foundPos);
+}
+function openEditModal(pmNode, pos) {
+  // 复用 author-modal DOM, 临时改文案 + 字段 (一次性同步循环, 用 cloneNode 替换按钮避免 listener 冲突)
+  const modal = $('#author-modal');
+  const titleEl = $('#author-modal-title');
+  const descEl = $('#author-modal-desc');
+  const inputEl = $('#author-input');
+  const saveBtn = $('#author-save');
+  const cancelBtn = $('#author-cancel');
+
+  // 把 author-modal 移到一个不同的位置避免与 promptAuthor 同时弹出冲突
+  // 这里仍共享 DOM, 所以一次性: 用一个同步循环展示 + 用 setTimeout 退出
+  const origTitle = titleEl.textContent;
+  const origDesc = descEl.textContent;
+  const origSaveText = saveBtn.textContent;
+  const origPlaceholder = inputEl.placeholder;
+  const origModalDisplay = modal.style.display;
+
+  titleEl.textContent = '编辑公式 LaTeX 源码';
+  descEl.innerHTML = `<strong>节点类型:</strong> ${pmNode.type.name}<br><strong>当前源码:</strong> <code style="font-family:var(--font-mono);font-size:12px;background:var(--panel-3);padding:2px 6px;border-radius:3px;">${escapeHtml(pmNode.attrs.tex || '')}</code>`;
+  saveBtn.textContent = '保存';
+  inputEl.placeholder = 'e.g. \\\\frac{a}{b}';
+  inputEl.value = pmNode.attrs.tex || '';
+
+  // 停掉可能存在的 promptAuthor 残余 handler (从 button remove 掉)
+  // 我们用 cloneNode 替换按钮来避免 listner 重叠
+  const newSaveBtn = saveBtn.cloneNode(true);
+  saveBtn.parentNode.replaceChild(newSaveBtn, saveBtn);
+  const newCancelBtn = cancelBtn.cloneNode(true);
+  cancelBtn.parentNode.replaceChild(newCancelBtn, cancelBtn);
+
+  openEditModal._lastPos = pos;
+  modal.classList.remove('hidden');
+  setTimeout(() => { inputEl.focus(); inputEl.select(); }, 50);
+
+  let resolved = false;
+  const close = (val) => {
+    if (resolved) return;
+    resolved = true;
+    modal.classList.add('hidden');
+    titleEl.textContent = origTitle;
+    descEl.textContent = origDesc;
+    saveBtn.textContent = origSaveText;
+    inputEl.placeholder = origPlaceholder;
+    inputEl.value = '';
+    // 还原按钮 (下次 promptAuthor 仍能用)
+    const rb = newSaveBtn.parentNode.replaceChild(saveBtn, newSaveBtn);
+    const rc = newCancelBtn.parentNode.replaceChild(cancelBtn, newCancelBtn);
+    inputEl.removeEventListener('keydown', keyHandler);
+  };
+  const saveHandler = () => {
+    const v = inputEl.value.trim();
+    if (!v) { showToast('公式不能为空'); return; }
+    close(v);
+    applyKatexEdit(pmNode, openEditModal._lastPos, v);
+  };
+  const cancelHandler = () => close(null);
+  const backdropHandler = (e) => { if (e.target === modal) close(null); };
+  const keyHandler = (e) => {
+    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); saveHandler(); }
+    else if (e.key === 'Escape') close(null);
+  };
+  newSaveBtn.addEventListener('click', saveHandler);
+  newCancelBtn.addEventListener('click', cancelHandler);
+  inputEl.addEventListener('keydown', keyHandler);
+  modal.addEventListener('click', backdropHandler);
+}
+
+function applyKatexEdit(pmNode, pos, newTex) {
+  if (typeof pos !== 'number') return;
+  if (newTex === pmNode.attrs.tex) return;  // noop
+  try {
+    const tr = State.editor.state.tr.setNodeMarkup(pos, undefined, { tex: newTex });
+    State.editor.view.dispatch(tr);
+    markDirty();
+    updateDocMeta();
+    showToast('✓ 公式已更新');
+  } catch (err) {
+    showToast('公式更新失败: ' + err.message);
+  }
+}
+function promptEditKatex(pmNode) {
+  return new Promise(resolve => {
+    // 复用 author modal 的 DOM (避免重复), 临时改它的文案 + 加 input 字段
+    const modal = $('#author-modal');
+    const titleEl = $('#author-modal-title');
+    const descEl = $('#author-modal-desc');
+    const inputEl = $('#author-input');
+    const saveBtn = $('#author-save');
+    const cancelBtn = $('#author-cancel');
+    if (!modal || !inputEl) { resolve(null); return; }
+    // 保存原始文案 + 替换
+    const origTitle = titleEl.textContent;
+    const origDesc = descEl.textContent;
+    const origSaveText = saveBtn.textContent;
+    titleEl.textContent = '编辑公式 LaTeX 源码';
+    descEl.textContent = `当前节点类型: ${pmNode.type.name}。输入合法的 LaTeX 数学公式源码 (KaTeX 支持的子集).`;
+    saveBtn.textContent = '保存';
+    inputEl.value = pmNode.attrs.tex || '';
+    inputEl.placeholder = 'e.g. E = mc^2';
+    modal.classList.remove('hidden');
+    setTimeout(() => { inputEl.focus(); inputEl.select(); }, 50);
+    const cleanup = (val) => {
+      modal.classList.add('hidden');
+      titleEl.textContent = origTitle;
+      descEl.textContent = origDesc;
+      saveBtn.textContent = origSaveText;
+      inputEl.placeholder = '例如：张三';
+      saveBtn.removeEventListener('click', saveHandler);
+      cancelBtn.removeEventListener('click', cancelHandler);
+      inputEl.removeEventListener('keydown', keyHandler);
+      modal.removeEventListener('click', backdropHandler);
+      resolve(val);
+    };
+    const saveHandler = () => cleanup(inputEl.value);
+    const cancelHandler = () => cleanup(null);
+    const backdropHandler = (e) => { if (e.target === modal) cleanup(null); };
+    const keyHandler = (e) => {
+      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) cleanup(inputEl.value);
+      else if (e.key === 'Escape') cleanup(null);
+    };
+    saveBtn.addEventListener('click', saveHandler);
+    cancelBtn.addEventListener('click', cancelHandler);
+    inputEl.addEventListener('keydown', keyHandler);
+    modal.addEventListener('click', backdropHandler);
+  });
+}
+
 
 // ============================================================
 // 5. 浮动批注按钮 — 选中文本后出现 + 选区在 mark 内自动激活批注
