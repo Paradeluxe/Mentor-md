@@ -38,11 +38,15 @@ const URL = 'http://127.0.0.1:8765/index.html';
 | a2 | b2 | c2 |
 | a3 | b3 | c3 |
 `;
+    const mockHandle = {
+      name: 'sample.md',
+      async getFile() { return new File([md], 'sample.md', { type: 'text/markdown' }); },
+      async queryPermission() { return 'granted'; },
+    };
     window.__mdAnnotator.loadMarkdownIntoEditor('sample.md', md, null);
-    // mock 一个 fileList 让 reload 能真正读到 (否则没 folderHandle/fileList, reload 静默无操作)
-    const mockFile = new File([md], 'sample.md', { type: 'text/markdown' });
-    window.__mdAnnotator.State.fileList = [mockFile];
-    window.__mdAnnotator.State.fileHandles = [];
+    // mock 一个 fileList + currentFile.handle 让 reload 能真正读到 (单 .md 模式)
+    window.__mdAnnotator.State.fileList = [new File([md], 'sample.md', { type: 'text/markdown' })];
+    window.__mdAnnotator.State.currentFile.handle = mockHandle;
     window.__mdAnnotator.State.currentFile.dirty = true;
     window.__mdAnnotator.State.currentFile.name = 'sample.md';
   });

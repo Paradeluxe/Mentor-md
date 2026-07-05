@@ -399,30 +399,24 @@ console.log('=== TEST 10: 最终截图 (pinned 状态) ===');
   console.log(`  ✓ tryWriteBack 无 handle: ${JSON.stringify(wb1)}`);
   if (wb1.handle !== false) throw new Error('无 handle 时应返回 handle:false');
 
-  console.log('=== TEST 17: tryWriteBack 模拟 mock folderHandle → handle:true ===');
+  console.log('=== TEST 17: tryWriteBack 模拟 mock single-file handle → handle:true ===');
   const wb2 = await page.evaluate(async () => {
-    // 注入 mock folderHandle（带 createWritable 模拟）
-    const mockFolderHandle = {
-      name: 'mock-folder',
+    // 注入 mock 单文件 handle (带 createWritable 模拟)
+    const mockHandle = {
+      name: 'mock.md',
       async queryPermission() { return 'granted'; },
       async requestPermission() { return 'granted'; },
-      async getFileHandle(name, opts) {
+      async getFile() { return { name: 'mock.md', lastModified: Date.now() }; },
+      async createWritable() {
         let writtenContent = null;
         return {
-          name,
-          async createWritable() {
-            return {
-              async write(content) { writtenContent = content; },
-              async close() {},
-              _getWritten: () => writtenContent,
-            };
-          },
+          async write(content) { writtenContent = content; },
+          async close() {},
           _getWritten: () => writtenContent,
         };
       },
     };
-    window.__mdAnnotator.State.folderHandle = mockFolderHandle;
-    window.__mdAnnotator.State.currentFile = { name: 'mock.md' };
+    window.__mdAnnotator.State.currentFile = { name: 'mock.md', handle: mockHandle };
     return await window.__mdAnnotator.tryWriteBack('# Mock\n\n$E=mc^2$', '{"annotations":[]}', 'mock.md.annotations.json');
   });
   console.log(`  ✓ tryWriteBack with mock handle: ${JSON.stringify(wb2)}`);
@@ -431,10 +425,10 @@ console.log('=== TEST 10: 最终截图 (pinned 状态) ===');
   console.log('=== TEST 18: 保存后状态栏/UI 反映 ===');
   const uiState = await page.evaluate(() => ({
     saveMode: window.__mdAnnotator.State.saveMode,
-    hasFolderHandle: window.__mdAnnotator.State.folderHandle !== null,
+    hasFileHandle: window.__mdAnnotator.State.currentFile && window.__mdAnnotator.State.currentFile.handle !== null && window.__mdAnnotator.State.currentFile.handle !== undefined,
   }));
   console.log(`  ✓ State.saveMode = ${uiState.saveMode}`);
-  console.log(`  ✓ State.folderHandle 存在 = ${uiState.hasFolderHandle}`);
+  console.log(`  ✓ State.currentFile.handle 存在 = ${uiState.hasFileHandle}`);
 
   console.log('=== TEST 19: 最终截图（handle 状态）===');
   // 在 mock 模式下截一张
@@ -767,66 +761,35 @@ console.log('=== TEST 10: 最终截图 (pinned 状态) ===');
     console.log(`  ⚠ TEST 36 已知 stale (file-tree 已合并到 outline), 跳过 click 失败`);
   }
 
-  console.log('=== TEST 37: tryWriteBack 真写回 → 读取写入内容 ===');
+  console.log('=== TEST 37: tryWriteBack 真写回 → 读取写入内容 (单 .md 模式) ===');
   const writeResult = await page.evaluate(async () => {
-    let writtenMd = null, writtenSidecar = null;
-    const mockFolderHandle = {
-      name: 'writeback-folder',
+    let writtenMd = null;
+    const mockFileHandle = {
+      name: 'write-test.md',
       async queryPermission() { return 'granted'; },
       async requestPermission() { return 'granted'; },
-      async getFileHandle(name, opts) {
-        const target = name === 'write-test.md' ? 'md' : 'sidecar';
-        let buf = null;
+      async getFile() { return { name: 'write-test.md', lastModified: Date.now() }; },
+      async createWritable() {
         return {
-          name,
-          async createWritable() {
-            return {
-              async write(content) {
-                if (target === 'md') writtenMd = content; else writtenSidecar = content;
-              },
-              async close() {},
-            };
-          },
+          async write(content) { writtenMd = content; },
+          async close() {},
         };
       },
     };
-    window.__mdAnnotator.State.folderHandle = mockFolderHandle;
-    window.__mdAnnotator.State.currentFile = { name: 'write-test.md' };
+    window.__mdAnnotator.State.currentFile = { name: 'write-test.md', handle: mockFileHandle };
     const result = await window.__mdAnnotator.tryWriteBack(
       '# New\n\n$E=mc^2$',
       '{"annotations":[]}',
       'write-test.md.annotations.json'
     );
-    return { result, writtenMd, writtenSidecar };
+    return { result, writtenMd };
   });
   console.log(`  ✓ tryWriteBack.handle = ${writeResult.result.handle}`);
   console.log(`  ✓ 写入 .md 长度 = ${writeResult.writtenMd?.length}, 内容 = "${writeResult.writtenMd}"`);
-  console.log(`  ✓ 写入 .sidecar 长度 = ${writeResult.writtenSidecar?.length}`);
   if (writeResult.result.handle !== true) throw new Error('真写回未返回 handle:true');
   if (writeResult.writtenMd !== '# New\n\n$E=mc^2$') throw new Error('真写回 md 内容错');
-  if (writeResult.writtenSidecar !== '{"annotations":[]}') throw new Error('真写回 sidecar 内容错');
 
-  console.log('=== TEST 38: 多 file handle 切换 ===');
-  await page.evaluate(async () => {
-    const makeHandle = (name, content) => ({
-      name,
-      async getFile() { return { name, async text() { return content; } }; },
-      async queryPermission() { return 'granted'; },
-    });
-    const handles = [makeHandle('a.md', '# A'), makeHandle('b.md', '# B'), makeHandle('c.md', '# C')];
-    window.__mdAnnotator.State.fileHandles = handles;
-    window.__mdAnnotator.State.folderHandle = null;
-    window.__mdAnnotator.State.saveMode = 'download';
-    // 直接调用 openFromHandle 内部逻辑（等价于点 tree 节点）
-    const openFn = window.__mdAnnotator.openFromHandle || window.openFromHandle;
-    // openFromHandle 是模块内部函数，不能直接调。改用 loadMarkdownIntoEditor 模拟
-    // 但要验证 fileHandles 切换后 UI 渲染
-    window.__mdAnnotator.renderFileTreeFromHandles(handles);
-  });
-  await page.waitForTimeout(150);
-  const treeNodes = await page.locator('#file-tree .tree-node[data-handle-name]').count();
-  console.log(`  ✓ 文件树节点数 = ${treeNodes} (预期 3)`);
-  if (treeNodes !== 3) throw new Error('多文件 tree 渲染错');
+  // TEST 38 removed 2026-07-05 (folder mode dropped; multi-file tree no longer exists)
 
   console.log('=== TEST 39: tryWriteBack 无任何 handle → fallback 路径 ===');
   const fallbackResult = await page.evaluate(async () => {
@@ -1124,21 +1087,16 @@ console.log('=== TEST 10: 最终截图 (pinned 状态) ===');
   const t53 = await page.evaluate(async () => {
     let requestCalled = false;
     let queryCount = 0;
-    const mockFolder = {
-      name: 'perm-test',
+    const mockHandle = {
+      name: 'perm-test.md',
       async queryPermission() { queryCount++; return queryCount === 1 ? 'prompt' : 'granted'; },
       async requestPermission() { requestCalled = true; return 'granted'; },
-      async getFileHandle(name) {
-        return {
-          name,
-          async createWritable() {
-            return { async write() {}, async close() {} };
-          },
-        };
+      async getFile() { return { name: 'perm-test.md', lastModified: Date.now() }; },
+      async createWritable() {
+        return { async write() {}, async close() {} };
       },
     };
-    window.__mdAnnotator.State.folderHandle = mockFolder;
-    window.__mdAnnotator.State.currentFile = { name: 'perm-test.md' };
+    window.__mdAnnotator.State.currentFile = { name: 'perm-test.md', handle: mockHandle };
     return {
       result: await window.__mdAnnotator.tryWriteBack('x', 'y', 'perm-test.md.annotations.json'),
       requestCalled, queryCount,
@@ -1150,57 +1108,42 @@ console.log('=== TEST 10: 最终截图 (pinned 状态) ===');
 
   console.log('=== TEST 54: handle 权限被拒 (NotAllowedError) ===');
   const t54 = await page.evaluate(async () => {
-    const mockFolder = {
-      name: 'deny-test',
+    const mockHandle = {
+      name: 'deny-test.md',
       async queryPermission() { return 'granted'; },
       async requestPermission() { return 'granted'; },
-      async getFileHandle(name) {
-        return {
-          name,
-          async createWritable() {
-            throw Object.assign(new Error('denied'), { name: 'NotAllowedError' });
-          },
-        };
+      async getFile() { return { name: 'deny-test.md', lastModified: Date.now() }; },
+      async createWritable() {
+        throw Object.assign(new Error('denied'), { name: 'NotAllowedError' });
       },
     };
-    window.__mdAnnotator.State.folderHandle = mockFolder;
-    window.__mdAnnotator.State.currentFile = { name: 'deny-test.md' };
+    window.__mdAnnotator.State.currentFile = { name: 'deny-test.md', handle: mockHandle };
     return await window.__mdAnnotator.tryWriteBack('x', 'y', 'deny-test.md.annotations.json');
   });
   console.log(`  ✓ 拒绝时: ${JSON.stringify(t54)}`);
   if (t54.handle !== false || !t54.error) throw new Error('拒绝应返回 {handle: false, error}');
 
   // ============================================================
-  // SECTION G: File Pane Trae 化 (4 项新增功能)
+  // SECTION G: File Pane 单 .md 模式 (2026-07-05 重构: 替代原 Trae 文件树测试)
   // ============================================================
-  console.log('\n========== SECTION G: File Pane Trae 化 ==========');
+  console.log('\n========== SECTION G: File Pane 单 .md 模式 ==========');
 
-  // 准备：构造 3 个文件用于 tree 渲染
+  // 准备: 加载 sample.md 作 currentFile
   await page.evaluate((md) => {
-    const files = [
-      new File([md], 'sample.md', { type: 'text/markdown' }),
-      new File([md], 'draft.md', { type: 'text/markdown' }),
-      new File(['{}'], 'data.json', { type: 'application/json' }),
-    ];
     const m = window.__mdAnnotator;
-    m.State.fileList = files;
-    m.renderFileTreeFromList(files);
+    m.State.currentFile = { name: 'sample.md', content: md };
+    m.State.saveMode = 'handle';
+    m.renderFilePaneCurrent();
   }, SAMPLE_MD);
   await page.waitForTimeout(100);
 
-  console.log('=== TEST 55: 文件类型专属图标 (icon-md / icon-json) ===');
-  const t55a = await page.locator('.tree-node[data-handle-name="sample.md"] .icon').getAttribute('class');
-  console.log(`  ✓ sample.md icon class: ${t55a}`);
-  if (!t55a.includes('icon-md')) throw new Error('sample.md 应有 icon-md class');
-  const t55b = await page.locator('.tree-node[data-handle-name="data.json"] .icon').getAttribute('class');
-  console.log(`  ✓ data.json icon class: ${t55b}`);
-  if (!t55b.includes('icon-json')) throw new Error('data.json 应有 icon-json class');
-  // 验证颜色（md = text-2 中性灰 rgba(38, 37, 30, 0.6) = Cursor 设计: 避免 icon 抢戏）
-  const t55c = await page.locator('.tree-node[data-handle-name="sample.md"] .icon').evaluate(el => getComputedStyle(el).color);
-  console.log(`  ✓ sample.md icon color: ${t55c} (预期中性灰 rgba(38, 37, 30, 0.6) = --text-2)`);
-  if (!t55c.includes('38, 37, 30') || !t55c.includes('0.6')) {
-    throw new Error(`sample.md 图标颜色应等于 text-2 中性灰, 实际 ${t55c}`);
-  }
+  console.log('=== TEST 55: 文件栏显示当前文件名 + 授权 badge ===');
+  const filename = await page.locator('#file-tree .filename').textContent();
+  console.log(`  ✓ file-pane 显示的文件名: "${filename}"`);
+  if (filename?.trim() !== 'sample.md') throw new Error(`file-pane 应显示 sample.md, 实际 "${filename}"`);
+  const saveBadge = await page.locator('#file-tree .save-mode-badge').count();
+  console.log(`  ✓ 授权/下载 badge 数: ${saveBadge} (预期 1)`);
+  if (saveBadge !== 1) throw new Error('file-pane 应有 1 个 badge');
 
   console.log('=== TEST 56: outline 浮起 hover 样式 (P3-B 迁移) ===');
   await page.evaluate((md) => {
