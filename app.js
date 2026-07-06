@@ -1416,15 +1416,9 @@ function handleSelectionChange() {
     }
     return;
   }
-  // P-h: 选区在 heading 节点内 → reject (不显示批注按钮)
-  // 原因: heading 是结构性元素, 批注应放在正文段落. 用户落位到 heading 大多是误触.
-  const $fromHead = editor.state.doc.resolve(from);
-  const $toHead = editor.state.doc.resolve(to);
-  if ($fromHead.parent.type.name === 'heading' || $toHead.parent.type.name === 'heading') {
-    btn.classList.add('hidden');
-    setStatus('提示', '批注不支持标题选区, 请选段落正文');
-    return;
-  }
+  // P-h: 选区在 heading 节点内 → v2.1: 仍允许批注 (heading 也是 textblock)
+  // 旧版 reject heading 选区 — 但跨 heading + paragraph 的多段选区需要支持
+  // 后面 nodesBetween + isTextblock 处理会涵盖
 
   // 选区跨 block (多行) → 走多段批注 (每段各打 mark, 共享 threadId)
   // 跨 cell (table 内) → 走多 cell 批注 (每 cell 各打 mark, 共享 threadId)
@@ -1465,11 +1459,14 @@ function handleSelectionChange() {
         btn.classList.add('hidden');
         return;
       }
-    } else if ($from.parent.type.name === 'paragraph' && $to.parent.type.name === 'paragraph') {
-      // 跨段落 (多行选区): 不 reject, 让 handleCreateMultiParagraphAnnotation 后续处理
+    } else if (($from.parent.type.name === 'paragraph' && $to.parent.type.name === 'paragraph')
+            || ($from.parent.type.name === 'heading' && $to.parent.type.name === 'heading')
+            || ($from.parent.type.name === 'heading' && $to.parent.type.name === 'paragraph')
+            || ($from.parent.type.name === 'paragraph' && $to.parent.type.name === 'heading')) {
+      // 跨 textblock 选区 (含 heading + paragraph 组合): 不 reject, 让 handleCreateMultiParagraphAnnotation 后续处理
       // 按钮继续显示 (定位到 from 上沿)
     } else {
-      // 其他跨 block (heading, list item, blockquote) → reject
+      // 其他跨 block (list item, blockquote, codeBlock 跨段) → reject
       btn.classList.add('hidden');
       setStatus('提示', '批注暂不支持跨块选区, 请选段落内或跨段连续文字');
       return;
@@ -1505,12 +1502,13 @@ function setupFloatCommentButton() {
       handleCreateMultiCellAnnotation(sel);
       return;
     }
-    // 判断是不是跨段落多行选区 (PM 标记无法跨 block, 我们对每段各打 mark 共享 threadId)
+    // 判断是不是跨 textblock 多行选区 (PM 标记无法跨 block, 我们对每段各打 mark 共享 threadId)
+    // v2.1: 任何 textblock 组合 (paragraph + heading + ...) 都走多段路径
     const { from, to } = sel;
     if (from === to) return;
     const $from = State.editor.state.doc.resolve(from);
     const $to = State.editor.state.doc.resolve(to);
-    if ($from.parent !== $to.parent && $from.parent.type.name === 'paragraph' && $to.parent.type.name === 'paragraph') {
+    if ($from.parent !== $to.parent && $from.parent.isTextblock && $to.parent.isTextblock) {
       handleCreateMultiParagraphAnnotation(from, to);
       return;
     }
@@ -1733,7 +1731,9 @@ function handleCreateMultiParagraphAnnotation(from, to) {
   // 修复: rTo = min(to, textEnd + 1) 后, 如果 to == textEnd + 1 (i.e. 选区延伸到 paragraph 末尾边界), clamp to textEnd
   const ranges = [];
   ed.state.doc.nodesBetween(from, to, (node, pos) => {
-    if (node.type.name === 'paragraph' && node.isTextblock) {
+    // v2.1: 任何 textblock (paragraph / heading / blockquote / listItem / codeBlock) 都参与
+    // 旧版只匹配 paragraph → heading 跨段被漏
+    if (node.isTextblock) {
       const blockStart = pos;
       const blockEnd = pos + node.nodeSize;
       const textStart = blockStart + 1;  // first text position (inclusive)
@@ -1742,8 +1742,8 @@ function handleCreateMultiParagraphAnnotation(from, to) {
       // PM addMark 限制: rTo 不能跨过 paragraph close token (textEnd + 1 = blockEnd)
       // 所以 rTo 必须 ≤ textEnd
       const rTo = Math.min(to, textEnd + 1);
-      // 只要这段 paragraph 跟选区有重叠, 就记录一个 range
-      // (即使 rFrom == rTo, 仍代表该 paragraph 被"覆盖"了 - 哪怕只是边界)
+      // 只要这段 textblock 跟选区有重叠, 就记录一个 range
+      // (即使 rFrom == rTo, 仍代表该 block 被"覆盖"了 - 哪怕只是边界)
       if (rFrom <= rTo && rTo > textStart && rFrom <= textEnd) {
         ranges.push({ from: rFrom, to: Math.max(rTo, rFrom) });  // 0 长度也保留
       }
@@ -2846,7 +2846,11 @@ function findAnnotationRange(doc, annotation) {
     return r;
   };
   // === P0 精确 text 匹配 ===
+  // v2.1: 支持跨 block 选区 (2 行正文 + 一级标题) — text 含空格
+  //   跨 block 时 ProseMirror 没有跨 block 的 text node, 但 joined 字符串用 ' ' 连接
+  //   所以 text 在 joined 里能 indexOf 到, 用 posAtOffset 转 PM pos
   if (text) {
+    // 先用单段 P0 (快路径): text 在某一段内完整
     const first = findInSegments(text);
     if (first) {
       // 检查 text 在整个 doc 中是否唯一 (跨 segments)
@@ -2860,7 +2864,6 @@ function findAnnotationRange(doc, annotation) {
       }
       const isUnique = totalOccurrences === 1;
       if (isUnique) {
-        // P0 唯一, 直接返回 ProseMirror pos (精确)
         return {
           from: segments[first.foundNodeIdx].pos + first.inSegOffset,
           to: segments[first.foundNodeIdx].pos + first.inSegOffset + text.length,
@@ -2876,6 +2879,28 @@ function findAnnotationRange(doc, annotation) {
         };
       }
       // 有 prefix/suffix, 让 P1-P3 算法决定
+    } else {
+      // 单段内找不到 → 跨 block 选区 (text 含空格)
+      // 在 joined 字符串里找 (textBetween 用 ' ' 分 block, 跟 textBetween 选区版一致)
+      const firstIdx = joined.indexOf(text);
+      if (firstIdx !== -1) {
+        // 检查 joined 中 text 出现次数 (避免多匹配)
+        let totalOccurrences = 0;
+        let searchFrom = 0;
+        while ((searchFrom = joined.indexOf(text, searchFrom)) !== -1) {
+          totalOccurrences++;
+          searchFrom += 1;
+        }
+        const isUnique = totalOccurrences === 1;
+        if (isUnique) {
+          // P0 跨 block 唯一, 用 posAtOffset 转 PM pos
+          const from = posAtOffset(firstIdx);
+          const to = posAtOffset(firstIdx + text.length);
+          return { from, to, fuzzy: false };
+        }
+        // 不唯一时, 用 prefix/suffix 帮助 (P1 跨段 fallback 已有)
+        // 不在这里做 — 让下面的 P1 算法处理
+      }
     }
   }
 

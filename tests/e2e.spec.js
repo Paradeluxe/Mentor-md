@@ -1646,8 +1646,8 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
     hidden: document.querySelector('#float-comment-btn').classList.contains('hidden'),
   }));
   console.log('  ✓ H1 选区 $pos.parent.type:', h1Sel.parentType, '(预期 "heading")');
-  console.log('  ✓ H1 选区按钮 hidden:', h1Btn.hidden, '(预期 true)');
-  if (!h1Btn.hidden) throw new Error('H1 选区应隐藏批注按钮');
+  console.log('  ✓ H1 选区按钮 hidden:', h1Btn.hidden, '(v2.1: 预期 false — heading 也允许批注)');
+  if (h1Btn.hidden) throw new Error('v2.1: H1 选区应显示批注按钮 (heading 也是 textblock)');
 
   // 场景 2: 选中 H2 文字 → 按钮应隐藏
   const h2Btn = await page.evaluate(() => {
@@ -1668,10 +1668,10 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
   const h2State = await page.evaluate(() => ({
     hidden: document.querySelector('#float-comment-btn').classList.contains('hidden'),
   }));
-  console.log('  ✓ H2 选区按钮 hidden:', h2State.hidden, '(预期 true)');
-  if (!h2State.hidden) throw new Error('H2 选区应隐藏批注按钮');
+  console.log('  ✓ H2 选区按钮 hidden:', h2State.hidden, '(v2.1: 预期 false — heading 也允许批注)');
+  if (h2State.hidden) throw new Error('v2.1: H2 选区应显示批注按钮');
 
-  // 场景 3: 选区起点在 H1, 终点在正文段落 → 应隐藏 (任一端是 heading 即 reject)
+  // 场景 3: 选区起点在 H1, 终点在正文段落 → v2.1 不再 reject (heading + paragraph 一起)
   const h1ParaSel = await page.evaluate(() => {
     const editor = window.__mdAnnotator.State.editor;
     let h1From = -1, h1To = -1, paraFrom = -1, paraTo = -1;
@@ -1690,8 +1690,8 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
     hidden: document.querySelector('#float-comment-btn').classList.contains('hidden'),
   }));
   console.log('  ✓ H1→正文跨块选区文本:', JSON.stringify(h1ParaSel.text));
-  console.log('  ✓ H1→正文按钮 hidden:', h1ParaState.hidden, '(预期 true — heading reject 优先)');
-  if (!h1ParaState.hidden) throw new Error('H1→正文选区应隐藏按钮 (heading reject 优先)');
+  console.log('  ✓ H1→正文按钮 hidden:', h1ParaState.hidden, '(v2.1: 预期 false — heading + paragraph 多段允许)');
+  if (h1ParaState.hidden) throw new Error('v2.1: H1→正文选区应显示按钮 (heading + paragraph 一起批注)');
 
   // 场景 4: 选区全部在正文段落 → 按钮应正常显示 (反向断言)
   const paraSel = await page.evaluate(() => {
