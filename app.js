@@ -1908,14 +1908,7 @@ function renderCommentList() {
               <span class="comment-author">${escapeHtml(authorName(first.author))}</span>
               <span class="comment-time" title="${escapeHtml(first.createdAt || '')}">${formatTime(first.createdAt)}</span>
             </div>
-            ${first.body ? `<div class="comment-body">${escapeHtml(first.body)}</div>` : `
-              <div class="comment-reply-form">
-                <textarea data-thread-input="${thread.threadId}" placeholder="输入批注内容..."></textarea>
-                <div class="form-actions">
-                  <button data-act="submit-reply" data-thread="${thread.threadId}" class="primary">提交</button>
-                </div>
-              </div>
-            `}
+            ${first.body ? `<div class="comment-body">${escapeHtml(first.body)}</div>` : ''}
             ${replies.map(r => `
               <div class="comment-reply">
                 <div class="comment-meta">
@@ -1926,18 +1919,18 @@ function renderCommentList() {
                 <div class="comment-body">${escapeHtml(r.body)}</div>
               </div>
             `).join('')}
-            ${first.body ? `
-              <details class="reply-toggle" ${isActive ? 'open' : ''}>
-                <summary>↳ 回复</summary>
-                <div class="comment-reply-form">
-                  <textarea data-thread-input="${thread.threadId}" placeholder="输入回复..."></textarea>
-                  <div class="form-actions">
-                    <button data-act="submit-reply" data-thread="${thread.threadId}" class="primary">提交</button>
-                  </div>
-                </div>
-              </details>
-            ` : ''}
-          </div>
+            <!--
+              输入框永远在卡片末尾 (docx 风格, 对话往下追加)
+              - 首条未写: placeholder "开始批注..." (新建第一句)
+              - 首条已写: placeholder "回复..." (后续追加)
+            -->
+            <div class="comment-reply-form">
+              <textarea data-thread-input="${thread.threadId}" placeholder="${first.body ? '回复...' : '开始批注...'}"></textarea>
+              <div class="form-actions">
+                <button data-act="submit-reply" data-thread="${thread.threadId}" class="primary">提交</button>
+              </div>
+            </div>
+        </div>
         </div>
       </div>
     `;
