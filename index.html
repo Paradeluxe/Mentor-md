@@ -125,8 +125,6 @@
             <button class="filter-tab" data-filter-tab="open" title="未解决">未解决 <span class="filter-tab-count" data-count-for="open">0</span></button>
             <button class="filter-tab" data-filter-tab="resolved" title="已解决">已解决 <span class="filter-tab-count" data-count-for="resolved">0</span></button>
           </div>
-          <label class="filter-checkbox-fallback"><input type="checkbox" id="filter-open" checked /> 未解决</label>
-          <label class="filter-checkbox-fallback"><input type="checkbox" id="filter-resolved" /> 已解决</label>
           <label title="显示所有批注标记 + 气泡 (Word 顶部 'All Markup' 按钮)">
             <input type="checkbox" id="show-all-markup" checked /> All Markup
           </label>
@@ -183,7 +181,8 @@
     "js-yaml": "https://esm.sh/js-yaml@4.1.0",
     "turndown": "https://esm.sh/turndown@7.1.2",
     "prosemirror-view": "https://esm.sh/prosemirror-view@1.33.7",
-    "prosemirror-state": "https://esm.sh/prosemirror-state@1.4.3"
+    "prosemirror-state": "https://esm.sh/prosemirror-state@1.4.3",
+    "jszip": "https://esm.sh/jszip@3.10.1"
   }
 }
 </script>
@@ -196,9 +195,10 @@
     <li><strong>选区批注:</strong> 拖选任意文字 → 点 <kbd>批注</kbd> 按钮 → 侧栏建批注线程</li>
     <li><strong>嵌套回复:</strong> 在批注线程里继续回复, 像 docx 一样对话</li>
     <li><strong>解决 / 重新打开:</strong> 批注可以标记为已解决, 需要时再打开</li>
-    <li><strong>侧车存储:</strong> 批注存在 <code>xxx.md.annotations.json</code>, 源 .md 保持干净</li>
-    <li><strong>单 .md 模式:</strong> 点 <kbd>打开文件</kbd> 选 .md (可选同时 <kbd>Ctrl</kbd> 选 <code>notes.md</code> + <code>notes.annotations.json</code>)</li>
-    <li><strong>保存:</strong> <kbd>Ctrl</kbd>+<kbd>S</kbd> Chrome/Edge 直接写回原位置; 其他浏览器下载两个文件到 <code>xxx.md</code> 同目录</li>
+    <li><strong>侧车存储:</strong> 批注存为 <code>xxx.md.annotations.json</code> 侧车, 源 .md 保持干净</li>
+    <li><strong>单 .mentor 包:</strong> 像 docx 一样, 选 <code>.mentor</code> 单文件 = md + 批注打包在一起 (内部仍是 <code>content.md</code> + <code>annotations.json</code>)</li>
+    <li><strong>双模式兼容:</strong> 旧 <code>.md</code> + <code>.annotations.json</code> 仍可加载; 新建/另存可选 <code>.mentor</code></li>
+    <li><strong>保存:</strong> <kbd>Ctrl</kbd>+<kbd>S</kbd> Chrome/Edge 直接写回原位置; 其他浏览器下载到 <code>xxx.md</code> 同目录</li>
     <li><strong>跨刷新重连:</strong> 授权过的 .md handle 留在 IndexedDB; 重开应用自动恢复并继续保存</li>
   </ul>
   <p class="help-popover-footer">快捷键: <kbd>Ctrl</kbd>+<kbd>B</kbd> 加粗 · <kbd>Ctrl</kbd>+<kbd>I</kbd> 斜体 · <kbd>Ctrl</kbd>+<kbd>S</kbd> 保存</p>

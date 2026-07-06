@@ -25,6 +25,10 @@ tests/_outline-preview.html
 
 # 临时 probe 文件 (开发调试用, 用完删)
 tests/probe-*.spec.js
+tests/diag-*.spec.js
+
+# pack 脚本 (一次性, 打完产出 .mentor 就完成使命)
+tests/pack-*.js
 
 # Local env
 .env

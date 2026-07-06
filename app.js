@@ -19,6 +19,7 @@ import MarkdownIt from 'markdown-it';
 import katex from 'katex';
 import { Node } from '@tiptap/core';
 import TurndownService from 'turndown';
+import JSZip from 'jszip';
 
 // ============================================================
 // Tiptap Node: KatexInline — 保留 KaTeX 渲染输出作为原子节点
@@ -212,6 +213,15 @@ const HandleStore = {
       const tx = db.transaction('lastFile', 'readonly');
       const req = tx.objectStore('lastFile').get('last');
       req.onsuccess = () => resolve(req.result || null);
+      tx.onerror = () => reject(tx.error);
+    });
+  },
+  async removeLastFile() {
+    const db = await this.open();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction('lastFile', 'readwrite');
+      tx.objectStore('lastFile').delete('last');
+      tx.oncomplete = resolve;
       tx.onerror = () => reject(tx.error);
     });
   },
@@ -742,12 +752,8 @@ function updateCommentCounts() {
   if (resolvedBtn) resolvedBtn.textContent = resolved;
 }
 
-// G16: sync filter tabs active class + checkbox state (Word 风格 All/Open/Resolved tab)
+// G16: sync filter tabs active class (Word 风格 All/Open/Resolved tab)
 function syncFilterTabsFromCheckboxes() {
-  const open = $('#filter-open');
-  const res = $('#filter-resolved');
-  if (open) open.checked = State.filterOpen;
-  if (res) res.checked = State.filterResolved;
   let mode = 'open';
   if (State.filterOpen && State.filterResolved) mode = 'all';
   else if (!State.filterOpen && State.filterResolved) mode = 'resolved';
@@ -1884,10 +1890,9 @@ function renderCommentList() {
       <div class="comment-thread ${isActive ? 'is-active' : ''} ${thread.resolved ? 'is-resolved' : ''} ${isPinnedThread ? 'is-pinned' : ''} ${thread.fuzzy ? 'is-fuzzy' : ''} ${isCollapsed ? 'is-collapsed' : ''}" data-thread="${thread.threadId}">
         ${isPinnedThread ? '<div class="pinned-banner">📌 当前光标处 (filter 已隐藏)</div>' : ''}
         ${thread.fuzzy ? '<div class="fuzzy-banner">⚠ 位置可能偏移 - 请检查文档</div>' : ''}
-        <div class="comment-number-badge" data-number="${number}" title="批注 #${number}">${number}</div>
-        <!-- 卡片头: 引文 (可点击跳转) + ⋯ 菜单按钮 -->
+        <!-- 卡片头: 序号 + 引文 (可点击跳转) + ⋯ 菜单按钮 -->
         <div class="comment-quote" data-act="goto" data-thread="${thread.threadId}" title="点击跳转到批注处">
-          <span class="comment-quote-mark">"</span>
+          <span class="comment-number-badge" data-number="${number}" title="批注 #${number}">${number}</span>
           <span class="comment-quote-text">${escapeHtml((thread.text || '').slice(0, 200))}${(thread.text || '').length > 200 ? '…' : ''}</span>
           ${thread.resolved ? `<span class="comment-resolved-badge">✓ 已解决${thread.resolvedAt ? ' · ' + formatTime(thread.resolvedAt) : ''}</span>` : ''}
           <button class="comment-menu-btn" data-act="toggle-menu" data-thread="${thread.threadId}" title="更多操作" aria-label="更多操作">⋯</button>
@@ -2862,19 +2867,29 @@ async function openFiles() {
     try {
       const handles = await window.showOpenFilePicker({
         multiple: true,
-        // 同时接受 .md 和 .annotations.json, 让 user 一次选两个文件自动加载批注
+        // v2 锁死 .mentor: 旧 .md + .json 侧车不再从文件选择器进入, 避免半新半旧体验
         types: [{
-          description: 'Markdown (.md) + 批注侧车 (.annotations.json)',
+          description: 'Mentor 单文件包 (.mentor)',
           accept: {
-            'text/markdown': ['.md', '.markdown'],
-            'application/json': ['.json'],
+            'application/zip': ['.mentor'],
           },
         }],
         excludeAcceptAllOption: false,
       });
       if (handles.length === 0) return;
-      // 分类: 主 .md + 可选 sidecar .annotations.json
-      // 用户可一次选 2 个文件 (my.md + my.annotations.json), sidecar 会被加载
+      // 分类: 主 .md / .mentor + 可选 sidecar .annotations.json
+      // .mentor 是自包含单文件, 优先于 .md + .json 组合
+      const mentorHandle = handles.find(h => /\.mentor$/i.test(h.name));
+      if (mentorHandle) {
+        await openFromMentorHandle(mentorHandle);
+        State.saveMode = 'mentor-handle';
+        try { await HandleStore.putFile(mentorHandle.name, mentorHandle); } catch (e) { console.warn('putFile failed:', e); }
+        try { await HandleStore.putLastFile(mentorHandle.name); } catch (e) { console.warn('putLastFile failed:', e); }
+        renderFilePaneCurrent();
+        setStatus('已加载 .mentor 包', `${mentorHandle.name} (Ctrl+S 直接写回原位置)`);
+        updateDocMeta();
+        return;
+      }
       const mdHandle = handles.find(h => /\.md(markdown)?$/i.test(h.name)) || handles[0];
       const sidecarHandle = handles.find(h =>
         /\.annotations\.json$/i.test(h.name) &&
@@ -2908,10 +2923,22 @@ async function openFilesLegacy() {
   const input = document.createElement('input');
   input.type = 'file';
   input.multiple = true;
-  input.accept = '.md,.markdown,.txt,.json';  // 接受 .json 以便同时选 sidecar
+  input.accept = '.mentor';  // v2 锁死: 文件选择器只接受 .mentor 单文件包
   input.onchange = async () => {
     const files = Array.from(input.files);
     if (files.length === 0) return;
+    // 单 .mentor 模式: 自包含包优先 (先用扩展名快速判定, 不匹配再用魔数)
+    let mentorFile = files.find(f => /\.mentor$/i.test(f.name));
+    if (!mentorFile) {
+      // 兜底: 用魔数检测 (用户改后缀的情况) — 顺序 await, 不在 find 里
+      for (const f of files) {
+        if (await isMentorZip(f)) { mentorFile = f; break; }
+      }
+    }
+    if (mentorFile) {
+      await openFromMentorFile(mentorFile);
+      return;
+    }
     // 单 .md 模式: 只看第一个文件
     const file = files[0];
     const content = await file.text();
@@ -2972,6 +2999,18 @@ async function openFromHandle(fileHandle, sidecarHandle = null) {
     await HandleStore.putFile(file.name, fileHandle);
     await HandleStore.putLastFile(file.name);
   } catch (e) { console.warn('handle persist failed:', e); }
+}
+
+// --- 通过 FileSystemFileHandle 打开 .mentor 单文件包
+async function openFromMentorHandle(fileHandle) {
+  const file = await fileHandle.getFile();
+  const { mdText, annotations } = await readMentorZip(file);
+  await loadMarkdownIntoEditor(file.name, mdText, annotations);
+  State.currentFile.handle = fileHandle;  // 写回原 .mentor 位置用
+  try {
+    await HandleStore.putFile(file.name, fileHandle);
+    await HandleStore.putLastFile(file.name);
+  } catch (e) { console.warn('mentor handle persist failed:', e); }
 }
 
 // --- 文件类型专属图标 (Cursor 风格 - 统一 SVG 图标库)
@@ -3217,10 +3256,16 @@ async function handleTreeAction(action, name) {
     if (State.currentFile && State.currentFile.name === name && State.currentFile.dirty) {
       if (!confirm(`当前文档有未保存修改，确定重新加载 "${name}" 吗？\n\n加载后未保存的修改会丢失。`)) return;
     }
-    // 单 .md 模式: 当前文件就是它, 直接 reload
+    // v2: 锁 .mentor 模式 — reload 走 mentor 路径, 不用 .md 路径
     if (State.currentFile && State.currentFile.handle) {
       try {
-        await openFromHandle(State.currentFile.handle);
+        if (/\.mentor$/i.test(name)) {
+          await openFromMentorHandle(State.currentFile.handle);
+        } else {
+          // 旧 .md handle 残留, 提示用户手动重开
+          showToast('旧格式已不支持, 请重新打开 .mentor');
+          return;
+        }
         showToast(`已重新加载: ${name}`);
       } catch (e) {
         showToast('重新加载失败: ' + e.message);
@@ -3310,7 +3355,97 @@ async function tryLoadSidecar(mdFileName, mdFile) {
   return null;
 }
 
-// --- 保存 .md + 侧车 JSON
+// ============================================================
+// .mentor 包: ZIP(md + annotations.json) — 像 docx 一样, 表面一个文件
+// ============================================================
+//
+// 内部结构 (最小可行):
+//   xxx.mentor
+//   ├── content.md              (原 .md 文本)
+//   └── annotations.json        (原 .annotations.json 侧车)
+//
+// 加载流程 (loadMentorZip): 用户在文件选择器选 .mentor → JSZip 解压 →
+//   提取 content.md 作 mdText, 提取 annotations.json 作 annotations →
+//   用 loadMarkdownIntoEditor 渲染 (复用现成路径) → State.saveMode='mentor'
+//
+// 保存流程 (saveMentorZip): 编辑后 Ctrl+S / Save As → JSZip 重新打包 →
+//   handle 模式: 写回原 .mentor 位置; download 模式: 浏览器下载到 Downloads
+//
+// 双开一致性: v1 不解决 (无文件锁). 注释提示用户避免同时打开同一 .mentor
+
+const MENTOR_ZIP_MAGIC = 'PK\x03\x04'; // ZIP 文件头魔数
+const MENTOR_MD_NAME = 'content.md';
+const MENTOR_ANN_NAME = 'annotations.json';
+
+// 判定 File 是否为 .mentor 包 (看魔数, 不只看后缀 — 后缀可能错)
+async function isMentorZip(file) {
+  if (!file) return false;
+  // .mentor 后缀: 直接信任
+  if (/\.mentor$/i.test(file.name)) return true;
+  // 兜底: 读头 4 字节判定 (用于 Legacy 路径下 user 改后缀的情况)
+  try {
+    const head = new Uint8Array(await file.slice(0, 4).arrayBuffer());
+    return head[0] === 0x50 && head[1] === 0x4B && head[2] === 0x03 && head[3] === 0x04;
+  } catch (e) {
+    return false;
+  }
+}
+
+// 从 File 提取 content.md + annotations.json, 失败抛错
+async function readMentorZip(file) {
+  const buf = await file.arrayBuffer();
+  const zip = await JSZip.loadAsync(buf);
+  const mdEntry = zip.file(MENTOR_MD_NAME);
+  const annEntry = zip.file(MENTOR_ANN_NAME);
+  if (!mdEntry) {
+    throw new Error(`.mentor 包缺少 ${MENTOR_MD_NAME}`);
+  }
+  const mdText = await mdEntry.async('string');
+  let annotations = null;
+  if (annEntry) {
+    try {
+      const annText = await annEntry.async('string');
+      annotations = JSON.parse(annText);
+    } catch (e) {
+      console.warn('[mentor] annotations.json 解析失败, 当作空批注:', e);
+      annotations = null;
+    }
+  }
+  return { mdText, annotations };
+}
+
+// 打开 .mentor 包: 解压 → loadMarkdownIntoEditor → State.saveMode='mentor'
+async function openFromMentorFile(file) {
+  const { mdText, annotations } = await readMentorZip(file);
+  // 单文件模式: 没法 handle 写回, 走 download fallback
+  State.saveMode = 'mentor-download';
+  // 显示用名: 保留原 .mentor 文件名 (title bar / outline)
+  const displayName = file.name;
+  await loadMarkdownIntoEditor(displayName, mdText, annotations);
+  setStatus('已加载 .mentor 包', `${displayName} (Ctrl+S 下载 .mentor 副本)`);
+  updateDocMeta();
+  return { displayName, mdText, annotations };
+}
+
+// 打包 content.md + annotations.json → Blob (application/zip)
+async function buildMentorZipBlob(mdText, annotations) {
+  const zip = new JSZip();
+  zip.file(MENTOR_MD_NAME, mdText);
+  zip.file(MENTOR_ANN_NAME, JSON.stringify(annotations, null, 2));
+  return await zip.generateAsync({
+    type: 'blob',
+    mimeType: 'application/zip',
+    compression: 'DEFLATE',
+    compressionOptions: { level: 6 },
+  });
+}
+
+// 生成导出用 .mentor 文件名: 同前缀, 后缀改 .mentor
+function mentorExportName(mdName) {
+  return mdName.replace(/\.(md|markdown)$/i, '') + '.mentor';
+}
+
+// --- 保存 .md + 侧车 JSON (或 .mentor 单文件包)
 async function saveCurrent() {
   if (State.readOnlyMode) {
     showToast('只读模式: 另一标签在编辑, 已禁用 Ctrl+S', 3000);
@@ -3359,7 +3494,26 @@ async function saveCurrent() {
     console.log('[IDB] put OK');
   } catch (e) { console.warn('[IDB] put 失败:', e); }
 
-  // 3. 尝试用 handle 写回原位置
+  // 3a. .mentor 单文件包模式: 重新打包 ZIP 写回 / 下载
+  if (State.saveMode === 'mentor-handle' || State.saveMode === 'mentor-download') {
+    const result = await tryWriteBackMentor(mdText, sidecar, State.currentFile.name);
+    if (result.handle) {
+      showToast('已保存到原位置 ✓ (.mentor)');
+      setStatus('已保存', State.currentFile.name);
+    } else if (result.error) {
+      showToast('保存失败: ' + result.error);
+      setStatus('保存失败', result.error);
+    } else {
+      // download 模式 / 写回失败 → 浏览器下载
+      const blob = await buildMentorZipBlob(mdText, sidecar);
+      downloadBlob(State.currentFile.name, blob);
+      showToast('已下载 ✓ (.mentor)');
+      setStatus('已下载', State.currentFile.name);
+    }
+    return;
+  }
+
+  // 3b. 传统 .md + .json 侧车模式 (沿用原 tryWriteBack 路径)
   const result = await tryWriteBack(mdText, sidecarText, sidecarName);
   if (result.handle) {
     showToast('已保存到原位置 ✓');
@@ -3374,6 +3528,27 @@ async function saveCurrent() {
     showToast('已下载 ✓ (浏览器不支持或未授权)');
     setStatus('已下载', `${State.currentFile.name} + ${sidecarName}`);
   }
+}
+
+// 写回 .mentor 包 (handle 模式直写, 否则 fallback 给 download 路径)
+async function tryWriteBackMentor(mdText, sidecar, mentorName) {
+  if (State.saveMode === 'mentor-handle' && State.currentFile && State.currentFile.handle) {
+    try {
+      const handle = State.currentFile.handle;
+      if (await handle.queryPermission({ mode: 'readwrite' }) !== 'granted') {
+        await handle.requestPermission({ mode: 'readwrite' });
+      }
+      const blob = await buildMentorZipBlob(mdText, sidecar);
+      const writable = await handle.createWritable();
+      await writable.write(blob);
+      await writable.close();
+      return { handle: true };
+    } catch (e) {
+      if (e.name === 'NotAllowedError') return { handle: false, error: '权限被拒' };
+      return { handle: false, error: e.message };
+    }
+  }
+  return { handle: false };
 }
 
 // 写回原文件，返回 { handle: bool, error?: string }
@@ -3430,6 +3605,16 @@ async function tryWriteBack(mdText, sidecarText, sidecarName) {
 
 function downloadFile(name, content) {
   const blob = new Blob([content], { type: name.endsWith('.json') ? 'application/json' : 'text/markdown' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+// 下载任意 Blob (用于 .mentor 包的 application/zip)
+function downloadBlob(name, blob) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
@@ -3624,10 +3809,10 @@ function setupToolbar() {
   $('#btn-open-files').addEventListener('click', openFiles);
   // 打开文件夹: 已合并到左侧空文件栏点击 (setupEmptyTreeClick), 工具栏不再需要按钮
   $('#btn-save').addEventListener('click', saveCurrent);
-  $('#btn-save-as').addEventListener('click', () => {
+  $('#btn-save-as').addEventListener('click', async () => {
     if (!State.currentFile) return;
-    downloadFile(State.currentFile.name, State.currentFile.content || htmlToMarkdown(State.editor.getHTML()));
-    const sidecarName = State.currentFile.name.replace(/\.md$/i, '') + '.annotations.json';
+    const html = State.editor.getHTML();
+    const mdText = htmlToMarkdown(html);
     const sidecar = {
       version: '1', document: State.currentFile.name, updatedAt: nowISO(), author: { id: State.authorId, name: State.author },
       annotations: State.annotations.map(t => ({
@@ -3641,8 +3826,26 @@ function setupToolbar() {
         comments: t.comments,
       })),
     };
-    downloadFile(sidecarName, JSON.stringify(sidecar, null, 2));
-    showToast('已下载两个文件');
+    // 询问格式: 旧 .md + .json / 新 .mentor 单文件包
+    const choice = prompt(
+      '另存为:\n' +
+      '1) .mentor 单文件包 (推荐 — 像 docx)\n' +
+      '2) .md + .annotations.json 两个文件 (兼容旧版)\n' +
+      '输入 1 或 2 (默认 1):',
+      '1'
+    );
+    const useMentor = choice !== '2';  // 默认 1
+    if (useMentor) {
+      const blob = await buildMentorZipBlob(mdText, sidecar);
+      const exportName = mentorExportName(State.currentFile.name);
+      downloadBlob(exportName, blob);
+      showToast(`已下载 ${exportName} ✓`);
+    } else {
+      const sidecarName = State.currentFile.name.replace(/\.md$/i, '') + '.annotations.json';
+      downloadFile(State.currentFile.name, mdText);
+      downloadFile(sidecarName, JSON.stringify(sidecar, null, 2));
+      showToast('已下载两个文件');
+    }
   });
 
   // 格式按钮
@@ -3677,23 +3880,6 @@ function setupToolbar() {
     });
   });
 
-  // 批注过滤 (G16: tabs 已替代 checkbox, 留 fallback)
-  const filterOpenEl = $('#filter-open');
-  if (filterOpenEl) {
-    filterOpenEl.addEventListener('change', e => {
-      State.filterOpen = e.target.checked;
-      syncFilterTabsFromCheckboxes();
-      renderCommentList();
-    });
-  }
-  const filterResolvedEl = $('#filter-resolved');
-  if (filterResolvedEl) {
-    filterResolvedEl.addEventListener('change', e => {
-      State.filterResolved = e.target.checked;
-      syncFilterTabsFromCheckboxes();
-      renderCommentList();
-    });
-  }
   // G16: filter tab click
   document.querySelectorAll('.filter-tab').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -3958,11 +4144,20 @@ async function boot() {
   await tryReconnect();
 }
 
-// 尝试从 IndexedDB 重连上次打开的 .md 文件
+// 尝试从 IndexedDB 重连上次打开的 .mentor 文件
 async function tryReconnect() {
   try {
     const last = await HandleStore.getLastFile();
     if (!last || !last.fileName) return;
+    // v2: 只重连 .mentor 格式, 旧 .md handle 视为过期 (格式升级后, 旧 handle 不再适用)
+    if (!/\.mentor$/i.test(last.fileName)) {
+      console.log(`[P-reconnect] 跳过旧格式 handle: ${last.fileName} (需手动重新打开 .mentor)`);
+      // 清理 IDB 中的旧记录, 避免下次启动再尝试
+      try { await HandleStore.deleteFile(last.fileName); } catch (e) { /* 忽略 */ }
+      try { await HandleStore.removeLastFile(); } catch (e) { /* 忽略 */ }
+      setStatus('文件格式已升级', '请手动重新打开 .mentor 文件');
+      return;
+    }
     const handle = await HandleStore.getFile(last.fileName);
     if (!handle) return;
     // 确认权限 (用户上次授权过的文件, 多数情况仍 granted; revoke 后需要重选)
@@ -3973,8 +4168,8 @@ async function tryReconnect() {
       setStatus('上次文件未授权', `${last.fileName} (重新打开以授权)`);
       return;
     }
-    State.saveMode = 'handle';
-    await openFromHandle(handle);
+    State.saveMode = 'mentor-handle';
+    await openFromMentorHandle(handle);
     renderFilePaneCurrent();
     setStatus(`已重连 ${last.fileName}`, 'Ctrl+S 直接保存到原位置');
   } catch (e) {
@@ -3996,8 +4191,15 @@ window.__mdAnnotator = {
   tryReconnect,
   promptAuthor,
   openFromHandle,
+  openFromMentorHandle,
   openFiles,
   openFilesLegacy,
+  openFromMentorFile,
+  // .mentor 包帮助函数 (给 e2e 测试 + 第三方插件使用)
+  isMentorZip,
+  readMentorZip,
+  buildMentorZipBlob,
+  mentorExportName,
   // HTML → markdown 内部 helper（暴露给 e2e 测试 + 第三方插件使用）
   htmlToMarkdown,
   // File pane 测试 API
