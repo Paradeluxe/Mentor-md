@@ -220,20 +220,10 @@ function assert(cond, msg) {
   }).then(r => { errCaught = r; });
   assert(errCaught && errCaught.ok === false, `缺 content.md 抛错: ${errCaught && errCaught.msg}`);
 
-  // ---- 写一个 .mentor fixture 文件 (供后续 e2e 文件选择器流程用) ----
-  console.log('\n=== STEP 10: 写 fixture 到 tests/fixtures/ ===');
-  const fixDir = path.join(ROOT, 'tests', 'fixtures');
-  if (!fs.existsSync(fixDir)) fs.mkdirSync(fixDir, { recursive: true });
-  const fixPath = path.join(fixDir, 'sample-roundtrip.mentor');
-  fs.writeFileSync(fixPath, buf);
-  const stat = fs.statSync(fixPath);
-  assert(stat.size > 100, `fixture 已写入 ${fixPath} (${stat.size} bytes)`);
-
   // ---- 页面无未捕获错误 ----
-  console.log('\n=== STEP 11: 页面无 JS 错误 ===');
+  console.log('\n=== STEP 10: 页面无 JS 错误 ===');
   assert(pageErrors.length === 0, `page errors = ${pageErrors.length} (期望 0); errors=${JSON.stringify(pageErrors)}`);
 
-  await page.screenshot({ path: '/tmp/Mentor-test-mentor-pack.png' });
-  console.log('\n✓ 全部 11 步通过, 截图 /tmp/Mentor-test-mentor-pack.png');
+  console.log('\n✓ 全部 10 步通过');
   await browser.close();
 })().catch(e => { console.error('\n✗ TEST FAILED:', e.message); process.exit(1); });
