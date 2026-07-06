@@ -104,8 +104,8 @@ const URL = 'http://127.0.0.1:8765/index.html';
   });
   await page.waitForTimeout(300);
 
-  // 1. 验证 3 个 thread 渲染 (包括 resolved) - 通过 click checkbox 触发 filter
-  await page.check('#filter-resolved');
+  // 1. 验证 3 个 thread 渲染 (包括 resolved) - 切到"全部" tab 触发 filter
+  await page.locator('.filter-tab[data-filter-tab="all"]').click();
   await page.waitForTimeout(200);
   const threadCount = await page.evaluate(() => document.querySelectorAll('.comment-thread').length);
   record('3 个 comment thread 渲染 (含 resolved)', threadCount === 3, `count=${threadCount}`);
@@ -167,9 +167,10 @@ const URL = 'http://127.0.0.1:8765/index.html';
   });
   record('Delete 按钮含文字 (🗑 删除批注)', deleteBtn && deleteBtn.includes('删除批注'), `text="${deleteBtn}"`);
 
-  // 10. 验证 quote-mark 在 3 个 thread 都存在
-  const quoteMarkAll = await page.evaluate(() => document.querySelectorAll('.comment-quote-mark').length);
-  record('引用条装饰符在 3 个 thread 都存在', quoteMarkAll === 3, `count=${quoteMarkAll}`);
+  // 10. 验证 quote 行结构 (number-badge + text) 在 3 个 thread 都存在
+  // 极简版不再用 .comment-quote-mark 装饰, 改用 .comment-number-badge 作序号指示
+  const numberBadgeAll = await page.evaluate(() => document.querySelectorAll('.comment-number-badge').length);
+  record('序号 badge 在 3 个 thread 都存在', numberBadgeAll === 3, `count=${numberBadgeAll}`);
 
   await browser.close();
   const passed = results.filter(r => r.pass).length;

@@ -72,15 +72,15 @@ const SAMPLE_ANN = JSON.parse(fs.readFileSync(path.join(ROOT, 'test-data/sample.
   console.log(`  ✓ 默认 filter (未解决): 侧栏显示 ${commentCount} 个 (预期 1)`);
   if (commentCount !== 1) throw new Error(`默认 filter 应显示 1 个，实际 ${commentCount}`);
 
-  // 勾选"已解决" filter，应该显示 2 个
-  await page.locator('#filter-resolved').check();
+  // 切到"全部" filter，应该显示 2 个
+  await page.locator('.filter-tab[data-filter-tab="all"]').click();
   await page.waitForTimeout(150);
   commentCount = await page.locator('.comment-thread').count();
   console.log(`  ✓ 勾选已解决 filter: 侧栏显示 ${commentCount} 个 (预期 2)`);
   if (commentCount !== 2) throw new Error(`含已解决 filter 应显示 2 个，实际 ${commentCount}`);
 
-  // 恢复默认
-  await page.locator('#filter-resolved').uncheck();
+  // 恢复默认 (未解决)
+  await page.locator('.filter-tab[data-filter-tab="open"]').click();
   await page.waitForTimeout(100);
 
   console.log('=== TEST 3: 截图当前状态 ===');
@@ -770,6 +770,9 @@ const SAMPLE_ANN = JSON.parse(fs.readFileSync(path.join(ROOT, 'test-data/sample.
   console.log(`  ✓ ProseMirror doc 中 annotation mark 数 = ${marksBefore} (预期 1)`);
   if (marksBefore !== 1) throw new Error('创建批注后 mark 不在 doc 中');
   // P-card: 删除批注需要先打开 ⋯ 菜单 (新版 word 风格)
+  // ⋯ 按钮 opacity=0 默认不可点, 先 hover 卡片让它显出来
+  await page.locator('.comment-thread').first().hover();
+  await page.waitForTimeout(50);
   await page.locator('.comment-thread button[data-act="toggle-menu"]').first().click();
   await page.waitForTimeout(100);
   await page.locator('.comment-menu button[data-act="delete"]').first().click();
@@ -903,30 +906,26 @@ const SAMPLE_ANN = JSON.parse(fs.readFileSync(path.join(ROOT, 'test-data/sample.
   // ============================================================
   console.log('\n========== SECTION E: UI 状态 ==========');
 
-  console.log('=== TEST 49: filter 取消勾选 → 显示全部 ===');
+  console.log('=== TEST 49: filter tab 切换 ===');
   // 加载有 2 个批注的 sample
   await page.evaluate((args) => {
     window.__mdAnnotator.loadMarkdownIntoEditor(args.name, args.content, args.annotations);
   }, { name: 'sample.md', content: SAMPLE_MD, annotations: SAMPLE_ANN });
   await page.waitForTimeout(300);
-  // 取消勾选未解决
-  await page.locator('#filter-open').uncheck();
-  await page.waitForTimeout(100);
-  // 只勾选已解决
-  await page.locator('#filter-resolved').check();
+  // 切到"已解决" tab
+  await page.locator('.filter-tab[data-filter-tab="resolved"]').click();
   await page.waitForTimeout(100);
   const resolvedOnly = await page.locator('.comment-thread').count();
   console.log(`  ✓ 只显示已解决: ${resolvedOnly} (预期 1)`);
   if (resolvedOnly !== 1) throw new Error('filter 已解决错');
-  // 全部取消
-  await page.locator('#filter-open').check();
-  await page.locator('#filter-resolved').check();
+  // 全部 tab
+  await page.locator('.filter-tab[data-filter-tab="all"]').click();
   await page.waitForTimeout(100);
   const allCount = await page.locator('.comment-thread').count();
-  console.log(`  ✓ 两个都勾: ${allCount} (预期 2)`);
+  console.log(`  ✓ 全部 tab: ${allCount} (预期 2)`);
   if (allCount !== 2) throw new Error('filter 全部错');
-  // 恢复默认
-  await page.locator('#filter-resolved').uncheck();
+  // 恢复默认 (未解决)
+  await page.locator('.filter-tab[data-filter-tab="open"]').click();
   await page.waitForTimeout(100);
 
   console.log('=== TEST 50: 大纲栏始终显示 (Word 风格, 不允许折叠) ===');
@@ -1873,11 +1872,8 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
   }
 
   // 场景 7: 解决后卡片默认折叠 (is-collapsed) — body-wrap 隐藏
-  // 先勾 filter-resolved 看到 resolved 卡片 (TEST 6 默认只显示 unresolved)
-  await page.evaluate(() => {
-    document.querySelector('#filter-resolved').checked = true;
-    document.querySelector('#filter-resolved').dispatchEvent(new Event('change', { bubbles: true }));
-  });
+  // 切到"全部" tab 看到所有卡片 (默认只显示未解决)
+  await page.locator('.filter-tab[data-filter-tab="all"]').click();
   await page.waitForTimeout(200);
   // 触发 resolve 走 ⋯ 菜单
   const firstThread = await page.evaluate(() => {
@@ -2159,11 +2155,8 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
   // 没有 ⋯ 菜单 因为刚刚批量创建 — 用 sample 文档测 Esc
   await page.evaluate((args) => window.__mdAnnotator.loadMarkdownIntoEditor('sample.md', args.md, args.sidecar), { md: sampleMd, sidecar: sampleSidecar });
   await page.waitForTimeout(500);
-  // 激活 filter-resolved 看 2 张卡
-  await page.evaluate(() => {
-    document.querySelector('#filter-resolved').checked = true;
-    document.querySelector('#filter-resolved').dispatchEvent(new Event('change', { bubbles: true }));
-  });
+  // 切到"全部" tab 看 2 张卡
+  await page.locator('.filter-tab[data-filter-tab="all"]').click();
   await page.waitForTimeout(200);
   // hover + 点 ⋯ 打开菜单
   await page.locator('.comment-thread').first().hover();
@@ -2225,12 +2218,8 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
   // 真实路径测: 通过 ⋯ 菜单 resolve → filter 正确隐藏
   console.log('  ✓ 通过 ⋯ 菜单 resolve → filter 正确隐藏');
   // 重置 filter 状态 (前一个测试可能改过): filterOpen=true, filterResolved=false
-  await page.evaluate(() => {
-    const open = document.querySelector('#filter-open');
-    const resolved = document.querySelector('#filter-resolved');
-    if (!open.checked) { open.checked = true; open.dispatchEvent(new Event('change', { bubbles: true })); }
-    if (resolved.checked) { resolved.checked = false; resolved.dispatchEvent(new Event('change', { bubbles: true })); }
-  });
+  // 切到"未解决" tab 同步 state
+  await page.locator('.filter-tab[data-filter-tab="open"]').click();
   await page.waitForTimeout(150);
   await page.locator(`.comment-thread[data-thread="${tid}"]`).hover();
   await page.locator(`.comment-thread[data-thread="${tid}"] .comment-menu-btn`).click();
@@ -2985,12 +2974,9 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
   const openState = await page.evaluate(() => ({
     threads: document.querySelectorAll('.comment-thread').length,
     activeTab: document.querySelector('.filter-tab.is-active')?.dataset.filterTab,
-    openChecked: document.querySelector('#filter-open')?.checked,
-    resolvedChecked: document.querySelector('#filter-resolved')?.checked,
   }));
   console.log('  未解决 tab:', JSON.stringify(openState));
   if (openState.activeTab !== 'open') throw new Error(`active 应 open, 实际 ${openState.activeTab}`);
-  if (!openState.openChecked || openState.resolvedChecked) throw new Error('checkbox 应 open=true, resolved=false');
   if (openState.threads !== 2) throw new Error(`未解决 tab 应 2 thread, 实际 ${openState.threads}`);
   // 点 "已解决" tab
   await page.click('.filter-tab[data-filter-tab="resolved"]');

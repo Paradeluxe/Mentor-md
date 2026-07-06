@@ -70,15 +70,15 @@ const SAMPLE_ANN = JSON.parse(fs.readFileSync(path.join(ROOT, 'test-data/sample.
   console.log(`  ✓ 默认 filter (未解决): 侧栏显示 ${commentCount} 个 (预期 1)`);
   if (commentCount !== 1) throw new Error(`默认 filter 应显示 1 个，实际 ${commentCount}`);
 
-  // 勾选"已解决" filter，应该显示 2 个
-  await page.locator('#filter-resolved').check();
+  // 切到"全部" filter，应该显示 2 个
+  await page.locator('.filter-tab[data-filter-tab="all"]').click();
   await page.waitForTimeout(150);
   commentCount = await page.locator('.comment-thread').count();
   console.log(`  ✓ 勾选已解决 filter: 侧栏显示 ${commentCount} 个 (预期 2)`);
   if (commentCount !== 2) throw new Error(`含已解决 filter 应显示 2 个，实际 ${commentCount}`);
 
-  // 恢复默认
-  await page.locator('#filter-resolved').uncheck();
+  // 恢复默认 (未解决)
+  await page.locator('.filter-tab[data-filter-tab="open"]').click();
   await page.waitForTimeout(100);
 
   console.log('=== TEST 3: 截图当前状态 ===');
@@ -992,24 +992,20 @@ console.log('=== TEST 10: 最终截图 (pinned 状态) ===');
     window.__mdAnnotator.loadMarkdownIntoEditor(args.name, args.content, args.annotations);
   }, { name: 'sample.md', content: SAMPLE_MD, annotations: SAMPLE_ANN });
   await page.waitForTimeout(300);
-  // 取消勾选未解决
-  await page.locator('#filter-open').uncheck();
-  await page.waitForTimeout(100);
-  // 只勾选已解决
-  await page.locator('#filter-resolved').check();
+  // 切到"已解决" tab
+  await page.locator('.filter-tab[data-filter-tab="resolved"]').click();
   await page.waitForTimeout(100);
   const resolvedOnly = await page.locator('.comment-thread').count();
   console.log(`  ✓ 只显示已解决: ${resolvedOnly} (预期 1)`);
   if (resolvedOnly !== 1) throw new Error('filter 已解决错');
-  // 全部取消
-  await page.locator('#filter-open').check();
-  await page.locator('#filter-resolved').check();
+  // 全部 tab
+  await page.locator('.filter-tab[data-filter-tab="all"]').click();
   await page.waitForTimeout(100);
   const allCount = await page.locator('.comment-thread').count();
-  console.log(`  ✓ 两个都勾: ${allCount} (预期 2)`);
+  console.log(`  ✓ 全部 tab: ${allCount} (预期 2)`);
   if (allCount !== 2) throw new Error('filter 全部错');
-  // 恢复默认
-  await page.locator('#filter-resolved').uncheck();
+  // 恢复默认 (未解决)
+  await page.locator('.filter-tab[data-filter-tab="open"]').click();
   await page.waitForTimeout(100);
 
   console.log('=== TEST 50: 大纲栏始终显示 (Word 风格, 不允许折叠) ===');
