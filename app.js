@@ -4364,10 +4364,6 @@ window.__mdAnnotator = {
   filterTree,
   renderFilePaneCurrent,
   handleTreeAction,
-  // Compatibility shims for tests written pre-folder-removal (2026-07-05):
-  // these now do nothing / no-op since renderFilePaneCurrent owns the pane
-  renderFileTreeFromHandles: () => renderFilePaneCurrent(),
-  renderFileTreeFromList: () => renderFilePaneCurrent(),
   // AI 协作协议：结构化 API（不让 AI 通过 UI 模拟点击）
   ai: (() => {
     // P1 #10: 默认署名是 'AI Reviewer', 但用户可以在 settings 改 ai.author

@@ -1308,9 +1308,6 @@ body.file-pane-collapsed #file-pane {
   transition: background 0.12s;
 }
 .comment-quote:hover { background: var(--panel-3); }
-.comment-quote-mark {
-  display: none;  /* 去掉 ❝ 字符, 极简风格不需要装饰 */
-}
 .comment-quote-text {
   flex: 1;
   min-width: 0;
@@ -1625,51 +1622,6 @@ body.file-pane-collapsed #file-pane {
   color: var(--accent);
   background: var(--accent-soft);
 }
-
-/* Action bar (resolve / goto / delete) */
-.comment-actions {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  padding: 6px 8px;
-  border-top: 1px solid var(--border-warm);
-  background: transparent;
-  margin-top: 0;
-  font-size: var(--font-sm, 12.5px);
-}
-.comment-actions button {
-  flex: 0 0 auto;
-  font-size: var(--font-sm, 12.5px);
-  font-weight: 500;
-  padding: 5px 10px;
-  border: none;
-  background: transparent;
-  color: var(--text-2);
-  cursor: pointer;
-  transition: background 0.12s, color 0.12s, box-shadow 0.12s;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  line-height: 1.2;
-  border-radius: var(--rounded-sm, 4px);
-}
-.comment-actions button:hover {
-  background: var(--panel-2);
-  color: var(--text);
-}
-.comment-actions button.resolve-action {
-  color: var(--text);
-  font-weight: 500;
-}
-.comment-actions button.resolve-action:hover {
-  background: var(--accent-soft);
-  color: var(--accent);
-}
-.comment-actions button.danger:hover {
-  color: var(--danger);
-  background: rgba(207, 45, 86, 0.06);
-}
-.comment-actions .spacer { flex: 1; }
 
 /* === Float comment button (DESIGN.md: 蓝底白字 pill, hover scale 1.05) === */
 #float-comment-btn button {
