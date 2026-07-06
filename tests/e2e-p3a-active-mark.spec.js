@@ -176,9 +176,10 @@ const SAMPLE_ANN = JSON.parse(fs.readFileSync(path.join(ROOT, 'test-data/sample.
   if (!pinnedResult.ok) throw new Error('移光标失败');
 
   await page.waitForTimeout(200);
-  const pinnedBannerVisible = await page.locator('.pinned-banner').count();
-  console.log(`  ✓ pinned banner 出现次数 = ${pinnedBannerVisible} (预期 1)`);
-  if (pinnedBannerVisible !== 1) throw new Error(`pinned banner 应显示，实际 ${pinnedBannerVisible}`);
+  // v2: pinned banner 已移除, 验证 .pinned-banner 不在 DOM
+  const pinnedBannerCount = await page.locator('.pinned-banner').count();
+  console.log(`  ✓ pinned banner 出现次数 = ${pinnedBannerCount} (v2: 预期 0, 不再 pin)`);
+  if (pinnedBannerCount !== 0) throw new Error(`v2 已移除 pinned banner, 实际 ${pinnedBannerCount}`);
 
   const activeThreadId = await page.evaluate(() => window.__mdAnnotator.State.activeThreadId);
   console.log(`  ✓ activeThreadId = ${activeThreadId?.slice(0, 8)} (预期 test-thread-2)`);

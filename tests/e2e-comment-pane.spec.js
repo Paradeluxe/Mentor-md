@@ -122,9 +122,13 @@ const URL = 'http://127.0.0.1:8765/index.html';
   const uniqueColors = new Set(avatarColors).size;
   record('不同用户 avatar 颜色不同', uniqueColors >= 2, `unique colors=${uniqueColors}, samples=${JSON.stringify(avatarColors)}`);
 
-  // 4. 验证 reply-toggle 存在
-  const replyToggle = await page.evaluate(() => document.querySelectorAll('.reply-toggle').length);
-  record('回复折叠存在 (t1 有 body)', replyToggle >= 1, `count=${replyToggle}`);
+  // 4. v2: reply-toggle <details> 折叠层已移除, 输入框永远在卡片末尾
+  // 验证: t1 卡片末尾直接有 comment-reply-form (无 details 包裹)
+  const inputFormCount = await page.evaluate(() => {
+    const t1 = document.querySelector('[data-thread="t1"]');
+    return t1 ? t1.querySelectorAll('.comment-reply-form textarea').length : 0;
+  });
+  record('回复输入框在卡片末尾 (v2: 无 details 折叠)', inputFormCount >= 1, `count=${inputFormCount}`);
 
   // 5. 验证 textarea 不显示 native resize handle
   const ta = await page.evaluate(() => {

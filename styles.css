@@ -1281,15 +1281,11 @@ body.file-pane-collapsed #file-pane {
   text-decoration-color: var(--text-3);
   text-decoration-thickness: 1px;
 }
-.comment-thread.is-pinned {
-  border-left-color: var(--accent);
-}
 .comment-thread.is-fuzzy {
   border-left-color: var(--warning);
 }
 
-/* Thread banners (pinned / fuzzy) */
-.comment-thread .pinned-banner,
+/* Thread banner (fuzzy only — pinned 已在 v2 移除) */
 .comment-thread .fuzzy-banner {
   padding: 5px 12px;
   font-size: var(--font-xs, 11px);
@@ -1299,12 +1295,6 @@ body.file-pane-collapsed #file-pane {
   display: flex;
   align-items: center;
   gap: 6px;
-}
-.comment-thread .pinned-banner {
-  background: var(--accent-soft);
-  color: var(--accent);
-}
-.comment-thread .fuzzy-banner {
   background: rgba(217, 119, 6, 0.08);
   color: var(--warning);
 }

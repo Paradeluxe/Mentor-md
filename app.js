@@ -1807,18 +1807,15 @@ function deleteThread(threadId) {
 function renderCommentList() {
   const list = $('#comment-list');
   const empty = $('#comment-empty');
+  // v2: 严格按 filter 过滤, 不再 pin activeThread.
+  // 旧逻辑会把 "已点开过但当前 tab 不显示" 的 active 强制塞回来,
+  // 在 tab 切换时给用户造成 "切到已解决 tab 却看到未解决卡片" 的假象.
   const filtered = State.annotations.filter(t => {
     if (State.filterOpen && !State.filterResolved && t.resolved) return false;
     if (State.filterResolved && !State.filterOpen && !t.resolved) return false;
     return true;
   });
 
-  // 即使被 filter 隐藏，active thread 也强制显示（pinned）
-  const activeThread = State.activeThreadId
-    ? State.annotations.find(t => t.threadId === State.activeThreadId)
-    : null;
-  const isPinned = activeThread && !filtered.includes(activeThread);
-  const pinnedThread = isPinned ? activeThread : null;
   // F7 docx 一致: 侧栏按 doc 位置排序 (Word 行为), range.from 升序
   // invalid/fuzzy ann (range=null) 排在最后
   const sorted = [...filtered].sort((a, b) => {
@@ -1827,9 +1824,7 @@ function renderCommentList() {
     if (b.range == null) return -1;
     return a.range.from - b.range.from;
   });
-  const visibleThreads = pinnedThread
-    ? [pinnedThread, ...sorted.filter(t => t.threadId !== pinnedThread.threadId)]
-    : sorted;
+  const visibleThreads = sorted;
 
   if (visibleThreads.length === 0) {
     list.innerHTML = '';
@@ -1873,16 +1868,14 @@ function renderCommentList() {
       : { author: '匿名', body: '', createdAt: thread.createdAt || new Date().toISOString() });
     const replies = (thread.comments || []).slice(1);
     const isActive = State.activeThreadId === thread.threadId;
-    const isPinnedThread = pinnedThread && thread.threadId === pinnedThread.threadId;
+    // v2: 不再 pin activeThread (renderCommentList 已不再做强制显示)
     // F20 docx 一致: 侧栏 thread 加数字标号 (Word 风格 1, 2, 3)
-    // pinned thread 也算 (用大写 P)
-    const number = isPinnedThread ? 'P' : (idx + 1);
+    const number = idx + 1;
     // P-card: 解决后默认折叠 (Word 风格), 只显示 quote + meta 一行. 通过 collapsed class 控制.
     // H2 fix: 解决后点击展开 (临时 expanded 状态, 不持久).
     const isCollapsed = thread.resolved && !State.expandedThreadIds?.[thread.threadId];
     return `
-      <div class="comment-thread ${isActive ? 'is-active' : ''} ${thread.resolved ? 'is-resolved' : ''} ${isPinnedThread ? 'is-pinned' : ''} ${thread.fuzzy ? 'is-fuzzy' : ''} ${isCollapsed ? 'is-collapsed' : ''}" data-thread="${thread.threadId}">
-        ${isPinnedThread ? '<div class="pinned-banner">📌 当前光标处 (filter 已隐藏)</div>' : ''}
+      <div class="comment-thread ${isActive ? 'is-active' : ''} ${thread.resolved ? 'is-resolved' : ''} ${thread.fuzzy ? 'is-fuzzy' : ''} ${isCollapsed ? 'is-collapsed' : ''}" data-thread="${thread.threadId}">
         ${thread.fuzzy ? '<div class="fuzzy-banner">⚠ 位置可能偏移 - 请检查文档</div>' : ''}
         <!-- 卡片头: 序号 + 引文 (可点击跳转) + ⋯ 菜单按钮 -->
         <div class="comment-quote" data-act="goto" data-thread="${thread.threadId}" title="点击跳转到批注处">

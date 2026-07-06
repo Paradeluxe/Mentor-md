@@ -177,9 +177,10 @@ const SAMPLE_ANN = JSON.parse(fs.readFileSync(path.join(ROOT, 'test-data/sample.
   if (!pinnedResult.ok) throw new Error('移光标失败');
 
   await page.waitForTimeout(200);
-  const pinnedBannerVisible = await page.locator('.pinned-banner').count();
-  console.log(`  ✓ pinned banner 出现次数 = ${pinnedBannerVisible} (预期 1)`);
-  if (pinnedBannerVisible !== 1) throw new Error(`pinned banner 应显示，实际 ${pinnedBannerVisible}`);
+  // v2: pinned banner 已移除, 验证 .pinned-banner 不在 DOM
+  const pinnedBannerCount = await page.locator('.pinned-banner').count();
+  console.log(`  ✓ pinned banner 出现次数 = ${pinnedBannerCount} (v2: 预期 0, 不再 pin)`);
+  if (pinnedBannerCount !== 0) throw new Error(`v2 已移除 pinned banner, 实际 ${pinnedBannerCount}`);
 
   const activeThreadId = await page.evaluate(() => window.__mdAnnotator.State.activeThreadId);
   console.log(`  ✓ activeThreadId = ${activeThreadId?.slice(0, 8)} (预期 test-thread-2)`);
@@ -2186,16 +2187,17 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
   // resolve 不触发 confirm dialog (直接 toggle), 这里不要 .once('dialog',...)
   await page.locator('.comment-menu:not(.hidden) button[data-act="resolve"]').click();
   await page.waitForTimeout(300);
+  // v2: filter 严格匹配, 不再 pin. resolve 后 filter 切到"未解决"会真的隐藏该卡片
   const wordAfterResolve = await page.evaluate(() => ({
     visibleCount: document.querySelectorAll('.comment-thread').length,  // filterOpen=true → resolved 隐藏
     state: window.__mdAnnotator.State.annotations[0]?.resolved,
-    isPinned: !!document.querySelector('.comment-thread.is-pinned'),  // 隐藏但 pinned 显示
+    isPinned: !!document.querySelector('.comment-thread.is-pinned'),  // v2: 永远 false
   }));
-  console.log('  ✓ resolve 后侧栏可见数:', wordAfterResolve.visibleCount, '(预期 1 — 走 pinned 显示)');
+  console.log('  ✓ resolve 后侧栏可见数:', wordAfterResolve.visibleCount, '(v2 预期 0 — filter 严格隐藏)');
   console.log('  ✓ state.resolved:', wordAfterResolve.state);
-  console.log('  ✓ is-pinned 标记:', wordAfterResolve.isPinned, '(预期 true)');
-  if (wordAfterResolve.visibleCount !== 1) throw new Error(`resolve 后应 1 张 pinned 卡片, 实际 ${wordAfterResolve.visibleCount}`);
-  if (!wordAfterResolve.isPinned) throw new Error('resolve 后应标 is-pinned (filter 隐藏 → pinned 显示)');
+  console.log('  ✓ is-pinned 标记:', wordAfterResolve.isPinned, '(v2 预期 false)');
+  if (wordAfterResolve.visibleCount !== 0) throw new Error(`v2 resolve 后应 0 张卡片 (filter 严格隐藏), 实际 ${wordAfterResolve.visibleCount}`);
+  if (wordAfterResolve.isPinned) throw new Error('v2 已移除 pinned 行为, is-pinned 永远 false');
 
   // === TEST 82: mark 内有选区 → mark-delete-popover 隐藏, 不挡 💬 按钮 (Bug 2 修复) ===
   console.log('\n=== TEST 82: mark 内有选区 → mark-delete-popover 隐藏 ===');
@@ -2665,6 +2667,10 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
   // Word 行为: resolved 后显示 "Resolved 2h ago"
   // Mentor 修复: toggleResolved 存 resolvedAt, 徽章显 "✓ 已解决 · 时间"
   console.log('\n=== TEST 93: resolved 时间记录 + 显示 (docx 一致) ===');
+  // v2: filter 严格匹配, 默认 open tab 下 resolved 卡片被隐藏看不到徽章
+  // 先切到 "全部" tab, 之后 resolve 卡片仍可见
+  await page.locator('.filter-tab[data-filter-tab="all"]').click();
+  await page.waitForTimeout(150);
   await page.evaluate((m) => window.__mdAnnotator.loadMarkdownIntoEditor('d20-test.md', m, null), 'd20 段.');
   await page.waitForTimeout(300);
   await page.evaluate(() => {
@@ -2988,7 +2994,10 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
   // Word 行为: 解决后点击折叠卡片, 展开内容 (临时状态)
   // Mentor 修复: State.expandedThreadIds[tid] 持久, 防止 render 重置
   console.log('\n=== TEST 101: 解决后点击展开 (docx 一致) ===');
-  // 清理之前 test 残留的 activeThreadId (避免 pinnedThread 干扰)
+  // v2 filter 严格: 切到 "全部" tab 看完整生命周期
+  await page.locator('.filter-tab[data-filter-tab="all"]').click();
+  await page.waitForTimeout(150);
+  // 清理之前 test 残留的 activeThreadId
   await page.evaluate(() => {
     window.__mdAnnotator.State.activeThreadId = null;
     window.__mdAnnotator.State.expandedThreadIds = {};
