@@ -123,7 +123,6 @@ const State = {
   author: localStorage.getItem('Mentor:author') || '',       // 显示名, 可改
   filterOpen: true,
   filterResolved: false,
-  showAllMarkup: true,        // P-marks: All Markup / No Markup 切换 (默认 true = 显示所有批注 + 气泡)
   // F18: reply 草稿持久 (Word 行为: 切文档再切回草稿保留)
   // key = threadId, value = textarea 内容
   replyDrafts: {},
@@ -634,19 +633,15 @@ const AnnotationMark = Mark.create({
 const annotationBubbleKey = new PluginKey('annotation-bubble');
 const AnnotationBubblePlugin = new Plugin({
   key: annotationBubbleKey,
-  // 监听 setMeta 重算 decorations (State.showAllMarkup 变化)
+  // mark + 气泡永远显示 (无开关). 保留 plugin state init 仅为向后兼容 setMeta 调用.
   state: {
-    init() { return { allMarkup: true }; },
+    init() { return {}; },
     apply(tr, prev) {
-      const meta = tr.getMeta(annotationBubbleKey);
-      if (meta) return meta;
       return prev;
     },
   },
   props: {
     decorations(state) {
-      const pluginState = annotationBubbleKey.getState(state);
-      if (pluginState && pluginState.allMarkup === false) return DecorationSet.empty;
       const { doc } = state;
       const decorations = [];
       // 收集每个 mark 的 position
@@ -2080,26 +2075,6 @@ function renderCommentList() {
       renderCommentList();
     });
   });
-}
-
-// P-marks: 全局切换 helper — 改 State 后 dispatch 空 transaction 触发 Plugin 重算
-function refreshDecorations() {
-  if (State.editor && State.editor.view) {
-    // 用 setMeta(pluginKey, state) 通知 plugin 重算 decorations
-    const tr = State.editor.state.tr.setMeta(annotationBubbleKey, { allMarkup: State.showAllMarkup });
-    State.editor.view.dispatch(tr);
-  }
-}
-
-// P-marks: 切换 showAllMarkup
-function setShowAllMarkup(val) {
-  State.showAllMarkup = !!val;
-  // 同步 .tiptap.no-markup class (CSS 控制 mark 高亮 + 气泡显示)
-  const tiptap = document.querySelector('.tiptap');
-  if (tiptap) tiptap.classList.toggle('no-markup', !State.showAllMarkup);
-  // 同步 UI 控件状态
-  const cb = document.querySelector('#show-all-markup');
-  if (cb) cb.checked = State.showAllMarkup;
 }
 
 // P-card: 关闭所有 ⋯ 菜单
@@ -3891,10 +3866,6 @@ function setupToolbar() {
       renderCommentList();
     });
   });
-  // P-marks: All Markup / No Markup 切换 (Word 顶部同名按钮)
-  $('#show-all-markup').addEventListener('change', e => {
-    setShowAllMarkup(e.target.checked);
-  });
 
   // 文件树收起/展开功能已移除 — 大纲栏始终显示 (Word 风格, 不能折叠)
 
@@ -4108,8 +4079,6 @@ async function boot() {
   }
   // 初次同步 chip 显示
   renderAuthorChip();
-  // P-marks: 同步 .tiptap.no-markup class (默认 showAllMarkup=true, 不应加 class)
-  setShowAllMarkup(State.showAllMarkup);
 
   // P-reload: 预热 IDB 缓存 (loadMarkdownIntoEditor 同步读, 不能用 await)
   // 启动时一次性把所有缓存的 sidecar 同步到 State.idbCache

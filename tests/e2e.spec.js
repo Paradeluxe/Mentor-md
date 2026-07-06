@@ -2042,67 +2042,26 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
   console.log('  ✓ resolved mark ::after opacity:', resolvedMark?.opacity);
   if (!resolvedMark) throw new Error('应能找到 is-resolved mark');
 
-  // === TEST 79: All Markup / No Markup 切换 (P-marks) ===
-  console.log('\n=== TEST 79: All Markup 切换 (P-marks) ===');
-  // 默认 showAllMarkup=true → mark 高亮存在 (CSS no-markup class 不在 .tiptap 上)
-  const beforeToggle = await page.evaluate(() => {
-    const tiptap = document.querySelector('.tiptap');
-    return {
-      hasNoMarkup: tiptap?.classList.contains('no-markup') || false,
-      firstMarkBg: getComputedStyle(document.querySelector('.annotation-mark')).backgroundColor,
-    };
-  });
-  console.log('  ✓ 切换前 .tiptap.no-markup:', beforeToggle.hasNoMarkup, '(预期 false)');
-  console.log('  ✓ 切换前 mark 背景色:', beforeToggle.firstMarkBg);
-  if (beforeToggle.hasNoMarkup) throw new Error('默认不应有 no-markup class');
-
-  // 取消勾选 All Markup → 触发 setShowAllMarkup(false)
-  await page.evaluate(() => {
-    const cb = document.querySelector('#show-all-markup');
-    cb.checked = false;
-    cb.dispatchEvent(new Event('change', { bubbles: true }));
-  });
-  await page.waitForTimeout(200);
-  const afterToggleOff = await page.evaluate(() => {
+  // === TEST 79: mark 永远显示 (v2: All Markup 开关已移除, 验证默认状态) ===
+  console.log('\n=== TEST 79: mark 永远显示 (v2: 无 All Markup 开关) ===');
+  // 默认状态: no-markup class 不在 .tiptap 上, mark 高亮存在
+  const alwaysShown = await page.evaluate(() => {
     const tiptap = document.querySelector('.tiptap');
     const mark = document.querySelector('.annotation-mark');
     return {
       hasNoMarkup: tiptap?.classList.contains('no-markup') || false,
-      state: window.__mdAnnotator.State.showAllMarkup,
-      // CSS 验证: no-markup 时 mark 背景透明
+      // checkbox 已被 v2 移除, 确认 DOM 上不存在
+      hasCheckbox: !!document.querySelector('#show-all-markup'),
       markBg: mark ? getComputedStyle(mark).backgroundColor : null,
     };
   });
-  console.log('  ✓ 关掉后 .tiptap.no-markup:', afterToggleOff.hasNoMarkup, '(预期 true)');
-  console.log('  ✓ State.showAllMarkup:', afterToggleOff.state, '(预期 false)');
-  console.log('  ✓ 关掉后 mark 背景:', afterToggleOff.markBg, '(应透明)');
-  if (!afterToggleOff.hasNoMarkup) throw new Error('关掉 All Markup 后 .tiptap 应有 no-markup');
-  if (afterToggleOff.state !== false) throw new Error('State.showAllMarkup 应为 false');
-  // 'rgba(0, 0, 0, 0)' 或 'transparent' 是透明
-  if (afterToggleOff.markBg !== 'rgba(0, 0, 0, 0)' && afterToggleOff.markBg !== 'transparent') {
-    throw new Error(`关掉 All Markup 后 mark 背景应透明, 实际 ${afterToggleOff.markBg}`);
-  }
-
-  // 重新勾选
-  await page.evaluate(() => {
-    const cb = document.querySelector('#show-all-markup');
-    cb.checked = true;
-    cb.dispatchEvent(new Event('change', { bubbles: true }));
-  });
-  await page.waitForTimeout(200);
-  const afterToggleOn = await page.evaluate(() => {
-    const tiptap = document.querySelector('.tiptap');
-    const mark = document.querySelector('.annotation-mark');
-    return {
-      hasNoMarkup: tiptap?.classList.contains('no-markup') || false,
-      markBg: mark ? getComputedStyle(mark).backgroundColor : null,
-    };
-  });
-  console.log('  ✓ 重新打开 .tiptap.no-markup:', afterToggleOn.hasNoMarkup, '(预期 false)');
-  console.log('  ✓ 重新打开 mark 背景:', afterToggleOn.markBg, '(应非透明)');
-  if (afterToggleOn.hasNoMarkup) throw new Error('重开 All Markup 后 no-markup 应消失');
-  if (afterToggleOn.markBg === 'rgba(0, 0, 0, 0)' || afterToggleOn.markBg === 'transparent') {
-    throw new Error('重开 All Markup 后 mark 背景应非透明');
+  console.log('  ✓ .tiptap.no-markup:', alwaysShown.hasNoMarkup, '(预期 false)');
+  console.log('  ✓ #show-all-markup checkbox 存在:', alwaysShown.hasCheckbox, '(预期 false)');
+  console.log('  ✓ mark 背景色 (应非透明):', alwaysShown.markBg);
+  if (alwaysShown.hasNoMarkup) throw new Error('不应有 no-markup class');
+  if (alwaysShown.hasCheckbox) throw new Error('v2 已移除 #show-all-markup checkbox');
+  if (alwaysShown.markBg === 'rgba(0, 0, 0, 0)' || alwaysShown.markBg === 'transparent') {
+    throw new Error('mark 背景应非透明 (v2 mark 永远显示)');
   }
 
   // === TEST 80: Ctrl+Alt+M 快捷键 + Esc 关闭菜单 (P-key) ===

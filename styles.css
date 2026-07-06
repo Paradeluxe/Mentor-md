@@ -1082,17 +1082,6 @@ body.file-pane-collapsed #file-pane {
   opacity: 1;
 }
 
-/* P-marks: 当 showAllMarkup=false, 气泡 + mark 高亮都隐藏 (NO MARKUP 模式)
-   mark 仍是 mark (ProseMirror 内), 只是 CSS 让它透明 */
-.tiptap.no-markup .annotation-mark {
-  background: transparent !important;
-  border-bottom: none !important;
-  opacity: 1 !important;
-}
-.tiptap.no-markup .annotation-mark::after {
-  display: none !important;
-}
-
 /* 空编辑器提示 */
 .empty-hint { padding: 48px 24px; color: var(--text-2); text-align: center; }
 .empty-hint h2 {
