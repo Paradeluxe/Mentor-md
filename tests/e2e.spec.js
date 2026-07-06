@@ -2529,14 +2529,14 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
     document.querySelector('button[data-act="submit-reply"]').click();
   });
   await page.waitForTimeout(300);
-  // focus editor + Ctrl+Z
+  // focus editor + 显式调 Tiptap undo (绕过 Ctrl+Z 拦截 — v2: Ctrl+Z 优先批注 undo, 这里要测 doc undo)
   await page.evaluate(() => {
     const editor = window.__mdAnnotator.State.editor;
     editor.view.focus();
     editor.commands.focus('end');
+    // 显式调 Tiptap doc undo (v2 Ctrl+Z 智能分发会优先批注, 这里直接走 Tiptap)
+    editor.commands.undo();
   });
-  await page.waitForTimeout(200);
-  await page.keyboard.press('Control+z');
   await page.waitForTimeout(500);
   const undoState = await page.evaluate(() => {
     const ann = window.__mdAnnotator.State.annotations[0];
@@ -2547,8 +2547,8 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
       marksInDoc: document.querySelectorAll('.annotation-mark').length,
     };
   });
-  console.log('  Ctrl+Z 后:', JSON.stringify(undoState), '(fuzzy=true, invalid=true)');
-  if (!undoState.fuzzy || !undoState.invalid) throw new Error('Ctrl+Z: ann 应标 fuzzy=true, invalid=true');
+  console.log('  Tiptap undo 后:', JSON.stringify(undoState), '(fuzzy=true, invalid=true)');
+  if (!undoState.fuzzy || !undoState.invalid) throw new Error('Tiptap undo: ann 应标 fuzzy=true, invalid=true');
   if (undoState.marksInDoc !== 0) throw new Error(`mark 应消失, 实际 ${undoState.marksInDoc}`);
 
   // === TEST 90: 切文档时 dirty 弹 confirm (D3 docx 一致性) ===

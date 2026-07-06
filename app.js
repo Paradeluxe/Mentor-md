@@ -3983,16 +3983,48 @@ function setupToolbar() {
     if (redo()) showToast('已重做');
   });
   updateHistoryButtons();  // 初始 disabled 状态
-  // 快捷键: Ctrl+Alt+Z 撤销批注 / Ctrl+Alt+Shift+Z 重做
-  // (避开 Tiptap 的 Ctrl+Z — doc 文本撤销仍走 Tiptap 默认)
+  // 快捷键 (v2 Office 风格, 用户要求: Ctrl+Z/Ctrl+Y)
+  // - Ctrl+Z: 优先撤销批注 (my history), 没批注 history 时让 Tiptap 撤销 doc
+  // - Ctrl+Y 或 Ctrl+Shift+Z: 优先重做批注, 没批注 future 时让 Tiptap 重做 doc
+  // - Ctrl+Alt+Z / Ctrl+Alt+Shift+Z: 显式走 Tiptap (强制走 doc undo, 不管批注 history)
   document.addEventListener('keydown', (e) => {
-    if ((e.metaKey || e.ctrlKey) && e.altKey && !e.shiftKey && (e.key === 'z' || e.key === 'Z')) {
+    // 避免在 textarea/input 内误触 (用户在输入文字)
+    const tag = e.target?.tagName;
+    if (tag === 'TEXTAREA' || tag === 'INPUT') return;
+    if (!((e.metaKey || e.ctrlKey) && !e.altKey)) return;
+
+    // Ctrl+Z (无 shift): 智能 undo — 批注优先, 没有就让 Tiptap
+    if (!e.shiftKey && (e.key === 'z' || e.key === 'Z')) {
       e.preventDefault();
-      if (undo()) showToast('已撤销');
+      if (State.history.past.length > 0) {
+        if (undo()) showToast('已撤销');
+      } else {
+        State.editor?.commands.undo();
+        showToast('已撤销 (文档)');
+      }
+      return;
     }
-    if ((e.metaKey || e.ctrlKey) && e.altKey && e.shiftKey && (e.key === 'z' || e.key === 'Z')) {
+    // Ctrl+Y: 智能 redo
+    if (!e.shiftKey && (e.key === 'y' || e.key === 'Y')) {
       e.preventDefault();
-      if (redo()) showToast('已重做');
+      if (State.history.future.length > 0) {
+        if (redo()) showToast('已重做');
+      } else {
+        State.editor?.commands.redo();
+        showToast('已重做 (文档)');
+      }
+      return;
+    }
+    // Ctrl+Shift+Z: 备选 redo
+    if (e.shiftKey && (e.key === 'z' || e.key === 'Z')) {
+      e.preventDefault();
+      if (State.history.future.length > 0) {
+        if (redo()) showToast('已重做');
+      } else {
+        State.editor?.commands.redo();
+        showToast('已重做 (文档)');
+      }
+      return;
     }
   });
   $('#btn-save-as').addEventListener('click', async () => {

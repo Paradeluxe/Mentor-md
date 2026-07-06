@@ -184,32 +184,33 @@ function assert(cond, msg) {
   const beforeKbd = await page.evaluate(() => window.__mdAnnotator.State.annotations.length);
   assert(beforeKbd === 1, `创建后 1 个批注`);
 
-  await page.keyboard.press('Control+Alt+z');
+  // v2 Office 风格快捷键: Ctrl+Z (无 shift) 撤销批注 (my history 优先)
+  await page.keyboard.press('Control+z');
   await page.waitForTimeout(300);
   let afterKbd = await page.evaluate(() => window.__mdAnnotator.State.annotations.length);
-  assert(afterKbd === 1, `Ctrl+Alt+Z 撤销 reply: annotations = ${afterKbd} (期望 1, 批注还在, reply 撤销)`);
+  assert(afterKbd === 1, `Ctrl+Z 撤销 reply: annotations = ${afterKbd} (期望 1, 批注还在, reply 撤销)`);
 
   // 再 undo 撤销批注本身
-  await page.keyboard.press('Control+Alt+z');
+  await page.keyboard.press('Control+z');
   await page.waitForTimeout(300);
   afterKbd = await page.evaluate(() => window.__mdAnnotator.State.annotations.length);
-  assert(afterKbd === 0, `第二次 Ctrl+Alt+Z 撤销批注本身: annotations = ${afterKbd} (期望 0)`);
+  assert(afterKbd === 0, `第二次 Ctrl+Z 撤销批注本身: annotations = ${afterKbd} (期望 0)`);
 
-  // redo 1 次 → 批注本身回来 (空批注, 无 reply)
-  await page.keyboard.press('Control+Alt+Shift+z');
+  // Ctrl+Y 重做批注
+  await page.keyboard.press('Control+y');
   await page.waitForTimeout(300);
   const afterKbdRedo = await page.evaluate(() => window.__mdAnnotator.State.annotations.length);
-  assert(afterKbdRedo === 1, `Ctrl+Alt+Shift+Z 重做批注: annotations = ${afterKbdRedo} (期望 1, 批注本身回来)`);
+  assert(afterKbdRedo === 1, `Ctrl+Y 重做批注: annotations = ${afterKbdRedo} (期望 1, 批注本身回来)`);
 
-  // redo 2 次 → reply 一起回来
-  await page.keyboard.press('Control+Alt+Shift+z');
+  // Ctrl+Y 再次重做 → reply 一起回来
+  await page.keyboard.press('Control+y');
   await page.waitForTimeout(300);
   const afterKbdRedo2 = await page.evaluate(() => {
     const anns = window.__mdAnnotator.State.annotations;
     return { count: anns.length, comments: anns[0]?.comments?.length };
   });
-  assert(afterKbdRedo2.count === 1, `第 2 次 redo: annotations = ${afterKbdRedo2.count} (期望 1)`);
-  assert(afterKbdRedo2.comments === 1, `第 2 次 redo: comments = ${afterKbdRedo2.comments} (期望 1, reply 一起回来)`);
+  assert(afterKbdRedo2.count === 1, `第 2 次 Ctrl+Y: annotations = ${afterKbdRedo2.count} (期望 1)`);
+  assert(afterKbdRedo2.comments === 1, `第 2 次 Ctrl+Y: comments = ${afterKbdRedo2.comments} (期望 1, reply 一起回来)`);
 
   console.log('\n=== 8) autosaveNow: handle + dirty=true → markClean ===');
   await page.evaluate(() => {
