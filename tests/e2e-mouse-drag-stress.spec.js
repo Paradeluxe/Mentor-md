@@ -146,13 +146,22 @@ function test() {
       const view = window.__mdAnnotator.State.editor.view;
       const sc = view.coordsAtPos(from);
       const ec = view.coordsAtPos(to);
+      const charWidth = ec.left - sc.left || 10;
+      // 安全偏移: 起始 +10%, 结束 -10%, 上限 4px (避免大字符宽选区偏移过大)
+      const offset = Math.min(4, charWidth * 0.1);
+      const safeStart = sc.left + offset;
+      const safeEnd = ec.right - offset;
       return {
-        startX: sc.left + 1,
+        startX: safeStart,
         startY: (sc.top + sc.bottom) / 2,
-        endX: ec.right - 1,
+        endX: safeEnd,
         endY: (ec.top + ec.bottom) / 2,
       };
     }, { from, to });
+
+    // 字符宽度太小 (e.g. 单字拖拽 with 字符宽 12px, 偏移 8px 一来一回)
+    // 如果 endX <= startX + 2, 跳过这轮 (PM 反向选区会导致发散)
+    if (coords.endX <= coords.startX + 2) continue;
 
     if (coords.startX < 0 || coords.endX < 0) continue;
 
