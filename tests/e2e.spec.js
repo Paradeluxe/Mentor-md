@@ -2878,10 +2878,9 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
   if (f18Cleared.draftKeys.length !== 0) throw new Error('提交后草稿应清空');
   if (f18Cleared.comments !== 1) throw new Error('应提交 1 comment');
 
-  // === TEST 98: 侧栏顶部 thread count badge (P-G15 docx 一致) ===
-  // Word 行为: 顶部 "5 comments" 计数
-  // Mentor 修复: renderCommentList 调 updateCommentCounts 更新 #comment-count
-  console.log('\n=== TEST 98: 顶部 thread count badge (docx 一致) ===');
+  // === TEST 98: 侧栏 tab 计数 (3 个 tab 数字说明总批注 + open/resolved 分布) ===
+  // v2: 顶部 #comment-count 总数已移除, 改测 3 个 tab 计数累加 = all
+  console.log('\n=== TEST 98: tab 计数 (open + resolved = all) ===');
   await page.evaluate((m) => window.__mdAnnotator.loadMarkdownIntoEditor('g15-test.md', m, null), 'g15 段.');
   await page.waitForTimeout(300);
   // 加 3 批注
@@ -2904,13 +2903,14 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
     await page.waitForTimeout(300);
   }
   const g15 = await page.evaluate(() => ({
-    total: document.querySelector('#comment-count')?.textContent,
     all: document.querySelector('[data-count-for="all"]')?.textContent,
     open: document.querySelector('[data-count-for="open"]')?.textContent,
     resolved: document.querySelector('[data-count-for="resolved"]')?.textContent,
+    // 顶部 #comment-count badge 在 v2 已移除, 确认 DOM 不存在
+    hasTotalBadge: !!document.querySelector('#comment-count'),
   }));
   console.log('  counts:', JSON.stringify(g15));
-  if (g15.total !== '3') throw new Error(`顶部 total 应 3, 实际 "${g15.total}"`);
+  if (g15.hasTotalBadge) throw new Error('v2 已移除 #comment-count 顶部 badge');
   if (g15.all !== '3' || g15.open !== '3' || g15.resolved !== '0') {
     throw new Error(`tab 计数错: ${JSON.stringify(g15)}`);
   }

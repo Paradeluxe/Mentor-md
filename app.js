@@ -732,13 +732,12 @@ function formatTime(iso) {
   return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-// G15: 更新侧栏顶 thread count + tab 计数 (Word 风格 "5 comments")
+// G15: 更新侧栏顶 tab 计数 (Word 风格 "5 comments")
+// v2: 移除 #comment-count 总数显示 (3 个 tab 数字已说明分布)
 function updateCommentCounts() {
   const all = State.annotations.length;
   const open = State.annotations.filter(a => !a.resolved).length;
   const resolved = State.annotations.filter(a => a.resolved).length;
-  const total = $('#comment-count');
-  if (total) total.textContent = all;
   const allBtn = document.querySelector('[data-count-for="all"]');
   if (allBtn) allBtn.textContent = all;
   const openBtn = document.querySelector('[data-count-for="open"]');
