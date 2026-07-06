@@ -116,7 +116,7 @@ const KatexBlock = Node.create({
 // ============================================================
 const State = {
   editor: null,
-  currentFile: null,        // { name, path, handle?, content, annotations, dirty, folderHandle? }
+  currentFile: null,        // { name, path, handle?, content, annotations, dirty }
   annotations: [],          // 当前文档所有批注 thread
   activeThreadId: null,     // 当前在侧栏高亮的 thread
   authorId: localStorage.getItem('Mentor:authorId') || '',   // 用户唯一 ID, 永不改变
@@ -133,7 +133,6 @@ const State = {
   // - undo: pop past → 还原; redo: pop future → 还原
   // - doc 文本撤销走 Tiptap 自带 Ctrl+Z (history: { depth: 100 }), 不入这个 stack
   history: { past: [], future: [], capacity: 100 },
-  folderHandle: null,       // 当前文件夹 handle（FileSystemDirectoryHandle）
   saveMode: 'unknown',      // 'handle' | 'download' | 'unknown' | 'mentor-handle' | 'mentor-download'
   readOnlyMode: false,      // P0-A: 另一 tab 在编辑时启用只读 (Ctrl+S 禁用)
   fileMtime: null,          // P0-C: 主 .md 的 mtime (last save 时记录的)
@@ -1024,10 +1023,7 @@ function initEditor() {
   State.editor = new Editor({
     element: editorEl,
     extensions: [
-      StarterKit.configure({
-        // 历史栈深度
-        history: { depth: 100 },
-      }),
+      StarterKit,  // 默认配置 (history depth 100, 已够用)
       Highlight.configure({ multicolor: false }),
       Link.configure({ openOnClick: false, autolink: true, HTMLAttributes: { rel: 'noopener noreferrer' } }),
       Image,
