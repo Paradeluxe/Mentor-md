@@ -767,14 +767,6 @@ function syncFilterTabsFromCheckboxes() {
 // 格式: "批注: <text>\n回复: <body> · <author> · <time>"
 // 重要: 不能在 editor DOM 内部用 setAttribute — 会触发 PM MutationObserver 重置 selection
 // 改用 wrapper: 给 .annotation-mark 父元素或兄弟元素加 title, 不在 mark 上
-function updateMarkTitles() {
-  // 不在 .annotation-mark 上 setAttribute (会触发 PM 重置 selection)
-  // 暂用 data-tooltip 属性 (同样会触发), 改用悬浮层 wrapper
-  // 简化方案: 跳过此特性, 留待 H1 v2
-  // 实际: 不调 setAttribute/title
-  return;
-}
-
 function showToast(msg, ms = 1800) {
   const t = $('#toast');
   t.textContent = msg;
@@ -1293,52 +1285,6 @@ function applyKatexEdit(pmNode, pos, newTex) {
     showToast('公式更新失败: ' + err.message);
   }
 }
-function promptEditKatex(pmNode) {
-  return new Promise(resolve => {
-    // 复用 author modal 的 DOM (避免重复), 临时改它的文案 + 加 input 字段
-    const modal = $('#author-modal');
-    const titleEl = $('#author-modal-title');
-    const descEl = $('#author-modal-desc');
-    const inputEl = $('#author-input');
-    const saveBtn = $('#author-save');
-    const cancelBtn = $('#author-cancel');
-    if (!modal || !inputEl) { resolve(null); return; }
-    // 保存原始文案 + 替换
-    const origTitle = titleEl.textContent;
-    const origDesc = descEl.textContent;
-    const origSaveText = saveBtn.textContent;
-    titleEl.textContent = '编辑公式 LaTeX 源码';
-    descEl.textContent = `当前节点类型: ${pmNode.type.name}。输入合法的 LaTeX 数学公式源码 (KaTeX 支持的子集).`;
-    saveBtn.textContent = '保存';
-    inputEl.value = pmNode.attrs.tex || '';
-    inputEl.placeholder = 'e.g. E = mc^2';
-    modal.classList.remove('hidden');
-    setTimeout(() => { inputEl.focus(); inputEl.select(); }, 50);
-    const cleanup = (val) => {
-      modal.classList.add('hidden');
-      titleEl.textContent = origTitle;
-      descEl.textContent = origDesc;
-      saveBtn.textContent = origSaveText;
-      inputEl.placeholder = '例如：张三';
-      saveBtn.removeEventListener('click', saveHandler);
-      cancelBtn.removeEventListener('click', cancelHandler);
-      inputEl.removeEventListener('keydown', keyHandler);
-      modal.removeEventListener('click', backdropHandler);
-      resolve(val);
-    };
-    const saveHandler = () => cleanup(inputEl.value);
-    const cancelHandler = () => cleanup(null);
-    const backdropHandler = (e) => { if (e.target === modal) cleanup(null); };
-    const keyHandler = (e) => {
-      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) cleanup(inputEl.value);
-      else if (e.key === 'Escape') cleanup(null);
-    };
-    saveBtn.addEventListener('click', saveHandler);
-    cancelBtn.addEventListener('click', cancelHandler);
-    inputEl.addEventListener('keydown', keyHandler);
-    modal.addEventListener('click', backdropHandler);
-  });
-}
 
 
 // ============================================================
@@ -1662,13 +1608,6 @@ function handleCreateMultiCellAnnotation(cellSel) {
   }, 50);
   setStatus('已创建批注', `${ranges.length} 个单元格 · 线程 ${threadId.slice(0, 8)}`);
   emitAI('threadChange', { threadId, change: 'create', thread });
-}
-
-// P-D10: 简单字符串 hash (用于 authorId 派生, 同名 → 同色)
-function simpleHashString(s) {
-  let h = 0;
-  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
-  return Math.abs(h);
 }
 
 // P-D10: 根据 authorId 算 8 色 color index (Word 行为: 同 author 同色)
@@ -3207,25 +3146,6 @@ function fileTypeIcon(name) {
   if (/\.(md|markdown)$/i.test(name)) return { glyph: window.MentorIcons.fileMd, cls: 'icon-md' };
   if (/\.json$/i.test(name)) return { glyph: window.MentorIcons.fileJson, cls: 'icon-json' };
   return { glyph: window.MentorIcons.fileOther, cls: 'icon-other' };
-}
-
-// --- tree node 模板（复用）
-function treeNodeHTML(name, isActive) {
-  const icon = fileTypeIcon(name);
-  const isMd = /\.(md|markdown)$/i.test(name);
-  const actions = isMd
-    ? `<span class="tree-actions">
-         <button data-action="copy" title="复制路径" aria-label="复制路径">${window.MentorIcons.copy}</button>
-         <button data-action="reload" title="重新加载" aria-label="重新加载">${window.MentorIcons.reload}</button>
-         <button data-action="delete" title="删除 .md" aria-label="删除" class="danger">${window.MentorIcons.trash}</button>
-       </span>`
-    : `<span class="tree-actions">
-         <button data-action="copy" title="复制路径" aria-label="复制路径">${window.MentorIcons.copy}</button>
-       </span>`;
-  return `<div class="tree-node ${isActive ? 'is-active' : ''}" data-handle-name="${escapeHtml(name)}">
-    <span class="icon ${icon.cls}">${icon.glyph}</span><span class="filename">${escapeHtml(name)}</span>
-    ${actions}
-  </div>`;
 }
 
 // --- 文件栏渲染 (单 .md 模式): 只显示当前文件名
