@@ -176,6 +176,14 @@ code {
 .tb-icon-text:hover .tb-icon { color: var(--text); }
 .tb-icon-text.is-active { background: var(--accent-soft); color: var(--accent); }
 .tb-icon-text.is-active .tb-icon { color: var(--accent); }
+/* H-undo: undo/redo 按钮无历史时 disabled (灰) */
+.tb-icon-text:disabled,
+.tb-icon-text:disabled:hover {
+  background: transparent;
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+.tb-icon-text:disabled .tb-icon { color: var(--text-3); }
 
 /* 给 5 个工具栏按钮注入 SVG (CSS mask-image) */
 #btn-new .tb-icon::before {

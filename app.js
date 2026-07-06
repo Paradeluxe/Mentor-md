@@ -128,8 +128,13 @@ const State = {
   replyDrafts: {},
   // H2 fix: 解决卡片临时展开状态 (key = threadId, value = true), 仅 session 内
   expandedThreadIds: {},
+  // H-undo: 批注操作 history stack
+  // - 每次 push 一次"修改前快照" (深拷贝 annotations)
+  // - undo: pop past → 还原; redo: pop future → 还原
+  // - doc 文本撤销走 Tiptap 自带 Ctrl+Z (history: { depth: 100 }), 不入这个 stack
+  history: { past: [], future: [], capacity: 100 },
   folderHandle: null,       // 当前文件夹 handle（FileSystemDirectoryHandle）
-  saveMode: 'unknown',      // 'handle' | 'download' | 'unknown'
+  saveMode: 'unknown',      // 'handle' | 'download' | 'unknown' | 'mentor-handle' | 'mentor-download'
   readOnlyMode: false,      // P0-A: 另一 tab 在编辑时启用只读 (Ctrl+S 禁用)
   fileMtime: null,          // P0-C: 主 .md 的 mtime (last save 时记录的)
   renderMode: 'rendered',   // 'rendered' = WYSIWYG 渲染; 'source' = 显示原始 markdown 源码
@@ -921,6 +926,82 @@ function markClean() {
   }
 }
 
+// ============================================================
+// Autosave (handle 模式 30s 自动写回 .mentor)
+// ============================================================
+//
+// 策略:
+// - handle 模式 (mentor-handle): 每 30s 检查 dirty, 写回原 .mentor 位置
+// - download 模式 (mentor-download): 不自动写 (浏览器无权限, 下载会刷屏)
+// - 写盘成功 → markClean (dirty 指示器清)
+// - 写盘失败 (权限 revoke 等) → 停 timer + toast, 让用户重选文件
+
+let _autosaveTimer = null;
+const AUTOSAVE_INTERVAL = 30000;  // 30 秒
+
+function startAutosaveTimer() {
+  stopAutosaveTimer();
+  // 只在 handle 模式启动
+  if (State.saveMode !== 'mentor-handle') return;
+  if (!State.currentFile || !State.currentFile.handle) return;
+  _autosaveTimer = setInterval(() => {
+    autosaveNow();
+  }, AUTOSAVE_INTERVAL);
+  console.log('[autosave] timer started (30s interval, handle mode)');
+}
+
+function stopAutosaveTimer() {
+  if (_autosaveTimer) {
+    clearInterval(_autosaveTimer);
+    _autosaveTimer = null;
+  }
+}
+
+async function autosaveNow() {
+  if (State.saveMode !== 'mentor-handle') return;
+  if (!State.currentFile || !State.currentFile.handle) return;
+  if (!State.currentFile.dirty) return;  // 没改动不写
+  try {
+    const html = State.editor.getHTML();
+    const mdText = htmlToMarkdown(html);
+    const sidecar = {
+      version: '1',
+      document: State.currentFile.name,
+      updatedAt: nowISO(),
+      author: { id: State.authorId, name: State.author },
+      annotations: State.annotations.map(t => ({
+        threadId: t.threadId,
+        text: t.text,
+        prefix: t.prefix || '',
+        suffix: t.suffix || '',
+        resolved: t.resolved,
+        createdAt: t.createdAt,
+        comments: t.comments,
+      })),
+    };
+    const blob = await buildMentorZipBlob(mdText, sidecar);
+    const handle = State.currentFile.handle;
+    if (await handle.queryPermission({ mode: 'readwrite' }) !== 'granted') {
+      await handle.requestPermission({ mode: 'readwrite' });
+    }
+    const writable = await handle.createWritable();
+    await writable.write(blob);
+    await writable.close();
+    markClean();
+    const time = new Date().toLocaleTimeString();
+    showToast(`已自动保存 (${time})`, 2000);
+    console.log(`[autosave] written at ${time}`);
+  } catch (e) {
+    if (e.name === 'NotAllowedError' || e.name === 'SecurityError') {
+      console.warn('[autosave] 权限被拒, 停 timer');
+      showToast('自动保存失败: 文件权限被撤销, 请重新打开', 3000);
+      stopAutosaveTimer();
+    } else {
+      console.warn('[autosave] 写盘失败:', e);
+    }
+  }
+}
+
 // 更新 tree 中所有文件的 dirty 圆点（per-file）
 function updateTreeDirtyDots() {
   $$('.tree-node[data-handle-name]').forEach(el => {
@@ -1503,6 +1584,7 @@ function createAnnotationThread(from, to, text) {
     createdAt: nowISO(),
     comments: [],          // P-card fix: 初始空, 第一次 addReply 时填充
   };
+  pushHistory();
   State.annotations.push(thread);
   // 在编辑器中加 mark
   applyAnnotationMark(threadId, from, to);
@@ -1568,6 +1650,7 @@ function handleCreateMultiCellAnnotation(cellSel) {
       createdAt: nowISO(),
     }],
   };
+  pushHistory();
   State.annotations.push(thread);
   // 给每个 cell 加 mark
   applyAnnotationMarksMultiCell(threadId, ranges);
@@ -1692,6 +1775,7 @@ function handleCreateMultiParagraphAnnotation(from, to) {
       createdAt: nowISO(),
     }],
   };
+  pushHistory();
   State.annotations.push(thread);
   // 每段各打 mark (跳过 0 长度 range, 因为 PM addMark 会 no-op)
   const tr = ed.state.tr;
@@ -1717,6 +1801,7 @@ function handleCreateMultiParagraphAnnotation(from, to) {
 function addReply(threadId, body) {
   const thread = State.annotations.find(t => t.threadId === threadId);
   if (!thread || !body.trim()) return;
+  pushHistory();
   const comment = {
     id: uuid(),
     author: { id: State.authorId, name: State.author },
@@ -1736,6 +1821,7 @@ function addReply(threadId, body) {
 function toggleResolved(threadId) {
   const thread = State.annotations.find(t => t.threadId === threadId);
   if (!thread) return;
+  pushHistory();
   thread.resolved = !thread.resolved;
   // P-D20: 记录 resolved 时间 + user (Word 风格: "Resolved 2h ago")
   if (thread.resolved) {
@@ -1765,6 +1851,12 @@ function toggleResolved(threadId) {
 
 function deleteThread(threadId) {
   if (!confirm('删除此批注线程？此操作不可撤销。')) return;
+  // H-undo: 删之前 push, 让用户能 undo 回退
+  // (注: confirm 弹窗期间如果用户取消, pushHistory 已被旧版本的副作用污染, 但这没问题 — 实际不修改)
+  // 修正: confirm 后再 push, 避免取消时污染 history
+  const thread = State.annotations.find(t => t.threadId === threadId);
+  if (!thread) return;
+  pushHistory();
   // 移除 mark
   const editor = State.editor;
   const tr = editor.state.tr;
@@ -1772,6 +1864,7 @@ function deleteThread(threadId) {
   // P-card: 记下原 selection 位置, 删除 mark 后强制 reset selection 让 handleSelectionChange 重跑
   // 不然 mark 删了但 cursor 还在原位置 (selection 没变), handleSelectionChange 不触发, 按钮状态 stale
   const oldSel = { from: editor.state.selection.from, to: editor.state.selection.to };
+
   editor.state.doc.descendants((node, pos) => {
     node.marks.forEach(m => {
       if (m.type === markType && m.attrs.threadId === threadId) {
@@ -2444,10 +2537,116 @@ function renderOutline() {
   });
 }
 
+// ============================================================
+// History stack (undo/redo for annotation operations)
+// ============================================================
+//
+// 数据结构: State.history = { past: [], future: [], capacity: 100 }
+// 每条 snapshot = { annotations: 深拷贝数组, ts: 时间戳 }
+// 不存 md 文本 — md 文本不变, annotations 是 source of truth
+// doc 内 annotation mark 在 restoreFromSnapshot 时重建 (rebuildAnnotationMarks)
+
+function deepCloneAnnotations(arr) {
+  return JSON.parse(JSON.stringify(arr));
+}
+
+// 修改 annotations 前调用: 推入 past, 清空 future
+function pushHistory() {
+  State.history.past.push({
+    annotations: deepCloneAnnotations(State.annotations),
+    ts: Date.now(),
+  });
+  if (State.history.past.length > State.history.capacity) {
+    State.history.past.shift();
+  }
+  State.history.future = [];
+  updateHistoryButtons();
+}
+
+function undo() {
+  if (State.history.past.length === 0) return false;
+  // 1. 当前状态推入 future (给 redo 用)
+  State.history.future.push({
+    annotations: deepCloneAnnotations(State.annotations),
+    ts: Date.now(),
+  });
+  if (State.history.future.length > State.history.capacity) {
+    State.history.future.shift();
+  }
+  // 2. 弹出 past 最后一个, 还原
+  const prev = State.history.past.pop();
+  restoreFromSnapshot(prev);
+  return true;
+}
+
+function redo() {
+  if (State.history.future.length === 0) return false;
+  // 1. 当前状态推入 past
+  State.history.past.push({
+    annotations: deepCloneAnnotations(State.annotations),
+    ts: Date.now(),
+  });
+  if (State.history.past.length > State.history.capacity) {
+    State.history.past.shift();
+  }
+  // 2. 弹出 future, 还原
+  const next = State.history.future.pop();
+  restoreFromSnapshot(next);
+  return true;
+}
+
+function restoreFromSnapshot(snap) {
+  State.annotations = snap.annotations;
+  // 重建 ProseMirror doc 的 annotation marks (因为 mark 是 doc 的一部分, 跟 annotations 必须同步)
+  rebuildAnnotationMarks();
+  renderCommentList();
+  markDirty();
+  updateHistoryButtons();
+}
+
+// 清空所有 annotation mark, 按 State.annotations 重建
+function rebuildAnnotationMarks() {
+  const ed = State.editor;
+  if (!ed) return;
+  const markType = ed.schema.marks.annotation;
+  if (!markType) return;
+  const docSize = ed.state.doc.content.size;
+  let tr = ed.state.tr;
+  // 1. 清掉所有 annotation mark
+  tr = tr.removeMark(0, docSize, markType);
+  // 2. 按 State.annotations 重建 mark
+  for (const t of State.annotations) {
+    if (!t.range) continue;
+    const { from, to } = t.range;
+    if (from < 0 || to > docSize || from >= to) continue;
+    const attrs = { threadId: t.threadId, resolved: !!t.resolved };
+    tr = tr.addMark(from, to, markType.create(attrs));
+  }
+  ed.view.dispatch(tr);
+}
+
+// 工具栏 undo/redo 按钮的 disabled 状态
+function updateHistoryButtons() {
+  const undoBtn = $('#btn-undo');
+  const redoBtn = $('#btn-redo');
+  if (undoBtn) undoBtn.disabled = State.history.past.length === 0;
+  if (redoBtn) redoBtn.disabled = State.history.future.length === 0;
+}
+
+// 加载新文件 / 新建文档时重置 history (切文件不应该继承旧 history)
+function resetHistory() {
+  State.history.past = [];
+  State.history.future = [];
+  updateHistoryButtons();
+}
+
 // 从 .md 加载到编辑器
 function loadMarkdownIntoEditor(name, content, annotationsData = null) {
   // P1 #6: 立即清掉状态栏, 避免切换文档时短暂闪旧文件名
   $('#status-right').textContent = '加载中...';
+  // H-autosave: 切文件停旧 timer (新文件 loadMarkdownIntoEditor 后会按 saveMode 重启)
+  stopAutosaveTimer();
+
   $('#current-file-name').textContent = name;
   // D3 docx 一致性: 切文档时, 如果当前文档 dirty, 弹"是否保存" (Word 行为)
   // 注意: IDB 兜底已经防止数据丢失, 但 Word 仍会让用户主动选择
@@ -2483,6 +2682,8 @@ function loadMarkdownIntoEditor(name, content, annotationsData = null) {
   }
   // 重置批注
   State.annotations = [];
+  // H-undo: 切文件清空 history (旧 history 不属于新文档)
+  resetHistory();
   // 加载侧车批注数据
   if (annotationsData && annotationsData.annotations) {
     // === P0-B: 侧车 schema 验证 - 检测重复 threadId / 缺字段 ===
@@ -2841,8 +3042,9 @@ async function openFiles() {
       // .mentor 是自包含单文件, 优先于 .md + .json 组合
       const mentorHandle = handles.find(h => /\.mentor$/i.test(h.name));
       if (mentorHandle) {
-        await openFromMentorHandle(mentorHandle);
+        // H-autosave: 先设 saveMode 再调 openFromMentorHandle, 让内部 startAutosaveTimer 能正确启动
         State.saveMode = 'mentor-handle';
+        await openFromMentorHandle(mentorHandle);
         try { await HandleStore.putFile(mentorHandle.name, mentorHandle); } catch (e) { console.warn('putFile failed:', e); }
         try { await HandleStore.putLastFile(mentorHandle.name); } catch (e) { console.warn('putLastFile failed:', e); }
         renderFilePaneCurrent();
@@ -2971,6 +3173,8 @@ async function openFromMentorHandle(fileHandle) {
     await HandleStore.putFile(file.name, fileHandle);
     await HandleStore.putLastFile(file.name);
   } catch (e) { console.warn('mentor handle persist failed:', e); }
+  // H-autosave: handle 模式启动 30s 自动写盘
+  startAutosaveTimer();
 }
 
 // --- 文件类型专属图标 (Cursor 风格 - 统一 SVG 图标库)
@@ -3588,6 +3792,8 @@ function newDocument() {
   if (State.currentFile && State.currentFile.dirty && !confirm('当前文档有未保存修改，确定新建吗？')) return;
   State.editor.commands.setContent('<h1>新文档</h1><p></p>', false);
   State.annotations = [];
+  // H-undo: 新建文档重置 history
+  resetHistory();
   State.currentFile = { name: 'untitled.md', content: '', annotations: null, dirty: true };
   markDirty();
   renderCommentList();
@@ -3769,6 +3975,26 @@ function setupToolbar() {
   $('#btn-open-files').addEventListener('click', openFiles);
   // 打开文件夹: 已合并到左侧空文件栏点击 (setupEmptyTreeClick), 工具栏不再需要按钮
   $('#btn-save').addEventListener('click', saveCurrent);
+  // H-undo: 工具栏 ↶ ↷ 按钮
+  $('#btn-undo').addEventListener('click', () => {
+    if (undo()) showToast('已撤销');
+  });
+  $('#btn-redo').addEventListener('click', () => {
+    if (redo()) showToast('已重做');
+  });
+  updateHistoryButtons();  // 初始 disabled 状态
+  // 快捷键: Ctrl+Alt+Z 撤销批注 / Ctrl+Alt+Shift+Z 重做
+  // (避开 Tiptap 的 Ctrl+Z — doc 文本撤销仍走 Tiptap 默认)
+  document.addEventListener('keydown', (e) => {
+    if ((e.metaKey || e.ctrlKey) && e.altKey && !e.shiftKey && (e.key === 'z' || e.key === 'Z')) {
+      e.preventDefault();
+      if (undo()) showToast('已撤销');
+    }
+    if ((e.metaKey || e.ctrlKey) && e.altKey && e.shiftKey && (e.key === 'z' || e.key === 'Z')) {
+      e.preventDefault();
+      if (redo()) showToast('已重做');
+    }
+  });
   $('#btn-save-as').addEventListener('click', async () => {
     if (!State.currentFile) return;
     const html = State.editor.getHTML();
@@ -3861,23 +4087,6 @@ function setupToolbar() {
   });
   updateToggleBtnIcon();  // 初始图标
 
-  // 切换批注侧栏 (窄屏/手机备用入口)
-  $('#btn-toggle-comment-pane').addEventListener('click', () => {
-    document.body.classList.toggle('comment-pane-open');
-  });
-  // Ctrl+. 唤出/收下批注侧栏 (窄屏快捷键)
-  document.addEventListener('keydown', (e) => {
-    if ((e.metaKey || e.ctrlKey) && e.key === '.') {
-      e.preventDefault();
-      document.body.classList.toggle('comment-pane-open');
-    }
-    // Ctrl+[ 收起/展开文件栏 (Word 风格 outline 收起)
-    if ((e.metaKey || e.ctrlKey) && e.key === '[') {
-      e.preventDefault();
-      toggleFilePane();
-    }
-  });
-
   // P1-FilePaneCollapse: 文件栏收起按钮 + Ctrl+[ 快捷键
   function toggleFilePane() {
     const collapsed = document.body.classList.toggle('file-pane-collapsed');
@@ -3887,6 +4096,13 @@ function setupToolbar() {
   // 绑所有 [data-act='toggle-file-pane'] 元素 (折叠按钮 + 浮起展开按钮)
   document.addEventListener('click', (e) => {
     if (e.target.closest('[data-act="toggle-file-pane"]')) {
+      toggleFilePane();
+    }
+  });
+  // Ctrl+[ 收起/展开文件栏 (键盘快捷键)
+  document.addEventListener('keydown', (e) => {
+    if ((e.metaKey || e.ctrlKey) && e.key === '[') {
+      e.preventDefault();
       toggleFilePane();
     }
   });
@@ -4154,6 +4370,16 @@ window.__mdAnnotator = {
   readMentorZip,
   buildMentorZipBlob,
   mentorExportName,
+  // H-undo: history stack helpers
+  pushHistory,
+  undo,
+  redo,
+  resetHistory,
+  rebuildAnnotationMarks,
+  // H-autosave: autosave helpers
+  startAutosaveTimer,
+  stopAutosaveTimer,
+  autosaveNow,
   // HTML → markdown 内部 helper（暴露给 e2e 测试 + 第三方插件使用）
   htmlToMarkdown,
   // File pane 测试 API
