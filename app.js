@@ -360,26 +360,78 @@ const AnnotationStore = {
 const md = new MarkdownIt({ html: false, linkify: true, breaks: false });
 
 // ============================================================
-// 自定义 markdown-it 上/下标插件 (Pandoc 风格 ^text^ / ~text~)
-// 规则:
-//   ^x^ → superscript (要求前后非空白, 内部非空白, 不与 ~~ 重叠)
-//   ~x~ → subscript   (避免与 GFM 删除线 ~~x~~ 冲突: 要求单 ~ 不成对)
-//   \^  / \~           → 字面 ^/~
+// 自定义 markdown-it 上/下标插件
+// 支持 3 种语法 (优先级从高到低):
+//   1. HTML 标签: <sup>text</sup> / <sub>text</sub>  (其他 md 编辑器导出风格)
+//   2. 方括号语法糖: ^[text]^ / ~[text]~  (支持多字符+空格, 不与单字符语法冲突)
+//   3. Pandoc 单字符: ^x^ / ~x~  (单字符/单词, 内部无空白)
+// 转义:
+//   \^ / \~  → 字面 ^/~
+// 边界:
+//   subscript 排除 ~~strike~~ (GFM 删除线)
 // ============================================================
+
+// 匹配 <sup>...</sup> 或 <sub>...</sub> 标签
+const HTML_SUBSUP_RE = /^<(sup|sub)>([\s\S]*?)<\/\1>/i;
+
+function htmlSubsupRule(state, silent) {
+  const pos = state.pos;
+  const tail = state.src.slice(pos, pos + 256);
+  const m = tail.match(HTML_SUBSUP_RE);
+  if (!m) return false;
+  const tag = m[1].toLowerCase();
+  const content = m[2];
+  const fullMatchLen = m[0].length;
+  // 安全: 标签内容不应再含 <sup>/<sub> (避免嵌套), 也避免内容含 < > 干扰
+  if (/<(sup|sub)\b/i.test(content)) return false;
+  if (!silent) {
+    const tokenName = tag === 'sup' ? 'sup_inline' : 'sub_inline';
+    const token = state.push(tokenName, '', 0);
+    token.markup = tag;
+    token.content = content;
+  }
+  state.pos = pos + fullMatchLen;
+  return true;
+}
+
 function superscriptRule(state, silent) {
   const pos = state.pos;
   if (state.src[pos] !== '^') return false;
-  // 紧跟 ^ 必须是字符 (避免 ^^^ 双重标记和 ^ 单独一个)
   if (pos + 1 >= state.posMax) return false;
+  // 语法糖: ^[text]^ 支持多字符+空格
+  if (state.src[pos + 1] === '[') {
+    let end = pos + 2;
+    let depth = 1;
+    while (end < state.posMax && depth > 0) {
+      const ch = state.src[end];
+      if (ch === '\\') { end += 2; continue; }
+      if (ch === '[') depth++;
+      else if (ch === ']') depth--;
+      if (depth === 0) break;
+      end++;
+    }
+    if (depth !== 0) return false; // 未闭合
+    if (end + 1 >= state.posMax) return false;
+    if (state.src[end + 1] !== '^') return false; // 闭合 ^ 缺失
+    const content = state.src.slice(pos + 2, end);
+    if (!content) return false; // 空内容
+    if (!silent) {
+      const token = state.push('sup_inline', '', 0);
+      token.markup = '^[]';
+      token.content = content;
+    }
+    state.pos = end + 2;
+    return true;
+  }
+  // Pandoc 单字符: ^x^ (紧跟 ^ 是字符, 内部无空白)
   const next = state.src[pos + 1];
   if (/\s/.test(next)) return false;
-  // 找闭合 ^ (跳过 \^)
   let end = pos + 1;
   while (end < state.posMax) {
     const ch = state.src[end];
     if (ch === '\\') { end += 2; continue; }
     if (ch === '^') break;
-    if (/\s/.test(ch)) return false; // 内部含空白, 不算
+    if (/\s/.test(ch)) return false; // 内部含空白不算
     end++;
   }
   if (end >= state.posMax || end === pos + 1) return false;
@@ -399,6 +451,33 @@ function subscriptRule(state, silent) {
   // 排除 ~~ (GFM 删除线)
   if (state.src[pos + 1] === '~') return false;
   if (pos + 1 >= state.posMax) return false;
+  // 语法糖: ~[text]~ 支持多字符+空格
+  if (state.src[pos + 1] === '[') {
+    let end = pos + 2;
+    let depth = 1;
+    while (end < state.posMax && depth > 0) {
+      const ch = state.src[end];
+      if (ch === '\\') { end += 2; continue; }
+      if (ch === '[') depth++;
+      else if (ch === ']') depth--;
+      if (depth === 0) break;
+      end++;
+    }
+    if (depth !== 0) return false;
+    if (end + 1 >= state.posMax) return false;
+    if (state.src[end + 1] !== '~') return false; // 闭合 ~ 缺失
+    if (state.src[end + 1] === '~' && state.src[end + 2] === '~') return false; // ~~ 闭合 (与删除线冲突)
+    const content = state.src.slice(pos + 2, end);
+    if (!content) return false;
+    if (!silent) {
+      const token = state.push('sub_inline', '', 0);
+      token.markup = '~[]';
+      token.content = content;
+    }
+    state.pos = end + 2;
+    return true;
+  }
+  // Pandoc 单字符: ~x~
   const next = state.src[pos + 1];
   if (/\s/.test(next)) return false;
   let end = pos + 1;
@@ -522,9 +601,12 @@ function mathBlockRule(state, startLine, endLine, silent) {
   return true;
 }
 
-md.inline.ruler.after('escape', 'math_inline', mathInlineRule);
-md.inline.ruler.after('math_inline', 'superscript', superscriptRule);
-md.inline.ruler.after('math_inline', 'subscript', subscriptRule);
+// 顺序: htmlSubsup (标签) → superscript/subscript (语法糖+单字符) → math_inline
+// htmlSubsup 放第一优先, 避免 <sup> 内部的 ^ 被 superscriptRule 误吞
+md.inline.ruler.after('escape', 'html_subsup', htmlSubsupRule);
+md.inline.ruler.after('html_subsup', 'superscript', superscriptRule);
+md.inline.ruler.after('html_subsup', 'subscript', subscriptRule);
+md.inline.ruler.after('subscript', 'math_inline', mathInlineRule);
 md.block.ruler.after('blockquote', 'math_block', mathBlockRule, {
   alt: ['paragraph', 'reference', 'blockquote', 'list']
 });
@@ -550,20 +632,26 @@ const turndown = new TurndownService({ headingStyle: 'atx', codeBlockStyle: 'fen
 //     <span class="katex-html">...</span>
 //   </span>
 //   (block) <div class="katex-display">...</div>
-// ============================================================
-// ============================================================
 // Turndown 规则: <sup>/<sub> → ^x^ / ~x~
 // turndown 默认会把 sup/sub 当普通 inline 元素, 输出 <sup>/<sub> HTML
 // 这里显式 addRule 让其转回 Pandoc 风格 markdown, 与导入端 round-trip 一致
-// ============================================================
+// 内容若含特殊字符 (^ ~ [ ] \ 空白), 用 ^[...]^ / ~[...]~ 方括号语法糖避免歧义
 turndown.addRule('superscript', {
   filter: 'sup',
-  replacement: (content) => `^${content}^`,
+  replacement: (content) => {
+    // 去掉 turndown 给的 trim 后的空白, 但保留内部字符原样
+    const inner = content;
+    if (/[\^~\\\[\]\s]/.test(inner)) return `^[${inner}]^`;
+    return `^${inner}^`;
+  },
 });
 turndown.addRule('subscript', {
   filter: 'sub',
-  // 排除 ~~strike~~ 反向冲突: 内部若以 ~ 开头则不加包裹 (极少情况, 加转义)
-  replacement: (content) => `~${content}~`,
+  replacement: (content) => {
+    const inner = content;
+    if (/[\^~\\\[\]\s]/.test(inner)) return `~[${inner}]~`;
+    return `~${inner}~`;
+  },
 });
 
 turndown.addRule('katex-wrapper-inline', {
