@@ -11,6 +11,8 @@ import Highlight from '@tiptap/extension-highlight';
 import Link from '@tiptap/extension-link';
 import Image from '@tiptap/extension-image';
 import Placeholder from '@tiptap/extension-placeholder';
+import Superscript from '@tiptap/extension-superscript';
+import Subscript from '@tiptap/extension-subscript';
 import { Table } from '@tiptap/extension-table';
 import { TableRow } from '@tiptap/extension-table-row';
 import { TableHeader } from '@tiptap/extension-table-header';
@@ -121,13 +123,16 @@ const State = {
   activeThreadId: null,     // 当前在侧栏高亮的 thread
   authorId: localStorage.getItem('Mentor:authorId') || '',   // 用户唯一 ID, 永不改变
   author: localStorage.getItem('Mentor:author') || '',       // 显示名, 可改
+  // v2-resolve-btn: 默认 filter "all" — 用户解决批注后, 卡片仍可见才能点 "重新打开" 入口
   filterOpen: true,
-  filterResolved: false,
+  filterResolved: true,
   // F18: reply 草稿持久 (Word 行为: 切文档再切回草稿保留)
   // key = threadId, value = textarea 内容
   replyDrafts: {},
   // H2 fix: 解决卡片临时展开状态 (key = threadId, value = true), 仅 session 内
   expandedThreadIds: {},
+  // v4-抽屉: 用户手动折叠的批注 (独立于"已解决自动折叠", docx 风格可手动收起任意卡)
+  manuallyCollapsedIds: {},
   // H-undo: 批注操作 history stack
   // - 每次 push 一次"修改前快照" (深拷贝 annotations)
   // - undo: pop past → 还原; redo: pop future → 还原
@@ -355,6 +360,69 @@ const AnnotationStore = {
 const md = new MarkdownIt({ html: false, linkify: true, breaks: false });
 
 // ============================================================
+// 自定义 markdown-it 上/下标插件 (Pandoc 风格 ^text^ / ~text~)
+// 规则:
+//   ^x^ → superscript (要求前后非空白, 内部非空白, 不与 ~~ 重叠)
+//   ~x~ → subscript   (避免与 GFM 删除线 ~~x~~ 冲突: 要求单 ~ 不成对)
+//   \^  / \~           → 字面 ^/~
+// ============================================================
+function superscriptRule(state, silent) {
+  const pos = state.pos;
+  if (state.src[pos] !== '^') return false;
+  // 紧跟 ^ 必须是字符 (避免 ^^^ 双重标记和 ^ 单独一个)
+  if (pos + 1 >= state.posMax) return false;
+  const next = state.src[pos + 1];
+  if (/\s/.test(next)) return false;
+  // 找闭合 ^ (跳过 \^)
+  let end = pos + 1;
+  while (end < state.posMax) {
+    const ch = state.src[end];
+    if (ch === '\\') { end += 2; continue; }
+    if (ch === '^') break;
+    if (/\s/.test(ch)) return false; // 内部含空白, 不算
+    end++;
+  }
+  if (end >= state.posMax || end === pos + 1) return false;
+  const content = state.src.slice(pos + 1, end);
+  if (!silent) {
+    const token = state.push('sup_inline', '', 0);
+    token.markup = '^';
+    token.content = content;
+  }
+  state.pos = end + 1;
+  return true;
+}
+
+function subscriptRule(state, silent) {
+  const pos = state.pos;
+  if (state.src[pos] !== '~') return false;
+  // 排除 ~~ (GFM 删除线)
+  if (state.src[pos + 1] === '~') return false;
+  if (pos + 1 >= state.posMax) return false;
+  const next = state.src[pos + 1];
+  if (/\s/.test(next)) return false;
+  let end = pos + 1;
+  while (end < state.posMax) {
+    const ch = state.src[end];
+    if (ch === '\\') { end += 2; continue; }
+    if (ch === '~') break;
+    if (/\s/.test(ch)) return false;
+    end++;
+  }
+  if (end >= state.posMax || end === pos + 1) return false;
+  // 排除 ~~ 闭合 (双 ~)
+  if (state.src[end + 1] === '~') return false;
+  const content = state.src.slice(pos + 1, end);
+  if (!silent) {
+    const token = state.push('sub_inline', '', 0);
+    token.markup = '~';
+    token.content = content;
+  }
+  state.pos = end + 1;
+  return true;
+}
+
+// ============================================================
 // 自定义 markdown-it KaTeX 插件
 // 支持 $inline$ 和 $$block$$ 公式
 // 边界处理: $前后不能是字母数字（避免误匹配 "5$10$"）
@@ -455,6 +523,8 @@ function mathBlockRule(state, startLine, endLine, silent) {
 }
 
 md.inline.ruler.after('escape', 'math_inline', mathInlineRule);
+md.inline.ruler.after('math_inline', 'superscript', superscriptRule);
+md.inline.ruler.after('math_inline', 'subscript', subscriptRule);
 md.block.ruler.after('blockquote', 'math_block', mathBlockRule, {
   alt: ['paragraph', 'reference', 'blockquote', 'list']
 });
@@ -463,6 +533,8 @@ md.renderer.rules.math_inline = (tokens, idx) => {
   // 用 .katex-wrapper 包裹，让 Tiptap 解析为 KatexInline node
   return `<span class="katex-wrapper" data-tex="${escapeHtml(tex)}" contenteditable="false"><span class="katex-placeholder">${escapeHtml(tex)}</span></span>`;
 };
+md.renderer.rules.sup_inline = (tokens, idx) => `<sup>${escapeHtml(tokens[idx].content)}</sup>`;
+md.renderer.rules.sub_inline = (tokens, idx) => `<sub>${escapeHtml(tokens[idx].content)}</sub>`;
 md.renderer.rules.math_block = (tokens, idx) => {
   const tex = tokens[idx].content;
   return `<div class="katex-wrapper-display" data-tex="${escapeHtml(tex)}" contenteditable="false"><span class="katex-placeholder">${escapeHtml(tex)}</span></div>\n`;
@@ -479,6 +551,21 @@ const turndown = new TurndownService({ headingStyle: 'atx', codeBlockStyle: 'fen
 //   </span>
 //   (block) <div class="katex-display">...</div>
 // ============================================================
+// ============================================================
+// Turndown 规则: <sup>/<sub> → ^x^ / ~x~
+// turndown 默认会把 sup/sub 当普通 inline 元素, 输出 <sup>/<sub> HTML
+// 这里显式 addRule 让其转回 Pandoc 风格 markdown, 与导入端 round-trip 一致
+// ============================================================
+turndown.addRule('superscript', {
+  filter: 'sup',
+  replacement: (content) => `^${content}^`,
+});
+turndown.addRule('subscript', {
+  filter: 'sub',
+  // 排除 ~~strike~~ 反向冲突: 内部若以 ~ 开头则不加包裹 (极少情况, 加转义)
+  replacement: (content) => `~${content}~`,
+});
+
 turndown.addRule('katex-wrapper-inline', {
   filter: node => {
     if (!node || !node.classList) return false;
@@ -1035,6 +1122,8 @@ function initEditor() {
       TableRow,
       TableHeader,
       TableCell,
+      Superscript,
+      Subscript,
       AnnotationMark,
       KatexInline,
       KatexBlock,
@@ -1430,6 +1519,71 @@ function handleSelectionChange() {
   }
 }
 
+// Pane resizer (左/右栏宽度拖拽)
+function setupPaneResizer() {
+  const main = $('#main');
+  if (!main) return;
+
+  // 配置: paneId, CSS var 名, localStorage key, min, max, 拖动方向
+  // 拖右 = 增宽 (右栏); 拖左 = 增宽 (左栏)
+  const panes = [
+    { paneId: 'comment-pane', varName: '--comment-pane-width', lsKey: 'Mentor:commentPaneWidth', min: 220, max: 900, dir: -1 },
+    { paneId: 'file-pane',    varName: '--outline-pane-width', lsKey: 'Mentor:outlinePaneWidth', min: 160, max: 700, dir:  1 },
+  ];
+
+  panes.forEach(cfg => {
+    const resizer = document.querySelector(`[data-pane-resize="${cfg.paneId === 'file-pane' ? 'outline' : 'comment'}"]`);
+    const pane = document.getElementById(cfg.paneId);
+    if (!resizer || !pane) return;
+
+    // 恢复上次保存的宽度
+    try {
+      const saved = localStorage.getItem(cfg.lsKey);
+      if (saved) {
+        const w = parseInt(saved, 10);
+        if (w >= cfg.min && w <= cfg.max) {
+          main.style.setProperty(cfg.varName, w + 'px');
+        }
+      }
+    } catch (e) { /* ignore */ }
+
+    let dragging = false;
+    let startX = 0;
+    let startWidth = 0;
+
+    const onDown = (e) => {
+      dragging = true;
+      startX = e.clientX;
+      startWidth = pane.getBoundingClientRect().width;
+      resizer.classList.add('is-dragging');
+      document.body.style.cursor = 'ew-resize';
+      document.body.style.userSelect = 'none';
+      e.preventDefault();
+    };
+    const onMove = (e) => {
+      if (!dragging) return;
+      const dx = (e.clientX - startX) * cfg.dir;  // cfg.dir: -1 (右栏) / +1 (左栏)
+      const w = Math.max(cfg.min, Math.min(cfg.max, startWidth + dx));
+      main.style.setProperty(cfg.varName, w + 'px');
+    };
+    const onUp = () => {
+      if (!dragging) return;
+      dragging = false;
+      resizer.classList.remove('is-dragging');
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      const cur = main.style.getPropertyValue(cfg.varName);
+      if (cur) {
+        try { localStorage.setItem(cfg.lsKey, cur); } catch (e) { /* ignore */ }
+      }
+    };
+
+    resizer.addEventListener('mousedown', onDown);
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  });
+}
+
 function setupFloatCommentButton() {
   $('#float-comment-btn button').addEventListener('click', () => {
     const sel = State.editor.state.selection;
@@ -1455,14 +1609,9 @@ function setupFloatCommentButton() {
       return;
     }
     const text = State.editor.state.doc.textBetween(from, to, ' ');
-    if (!State.author) {
-      // 弹作者输入
-      promptAuthor().then(() => {
-        if (State.author) createAnnotationThread(from, to, text);
-      });
-    } else {
-      createAnnotationThread(from, to, text);
-    }
+    // v2: 不再弹作者 modal 拦截用户, 没作者直接以匿名创建批注 (作者可后改)
+    // 老逻辑: !State.author → 弹 modal → then() 再创建 → 用户点不动浮按钮
+    createAnnotationThread(from, to, text);
   });
   // mark 删除按钮: 从正文删除当前 active 批注
   $('#mark-delete-btn').addEventListener('click', () => {
@@ -1499,13 +1648,8 @@ function createAnnotationThread(from, to, text) {
     showToast('批注文字不能为空', 2000);
     return null;
   }
-  // 如果作者未设, 弹作者输入
-  if (!State.author) {
-    promptAuthor().then(() => {
-      if (State.author) createAnnotationThread(from, to, text);
-    });
-    return null;
-  }
+  // v2: 不再弹作者 modal, 没作者时第一行 addReply 自动从 State.authorId 派生显示
+  // 老逻辑: !State.author → 弹 modal → 用户卡死
   const threadId = uuid();
   // 计算 prefix/suffix (鲁棒重定位用) — 必须立即算, 不能等用户输入第一条 comment
   // 不然空 thread 的 prefix/suffix 都是空, reload 时 P0 找不到 → invalid
@@ -1546,12 +1690,7 @@ function createAnnotationThread(from, to, text) {
 // 处理多 cell 选区 (CellSelection) 的批注创建
 // CellSelection 覆盖 N 个 cell, 给每个 cell 一段独立 mark (共享 threadId)
 function handleCreateMultiCellAnnotation(cellSel) {
-  if (!State.author) {
-    promptAuthor().then(() => {
-      if (State.author) handleCreateMultiCellAnnotation(cellSel);
-    });
-    return;
-  }
+  // v2: 不弹作者 modal, 无作者直接匿名创建
   // 收集每个 cell 的内容范围
   const ranges = [];
   let totalText = '';
@@ -1645,12 +1784,7 @@ function applyAnnotationMarksMultiCell(threadId, ranges) {
 // 跨段: PM mark 不能跨 block. 收集经过的每个 paragraph 的 range, 给每段各打 mark (共享 threadId)
 // thread.ranges = [{from, to}, ...] (跟 multi-cell 一样用 ranges 数组存多段)
 function handleCreateMultiParagraphAnnotation(from, to) {
-  if (!State.author) {
-    promptAuthor().then(() => {
-      if (State.author) handleCreateMultiParagraphAnnotation(from, to);
-    });
-    return;
-  }
+  // v2: 不弹作者 modal, 无作者直接匿名创建
   const ed = State.editor;
   // 收集 from → to 之间的所有 paragraph range
   // 关键: PM addMark(from, to) 要求 from/to 都是 inline 文本内的位置
@@ -1901,24 +2035,42 @@ function renderCommentList() {
     const number = idx + 1;
     // P-card: 解决后默认折叠 (Word 风格), 只显示 quote + meta 一行. 通过 collapsed class 控制.
     // H2 fix: 解决后点击展开 (临时 expanded 状态, 不持久).
-    const isCollapsed = thread.resolved && !State.expandedThreadIds?.[thread.threadId];
+    const isCollapsed = thread.resolved && !State.expandedThreadIds?.[thread.threadId] || !!State.manuallyCollapsedIds?.[thread.threadId];
+    // v4: 手动折叠按钮图标 — 已解决(自动折叠)/手动折叠 都显示"展开↘"; 展开时显示"收起↗"
     return `
       <div class="comment-thread ${isActive ? 'is-active' : ''} ${thread.resolved ? 'is-resolved' : ''} ${thread.fuzzy ? 'is-fuzzy' : ''} ${isCollapsed ? 'is-collapsed' : ''}" data-thread="${thread.threadId}">
         ${thread.fuzzy ? '<div class="fuzzy-banner">⚠ 位置可能偏移 - 请检查文档</div>' : ''}
         <!-- 卡片头: 序号 + 引文 (可点击跳转) + ⋯ 菜单按钮 -->
-        <div class="comment-quote" data-act="goto" data-thread="${thread.threadId}" title="点击跳转到批注处">
+        <!-- v5: 点击卡片标题区域 = 折叠/展开 (用户明确要求). 跳转正文走 ⋯ 菜单 "📍 跳转到批注处" -->
+        <div class="comment-quote" data-thread="${thread.threadId}" title="点击收起/展开批注">
           <span class="comment-number-badge" data-number="${number}" title="批注 #${number}">${number}</span>
           <span class="comment-quote-text">${escapeHtml((thread.text || '').slice(0, 200))}${(thread.text || '').length > 200 ? '…' : ''}</span>
           ${thread.resolved ? `<span class="comment-resolved-badge">✓ 已解决${thread.resolvedAt ? ' · ' + formatTime(thread.resolvedAt) : ''}</span>` : ''}
+          <!-- v3: 解决按钮在折叠状态下显示在 header, 展开状态下显示在 form-actions 底部 -->
+          <button class="comment-resolve-btn comment-resolve-btn--header ${thread.resolved ? 'is-resolved' : ''}" data-act="resolve" data-thread="${thread.threadId}" title="${thread.resolved ? '重新打开此批注' : '标记为已解决'}" aria-label="${thread.resolved ? '重新打开' : '标记为已解决'}">${thread.resolved ? '↺' : '✓'}</button>
+          <!-- v6: 抽屉折叠/展开按钮 (SVG icon, 通过 ::before 渲染 - / +) -->
+          <button class="comment-collapse-btn ${isCollapsed ? 'is-collapsed' : ''}" data-act="toggle-collapse" data-thread="${thread.threadId}" title="${isCollapsed ? '展开批注' : '收起批注'}" aria-label="${isCollapsed ? '展开' : '收起'}"></button>
           <button class="comment-menu-btn" data-act="toggle-menu" data-thread="${thread.threadId}" title="更多操作" aria-label="更多操作">⋯</button>
         </div>
-        <!-- ⋯ 弹窗菜单 (默认 hidden) -->
+        <!-- ⋯ 弹窗菜单 (默认 hidden) — v6: SVG icons, 不用 emoji -->
         <div class="comment-menu hidden" data-menu-for="${thread.threadId}">
-          <button data-act="goto" data-thread="${thread.threadId}">📍 跳转到批注处</button>
-          <button data-act="resolve" data-thread="${thread.threadId}">${thread.resolved ? '↺ 重新打开' : '✓ 标记为已解决'}</button>
-          <button data-act="copy" data-thread="${thread.threadId}">📋 复制引文</button>
+          <button data-act="goto" data-thread="${thread.threadId}">
+            <span class="menu-icon menu-icon-goto"></span>
+            <span class="menu-label">跳转到批注处</span>
+          </button>
+          <button data-act="resolve" data-thread="${thread.threadId}">
+            <span class="menu-icon menu-icon-resolve"></span>
+            <span class="menu-label">${thread.resolved ? '重新打开' : '标记为已解决'}</span>
+          </button>
+          <button data-act="copy" data-thread="${thread.threadId}">
+            <span class="menu-icon menu-icon-copy"></span>
+            <span class="menu-label">复制引文</span>
+          </button>
           <div class="menu-sep"></div>
-          <button data-act="delete" data-thread="${thread.threadId}" class="menu-danger">🗑 删除批注</button>
+          <button data-act="delete" data-thread="${thread.threadId}" class="menu-danger">
+            <span class="menu-icon menu-icon-delete"></span>
+            <span class="menu-label">删除批注</span>
+          </button>
         </div>
         <!-- 卡片体: 默认收起 (解决后), active 时展开. 用 details 保留原生折叠能力 -->
         <div class="comment-body-wrap">
@@ -1945,9 +2097,11 @@ function renderCommentList() {
               - 首条已写: placeholder "回复..." (后续追加)
             -->
             <div class="comment-reply-form">
-              <textarea data-thread-input="${thread.threadId}" placeholder="${first.body ? '回复...' : '开始批注...'}"></textarea>
+              <textarea data-thread-input="${thread.threadId}" placeholder="${first.body ? '回复...' : '开始批注...'}" autocomplete="off"></textarea>
+              <!-- v3: 解决按钮放到 reply 区底部与提交同行 (docx 风格: 次要操作左, 主操作右) -->
               <div class="form-actions">
-                <button data-act="submit-reply" data-thread="${thread.threadId}" class="primary">提交</button>
+                <button class="comment-resolve-btn ${thread.resolved ? 'is-resolved' : ''}" data-act="resolve" data-thread="${thread.threadId}" title="${thread.resolved ? '重新打开此批注' : '标记为已解决'}" aria-label="${thread.resolved ? '重新打开' : '标记为已解决'}">${thread.resolved ? '↺ 重新打开' : '✓ 解决'}</button>
+                <button data-act="submit-reply" data-thread="${thread.threadId}" class="primary" disabled title="输入内容后可提交 (Ctrl+Enter)">提交</button>
               </div>
             </div>
         </div>
@@ -1964,8 +2118,14 @@ function renderCommentList() {
     if (State.replyDrafts[tid] && !ta.value) {
       ta.value = State.replyDrafts[tid];
     }
+    // v2: 草稿恢复后立刻同步 submit 按钮 disabled (避免渲染后看到禁用按钮但 textarea 有内容)
+    const _initBtn = list.querySelector(`[data-act="submit-reply"][data-thread="${tid}"]`);
+    if (_initBtn) _initBtn.disabled = !ta.value.trim();
     ta.addEventListener('input', () => {
       State.replyDrafts[tid] = ta.value;
+      // v2: 同步 submit 按钮 disabled (空内容 → 禁用)
+      const btn = list.querySelector(`[data-act="submit-reply"][data-thread="${tid}"]`);
+      if (btn) btn.disabled = !ta.value.trim();
     });
     ta.addEventListener('keydown', (e) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
@@ -1988,11 +2148,6 @@ function renderCommentList() {
   });
   list.querySelectorAll('[data-act="goto"]').forEach(btn => {
     btn.addEventListener('click', e => {
-      // H2 fix: 解决+折叠的卡片, 让 click 冒泡到 card click handler (展开而非跳转)
-      const card = btn.closest('.comment-thread');
-      if (card?.classList.contains('is-resolved') && card?.classList.contains('is-collapsed')) {
-        return;  // 不 stopPropagation, 让 card click handler 处理
-      }
       e.stopPropagation();
       scrollToThread(btn.dataset.thread);
       closeAllCommentMenus();
@@ -2003,6 +2158,26 @@ function renderCommentList() {
       e.stopPropagation();
       toggleResolved(btn.dataset.thread);
       closeAllCommentMenus();
+    });
+  });
+  // v4: 抽屉折叠/展开按钮 (手动)
+  list.querySelectorAll('[data-act="toggle-collapse"]').forEach(btn => {
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      const tid = btn.dataset.thread;
+      // 切换 manuallyCollapsedIds 状态
+      if (State.manuallyCollapsedIds[tid]) {
+        delete State.manuallyCollapsedIds[tid];
+      } else {
+        State.manuallyCollapsedIds[tid] = true;
+      }
+      // 解决后自动折叠: 如果是手动展开 resolved 卡片, 也清掉 expandedThreadIds (否则会冲突)
+      const thread = State.annotations.find(t => t.threadId === tid);
+      if (thread?.resolved && State.expandedThreadIds?.[tid]) {
+        delete State.expandedThreadIds[tid];
+      }
+      closeAllCommentMenus();
+      renderCommentList();
     });
   });
   list.querySelectorAll('[data-act="delete"]').forEach(btn => {
@@ -2073,19 +2248,15 @@ function renderCommentList() {
     el.addEventListener('click', e => {
       // 交互区 (按钮/textarea/details summary) 不触发
       if (e.target.closest('button') || e.target.closest('textarea') || e.target.closest('details summary')) return;
-      // 解决后折叠的卡片: 第一次点击展开 (H2 fix)
-      if (el.classList.contains('is-resolved') && el.classList.contains('is-collapsed')) {
-        const tid = el.dataset.thread;
-        if (!State.expandedThreadIds) State.expandedThreadIds = {};
-        State.expandedThreadIds[tid] = true;
+      // v6: 标题区域 → 折叠/展开; 正文区域 (body-wrap) → 跳转正文
+      const tid = el.dataset.thread;
+      if (e.target.closest('.comment-quote')) {
+        toggleManualCollapse(tid);
+        closeAllCommentMenus();
         renderCommentList();
-        return;
+      } else if (e.target.closest('.comment-body-wrap')) {
+        scrollToCommentText(tid);
       }
-      // 正常卡片: 点击 → 跳转到批注处 (Word 风格: 整张卡片可点跳转)
-      State.activeThreadId = el.dataset.thread;
-      highlightActiveMark();
-      scrollToThread(el.dataset.thread);
-      renderCommentList();
     });
   });
 }
@@ -2100,6 +2271,26 @@ document.addEventListener('mousedown', e => {
     closeAllCommentMenus();
   }
 });
+
+// v6: 标题区域 click → 折叠/展开 (用户要求)
+function toggleManualCollapse(tid) {
+  if (State.manuallyCollapsedIds[tid]) {
+    delete State.manuallyCollapsedIds[tid];
+  } else {
+    State.manuallyCollapsedIds[tid] = true;
+  }
+  const thread = State.annotations.find(t => t.threadId === tid);
+  if (thread?.resolved && State.expandedThreadIds?.[tid]) {
+    delete State.expandedThreadIds[tid];
+  }
+}
+
+function scrollToCommentText(tid) {
+  State.activeThreadId = tid;
+  highlightActiveMark();
+  scrollToThread(tid);
+  renderCommentList();
+}
 
 function scrollToThread(threadId) {
   const thread = State.annotations.find(t => t.threadId === threadId);
@@ -2438,19 +2629,10 @@ function renderOutline() {
     return;
   }
 
-  // 编号 (按 H1/H2/H3 层级递进) — Word 风格
-  let h1 = 0, h2 = 0, h3 = 0;
-  const rows = items.map(it => {
-    let num = '';
-    if (it.level === 1) { h1++; h2 = 0; h3 = 0; num = `${h1}.`; }
-    else if (it.level === 2) { h2++; h3 = 0; num = `${h1}.${h2}`; }
-    else { h3++; num = `${h1}.${h2}.${h3}`; }
-    return { ...it, num };
-  });
+  const rows = items;
 
   pane.innerHTML = rows.map(it =>
     `<div class="outline-item outline-h${it.level}" data-pos="${it.pos}" title="${escapeHtml(it.text)}">` +
-    `<span class="outline-num">${it.num}</span>` +
     `<span class="outline-text">${escapeHtml(it.text) || '(无标题)'}</span>` +
     `</div>`
   ).join('');
@@ -4017,6 +4199,8 @@ function setupToolbar() {
         case 'italic': c.toggleItalic().run(); break;
         case 'strike': c.toggleStrike().run(); break;
         case 'code': c.toggleCode().run(); break;
+        case 'superscript': c.toggleSuperscript().run(); break;
+        case 'subscript': c.toggleSubscript().run(); break;
         case 'h1': c.toggleHeading({ level: 1 }).run(); break;
         case 'h2': c.toggleHeading({ level: 2 }).run(); break;
         case 'h3': c.toggleHeading({ level: 3 }).run(); break;
@@ -4135,6 +4319,8 @@ function updateToolbarState() {
         case 'italic': isActive = editor.isActive('italic'); break;
         case 'strike': isActive = editor.isActive('strike'); break;
         case 'code': isActive = editor.isActive('code'); break;
+        case 'superscript': isActive = editor.isActive('superscript'); break;
+        case 'subscript': isActive = editor.isActive('subscript'); break;
         case 'h1': isActive = editor.isActive('heading', { level: 1 }); break;
         case 'h2': isActive = editor.isActive('heading', { level: 2 }); break;
         case 'h3': isActive = editor.isActive('heading', { level: 3 }); break;
@@ -4235,6 +4421,7 @@ async function boot() {
   initEditor();
   setupToolbar();
   setupFloatCommentButton();
+  setupPaneResizer();
   setupEditorSelectionObserver();
   setupAnnotationMarkClickObserver();
   setupTreeActionDelegation();

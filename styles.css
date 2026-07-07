@@ -243,6 +243,8 @@ code {
 [data-cmd="italic"]::before { -webkit-mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><path d='M19 5h-6'/><path d='M11 19H5'/><path d='m14 5-4 14'/></svg>"); mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><path d='M19 5h-6'/><path d='M11 19H5'/><path d='m14 5-4 14'/></svg>"); }
 [data-cmd="strike"]::before { -webkit-mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><path d='M4 12h16'/><path d='M17 6.5a4 4 0 0 0-4-2.5 4 4 0 0 0-4 4c0 1.5 1 2.5 3 3l2 1c2 1 3 2 3 3.5a4 4 0 0 1-7 2'/></svg>"); mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><path d='M4 12h16'/><path d='M17 6.5a4 4 0 0 0-4-2.5 4 4 0 0 0-4 4c0 1.5 1 2.5 3 3l2 1c2 1 3 2 3 3.5a4 4 0 0 1-7 2'/></svg>"); }
 [data-cmd="code"]::before { -webkit-mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><path d='m8 8-4 4 4 4'/><path d='m16 8 4 4-4 4'/><path d='m14 4-4 16'/></svg>"); mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><path d='m8 8-4 4 4 4'/><path d='m16 8 4 4-4 4'/><path d='m14 4-4 16'/></svg>"); }
+[data-cmd="superscript"]::before { -webkit-mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><path d='M4 19l4-7 4 7'/><path d='M5.5 16h5'/><path d='M14 7l3-3h-2.5a1.5 1.5 0 0 1 0-3H17'/></svg>"); mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><path d='M4 19l4-7 4 7'/><path d='M5.5 16h5'/><path d='M14 7l3-3h-2.5a1.5 1.5 0 0 1 0-3H17'/></svg>"); }
+[data-cmd="subscript"]::before { -webkit-mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><path d='M4 6l4 7 4-7'/><path d='M5.5 9h5'/><path d='M16 21l3-3h-2.5a1.5 1.5 0 0 1 0-3H19'/></svg>"); mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><path d='M4 6l4 7 4-7'/><path d='M5.5 9h5'/><path d='M16 21l3-3h-2.5a1.5 1.5 0 0 1 0-3H19'/></svg>"); }
 [data-cmd="h1"]::before { -webkit-mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><path d='M5 5v14'/><path d='M13 5v14'/><path d='M5 12h8'/><path d='m16 9 2-1v11'/></svg>"); mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><path d='M5 5v14'/><path d='M13 5v14'/><path d='M5 12h8'/><path d='m16 9 2-1v11'/></svg>"); }
 [data-cmd="h2"]::before { -webkit-mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><path d='M5 5v14'/><path d='M13 5v14'/><path d='M5 12h8'/><path d='M16 9c0-1 1-2 2-2s2 1 2 2-1 2-2 3l-2 3h4'/></svg>"); mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><path d='M5 5v14'/><path d='M13 5v14'/><path d='M5 12h8'/><path d='M16 9c0-1 1-2 2-2s2 1 2 2-1 2-2 3l-2 3h4'/></svg>"); }
 [data-cmd="h3"]::before { -webkit-mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><path d='M5 5v14'/><path d='M13 5v14'/><path d='M5 12h8'/><path d='M17 8h4l-3 3c2 0 3 1 3 2.5s-1 2.5-3 2.5-3-.5-3-2'/></svg>"); mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><path d='M5 5v14'/><path d='M13 5v14'/><path d='M5 12h8'/><path d='M17 8h4l-3 3c2 0 3 1 3 2.5s-1 2.5-3 2.5-3-.5-3-2'/></svg>"); }
@@ -442,12 +444,32 @@ code {
 #main {
   display: grid;
   /* 两边栏按视窗比例缩放 (clamp), 中间编辑区保最小 480px */
+  /* v2-comment-resize: 右栏宽度用 CSS var 可由 JS 拖拽调整 (默认 clamp) */
+  /* max: min(viewport * 0.5, 800px) — 用户拉到最大也只能占视窗一半, 保证编辑器最小 480px */
   grid-template-columns:
-    clamp(160px, 18vw, 260px)
+    clamp(160px, var(--outline-pane-width, 260px), min(40vw, 600px))
     minmax(480px, 1fr)
-    clamp(220px, 28vw, 360px);
+    clamp(220px, var(--comment-pane-width, 360px), min(50vw, 800px));
   overflow: hidden;
 }
+/* Pane resizer (左栏拖右边, 右栏拖左边) */
+.pane-resizer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 5px;
+  cursor: ew-resize;
+  z-index: 10;
+  background: transparent;
+  transition: background 0.12s;
+}
+.pane-resizer:hover,
+.pane-resizer.is-dragging { background: var(--accent); opacity: 0.5; }
+/* 左栏的 resizer 在右边; 右栏的 resizer 在左边 (拖动方向决定) */
+#file-pane > .pane-resizer { right: 0; }
+#comment-pane > .pane-resizer { left: 0; }
+#comment-pane { position: relative; /* 让 .pane-resizer absolute 锚定 */ }
+#file-pane { position: relative; /* 同上, 大纲栏 resizer 锚定 */ }
 
 /* v2 桌面端专属: 删除所有 @media 响应式规则
    任务栏"批注"按钮已删, Ctrl+. 快捷键已删, 文件栏 / 批注栏不再随视窗折叠.
@@ -673,15 +695,6 @@ body.file-pane-collapsed #file-pane {
   color: var(--accent);
   font-weight: 500;
 }
-.outline-item .outline-num {
-  display: inline-block;
-  color: var(--text-3);
-  font-variant-numeric: tabular-nums;
-  margin-right: 6px;
-  min-width: 22px;
-  font-size: 11.5px;
-}
-.outline-item.is-active .outline-num { color: var(--accent); }
 .outline-h1 { font-weight: 500; font-size: 13px; padding-top: 6px; padding-bottom: 6px; }
 .outline-h2 { padding-left: 22px; }
 .outline-h3 { padding-left: 34px; color: var(--text-2); font-size: 12px; }
@@ -985,6 +998,10 @@ body.file-pane-collapsed #file-pane {
 .tiptap a:hover { text-decoration-color: var(--accent); }
 .tiptap img { max-width: 100%; border-radius: 6px; }
 .tiptap hr { border: none; border-top: 1px solid var(--border-warm); margin: 1.5em 0; }
+/* 上/下标: 编辑器内视觉微调 (浏览器 default sup/sub 已经偏移, 这里只补字号) */
+.tiptap sup, .tiptap sub { font-size: 0.75em; line-height: 0; }
+.tiptap sup { vertical-align: super; }
+.tiptap sub { vertical-align: sub; }
 
 /* 批注 mark 高亮 (保留暖黄) */
 .tiptap .annotation-mark {
@@ -1360,6 +1377,8 @@ body.file-pane-collapsed #file-pane {
   color: var(--text);
 }
 
+/* v3: 解决按钮样式移到了 form-actions 内的 .comment-resolve-btn 规则块 (docx 风格 outline 次要按钮) */
+
 /* P-card: ⋯ 弹窗菜单 (绝对定位, 浮在卡片右上角) */
 .comment-menu {
   position: absolute;
@@ -1409,6 +1428,65 @@ body.file-pane-collapsed #file-pane {
   margin: 3px 4px;
 }
 
+/* v6: 菜单 SVG 图标 (不用 emoji) — 放大到 16px 让描边更清晰 */
+.comment-menu .menu-icon {
+  flex: 0 0 16px;
+  width: 16px;
+  height: 16px;
+  background: currentColor;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  mask-position: center;
+  -webkit-mask-size: contain;
+  mask-size: contain;
+  opacity: 0.9;
+}
+.comment-menu button:hover .menu-icon { opacity: 1; }
+
+/* 跳转 (map pin) */
+.comment-menu .menu-icon-goto {
+  -webkit-mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M20 10c0 7-8 12-8 12s-8-5-8-12a8 8 0 0 1 16 0Z'/><circle cx='12' cy='10' r='3'/></svg>");
+  mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M20 10c0 7-8 12-8 12s-8-5-8-12a8 8 0 0 1 16 0Z'/><circle cx='12' cy='10' r='3'/></svg>");
+}
+/* 解决 (check) */
+.comment-menu .menu-icon-resolve {
+  -webkit-mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><polyline points='20 6 9 17 4 12'/></svg>");
+  mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><polyline points='20 6 9 17 4 12'/></svg>");
+}
+/* 复制 (clipboard / copy) */
+.comment-menu .menu-icon-copy {
+  -webkit-mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><rect x='9' y='9' width='13' height='13' rx='2'/><path d='M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1'/></svg>");
+  mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><rect x='9' y='9' width='13' height='13' rx='2'/><path d='M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1'/></svg>");
+}
+/* 删除 (trash) */
+.comment-menu .menu-icon-delete {
+  -webkit-mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M3 6h18'/><path d='M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6'/><path d='M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2'/><path d='M10 11v6'/><path d='M14 11v6'/></svg>");
+  mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M3 6h18'/><path d='M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6'/><path d='M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2'/><path d='M10 11v6'/><path d='M14 11v6'/></svg>");
+}
+/* 折叠按钮 (也用 SVG mask, 替换 + / − 字符) */
+.comment-collapse-btn {
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  mask-position: center;
+  -webkit-mask-size: 14px 14px;
+  mask-size: 14px 14px;
+}
+.comment-collapse-btn::before {
+  content: '';
+  display: block;
+  width: 14px;
+  height: 14px;
+  background: currentColor;
+  -webkit-mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><path d='M5 12h14'/></svg>");
+  mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><path d='M5 12h14'/></svg>");
+}
+.comment-collapse-btn.is-collapsed::before {
+  -webkit-mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><path d='M5 12h14'/><path d='M12 5v14'/></svg>");
+  mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><path d='M5 12h14'/><path d='M12 5v14'/></svg>");
+}
+
 /* P-card: 解决后卡片折叠 (Word 风格) — 只显示 header, body-wrap 隐藏 */
 .comment-thread.is-collapsed .comment-body-wrap {
   display: none;
@@ -1417,7 +1495,7 @@ body.file-pane-collapsed #file-pane {
 .comment-thread.is-collapsed .comment-quote::after {
   content: "点击展开";
   position: absolute;
-  right: 38px;
+  right: 76px;  /* v4: 避开 + 折叠按钮 (22px) + ⋯ 按钮 (22px) + 间距 */
   top: 50%;
   transform: translateY(-50%);
   font-size: 10.5px;
@@ -1572,8 +1650,8 @@ body.file-pane-collapsed #file-pane {
 .comment-reply-form textarea {
   width: 100%;
   min-height: 48px;
-  max-height: 200px;
-  resize: none;
+  /* v4: 允许垂直拖拽调整高度 (docx 风格) — 用户写长批注可拉大 */
+  resize: vertical;
   padding: 7px 10px;
   border: none;
   border-radius: var(--rounded-sm, 4px);
@@ -1588,6 +1666,10 @@ body.file-pane-collapsed #file-pane {
   display: block;
   box-shadow: 0 0 0 1px var(--border-warm);
 }
+/* v4: resize 拖拽手柄样式 (Webkit 默认是右下角小三角) */
+.comment-reply-form textarea::-webkit-resizer {
+  background: transparent;
+}
 .comment-reply-form textarea::placeholder { color: var(--text-3); }
 .comment-reply-form textarea:focus {
   background: var(--panel);
@@ -1595,32 +1677,137 @@ body.file-pane-collapsed #file-pane {
 }
 .comment-reply-form .form-actions {
   display: flex;
-  justify-content: flex-end;
+  justify-content: space-between;  /* v3: 解决按钮在左, 提交在右 (docx 风格) */
+  align-items: center;
   gap: 4px;
   margin-top: 4px;
 }
 .comment-reply-form .form-actions button {
   font-size: 11.5px;
   font-weight: 500;
-  padding: 3px 10px;
+  padding: 4px 12px;
   border-radius: 4px;
   background: transparent;
   color: var(--text-2);
-  border: none;
+  border: 1px solid transparent;
   cursor: pointer;
-  transition: color 0.12s, background 0.12s;
+  transition: color 0.12s, background 0.12s, border-color 0.12s;
 }
 .comment-reply-form .form-actions button:hover {
   color: var(--text);
   background: var(--panel-2);
 }
+/* v3: 解决按钮 — docx 风格 outline 次要按钮 */
+/* 默认: form-actions 内显示; header 内隐藏 */
+.comment-reply-form .comment-resolve-btn { display: inline-flex; }
+.comment-quote .comment-resolve-btn--header { display: none; }
+/* 折叠状态: form-actions 内隐藏 (按钮 + textarea 都被 body-wrap 隐藏); header 内显示 */
+.comment-thread.is-collapsed .comment-reply-form .comment-resolve-btn { display: none; }
+/* v4: 抽屉折叠态时也藏 header 解决按钮 (用户要求: 收起时只保留 quote + 折叠按钮) */
+.comment-thread.is-collapsed .comment-quote .comment-resolve-btn--header { display: none; }
+.comment-reply-form .form-actions .comment-resolve-btn {
+  font-weight: 500;
+  color: var(--text-2);
+  border: 1px solid var(--border-warm-medium);
+}
+.comment-reply-form .form-actions .comment-resolve-btn:hover {
+  color: var(--success);
+  background: rgba(31, 138, 101, 0.08);
+  border-color: var(--success);
+}
+.comment-reply-form .form-actions .comment-resolve-btn.is-resolved {
+  color: var(--success);
+  border-color: var(--success);
+  background: rgba(31, 138, 101, 0.06);
+}
+.comment-reply-form .form-actions .comment-resolve-btn.is-resolved:hover {
+  background: var(--success);
+  color: #fff;
+  border-color: var(--success);
+}
+/* v4: 抽屉折叠/展开按钮 (docx 风格 ▾/▸) */
+.comment-collapse-btn {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  border: none;
+  background: transparent;
+  color: var(--text-3);
+  font-size: 0;  /* v6: 隐藏空字符, 让 ::before SVG 渲染 */
+  line-height: 0;
+  cursor: pointer;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin: -2px 0 0 0;
+  opacity: 1;
+  transition: background 0.12s, color 0.12s, opacity 0.12s;
+  flex-shrink: 0;
+  user-select: none;
+  padding: 0;
+}
+.comment-collapse-btn:hover {
+  background: var(--panel-3);
+  color: var(--text);
+}
+.comment-collapse-btn.is-collapsed {
+  color: var(--accent);
+  opacity: 0.8;
+}
+.comment-quote .comment-resolve-btn--header {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  border: 1px solid transparent;
+  background: var(--success);
+  color: #fff;
+  font-size: 13px;
+  line-height: 1;
+  font-weight: 700;
+  cursor: pointer;
+  border-radius: 4px;
+  align-items: center;
+  justify-content: center;
+  margin: -2px 0 0 2px;
+  flex-shrink: 0;
+  user-select: none;
+  box-shadow: 0 1px 2px rgba(31, 138, 101, 0.3);
+}
+.comment-quote .comment-resolve-btn--header:hover {
+  background: #fff;
+  color: var(--success);
+  border-color: var(--success);
+}
+.comment-quote .comment-resolve-btn--header.is-resolved {
+  background: transparent;
+  color: var(--success);
+  border-color: var(--success);
+  box-shadow: none;
+}
+.comment-quote .comment-resolve-btn--header.is-resolved:hover {
+  background: var(--success);
+  color: #fff;
+  border-color: var(--success);
+}
 .comment-reply-form .form-actions button.primary {
   color: var(--accent);
   font-weight: 600;
+  border-color: transparent;
 }
 .comment-reply-form .form-actions button.primary:hover {
   color: var(--accent);
   background: var(--accent-soft);
+}
+.comment-reply-form .form-actions button:disabled,
+.comment-reply-form .form-actions button.primary:disabled {
+  color: var(--text-3);
+  cursor: not-allowed;
+  background: transparent;
+}
+.comment-reply-form .form-actions button.primary:disabled:hover {
+  background: transparent;
+  color: var(--text-3);
 }
 
 /* === Float comment button (DESIGN.md: 蓝底白字 pill, hover scale 1.05) === */

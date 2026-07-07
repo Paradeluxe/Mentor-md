@@ -23,6 +23,9 @@ tests/soak-logs/
 _outline-preview.html
 tests/_outline-preview.html
 
+# 根目录 tmp/ (开发调试: serve.js, 测试 mjs, 截图)
+tmp/
+
 # 临时 probe 文件 (开发调试用, 用完删)
 tests/probe-*.spec.js
 tests/diag-*.spec.js
