@@ -1308,14 +1308,14 @@ body.file-pane-collapsed #file-pane {
   border-left-color: var(--warning);
 }
 
+/* v1.32: active/resolved 状态下 quote 不再画左边框
+   外层 (.comment-thread) 已经有 3px 同色边 (active=橙, resolved=绿),
+   quote 再画 2px = 视觉 "一粗一细两条同色边" 双线错觉 (v1.31 教训).
+   直接 border-left: transparent 让 3px 外层独占, 用 inset box-shadow 保留
+   quote 跟下面的层次过渡. 不再叠同色. */
+.comment-thread.is-resolved .comment-quote,
 .comment-thread.is-active .comment-quote {
-  border-left-color: var(--accent);  /* 跟外层 active 同色, 避免两种 */
-}
-.comment-thread.is-resolved .comment-quote {
-  border-left-color: var(--success);  /* 跟外层 resolved 同色, 避免绿+橙 */
-}
-.comment-thread.is-fuzzy .comment-quote {
-  border-left-color: var(--warning);
+  border-left-color: transparent;
 }
 
 /* Thread banner (fuzzy only — pinned 已在 v2 移除) */
