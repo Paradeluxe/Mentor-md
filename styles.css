@@ -1621,10 +1621,8 @@ body.file-pane-collapsed #file-pane {
   margin: 0 0 0 0;
   border-left: 2px solid var(--border-warm-medium);
   position: relative;
-  transition: border-color 0.12s;
-}
-.comment-reply:hover {
-  border-left-color: var(--accent);
+  /* v1.32: 删 hover 变橙 - 卡片整体 hover (line 1270 --highlight) 已足够,
+     reply 单独再变橙会跟外层卡 quote 内层默认灰色冲突出现 "3 种颜色" 错觉 */
 }
 .comment-reply + .comment-reply {
   margin-top: 0;
