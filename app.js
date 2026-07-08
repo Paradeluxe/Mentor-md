@@ -4411,14 +4411,10 @@ function updateToolbarState() {
     btn.classList.toggle('is-active', isActive);
   });
 
-  // 帮助按钮 - 点击切换 popover
-  const helpBtn = $('#help-btn');
-  if (helpBtn) {
-    helpBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      toggleHelp();
-    });
-  }
+  // 帮助按钮 - 不再 addEventListener, 改 inline onclick (v1.32 inline backup)
+  // 之前 addEventListener 在 init 阶段一次性绑定, 但部分浏览器 cache 老 app.js 会保留
+  // 旧的 init 路径, 跟新 inline onclick 叠加导致 toggleHelp 跑两次 = 自动抵消
+  // 现在只走 inline onclick 一条路径
   // popover 内关闭按钮
   const helpCloseBtn = document.querySelector('#help-popover .help-popover-close');
   if (helpCloseBtn) {
@@ -4603,6 +4599,7 @@ window.__mdAnnotator = {
   openFiles,
   openFilesLegacy,
   openFromMentorFile,
+  toggleHelp,  // v1.32: 暴露 help toggle 备用入口, 让 inline onclick 用
   // .mentor 包帮助函数 (给 e2e 测试 + 第三方插件使用)
   isMentorZip,
   readMentorZip,

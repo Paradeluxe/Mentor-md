@@ -44,7 +44,7 @@
   <!-- Toolbar -->
   <header id="toolbar">
     <div class="tb-group">
-      <button id="help-btn" class="help-btn" data-act="toggle-help" title="使用帮助 (按 ? 键)" aria-label="使用帮助">?</button>
+      <button id="help-btn" class="help-btn" data-act="toggle-help" title="使用帮助 (按 ? 键)" aria-label="使用帮助" onclick="window.__mdAnnotator && window.__mdAnnotator.toggleHelp && window.__mdAnnotator.toggleHelp(); event.stopPropagation();">?</button>
       <span class="tb-sep"></span>
       <button id="btn-new" title="新建空白文档" class="tb-icon-text"><span class="tb-icon"></span><span>新建</span></button>
       <button id="btn-open-files" title="打开文件 (按住 Ctrl 多选 .md + .annotations.json 可自动加载批注)" class="tb-icon-text"><span class="tb-icon"></span><span>打开文件</span></button>
