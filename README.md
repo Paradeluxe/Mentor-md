@@ -4,7 +4,18 @@
 
 一个 **WYSIWYG Markdown 编辑器**，右侧带 docx 风格批注侧栏，选区级批注、嵌套回复、解决/重新打开、侧车 JSON 存储。**纯前端单页**，无构建步骤，**双击 `index.html` 或起一个静态 server 即可用**。
 
+[![License: CC BY-NC-SA 4.0](https://img.shields.io/badge/License-CC%20BY--NC--SA%204.0-lightgrey.svg)](https://creativecommons.org/licenses/by-nc-sa/4.0/)
+[![GitHub stars](https://img.shields.io/github/stars/Paradeluxe/Mentor-md.svg)](https://github.com/Paradeluxe/Mentor-md/stargazers)
+[![GitHub forks](https://img.shields.io/github/forks/Paradeluxe/Mentor-md.svg)](https://github.com/Paradeluxe/Mentor-md/network/members)
+[![GitHub issues](https://img.shields.io/github/issues/Paradeluxe/Mentor-md.svg)](https://github.com/Paradeluxe/Mentor-md/issues)
+
 ![screenshot](screenshot.png)
+
+## 协议
+
+本项目采用 **[CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/)**：开源，**禁止商用**，衍生作品须同协议 + 署名。
+
+> ℹ️ CC 协议族面向文档/创作作品，对**代码项目**并不严格合规。如果你想做严肃开源软件协议切换，看 [LICENSE](./LICENSE) 文件末尾的提醒。
 
 ---
 
