@@ -1,0 +1,37 @@
+# Mentor 仓库合并操作清单 (本地已完成的)
+
+## 已完成 (本机)
+1. ✓ clone Paradeluxe/Mentor 临时目录 /e/hermes_playground/Mentor-donor-tmp
+2. ✓ 拷贝 assets:
+   - examples/ (3 个场景: ai-collab / paper-draft / tech-rfc)
+   - screenshot.png
+3. ✓ commit 109858b 推到 Paradeluxe/Mentor-md main
+4. ✓ 删除临时 clone
+
+## 待你完成 (GitHub 网页)
+手动归档/删除 Paradeluxe/Mentor 仓库:
+1. 打开 https://github.com/Paradeluxe/Mentor
+2. 进 Settings (页面最下方)
+3. 滚到底部 Danger Zone
+4. "Delete this repository"
+5. 输入 Paradeluxe/Mentor 确认
+6. 点 "I understand, delete this repository"
+
+(本地 GH CLI 没装, GitHub API 删 repo 需要 PAT token, 走网页最稳)
+
+## Mentor 仓库原本有 5 个 commits (项目历史快照):
+- d3511af Add examples/ — 3 real-world demo scenarios
+- 50a8168 Add design.md (Google/Microsoft-style design doc)
+- 2b60b39 Fix: scrollToThread to 4:6 viewport position + enlarge KaTeX inline font
+- 4ca2f1e Add README hero shot: sample.md with KaTeX math + docx-style annotations
+- 1ff0f9c Initial commit: Mentor WYSIWYG Markdown editor with docx-style comments
+
+这些历史 commit 没合并到 Mentor-md (历史快照, Mentor-md 是后续 fork/重命名),
+但 assets 已通过 109858b commit 全部吸收, 数据无丢失.
+
+## 后续 push 状态
+Mentor-md main 分支所有 v1.32 commit 已推到 https://github.com/Paradeluxe/Mentor-md
+- commit 109858b 这次新加 examples/ + screenshot.png
+- 之前 11 个 v1.32 commits (CSS 边框 / +-按钮删除 / ?号修复 等)
+
+删除 Paradeluxe/Mentor 后, GitHub 上只保留 Paradeluxe/Mentor-md 一个仓库.
