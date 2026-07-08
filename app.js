@@ -2133,11 +2133,8 @@ function renderCommentList() {
         <div class="comment-quote" data-thread="${thread.threadId}" title="点击收起/展开批注">
           <span class="comment-number-badge" data-number="${number}" title="批注 #${number}">${number}</span>
           <span class="comment-quote-text">${escapeHtml((thread.text || '').slice(0, 200))}${(thread.text || '').length > 200 ? '…' : ''}</span>
-          ${thread.resolved ? `<span class="comment-resolved-badge">✓ 已解决${thread.resolvedAt ? ' · ' + formatTime(thread.resolvedAt) : ''}</span>` : ''}
           <!-- v3: 解决按钮在折叠状态下显示在 header, 展开状态下显示在 form-actions 底部 -->
           <button class="comment-resolve-btn comment-resolve-btn--header ${thread.resolved ? 'is-resolved' : ''}" data-act="resolve" data-thread="${thread.threadId}" title="${thread.resolved ? '重新打开此批注' : '标记为已解决'}" aria-label="${thread.resolved ? '重新打开' : '标记为已解决'}">${thread.resolved ? '↺' : '✓'}</button>
-          <!-- v6: 抽屉折叠/展开按钮 (SVG icon, 通过 ::before 渲染 - / +) -->
-          <button class="comment-collapse-btn ${isCollapsed ? 'is-collapsed' : ''}" data-act="toggle-collapse" data-thread="${thread.threadId}" title="${isCollapsed ? '展开批注' : '收起批注'}" aria-label="${isCollapsed ? '展开' : '收起'}"></button>
           <button class="comment-menu-btn" data-act="toggle-menu" data-thread="${thread.threadId}" title="更多操作" aria-label="更多操作">⋯</button>
         </div>
         <!-- ⋯ 弹窗菜单 (默认 hidden) — v6: SVG icons, 不用 emoji -->
@@ -2248,26 +2245,6 @@ function renderCommentList() {
       closeAllCommentMenus();
     });
   });
-  // v4: 抽屉折叠/展开按钮 (手动)
-  list.querySelectorAll('[data-act="toggle-collapse"]').forEach(btn => {
-    btn.addEventListener('click', e => {
-      e.stopPropagation();
-      const tid = btn.dataset.thread;
-      // 切换 manuallyCollapsedIds 状态
-      if (State.manuallyCollapsedIds[tid]) {
-        delete State.manuallyCollapsedIds[tid];
-      } else {
-        State.manuallyCollapsedIds[tid] = true;
-      }
-      // 解决后自动折叠: 如果是手动展开 resolved 卡片, 也清掉 expandedThreadIds (否则会冲突)
-      const thread = State.annotations.find(t => t.threadId === tid);
-      if (thread?.resolved && State.expandedThreadIds?.[tid]) {
-        delete State.expandedThreadIds[tid];
-      }
-      closeAllCommentMenus();
-      renderCommentList();
-    });
-  });
   list.querySelectorAll('[data-act="delete"]').forEach(btn => {
     btn.addEventListener('click', e => {
       e.stopPropagation();
@@ -2360,16 +2337,28 @@ document.addEventListener('mousedown', e => {
   }
 });
 
-// v6: 标题区域 click → 折叠/展开 (用户要求)
+// v17: 标题区域 click → 折叠/展开
+// 已解决卡片 isCollapsed = resolved && !expandedThreadIds[tid], 手动折叠任意卡也是 collapsed
+// 解决"打不开" bug: 点已解决卡 → 总是设 expandedThreadIds[tid]=true; 点未解决卡 → toggle manuallyCollapsedIds
 function toggleManualCollapse(tid) {
-  if (State.manuallyCollapsedIds[tid]) {
+  const thread = State.annotations.find(t => t.threadId === tid);
+  if (thread?.resolved) {
+    // 已解决: toggle expandedThreadIds (确保"打不开"修复)
+    if (!State.expandedThreadIds) State.expandedThreadIds = {};
+    if (State.expandedThreadIds[tid]) {
+      delete State.expandedThreadIds[tid];
+    } else {
+      State.expandedThreadIds[tid] = true;
+    }
+    // 同步清掉 manuallyCollapsedIds (避免冲突)
     delete State.manuallyCollapsedIds[tid];
   } else {
-    State.manuallyCollapsedIds[tid] = true;
-  }
-  const thread = State.annotations.find(t => t.threadId === tid);
-  if (thread?.resolved && State.expandedThreadIds?.[tid]) {
-    delete State.expandedThreadIds[tid];
+    // 未解决: toggle manuallyCollapsedIds
+    if (State.manuallyCollapsedIds[tid]) {
+      delete State.manuallyCollapsedIds[tid];
+    } else {
+      State.manuallyCollapsedIds[tid] = true;
+    }
   }
 }
 

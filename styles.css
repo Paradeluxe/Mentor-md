@@ -1487,38 +1487,18 @@ body.file-pane-collapsed #file-pane {
   -webkit-mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M3 6h18'/><path d='M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6'/><path d='M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2'/><path d='M10 11v6'/><path d='M14 11v6'/></svg>");
   mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M3 6h18'/><path d='M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6'/><path d='M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2'/><path d='M10 11v6'/><path d='M14 11v6'/></svg>");
 }
-/* 折叠按钮 (也用 SVG mask, 替换 + / − 字符) */
-.comment-collapse-btn {
-  -webkit-mask-repeat: no-repeat;
-  mask-repeat: no-repeat;
-  -webkit-mask-position: center;
-  mask-position: center;
-  -webkit-mask-size: 14px 14px;
-  mask-size: 14px 14px;
-}
-.comment-collapse-btn::before {
-  content: '';
-  display: block;
-  width: 14px;
-  height: 14px;
-  background: currentColor;
-  -webkit-mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><path d='M5 12h14'/></svg>");
-  mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><path d='M5 12h14'/></svg>");
-}
-.comment-collapse-btn.is-collapsed::before {
-  -webkit-mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><path d='M5 12h14'/><path d='M12 5v14'/></svg>");
-  mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><path d='M5 12h14'/><path d='M12 5v14'/></svg>");
-}
+/* v1.32: 删除 .comment-collapse-btn CSS 块 (SVG mask + ::before/::after)
+   +-折叠按钮 DOM/handler 已删 (用户表态'不必要'), CSS 一并清理不再用.
+   v1.30 纪律: 不要保留 dead CSS, 跟 dead element 一齐删.
+*/
+/* (v1.31 折叠按钮 CSS 块删除) */
 
 /* P-card: 解决后卡片折叠 (Word 风格) — 只显示 header, body-wrap 隐藏 */
 .comment-thread.is-collapsed .comment-body-wrap {
   display: none;
 }
-/* 折叠卡片: 不再 hover 显示 '点击展开' 文字
-   v1.32: 用户截图反馈 4 个字跟 quote 文字重叠, 视觉'糊在一起'.
-   v1.16 折叠态极简纪律 = 只显示 quote 文字 + +折叠按钮 + ⋯ 菜单, 不加任何 hover 提示
-   用户已知道点哪个区域展开 (整张卡 = 折叠按钮) */
-/* v1.32: 删除 .comment-thread.is-collapsed .comment-quote::after 块 */
+/* v1.32: 折叠态已不显示 '点击展开' hover 文字 (commit 6d606f3)
+   用户已无需 hover tooltip: quote 区域点击折叠/展开 (v1.17), 已够用 */
 
 /* P-card: 已解决徽章 (在 quote 行内, 折叠时也可见)
    颜色用 #1f8a65 绿色 (--resolved 是灰色用于 mark/fade, 不能复用) */
@@ -1730,7 +1710,7 @@ body.file-pane-collapsed #file-pane {
 .comment-quote .comment-resolve-btn--header { display: none; }
 /* 折叠状态: form-actions 内隐藏 (按钮 + textarea 都被 body-wrap 隐藏); header 内显示 */
 .comment-thread.is-collapsed .comment-reply-form .comment-resolve-btn { display: none; }
-/* v4: 抽屉折叠态时也藏 header 解决按钮 (用户要求: 收起时只保留 quote + 折叠按钮) */
+/* v1.32: 折叠态藏 header 解决按钮 — 折叠时只保留 quote (没有 +-按钮了, v1.31 删) */
 .comment-thread.is-collapsed .comment-quote .comment-resolve-btn--header { display: none; }
 .comment-reply-form .form-actions .comment-resolve-btn {
   font-weight: 500;
@@ -1752,36 +1732,11 @@ body.file-pane-collapsed #file-pane {
   color: #fff;
   border-color: var(--success);
 }
-/* v4: 抽屉折叠/展开按钮 (docx 风格 ▾/▸) */
-.comment-collapse-btn {
-  flex: 0 0 auto;
-  width: 22px;
-  height: 22px;
-  border: none;
-  background: transparent;
-  color: var(--text-3);
-  font-size: 0;  /* v6: 隐藏空字符, 让 ::before SVG 渲染 */
-  line-height: 0;
-  cursor: pointer;
-  border-radius: 4px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  margin: -2px 0 0 0;
-  opacity: 1;
-  transition: background 0.12s, color 0.12s, opacity 0.12s;
-  flex-shrink: 0;
-  user-select: none;
-  padding: 0;
-}
-.comment-collapse-btn:hover {
-  background: var(--panel-3);
-  color: var(--text);
-}
-.comment-collapse-btn.is-collapsed {
-  color: var(--accent);
-  opacity: 0.8;
-}
+/* v1.32: 删除 .comment-collapse-btn 主样式块 (docx 风格 22×22 + hover background + .is-collapsed 颜色)
+   +-折叠按钮 DOM/handler 已删 (用户表态'不必要'), CSS 一并清理不再用.
+   v1.30 纪律: 不要保留 dead CSS, 跟 dead element 一齐删.
+*/
+/* (v1.31 折叠按钮 docx 风格 CSS 块删除) */
 .comment-quote .comment-resolve-btn--header {
   flex: 0 0 auto;
   width: 22px;
