@@ -4440,7 +4440,8 @@ function updateToolbarState() {
       e.preventDefault();
     }
     // ? 键 (Shift+/) 切换 (但不能在输入框/可编辑元素中触发)
-    if ((e.key === '?' || (e.key === '/' && e.shiftKey)) && !isHelpOpen()) {
+    // v1.32 修复: 去掉 !isHelpOpen() 守卫, toggleHelp 自己判断开/关, 否则按第二次不关闭
+    if (e.key === '?' || (e.key === '/' && e.shiftKey)) {
       const tag = (e.target?.tagName || '').toLowerCase();
       const isEditable = e.target?.isContentEditable || tag === 'input' || tag === 'textarea';
       if (!isEditable) {
