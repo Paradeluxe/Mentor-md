@@ -998,20 +998,57 @@ body.file-pane-collapsed #file-pane {
 .tiptap a:hover { text-decoration-color: var(--accent); }
 .tiptap img { max-width: 100%; border-radius: 6px; }
 .tiptap hr { border: none; border-top: 1px solid var(--border-warm); margin: 1.5em 0; }
-/* 上/下标: 编辑器内视觉微调 (浏览器 default sup/sub 已经偏移, 这里只补字号) */
-.tiptap sup, .tiptap sub { font-size: 0.75em; line-height: 0; }
-.tiptap sup { vertical-align: super; }
-.tiptap sub { vertical-align: sub; }
+/* 上/下标 — v9: 浏览器默认 vertical-align: super (自然上浮, 不脱离 inline 流) */
+.tiptap sup, .tiptap sub { font-size: 0.75em; }
+.tiptap sup { vertical-align: super; line-height: 0; }
+.tiptap sub { vertical-align: sub; line-height: 0; }
 
-/* 批注 mark 高亮 (保留暖黄) */
+/* 批注 mark 高亮 — v9: 极弱化, 跨段视觉合并 (避免 "4 个独立标志" 错觉)
+   只保留 1px 灰色下划线 + 极浅 hover/active 反馈, 让多段 mark 看起来"贯穿"而不是"分块" */
 .tiptap .annotation-mark {
-  background: var(--highlight);
-  border-bottom: 2px solid #f59e0b;
+  background: transparent;
+  border-bottom: 1px dashed var(--text-3);
   cursor: pointer;
-  transition: background 0.15s;
+  transition: background 0.15s, border-color 0.15s;
+  border-radius: 0;
 }
-.tiptap .annotation-mark:hover { background: #fde68a; }
-.tiptap .annotation-mark.is-active { background: var(--highlight-active); }
+/* v8-fix: sup/sub 是 mark 的父 (selection 跨 sup 时 mark 在 sup 内), 必须重置 author-color 覆盖
+   关键: .tiptap sup .annotation-mark 特异性 (0,3,0) 等于 .tiptap .annotation-mark[data-author-color="X"] (0,3,0)
+   必须用更具体的 selector 或 !important 覆盖 (author-color 8 个值都要清掉) */
+.tiptap sup .annotation-mark,
+.tiptap sub .annotation-mark,
+.tiptap sup .annotation-mark[data-author-color="0"],
+.tiptap sup .annotation-mark[data-author-color="1"],
+.tiptap sup .annotation-mark[data-author-color="2"],
+.tiptap sup .annotation-mark[data-author-color="3"],
+.tiptap sup .annotation-mark[data-author-color="4"],
+.tiptap sup .annotation-mark[data-author-color="5"],
+.tiptap sup .annotation-mark[data-author-color="6"],
+.tiptap sup .annotation-mark[data-author-color="7"],
+.tiptap sub .annotation-mark[data-author-color="0"],
+.tiptap sub .annotation-mark[data-author-color="1"],
+.tiptap sub .annotation-mark[data-author-color="2"],
+.tiptap sub .annotation-mark[data-author-color="3"],
+.tiptap sub .annotation-mark[data-author-color="4"],
+.tiptap sub .annotation-mark[data-author-color="5"],
+.tiptap sub .annotation-mark[data-author-color="6"],
+.tiptap sub .annotation-mark[data-author-color="7"] {
+  border-bottom: 0 !important;
+  background: transparent !important;
+  display: inline;
+  padding: 0;
+}
+.tiptap .annotation-mark sup,
+.tiptap .annotation-mark sub {
+  border-bottom: 0;
+  background: inherit;
+}
+.tiptap .annotation-mark:hover {
+  background: var(--highlight);
+}
+.tiptap .annotation-mark.is-active {
+  background: var(--highlight-active);
+}
 
 /* P-D10: mark 颜色按 author 8 色分配 (Word docx 一致)
    authorColor 0-7, 8 种颜色循环, 同 author 同色
@@ -1036,58 +1073,13 @@ body.file-pane-collapsed #file-pane {
 .tiptap .annotation-mark[data-author-color="4"].is-active { background: #fcd34d; }
 .tiptap .annotation-mark[data-author-color="5"].is-active { background: #c4b5fd; }
 .tiptap .annotation-mark[data-author-color="6"].is-active { background: #f9a8d4; }
-.tiptap .annotation-mark[data-author-color="7"].is-active { background: #67e8f9; }
-.tiptap .annotation-mark.is-resolved { background: var(--resolved); border-bottom-color: var(--text-3); opacity: 0.7; }
+.annotation-mark:hover { background: #fde68a; }
+.tiptap .annotation-mark.is-active { background: var(--highlight-active); }
 
-/* P-mark: 批注 mark 旁边的小气泡 (CSS 伪元素方案, 不依赖 widget decoration)
-   视觉: mark 末尾 ::after 生成一个小圆点 (💬 文字 emoji), 14×14 圆角方块
-   不可点击 (因为伪元素无 JS), 但视觉上跟 mark 一起移动 — 跟 Word 类似 */
-.annotation-mark {
-  position: relative;  /* 让 ::after 绝对定位以 mark 为锚 */
-}
-.annotation-mark::after {
-  content: "💬";
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 16px;
-  height: 16px;
-  margin: 0 0 0 4px;
-  background: var(--accent, #f54e00);
-  color: #fff;
-  font-size: 9px;
-  line-height: 1;
-  border-radius: 4px;
-  cursor: help;
-  user-select: none;
-  vertical-align: -2px;
-  transform: translateY(-1px);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
-  position: relative;
-  z-index: 1;
-  /* 不让浏览器选区选中气泡 */
-  -webkit-user-select: none;
-  user-select: none;
-  transition: transform 0.12s, background 0.12s, opacity 0.12s;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", sans-serif;
-}
-.annotation-mark:hover::after {
-  transform: translateY(-1px) scale(1.18);
-  background: #d94200;
-}
-/* Active (正在看这个 thread) — 用 accent 反色 (蓝底白字) */
-.annotation-mark.is-active::after {
-  background: var(--accent);
-  box-shadow: 0 0 0 2px var(--highlight-active, rgba(37, 99, 235, 0.25));
-}
-/* 解决后的气泡 — 灰底, 弱化 */
-.annotation-mark.is-resolved::after {
-  background: var(--resolved, #1f8a65);
-  opacity: 0.7;
-}
-.annotation-mark.is-resolved:hover::after {
-  opacity: 1;
-}
+/* v10-fix: 删除 .annotation-mark::after (每个 mark 都生成 💬 气泡) — 改用 AnnotationBubblePlugin widget
+   (plugin 内部用 seenThreads 去重, 同 threadId 只一个气泡).
+   原 CSS ::after 方式在多段共享 threadId 时会产生 N 个气泡 ("4 个独立标志" 错觉). */
+/* 旧 ::after 状态变体保留 (无副作用, 不再生效) */
 
 /* 空编辑器提示 */
 .empty-hint { padding: 48px 24px; color: var(--text-2); text-align: center; }
@@ -1244,13 +1236,15 @@ body.file-pane-collapsed #file-pane {
 .comment-thread {
   background: var(--panel);
   position: relative;
-  border-left: 3px solid var(--comment-bg, #d4a017);
+  border-left: 3px solid transparent;  /* v20: 默认透明, 由状态 (active/resolved/fuzzy) 决定颜色 */
+  border-top: 1px solid var(--border-warm);
+  border-bottom: 1px solid var(--border-warm);
+  border-right: 1px solid var(--border-warm);
   border-radius: var(--rounded-md, 6px);
   margin: 0 0 10px 0;
   padding: 0;
   overflow: visible;
   transition: border-left-color 0.15s ease;
-  box-shadow: 0 0 0 1px var(--border-warm);
   cursor: pointer;
 }
 /* 序号 badge: 放 quote 行内左侧, 跟 quote 文字一起 flex, 不再 absolute 跟 ⋯ 抢位置 */
@@ -1264,7 +1258,7 @@ body.file-pane-collapsed #file-pane {
   justify-content: center;
   font-size: 10px;
   font-weight: 600;
-  color: var(--text-3);
+  color: var(--text-2);  /* v22: 跟 quote-text 颜色完全一致 (避免 "1" 和 quote 两种颜色错觉) */
   background: transparent;
   border-radius: 9px;
   user-select: none;
@@ -1279,21 +1273,48 @@ body.file-pane-collapsed #file-pane {
 .tiptap .annotation-mark.is-hover { background: #fde68a; }
 .comment-thread.is-active {
   border-left-color: var(--accent);
-  box-shadow: 0 0 0 1px var(--accent);
+  /* v20: 不再用 box-shadow 包整个卡片 — 改成只描左边的边线, 避免 active 状态下"四边橙色" */
+  box-shadow: 0 0 0 0 transparent, inset 3px 0 0 0 var(--accent);
 }
+/* v20: 已解决 + active: 优先级已解决 > active (稳定状态) */
+.comment-thread.is-resolved.is-active {
+  border-left-color: var(--success);
+  box-shadow: 0 0 0 0 transparent, inset 3px 0 0 0 var(--success);
+}
+/* v19: 已解决 mark - 绿色标识 (替代默认橙色/灰色, 视觉上一眼看出已解决)
+   替代 line-through, 改用绿色淡化 + 绿色下划线 */
+.tiptap .annotation-mark.is-resolved {
+  background: rgba(31, 138, 101, 0.08);
+  border-bottom: 1px dashed var(--success);
+  opacity: 0.7;
+}
+.tiptap .annotation-mark.is-resolved:hover {
+  background: rgba(31, 138, 101, 0.15);
+  opacity: 0.95;
+}
+/* v19: 已解决卡片左边框 + 整体淡绿, 替代灰色 + line-through */
 .comment-thread.is-resolved {
-  background: var(--panel-2);
-  border-left-color: var(--resolved);
-  opacity: 0.78;
+  background: rgba(31, 138, 101, 0.03);
+  border-left-color: var(--success);
+  opacity: 0.85;
 }
-.comment-thread.is-resolved:hover { opacity: 0.92; }
+.comment-thread.is-resolved:hover { opacity: 1; }
+/* v19: 已解决卡内文字淡化 (不再用 line-through, 保留可读性) */
 .comment-thread.is-resolved .comment-body,
 .comment-thread.is-resolved .comment-quote-text {
-  text-decoration: line-through;
-  text-decoration-color: var(--text-3);
-  text-decoration-thickness: 1px;
+  color: var(--text-2);
 }
 .comment-thread.is-fuzzy {
+  border-left-color: var(--warning);
+}
+
+.comment-thread.is-active .comment-quote {
+  border-left-color: var(--accent);  /* 跟外层 active 同色, 避免两种 */
+}
+.comment-thread.is-resolved .comment-quote {
+  border-left-color: var(--success);  /* 跟外层 resolved 同色, 避免绿+橙 */
+}
+.comment-thread.is-fuzzy .comment-quote {
   border-left-color: var(--warning);
 }
 
@@ -1311,16 +1332,18 @@ body.file-pane-collapsed #file-pane {
   color: var(--warning);
 }
 
-/* Quote (批注引用条) — 极简文档式: 浅灰底 + 左侧细 accent 边, 不再用 #fff8e1 黄色块 */
+/* Quote (批注引用条) — 极简文档式: 浅灰底 + 左侧细边, 边色跟卡片状态走 (active=橙, resolved=绿, 默认=warn-medium)
+   不再硬编码 accent, 避免跟外层卡片 active/resolved 状态冲突出现 "两种左边框颜色" */
 .comment-quote {
   display: flex;
   align-items: flex-start;
   gap: 8px;
   padding: 8px 12px 8px 14px;
   background: var(--panel-2);  /* 极浅灰, 不抢视觉 */
-  border-left: 2px solid var(--accent);
+  border-left: 2px solid var(--border-warm-medium);  /* 默认: 中性, 不跟外层 accent 抢 */
   border-bottom: 1px solid var(--border-warm);
   position: relative;
+  transition: border-left-color 0.12s;
   cursor: pointer;
   transition: background 0.12s;
 }
@@ -1511,55 +1534,43 @@ body.file-pane-collapsed #file-pane {
 
 /* P-card: 已解决徽章 (在 quote 行内, 折叠时也可见)
    颜色用 #1f8a65 绿色 (--resolved 是灰色用于 mark/fade, 不能复用) */
-.comment-resolved-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  font-size: 10.5px;
-  font-weight: 600;
-  color: #1f8a65;  /* 绿色文字 — 显式不用 var(--resolved) 那个灰色 */
-  background: rgba(31, 138, 101, 0.1);
-  padding: 2px 7px;
-  border-radius: 999px;
-  margin: 0 6px 0 0;
-  letter-spacing: 0.02em;
-  line-height: 1.3;
-  flex-shrink: 0;
-  user-select: none;
-}
-/* 折叠时也保持徽章可见 (跟 quote-text 同一行) */
-.comment-thread.is-collapsed .comment-resolved-badge {
-  margin-left: 0;
-}
+// v20: 已解决徽章删除 - 不再在 quote 行显示 "✓ 已解决" 大块标签
+// 改为: mark 绿色虚线 + 卡片绿色左边框 + ↺ 按钮 (自己表达"已解决/重新打开")
+// 原因: 之前徽章太大 + 跟 quote-text 同行 + 跟 ↺ 按钮挤在一起, 用户感觉"挡标题"
+.comment-resolved-badge { display: none !important; }
 
-/* Comment item (single comment in thread) */
+/* v14: Comment item (主批注) - docx/GitHub 风格
+   参考: GitHub primer + CSS-Tricks "Styling Comment Threads" 2020
+   - avatar 圆形 28px (适中, 不过大)
+   - padding 14-16px (宽松但不松散)
+   - 不画大背景, 靠 border + 留白区分
+   - body 跟 avatar 左对齐 (padding-left = avatar width + gap)
+   - 行距 1.5 (紧凑可读) */
 .comment-item {
-  padding: 10px 14px 12px;
+  padding: 14px 16px;
   letter-spacing: 0.01px;
 }
 .comment-item + .comment-item {
   border-top: 1px solid var(--border-warm);
 }
-.comment-item + .comment-reply {
-  border-top: 1px solid var(--border-warm);
-}
 
-/* Meta line: avatar + name + time, tightly packed */
+/* v16: Meta (avatar + name + time) — 间距统一
+   - 用 padding-top 4px + padding-bottom 0 让 avatar 和文字垂直居中
+   - margin-bottom 4px (主批注和 reply 一致)
+   - 不再用 min-height (让自然高度, 避免和 reply 视觉差距) */
 .comment-meta {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   margin-bottom: 4px;
-  min-height: 20px;
 }
-/* Avatar — 缩到 18px, 紧凑布局 */
+/* Avatar — 28px 圆形, docx 风格 (适中, 不像 18 太小不像 40 太大) */
 .comment-avatar {
-  width: 18px;
-  height: 18px;
+  width: 28px;
+  height: 28px;
   border-radius: 50%;
-  /* background 由 inline style 注入 (hash → palette 之一) */
   color: var(--panel);
-  font-size: 9.5px;
+  font-size: 11px;
   font-weight: 600;
   display: inline-flex;
   align-items: center;
@@ -1568,52 +1579,80 @@ body.file-pane-collapsed #file-pane {
   letter-spacing: 0;
   line-height: 1;
   user-select: none;
-  box-shadow: 0 0 0 1px rgba(38, 37, 30, 0.06);
+  box-shadow: 0 0 0 1px rgba(38, 37, 30, 0.08);
 }
 .comment-author {
   font-weight: 600;
   color: var(--text);
-  font-size: 12px;
-  letter-spacing: 0.02px;
-  line-height: 1;
-  max-width: 150px;  /* 防止长名字挤压时间戳 */
+  font-size: 13px;
+  letter-spacing: 0.01px;
+  line-height: 1.2;
+  max-width: 150px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .comment-time {
-  font-size: 10.5px;
+  font-size: 11px;
   color: var(--text-3);
   margin-left: auto;
   font-feature-settings: "tnum" 1;
   letter-spacing: 0;
   white-space: nowrap;
 }
+/* Body — 缩进到 avatar 右边 (28 + 8 gap = 36), 行距 1.5 */
 .comment-body {
   color: var(--text);
   white-space: pre-wrap;
   word-wrap: break-word;
-  font-size: 12.5px;
-  line-height: 1.6;
+  font-size: 13px;
+  line-height: 1.5;
+  padding-left: 36px;
+  letter-spacing: 0.005em;
 }
 
-/* Reply: 缩进 16px, 浅灰底区分, 极简 */
+/* v15: Reply - docx 风格对齐: 左边界跟主批注 avatar 左对齐 (而不是缩进到中间)
+   - reply 跟主批注垂直对齐 (看上去是 thread 的延续)
+   - 左边框 2px 作为层次指示器 (CSS-Tricks 推荐)
+   - reply 之间靠 border-top 1px 细线分隔
+   - 无背景色, 靠 padding 区分 */
 .comment-reply {
-  padding: 7px 10px 7px 16px;
-  margin: 4px 10px 4px 16px;
+  padding: 10px 14px 10px 14px;
+  margin: 0 0 0 0;
   border-left: 2px solid var(--border-warm-medium);
-  background: rgba(38, 37, 30, 0.025);
-  border-radius: 0 4px 4px 0;
   position: relative;
+  transition: border-color 0.12s;
 }
-.comment-reply + .comment-reply { margin-top: -2px; }  /* 连续 reply 紧贴 */
-.comment-reply:last-child { margin-bottom: 8px; }
-/* 去掉重复的 ::before 装饰 — 已有左 border */
-.comment-reply .comment-meta { margin-bottom: 4px; }
+.comment-reply:hover {
+  border-left-color: var(--accent);
+}
+.comment-reply + .comment-reply {
+  margin-top: 0;
+  border-top: 1px solid var(--border-warm);
+}
+/* Reply 内的 avatar 22px (层级缩放) */
+.comment-reply .comment-avatar {
+  width: 22px;
+  height: 22px;
+  font-size: 9.5px;
+}
+/* Reply author 字号略小 */
+.comment-reply .comment-author { font-size: 12.5px; }
+.comment-reply .comment-author::before {
+  content: "回复 ";
+  font-size: 10.5px;
+  color: var(--text-3);
+  font-weight: 400;
+  font-style: italic;
+}
+/* Reply body — 缩进 22 + 8 = 30, 跟主批注 body 对齐 */
 .comment-reply .comment-body {
-  font-size: 12px;
-  line-height: 1.55;
+  padding-left: 30px;
+  font-size: 12.5px;
+  line-height: 1.5;
 }
+/* v16: Reply meta 间距与主批注统一 */
+.comment-reply .comment-meta { margin-bottom: 4px; gap: 6px; }
 
 /* Reply-toggle details — "↳ 回复" expander */
 .comment-thread .reply-toggle {
@@ -1643,9 +1682,11 @@ body.file-pane-collapsed #file-pane {
 }
 
 /* Reply form: textarea + submit inline */
+/* v13: reply-form 跟上方 reply 区域清晰分隔 — 上下留白 + 顶部 1px 分隔线 */
 .comment-reply-form {
-  margin: 6px 14px 10px;
-  padding: 0;
+  margin: 14px 14px 12px;
+  padding: 12px 0 0;
+  border-top: 1px solid var(--border-warm);
 }
 .comment-reply-form textarea {
   width: 100%;
