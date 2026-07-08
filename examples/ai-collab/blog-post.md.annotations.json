@@ -1,0 +1,84 @@
+{
+  "version": "1",
+  "document": "blog-post.md",
+  "updatedAt": "2026-06-21T16:40:00.000Z",
+  "author": "AI Reviewer (Lint)",
+  "annotations": [
+    {
+      "threadId": "ai-blog-001",
+      "text": "用 Git 五年后我才学会的 10 件事",
+      "resolved": false,
+      "createdAt": "2026-06-21T16:38:00.000Z",
+      "comments": [
+        {
+          "id": "ai-blog-001-c1",
+          "author": "AI Reviewer (Lint)",
+          "body": "📊 SEO 建议：标题含数字\"10\"对点击率有正向作用（BuzzSumo 数据：list 帖子平均分享数是普通帖子的 2x）。保持。但可考虑加更具体的副标题提升搜索匹配度，例如\"Git 老手避坑指南：从 add . 到 rebase -i\"。",
+          "createdAt": "2026-06-21T16:38:00.000Z"
+        }
+      ]
+    },
+    {
+      "threadId": "ai-blog-002",
+      "text": "不要写\"update\"、\"fix\"、\"改了点东西\"",
+      "resolved": false,
+      "createdAt": "2026-06-21T16:38:30.000Z",
+      "comments": [
+        {
+          "id": "ai-blog-002-c1",
+          "author": "AI Reviewer (Lint)",
+          "body": "✅ 拼写检查：通过。注意\"中英文标点混用\"：本文中文用全角标点（，。、）保持一致，全文无半角逗号错误。建议继续。",
+          "createdAt": "2026-06-21T16:38:30.000Z"
+        }
+      ]
+    },
+    {
+      "threadId": "ai-blog-003",
+      "text": "频繁的小 commit 容易回滚、容易 code review、容易 bisect",
+      "resolved": false,
+      "createdAt": "2026-06-21T16:39:00.000Z",
+      "comments": [
+        {
+          "id": "ai-blog-003-c1",
+          "author": "AI Reviewer (Lint)",
+          "body": "🎯 风格建议：\"bisect\"对非 Git 高手读者可能陌生。考虑加一句简短解释（\"git bisect 是二分查找定位 bug 的命令\"），或者链接到外部文档。降低新手读者的认知负担。",
+          "createdAt": "2026-06-21T16:39:00.000Z"
+        },
+        {
+          "id": "ai-blog-003-c2",
+          "author": "Blog 作者",
+          "body": "同意。已经在第 9 节详细解释了 bisect。可以把这里的\"bisect\"标记为向后引用。",
+          "createdAt": "2026-06-21T16:39:30.000Z"
+        }
+      ]
+    },
+    {
+      "threadId": "ai-blog-004",
+      "text": "推荐格式：",
+      "resolved": false,
+      "createdAt": "2026-06-21T16:39:30.000Z",
+      "comments": [
+        {
+          "id": "ai-blog-004-c1",
+          "author": "AI Reviewer (Lint)",
+          "body": "🛠️ 准确性建议：Conventional Commits（你这里说的格式）的规范还包括 footer（BREAKING CHANGE、Refs #123）。建议补充完整例子，避免读者只学半套。例如 `feat(api): add login endpoint\\n\\nImplements OAuth2 flow.\\n\\nRefs #456`",
+          "createdAt": "2026-06-21T16:39:30.000Z"
+        }
+      ]
+    },
+    {
+      "threadId": "ai-blog-005",
+      "text": "Git 是工具，习惯才是核心",
+      "resolved": false,
+      "createdAt": "2026-06-21T16:40:00.000Z",
+      "comments": [
+        {
+          "id": "ai-blog-005-c1",
+          "author": "AI Reviewer (Lint)",
+          "body": "✨ 总结很好，但可以更强。建议结尾加一句呼吁行动（call-to-action）：例如\"今天就开始改你的第一个 commit message\"或\"把这篇文章分享给还在写 update 的同事\"。让读者有具体下一步。",
+          "createdAt": "2026-06-21T16:40:00.000Z"
+        }
+      ]
+    }
+  ]
+}

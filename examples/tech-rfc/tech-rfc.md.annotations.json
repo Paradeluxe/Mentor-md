@@ -1,0 +1,96 @@
+{
+  "version": "1",
+  "document": "tech-rfc.md",
+  "updatedAt": "2026-06-21T16:35:00.000Z",
+  "author": "李四 (Reviewer)",
+  "annotations": [
+    {
+      "threadId": "rfc-001",
+      "text": "引入基于文件哈希的增量构建缓存系统，目标将 CI 构建时间从平均 12 分钟降至 3 分钟",
+      "resolved": false,
+      "createdAt": "2026-06-21T16:32:00.000Z",
+      "comments": [
+        {
+          "id": "rfc-001-c1",
+          "author": "李四 (Reviewer)",
+          "body": "目标很好。但 12→3 分钟是理论值还是实测？应该附上 prototype 数据证明可行性。",
+          "createdAt": "2026-06-21T16:32:00.000Z"
+        },
+        {
+          "id": "rfc-001-c2",
+          "author": "王五 (Reviewer)",
+          "body": "建议补充：3 分钟是 P50 还是 P95？构建时间分布通常是长尾。",
+          "createdAt": "2026-06-21T16:33:00.000Z"
+        },
+        {
+          "id": "rfc-001-c3",
+          "author": "张三 (Author)",
+          "body": "3 分钟是 P50 估算，基于内部 5 个 repo 的回放测试。P95 约 6 分钟。会在下一版附测试数据。",
+          "createdAt": "2026-06-21T16:34:00.000Z"
+        }
+      ]
+    },
+    {
+      "threadId": "rfc-002",
+      "text": "cache_key",
+      "resolved": false,
+      "createdAt": "2026-06-21T16:33:00.000Z",
+      "comments": [
+        {
+          "id": "rfc-002-c1",
+          "author": "赵六 (Reviewer)",
+          "body": "environment_fingerprint 包含什么？操作系统、Node 版本、还是更多？建议明确列出，避免环境差异导致误判 cache miss。原文是 sha256(toolchain_version || file_content_hash || build_flags || environment_fingerprint)。",
+          "createdAt": "2026-06-21T16:33:00.000Z"
+        }
+      ]
+    },
+    {
+      "threadId": "rfc-003",
+      "text": "30 天（自动清理）",
+      "resolved": false,
+      "createdAt": "2026-06-21T16:33:30.000Z",
+      "comments": [
+        {
+          "id": "rfc-003-c1",
+          "author": "李四 (Reviewer)",
+          "body": "30 天 TTL 可能太短。考虑 main 分支的 cache 应该永久保留，只清理 feature 分支的过期 cache。",
+          "createdAt": "2026-06-21T16:33:30.000Z"
+        }
+      ]
+    },
+    {
+      "threadId": "rfc-004",
+      "text": "预期节省 75% 构建时间（12min → 3min）",
+      "resolved": true,
+      "createdAt": "2026-06-21T16:34:00.000Z",
+      "comments": [
+        {
+          "id": "rfc-004-c1",
+          "author": "王五 (Reviewer)",
+          "body": "75% 是 hot cache 假设。如果 PR 改动大文件，cache miss，节省就少。需要 cold start 的 fallback。",
+          "createdAt": "2026-06-21T16:34:00.000Z"
+        },
+        {
+          "id": "rfc-004-c2",
+          "author": "张三 (Author)",
+          "body": "已在 Phase 1 计划里加 fallback：cold start 时并行 partial cache（只缓存未改动的 sub-project）。",
+          "createdAt": "2026-06-21T16:34:30.000Z"
+        }
+      ]
+    },
+    {
+      "threadId": "rfc-005",
+      "text": "需要迁移到 Bazel，迁移成本远超本 RFC 范围",
+      "resolved": false,
+      "createdAt": "2026-06-21T16:35:00.000Z",
+      "comments": [
+        {
+          "id": "rfc-005-c1",
+          "author": "赵六 (Reviewer)",
+          "body": "短期方案 OK。但建议在 Roadmap 里加一条：1 年内评估 Bazel 迁移，避免技术债积累。",
+          "createdAt": "2026-06-21T16:35:00.000Z"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,138 @@
+{
+  "version": "1",
+  "document": "paper-draft.md",
+  "updatedAt": "2026-06-21T16:30:00.000Z",
+  "author": "导师 (Reviewer)",
+  "annotations": [
+    {
+      "threadId": "paper-001",
+      "text": "本研究使用功能磁共振成像（fMRI）考察短时记忆容量随年龄的变化及其神经基础",
+      "resolved": false,
+      "createdAt": "2026-06-21T16:25:00.000Z",
+      "comments": [
+        {
+          "id": "paper-001-c1",
+          "author": "导师 (Reviewer)",
+          "body": "摘要需要更明确的研究问题。建议改为：本研究旨在回答两个核心问题：(1) WM 老化是否伴随 DLPFC 激活减弱？(2) 是否存在补偿性神经机制？",
+          "createdAt": "2026-06-21T16:25:00.000Z"
+        },
+        {
+          "id": "paper-001-c2",
+          "author": "学生 (Author)",
+          "body": "已修改，新增了具体研究问题。是否需要在摘要里就说明样本量？",
+          "createdAt": "2026-06-21T16:27:00.000Z"
+        },
+        {
+          "id": "paper-001-c3",
+          "author": "导师 (Reviewer)",
+          "body": "不用，摘要保持简洁。样本量在方法部分说明即可。",
+          "createdAt": "2026-06-21T16:28:00.000Z"
+        }
+      ]
+    },
+    {
+      "threadId": "paper-002",
+      "text": "工作记忆（Working Memory, WM）是认知功能的核心组成部分",
+      "resolved": false,
+      "createdAt": "2026-06-21T16:26:00.000Z",
+      "comments": [
+        {
+          "id": "paper-002-c1",
+          "author": "导师 (Reviewer)",
+          "body": "这里缺少关键引用。建议补充 Baddeley (2000) 多成分模型和 Miyake (2000) 统一/分离理论。这是 WM 领域的奠基性工作。",
+          "createdAt": "2026-06-21T16:26:00.000Z"
+        }
+      ]
+    },
+    {
+      "threadId": "paper-003",
+      "text": "n-back 任务",
+      "resolved": false,
+      "createdAt": "2026-06-21T16:26:30.000Z",
+      "comments": [
+        {
+          "id": "paper-003-c1",
+          "author": "导师 (Reviewer)",
+          "body": "n-back 范式的原始引用（Kirchner, 1958; Owen et al., 2005）需要加上，方便读者理解任务设计。",
+          "createdAt": "2026-06-21T16:26:30.000Z"
+        }
+      ]
+    },
+    {
+      "threadId": "paper-004",
+      "text": "所有被试均为右利手，无神经精神疾病史",
+      "resolved": true,
+      "createdAt": "2026-06-21T16:27:00.000Z",
+      "comments": [
+        {
+          "id": "paper-004-c1",
+          "author": "导师 (Reviewer)",
+          "body": "还需补充：视力正常或矫正后正常（MRI 室要求）、无 MRI 禁忌（如金属植入物、幽闭恐惧症）。",
+          "createdAt": "2026-06-21T16:27:00.000Z"
+        },
+        {
+          "id": "paper-004-c2",
+          "author": "学生 (Author)",
+          "body": "已补充视力校正和 MRI 禁忌说明。",
+          "createdAt": "2026-06-21T16:28:00.000Z"
+        }
+      ]
+    },
+    {
+      "threadId": "paper-005",
+      "text": "经典 n-back 任务，0-back（基线）和 2-back（工作记忆）条件",
+      "resolved": false,
+      "createdAt": "2026-06-21T16:27:30.000Z",
+      "comments": [
+        {
+          "id": "paper-005-c1",
+          "author": "导师 (Reviewer)",
+          "body": "为什么只选 0-back 和 2-back？1-back 和 3-back 也常用于绘制负荷-表现曲线。建议在讨论局限性时说明，或补充完整负荷曲线数据。",
+          "createdAt": "2026-06-21T16:27:30.000Z"
+        }
+      ]
+    },
+    {
+      "threadId": "paper-006",
+      "text": "本研究结果支持工作记忆随年龄下降的假说",
+      "resolved": false,
+      "createdAt": "2026-06-21T16:28:30.000Z",
+      "comments": [
+        {
+          "id": "paper-006-c1",
+          "author": "导师 (Reviewer)",
+          "body": "讨论部分过于简单。需要：(1) 与近期 meta-analysis（如 Maillet & Rajah, 2014）比较；(2) 讨论 HAROLD 模型（半球不对称老化）；(3) CRUNCH 模型（代偿相关利用神经回路假说）。",
+          "createdAt": "2026-06-21T16:28:30.000Z"
+        }
+      ]
+    },
+    {
+      "threadId": "paper-007",
+      "text": "局限性：样本量较小（n=69）",
+      "resolved": false,
+      "createdAt": "2026-06-21T16:29:00.000Z",
+      "comments": [
+        {
+          "id": "paper-007-c1",
+          "author": "导师 (Reviewer)",
+          "body": "n=69 不算\"较小\"，青年 42 + 老年 27 是合理分布。建议改为：样本量限制了亚组分析的统计功效（特别是年龄 × 性别的交互作用）。",
+          "createdAt": "2026-06-21T16:29:00.000Z"
+        }
+      ]
+    },
+    {
+      "threadId": "paper-008",
+      "text": "对理解认知老化机制和早期干预有重要意义",
+      "resolved": false,
+      "createdAt": "2026-06-21T16:29:30.000Z",
+      "comments": [
+        {
+          "id": "paper-008-c1",
+          "author": "导师 (Reviewer)",
+          "body": "\"早期干预\"过于笼统。具体是什么干预？认知训练？药物？应给出至少一个方向，让结论更扎实。",
+          "createdAt": "2026-06-21T16:29:30.000Z"
+        }
+      ]
+    }
+  ]
+}
