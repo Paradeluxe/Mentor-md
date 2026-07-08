@@ -4,18 +4,32 @@
 
 一个 **WYSIWYG Markdown 编辑器**，右侧带 docx 风格批注侧栏，选区级批注、嵌套回复、解决/重新打开、侧车 JSON 存储。**纯前端单页**，无构建步骤，**双击 `index.html` 或起一个静态 server 即可用**。
 
-[![License: CC BY-NC-SA 4.0](https://img.shields.io/badge/License-CC%20BY--NC--SA%204.0-lightgrey.svg)](https://creativecommons.org/licenses/by-nc-sa/4.0/)
+[![License: Custom (Free for personal + small org, Commercial License required)](https://img.shields.io/badge/License-Custom%20%28source--available%29-blue.svg)](./LICENSE)
+[![License: Commercial available](https://img.shields.io/badge/Commercial-license%20required%20%3F-orange.svg)](#商用-license--commercial-license)
 [![GitHub stars](https://img.shields.io/github/stars/Paradeluxe/Mentor-md.svg)](https://github.com/Paradeluxe/Mentor-md/stargazers)
 [![GitHub forks](https://img.shields.io/github/forks/Paradeluxe/Mentor-md.svg)](https://github.com/Paradeluxe/Mentor-md/network/members)
 [![GitHub issues](https://img.shields.io/github/issues/Paradeluxe/Mentor-md.svg)](https://github.com/Paradeluxe/Mentor-md/issues)
 
 ![screenshot](screenshot.png)
 
-## 协议
+## 协议 / License
 
-本项目采用 **[CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/)**：开源，**禁止商用**，衍生作品须同协议 + 署名。
+本项目采用 **自定义 source-available 协议**（[LICENSE](./LICENSE)）：
 
-> ℹ️ CC 协议族面向文档/创作作品，对**代码项目**并不严格合规。如果你想做严肃开源软件协议切换，看 [LICENSE](./LICENSE) 文件末尾的提醒。
+- ✅ **免费用**: 个人 / 小团队（收入 < USD 1M 且 < 10 员工）/ 学术 / 非营利
+- ❌ **必须付费取得商业 license**: 商业产品集成 / SaaS 服务 / 大公司内部使用 / 客户项目
+- 💼 **商用授权**: 在 GitHub 开 issue 标签 `commercial-license`，或私聊 `Paradeluxe`
+
+---
+
+## 商用 License / Commercial License
+
+如果您的使用场景落入 [LICENSE](./LICENSE) 第 2 节"Restricted Uses"，请联系我们获取商业 License：
+
+- **GitHub**: 开 issue 标签 `commercial-license`
+- **回应时间**: 7 个工作日内
+- **费用区间**: USD $200 – $5,000（按公司规模 / 用途面议）
+- **包含**: 当前 + 过去 12 个月版本不限商用 + 6 个月 minor/patch 升级 + 优先 issue 响应
 
 ---
 
