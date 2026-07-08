@@ -1514,23 +1514,11 @@ body.file-pane-collapsed #file-pane {
 .comment-thread.is-collapsed .comment-body-wrap {
   display: none;
 }
-/* 折叠卡片: hover 显示提示 (可点击展开) */
-.comment-thread.is-collapsed .comment-quote::after {
-  content: "点击展开";
-  position: absolute;
-  right: 76px;  /* v4: 避开 + 折叠按钮 (22px) + ⋯ 按钮 (22px) + 间距 */
-  top: 50%;
-  transform: translateY(-50%);
-  font-size: 10.5px;
-  color: var(--text-3);
-  opacity: 0;
-  transition: opacity 0.15s;
-  pointer-events: none;
-  font-weight: 500;
-}
-.comment-thread.is-collapsed:hover .comment-quote::after {
-  opacity: 0.7;
-}
+/* 折叠卡片: 不再 hover 显示 '点击展开' 文字
+   v1.32: 用户截图反馈 4 个字跟 quote 文字重叠, 视觉'糊在一起'.
+   v1.16 折叠态极简纪律 = 只显示 quote 文字 + +折叠按钮 + ⋯ 菜单, 不加任何 hover 提示
+   用户已知道点哪个区域展开 (整张卡 = 折叠按钮) */
+/* v1.32: 删除 .comment-thread.is-collapsed .comment-quote::after 块 */
 
 /* P-card: 已解决徽章 (在 quote 行内, 折叠时也可见)
    颜色用 #1f8a65 绿色 (--resolved 是灰色用于 mark/fade, 不能复用) */
