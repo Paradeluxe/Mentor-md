@@ -338,7 +338,3 @@ pending.forEach(t => {
 ## 变更记录
 
 完整 changelog 见 [CHANGELOG.md](./CHANGELOG.md)（由 `git log --oneline` 自动生成 + 已完成的 feature 段落）。
-
-## 许可
-
-MIT — 自由使用、修改、分发。
