@@ -2825,7 +2825,7 @@ function pushHistory() {
   updateHistoryButtons();
 }
 
-// v1.37: 从 PM doc 物理扫描所有 annotation marks, 输出 [{threadId, from, to}]
+// F-media: 从 PM doc 物理扫描所有 annotation marks, 输出 [{threadId, from, to}]
 function snapshotAnnotationMarks() {
   const ed = State.editor;
   if (!ed) return [];
@@ -2843,7 +2843,6 @@ function snapshotAnnotationMarks() {
   });
   return result;
 }
-
 function undo() {
   if (State.history.past.length === 0) return false;
   // 1. 当前状态推入 future (给 redo 用) — 同时存 markSnapshot
@@ -3515,6 +3514,13 @@ async function openFromMentorHandle(fileHandle) {
   console.log('[F-media v1.36 handle fix] mediaFiles count=', Object.keys(mediaFiles || {}).length, 'mediaUrls count=', Object.keys(State.mediaUrls).length);
   await loadMarkdownIntoEditor(file.name, mdText, annotations);
   State.currentFile.handle = fileHandle;  // 写回原 .mentor 位置用
+  // v1.37: 检测 corrupt .mentor (markdown 引 blob URLs 但 zip 无 media/), 给用户 toast
+  const mediaCount = Object.keys(mediaFiles || {}).length;
+  const blobUrlCount = (mdText.match(/!\[[^\]]*\]\(blob:[^)]+\)/g) || []).length;
+  if (mediaCount === 0 && blobUrlCount > 0) {
+    showToast(`⚠ .mentor 损坏: ${blobUrlCount} 张图引用失效 (zip 无 media/). 用 Pandoc 重新 generate 文档`, 8000);
+    setStatus('图全部失效', `${blobUrlCount} 张图引用 blob: URL 失效 — 这份 .mentor 没有 media/ 子目录`);
+  }
   try {
     await HandleStore.putFile(file.name, fileHandle);
     await HandleStore.putLastFile(file.name);
@@ -3928,7 +3934,23 @@ async function readMentorZip(file) {
     const blob = await entry.async('blob');
     mediaFiles[name] = blob;
   }
-  return { mdText, annotations, mediaFiles };
+  // v1.37 fix: 检测 corrupt .mentor — content.md 含 blob: URL 但 zip 里没 media/* 时
+  // 真实症状: img.naturalWidth=0 (browser 找不到 blob) + State.mediaUrls 空
+  // 根因: 这份 .mentor 是在 v1.34 schema 推出之前存的, 或某条保存路径没把 blob 反查成相对路径
+  // (见 htmlToMarkdownMedia 第 2569-2574 行做反向 — 如果保存时 State.mediaUrls 误空, blob URL 直接落 markdown)
+  const blobUrlCount = (mdText.match(/!\[[^\]]*\]\(blob:[^)]+\)/g) || []).length;
+  const mediaKeysCount = Object.keys(mediaFiles).length;
+  if (blobUrlCount > 0) {
+    console.warn(`[readMentorZip] ⚠ 检测到 ${blobUrlCount} 张图用 blob: 引用 (来自之前 session, 当前已失效).`);
+    if (mediaKeysCount === 0) {
+      // 最严重: md 用 blob URL 但 zip 里没 media. 用户在远端机器/老版本设备生成的文件. 图全部丢失
+      console.warn(`[readMentorZip] ⚠ zip 里无 media/ 子目录, ${blobUrlCount} 张图永远无法显示. 这是 corrupt .mentor.`);
+      console.warn(`[readMentorZip] 建议: 用原始 .docx 通过 Pandoc 重新 generate (.mentor v2 schema) 或换另一工具.`);
+    } else {
+      console.log(`[readMentorZip] zip 含 ${mediaKeysCount} 个 media 文件但 mdText 没引用 → 这可能是新生成的 .mentor 但 markdown 用旧 blob URL`);
+    }
+  }
+  return { mdText, annotations, mediaFiles, _diag: { blobUrlCount, mediaKeysCount } };
 }
 
 // 打开 .mentor 包: 解压 → loadMarkdownIntoEditor → State.saveMode='mentor'
@@ -3948,13 +3970,18 @@ async function openFromMentorFile(file) {
   // 显示用名: 保留原 .mentor 文件名 (title bar / outline)
   const displayName = file.name;
   await loadMarkdownIntoEditor(displayName, mdText, annotations);
-  setStatus('已加载 .mentor 包', `${displayName} (Ctrl+S 下载 .mentor 副本)`);
-  updateDocMeta();
-  // 提示用户图片数量 (v2 才显示)
+  // v1.37 fix: 如果 zip 里没图但 markdown 引 blob URLs, 弹 toast 提醒用户这是 corrupt 文件
   const mediaCount = Object.keys(mediaFiles || {}).length;
-  if (mediaCount > 0) {
+  const blobUrlCount = (mdText.match(/!\[[^\]]*\]\(blob:[^)]+\)/g) || []).length;
+  if (mediaCount === 0 && blobUrlCount > 0) {
+    showToast(`⚠ .mentor 损坏: ${blobUrlCount} 张图引用失效 (zip 无 media/). 用 Pandoc 重新 generate 文档`, 8000);
+    setStatus('图全部失效', `${blobUrlCount} 张图引用 blob: URL 失效 — 这份 .mentor 没有 media/ 子目录`);
+  } else if (mediaCount > 0) {
     setStatus('已加载 .mentor 包', `${displayName} · ${mediaCount} 张图片 ✓`);
+  } else {
+    setStatus('已加载 .mentor 包', `${displayName} (Ctrl+S 下载 .mentor 副本)`);
   }
+  updateDocMeta();
   return { displayName, mdText, annotations };
 }
 
