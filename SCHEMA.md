@@ -1,18 +1,28 @@
-# Mentor .mentor Schema Spec v1
+# Mentor .mentor Schema Spec v2
 
-规范时间: 2026-07-08. 来源: tests/fixtures/*.mentor 现状 + app.js:1040-1076 实际写盘代码.
+规范时间: 2026-07-09. 来源: tests/fixtures/*.mentor 现状 + app.js:readMentorZip/buildMentorZipBlob 实际写盘代码.
+
+**v2 升级 (2026-07-09)**: 增加 `media/` 子目录支持, 解决 Pandoc 解 docx 生成的 `media/imageN.png` 引用在 .mentor 包里全部丢失的问题.
 
 ---
 
-## 文件容器
+## 文件容器 (v2)
 
 ```
 .mentor  =  ZIP (magic PK\x03\x04)
-            ├── content.md         (utf-8 markdown 原文, 必有)
-            └── annotations.json   (utf-8 JSON sidecar, 必有)
+            ├── content.md              (utf-8 markdown 原文, 必有)
+            ├── annotations.json        (utf-8 JSON sidecar, 必有)
+            └── media/                  (可选, v2 新增)
+                ├── image5.png
+                ├── image6.png
+                └── ...                  (Pandoc 解 docx 默认产物)
 ```
 
-ZIP 内 `content.md` + `annotations.json` 同名约定, 其他文件一律忽略. 任何带 BOM 的 utf-8 必须先 strip.
+**v1 → v2 兼容性**: v1 .mentor (无 media/) 仍可正常打开, `readMentorZip` 会返回 `mediaFiles: {}`. v2 写的 .mentor 在老版本打开会丢失图片 (老版本只解 md+ann, 不解 media/*).
+
+**content.md 中引用**: `![](media/image5.png)` — 打开时 `markdownToHtml(md, State.mediaUrls)` 自动替换 src 为 blob URL.
+
+ZIP 内 `content.md` + `annotations.json` 同名约定, media/* 子目录按需打包. 任何带 BOM 的 utf-8 必须先 strip.
 
 ---
 

@@ -144,6 +144,14 @@ const State = {
   renderMode: 'rendered',   // 'rendered' = WYSIWYG 渲染; 'source' = 显示原始 markdown 源码
   savedSelection: null,     // P-sel: { from, to, text } — rendered→source 时保存, source→rendered 时尝试恢复
   idbCache: {},             // P-reload: { [file.name]: { sidecar, updatedAt } } 启动时预热, loadMarkdownIntoEditor 同步读
+  // F-media: .mentor v2 支持 media/ 子目录里的图片
+  // - 打开 .mentor 时: readMentorZip 返回的 mediaFiles: Map<path, Blob>
+  //   全部转成 blob URL, 写入 mediaUrls (path -> blob URL)
+  // - 渲染前: markdownToHtml 用 mediaUrls 把 ![](media/x.png) 重写成 ![](blob:...)
+  // - 保存时: 反查 src 把 blob URL 还原成原 path, mediaFiles 一起打进新 ZIP
+  // - 切/重开文件前: revoke 所有旧 blob URL 防内存泄漏
+  mediaUrls: {},            // { 'media/image5.png': 'blob:http://127.0.0.1:8765/abc-123' }
+  mediaFiles: {},           // { 'media/image5.png': Blob } — save 时用, 跟当前 doc 绑定
 };
 
 // ============================================================
@@ -2502,14 +2510,57 @@ function positionMarkDeletePopover() {
 // ============================================================
 
 // --- 文件 → HTML (markdown-it)
-function markdownToHtml(mdText) {
-  return md.render(mdText);
+// F-media: 第二参数可选 mediaUrls { 'media/x.png': 'blob:http://...' }
+// 渲染前把 ![](media/x.png) 的 src 重写成 blob URL, 让浏览器能解析
+// (相对路径在 sandbox 里没 base 解析不到)
+function markdownToHtml(mdText, mediaUrls) {
+  let text = mdText;
+  if (mediaUrls && Object.keys(mediaUrls).length > 0) {
+    // 替换 ![alt](media/path) → ![alt](blob URL); 只对 src 段做精确匹配,
+    // 避免误伤正文里的 [text](url) 链接
+    text = text.replace(/!\[([^\]]*)\]\((media\/[^)\s]+)\)/g, (m, alt, src) => {
+      const blobUrl = mediaUrls[src];
+      return blobUrl ? `![${alt}](${blobUrl})` : m;
+    });
+  }
+  return md.render(text);
+}
+
+// F-media: 释放旧 doc 的所有 blob URL, 切/重开文件前调用防内存泄漏
+function revokeMediaUrls() {
+  for (const url of Object.values(State.mediaUrls || {})) {
+    try { URL.revokeObjectURL(url); } catch (e) { /* ignore */ }
+  }
+  State.mediaUrls = {};
+  State.mediaFiles = {};
 }
 
 // --- HTML → markdown (turndown)
 function htmlToMarkdown(html) {
   // turndown 默认会丢 mark，先去掉 annotation-mark 标签，保留内部文本
   html = html.replace(/<span[^>]*data-thread-id[^>]*>(.*?)<\/span>/gs, '$1');
+  return turndown.turndown(html);
+}
+
+// F-media: htmlToMarkdown 的包装, 在 turndown 之前把 <img src="blob:...">
+// 反查回 'media/image5.png', 保证 markdown 源码里仍是相对路径
+// (不打回去会让用户存了 .mentor 后, 下一台机器看到 blob:... 失效)
+// url → path 反向表: State.mediaUrls (path -> blob URL) 反过来构造 (URL -> path)
+function htmlToMarkdownMedia(html) {
+  // turndown 默认会丢 mark，先去掉 annotation-mark 标签
+  html = html.replace(/<span[^>]*data-thread-id[^>]*>(.*?)<\/span>/gs, '$1');
+  if (State.mediaUrls && Object.keys(State.mediaUrls).length > 0) {
+    // 反查表
+    const reverseMap = {};
+    for (const [path, blobUrl] of Object.entries(State.mediaUrls)) {
+      reverseMap[blobUrl] = path;
+    }
+    // 替换 <img src="blob:..."> 为 <img src="media/...">
+    html = html.replace(/<img([^>]*?)src=("|')(blob:[^"']+)\2/gi, (m, attrs, q, blobUrl) => {
+      const path = reverseMap[blobUrl];
+      return path ? `<img${attrs}src=${q}${path}${q}` : m;
+    });
+  }
   return turndown.turndown(html);
 }
 
@@ -2866,7 +2917,7 @@ function loadMarkdownIntoEditor(name, content, annotationsData = null) {
       console.log(`[P-reload] IDB 恢复 ${annotationsData.annotations.length} 个批注 (${name})`);
     }
   }
-  const html = markdownToHtml(content);
+  const html = markdownToHtml(content, State.mediaUrls);
   // Tiptap 的 setContent 会解析 HTML
   State.editor.commands.setContent(html, false);
   // 如果是源码模式，把新内容同步到 <pre>（而不是 setContent 进编辑器）
@@ -3755,7 +3806,9 @@ async function isMentorZip(file) {
   }
 }
 
-// 从 File 提取 content.md + annotations.json, 失败抛错
+// 从 File 提取 content.md + annotations.json + media/* (v2 schema)
+// 失败抛错; 返回 { mdText, annotations, mediaFiles: { [path]: Blob } }
+// mediaFiles 只列 zip 顶层下的 media/ 子目录, 其它路径忽略 (避免 zip slip / 恶意 entry)
 async function readMentorZip(file) {
   const buf = await file.arrayBuffer();
   const zip = await JSZip.loadAsync(buf);
@@ -3775,12 +3828,32 @@ async function readMentorZip(file) {
       annotations = null;
     }
   }
-  return { mdText, annotations };
+  // F-media: 解 media/* 子目录 (Pandoc 解 docx 默认产物)
+  const mediaFiles = {};
+  const entries = Object.keys(zip.files);
+  for (const name of entries) {
+    // 只要 media/ 开头, 不要 media.bak/ 这种 backup 目录
+    if (!name.startsWith('media/')) continue;
+    // 防 zip slip: 不允许 ../ 或绝对路径
+    if (name.includes('..') || name.startsWith('/')) continue;
+    // 跳过目录 entry
+    const entry = zip.files[name];
+    if (!entry || entry.dir) continue;
+    const blob = await entry.async('blob');
+    mediaFiles[name] = blob;
+  }
+  return { mdText, annotations, mediaFiles };
 }
 
 // 打开 .mentor 包: 解压 → loadMarkdownIntoEditor → State.saveMode='mentor'
 async function openFromMentorFile(file) {
-  const { mdText, annotations } = await readMentorZip(file);
+  const { mdText, annotations, mediaFiles } = await readMentorZip(file);
+  // F-media: 释放旧 doc 的 blob URL, 把新 mediaFiles 转 blob URL 注入 State
+  revokeMediaUrls();
+  for (const [path, blob] of Object.entries(mediaFiles || {})) {
+    State.mediaUrls[path] = URL.createObjectURL(blob);
+    State.mediaFiles[path] = blob;
+  }
   // 单文件模式: 没法 handle 写回, 走 download fallback
   State.saveMode = 'mentor-download';
   // 显示用名: 保留原 .mentor 文件名 (title bar / outline)
@@ -3788,14 +3861,37 @@ async function openFromMentorFile(file) {
   await loadMarkdownIntoEditor(displayName, mdText, annotations);
   setStatus('已加载 .mentor 包', `${displayName} (Ctrl+S 下载 .mentor 副本)`);
   updateDocMeta();
+  // 提示用户图片数量 (v2 才显示)
+  const mediaCount = Object.keys(mediaFiles || {}).length;
+  if (mediaCount > 0) {
+    setStatus('已加载 .mentor 包', `${displayName} · ${mediaCount} 张图片 ✓`);
+  }
   return { displayName, mdText, annotations };
 }
 
-// 打包 content.md + annotations.json → Blob (application/zip)
-async function buildMentorZipBlob(mdText, annotations) {
+// 打包 content.md + annotations.json + media/* → Blob (application/zip)
+// v2 schema: mediaFiles 可选 { 'media/image5.png': Blob }
+// zip 顶层目录结构:
+//   content.md
+//   annotations.json
+//   media/
+//     image5.png
+//     ...
+async function buildMentorZipBlob(mdText, annotations, mediaFiles) {
   const zip = new JSZip();
   zip.file(MENTOR_MD_NAME, mdText);
   zip.file(MENTOR_ANN_NAME, JSON.stringify(annotations, null, 2));
+  if (mediaFiles && Object.keys(mediaFiles).length > 0) {
+    // 按 path 直接塞进 zip 顶层, JSZip 会自动建子目录
+    for (const [path, blob] of Object.entries(mediaFiles)) {
+      // 安全检查: 只允许 media/ 开头 + 无 ../ / /
+      if (!path.startsWith('media/') || path.includes('..') || path.startsWith('/')) {
+        console.warn('[mentor] buildMentorZipBlob 跳过非法 path:', path);
+        continue;
+      }
+      zip.file(path, blob);
+    }
+  }
   return await zip.generateAsync({
     type: 'blob',
     mimeType: 'application/zip',
@@ -3825,7 +3921,9 @@ async function saveCurrent() {
   }
   // 1. 转 markdown（不带 annotation mark + KaTeX）
   const html = State.editor.getHTML();
-  const mdText = htmlToMarkdown(html);
+  // F-media: 反查 <img src="blob:..."> → 'media/image5.png', 保证 markdown 源码里仍是相对路径
+  // (不打回去会让用户存了 .mentor 后, 下一台机器看到 blob:... 失效)
+  const mdText = htmlToMarkdownMedia(html);
   // 2. 写侧车 JSON
   const sidecar = {
     version: '1',
@@ -3869,7 +3967,7 @@ async function saveCurrent() {
       setStatus('保存失败', result.error);
     } else {
       // download 模式 / 写回失败 → 浏览器下载
-      const blob = await buildMentorZipBlob(mdText, sidecar);
+      const blob = await buildMentorZipBlob(mdText, sidecar, State.mediaFiles);
       downloadBlob(State.currentFile.name, blob);
       showToast('已下载 ✓ (.mentor)');
       setStatus('已下载', State.currentFile.name);
@@ -3902,7 +4000,7 @@ async function tryWriteBackMentor(mdText, sidecar, mentorName) {
       if (await handle.queryPermission({ mode: 'readwrite' }) !== 'granted') {
         await handle.requestPermission({ mode: 'readwrite' });
       }
-      const blob = await buildMentorZipBlob(mdText, sidecar);
+      const blob = await buildMentorZipBlob(mdText, sidecar, State.mediaFiles);
       const writable = await handle.createWritable();
       await writable.write(blob);
       await writable.close();
