@@ -892,7 +892,7 @@ body.file-pane-collapsed #file-pane {
 }
 
 /* ---- 分层段间 (核心间距系统) ----
-   全部统一基线: 0.4em = 6px (紧凑), 0.8em = 12px (正文), 1.2em = 18px (过渡), 1.8em = 27px (节切换) */
+   全部统一基线: 0.4em = 6px (紧凑), 0.7em = 11px (H3前), 0.9em = 14px (H2前), 1.2em = 18px (H1前/H→H) */
 
 /* 默认段间: 正文与正文 / 标题与正文 */
 .tiptap > p + p,
@@ -916,7 +916,7 @@ body.file-pane-collapsed #file-pane {
 .tiptap > h3 + h1,
 .tiptap > h3 + h2,
 .tiptap > h3 + h3 {
-  margin-top: 1.8em;     /* 标题紧跟标题: 大间距, 强调"换章" */
+  margin-top: 1.2em;     /* 标题紧跟标题: 中等间距, 体现"换节"但不过度 */
 }
 
 /* 标题之前: 与上一节(正文/代码块/列表)拉开 */
@@ -926,7 +926,7 @@ body.file-pane-collapsed #file-pane {
 .tiptap > ol + h1,
 .tiptap > blockquote + h1,
 .tiptap > table + h1 {
-  margin-top: 2.2em;     /* H1 是节标题, 与上一节彻底隔开 */
+  margin-top: 1.2em;     /* H1 是节标题, 与上一节明显隔开, 但不喧宾夺主 */
 }
 .tiptap > p + h2,
 .tiptap > pre + h2,
@@ -934,7 +934,7 @@ body.file-pane-collapsed #file-pane {
 .tiptap > ol + h2,
 .tiptap > blockquote + h2,
 .tiptap > table + h2 {
-  margin-top: 1.8em;
+  margin-top: 0.9em;
 }
 .tiptap > p + h3,
 .tiptap > pre + h3,
@@ -942,7 +942,7 @@ body.file-pane-collapsed #file-pane {
 .tiptap > ol + h3,
 .tiptap > blockquote + h3,
 .tiptap > table + h3 {
-  margin-top: 1.4em;
+  margin-top: 0.7em;
 }
 
 /* 代码块 / 引用 / 列表 / 表格 → 紧跟另一正文元素: 适中 */
