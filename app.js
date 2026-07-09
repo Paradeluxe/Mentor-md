@@ -987,7 +987,18 @@ function _doUpdateDocMeta() {
   const lineCount = docText.split('\n').length;
   const annCount = (State.annotations || []).length;
   const name = State.currentFile.name || '';
-  $('#status-right').textContent = `${name} · ${wordCount} 词 · ${lineCount} 行 · ${annCount} 批注`;
+  // F-media v1.34: status bar 显示图片渲染状态, 帮用户排查"看不到图"
+  const imgs = State.editor.view?.dom?.querySelectorAll('img') || [];
+  const imgCount = imgs.length;
+  const imgLoaded = Array.from(imgs).filter(i => i.complete && i.naturalWidth > 0).length;
+  const mediaUrlCount = Object.keys(State.mediaUrls || {}).length;
+  let statusRight = `${name} · ${wordCount} 词 · ${lineCount} 行 · ${annCount} 批注`;
+  if (imgCount > 0) {
+    statusRight += ` · 🖼 ${imgLoaded}/${imgCount} (media=${mediaUrlCount})`;
+  } else if (mediaUrlCount > 0) {
+    statusRight += ` · 🖼 media=${mediaUrlCount} 但 DOM 无 img`;
+  }
+  $('#status-right').textContent = statusRight;
 }
 
 function markDirty() {
@@ -3436,7 +3447,16 @@ async function openFromHandle(fileHandle, sidecarHandle = null) {
 // --- 通过 FileSystemFileHandle 打开 .mentor 单文件包
 async function openFromMentorHandle(fileHandle) {
   const file = await fileHandle.getFile();
-  const { mdText, annotations } = await readMentorZip(file);
+  const { mdText, annotations, mediaFiles } = await readMentorZip(file);
+  // F-media v1.36 fix: openFromMentorHandle 之前漏注入 mediaUrls — DOM img 是裸 markdown 路径
+  // (e.g. <img src="media/image5.png">) ,请求 server /media/ 路径 404 → 图全破图.
+  // 现在: revMediaUrls + 注入 State.mediaUrls/State.mediaFiles, 跟 openFromMentorFile 对齐.
+  revokeMediaUrls();
+  for (const [path, blob] of Object.entries(mediaFiles || {})) {
+    State.mediaUrls[path] = URL.createObjectURL(blob);
+    State.mediaFiles[path] = blob;
+  }
+  console.log('[F-media v1.36 handle fix] mediaFiles count=', Object.keys(mediaFiles || {}).length, 'mediaUrls count=', Object.keys(State.mediaUrls).length);
   await loadMarkdownIntoEditor(file.name, mdText, annotations);
   State.currentFile.handle = fileHandle;  // 写回原 .mentor 位置用
   try {
@@ -3810,8 +3830,18 @@ async function isMentorZip(file) {
 // 失败抛错; 返回 { mdText, annotations, mediaFiles: { [path]: Blob } }
 // mediaFiles 只列 zip 顶层下的 media/ 子目录, 其它路径忽略 (避免 zip slip / 恶意 entry)
 async function readMentorZip(file) {
-  const buf = await file.arrayBuffer();
-  const zip = await JSZip.loadAsync(buf);
+  // F-media v1.36 fix: File.arrayBuffer() 跨 iframe / cross-realm 时拿到的是
+  // parent realm 的 ArrayBuffer, JSZip (旧版) 拒读 ("Can't read the data of
+  // 'the loaded zip file'"). v1.35 试过 `new Blob([buf]).arrayBuffer()`,
+  // 但 Blob 构造在同一 realm, 没真复制到 iframe realm → 仍挂。
+  // 真修法: 当前 realm 内 new Uint8Array(buf), 再 new Blob([typedArray]),
+  // 字节 copy 到本地 realm 的 ArrayBuffer 后再喂 JSZip.
+  const rawBuf = await file.arrayBuffer();
+  const typed = new Uint8Array(rawBuf);
+  // typed 在当前 realm; Blob 接受 typed array 字节并在本 realm 内分配新 buffer
+  const blob = new Blob([typed]);
+  const safeBuf = await blob.arrayBuffer();
+  const zip = await JSZip.loadAsync(safeBuf);
   const mdEntry = zip.file(MENTOR_MD_NAME);
   const annEntry = zip.file(MENTOR_ANN_NAME);
   if (!mdEntry) {
@@ -3847,13 +3877,16 @@ async function readMentorZip(file) {
 
 // 打开 .mentor 包: 解压 → loadMarkdownIntoEditor → State.saveMode='mentor'
 async function openFromMentorFile(file) {
+  console.log('[F-media diag] openFromMentorFile start, file=', file?.name, 'size=', file?.size);
   const { mdText, annotations, mediaFiles } = await readMentorZip(file);
+  console.log('[F-media diag] readMentorZip done, mediaFiles keys=', Object.keys(mediaFiles || {}));
   // F-media: 释放旧 doc 的 blob URL, 把新 mediaFiles 转 blob URL 注入 State
   revokeMediaUrls();
   for (const [path, blob] of Object.entries(mediaFiles || {})) {
     State.mediaUrls[path] = URL.createObjectURL(blob);
     State.mediaFiles[path] = blob;
   }
+  console.log('[F-media diag] state.mediaUrls count=', Object.keys(State.mediaUrls).length);
   // 单文件模式: 没法 handle 写回, 走 download fallback
   State.saveMode = 'mentor-download';
   // 显示用名: 保留原 .mentor 文件名 (title bar / outline)
@@ -4703,6 +4736,31 @@ window.__mdAnnotator = {
   readMentorZip,
   buildMentorZipBlob,
   mentorExportName,
+  // F-media v1.34: 暴露 media 反查 helper 供诊断用
+  revokeMediaUrls,
+  htmlToMarkdownMedia,
+  __diagMedia: () => {
+    // 用户在 DevTools console 输入 __mdAnnotator.__diagMedia() 调出全状态
+    const M = window.__mdAnnotator;
+    const S = M.State;
+    const imgs = Array.from(document.querySelectorAll('#editor img'));
+    return {
+      appJs: document.querySelector('script[src*="app.js"]')?.src || '?',
+      title: document.title,
+      saveMode: S.saveMode,
+      currentFileName: S.currentFile?.name,
+      mediaUrlsKeys: Object.keys(S.mediaUrls || {}),
+      mediaFilesKeys: Object.keys(S.mediaFiles || {}),
+      mediaUrlsSample: Object.entries(S.mediaUrls || {}).slice(0, 2),
+      imgCount: imgs.length,
+      imgDetails: imgs.map(i => ({
+        srcPrefix: i.src.slice(0, 30),
+        complete: i.complete,
+        naturalWidth: i.naturalWidth,
+        naturalHeight: i.naturalHeight,
+      })),
+    };
+  },
   // H-undo: history stack helpers
   pushHistory,
   undo,

@@ -852,6 +852,8 @@ body.file-pane-collapsed #file-pane {
   font-size: 15px;
   letter-spacing: 0.02px;
   color: var(--text);
+  /* v1.38: em 受自身 font-size 影响 (h1 的 1.8em ≈ 51px), rem 受 root font-size 影响 (1rem=14px ≈ sp 比预期小 7%). 
+     改成 px 直接锁值, 不会被其他 selector 干扰 */
 }
 
 /* ---- 标题 (H1/H2/H3) ---- */
@@ -891,8 +893,17 @@ body.file-pane-collapsed #file-pane {
   line-height: 1.85;
 }
 
-/* ---- 分层段间 (核心间距系统) ----
-   全部统一基线: 0.4em = 6px (紧凑), 0.7em = 11px (H3前), 0.9em = 14px (H2前), 1.2em = 18px (H1前/H→H) */
+/* ---- 分层段间 (核心间距系统) — v1.38 spacing tuned ----
+   v1.37 用 em 时 h1 的 1.8em 实际渲染 1.8 × 1.9 × 15 = 51px (em 相对自身 font-size) 
+     → 标题间距 h1/h2/h3 不一致, 用户反馈"标题间距过大".
+   v1.38 改用 rem (基于根 15px=1rem), 各 heading 间距一致, 也回调到"中段"档:
+     p+p: 15px (15px, 用户确认 OK)
+     p → H2: 21px (21px, 适中抬头)
+     p → H1: 24px (24px, 节标题明显但不过)
+     h1 → h2: 21px (21px, 标题间紧凑一些)
+     块+块: 27px (27px)
+     p → 块: 21px (21px)
+     块 → p: 15px (15px) */
 
 /* 默认段间: 正文与正文 / 标题与正文 */
 .tiptap > p + p,
@@ -903,7 +914,7 @@ body.file-pane-collapsed #file-pane {
 .tiptap > h2 + p,
 .tiptap > h3 + p,
 .tiptap > h4 + p {
-  margin-top: 0.4em;     /* 标题→正文, 正文→正文: 紧凑, 体现"同一节" */
+  margin-top: 15px;     /* 标题→正文, 正文→正文: 15px = 15px (节内呼吸充裕) */
 }
 
 /* 标题之间: 节切换感 */
@@ -916,7 +927,7 @@ body.file-pane-collapsed #file-pane {
 .tiptap > h3 + h1,
 .tiptap > h3 + h2,
 .tiptap > h3 + h3 {
-  margin-top: 1.2em;     /* 标题紧跟标题: 中等间距, 体现"换节"但不过度 */
+  margin-top: 21px;     /* 标题紧跟标题: 21px (适中"换节") */
 }
 
 /* 标题之前: 与上一节(正文/代码块/列表)拉开 */
@@ -926,7 +937,7 @@ body.file-pane-collapsed #file-pane {
 .tiptap > ol + h1,
 .tiptap > blockquote + h1,
 .tiptap > table + h1 {
-  margin-top: 1.2em;     /* H1 是节标题, 与上一节明显隔开, 但不喧宾夺主 */
+  margin-top: 24px;     /* H1 节标题: 24px (明显但不喧宾夺主) */
 }
 .tiptap > p + h2,
 .tiptap > pre + h2,
@@ -934,7 +945,7 @@ body.file-pane-collapsed #file-pane {
 .tiptap > ol + h2,
 .tiptap > blockquote + h2,
 .tiptap > table + h2 {
-  margin-top: 0.9em;
+  margin-top: 21px;     /* H2: 21px */
 }
 .tiptap > p + h3,
 .tiptap > pre + h3,
@@ -942,7 +953,7 @@ body.file-pane-collapsed #file-pane {
 .tiptap > ol + h3,
 .tiptap > blockquote + h3,
 .tiptap > table + h3 {
-  margin-top: 0.7em;
+  margin-top: 18px;     /* H3: 18px */
 }
 
 /* 代码块 / 引用 / 列表 / 表格 → 紧跟另一正文元素: 适中 */
@@ -953,7 +964,7 @@ body.file-pane-collapsed #file-pane {
 .tiptap > pre + table,
 .tiptap > table + table,
 .tiptap > table + pre {
-  margin-top: 1.4em;     /* 两个"块级容器"之间: 大间距避免视觉粘连 */
+  margin-top: 27px;     /* 两个"块级容器"之间: 27px */
 }
 
 /* 正文 → 代码块 / 引用 / 列表 / 表格: 稍大 (这些元素本身有 padding) */
@@ -964,7 +975,7 @@ body.file-pane-collapsed #file-pane {
 .tiptap > p + table,
 .tiptap > li + pre,
 .tiptap > li + blockquote {
-  margin-top: 1.0em;
+  margin-top: 21px;     /* 21px */
 }
 
 /* 代码块 / 列表 → 紧跟正文 */
@@ -973,7 +984,7 @@ body.file-pane-collapsed #file-pane {
 .tiptap > ol + p,
 .tiptap > blockquote + p,
 .tiptap > table + p {
-  margin-top: 0.8em;
+  margin-top: 15px;     /* 15px */
 }
 .tiptap code {
   background: rgba(38, 37, 30, 0.06);

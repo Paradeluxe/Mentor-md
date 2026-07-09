@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Mentor v1.35 Diag</title>
+<style>
+body { font: 13px/1.5 monospace; margin: 0; padding: 0; background: #1e1e1e; color: #d4d4d4; }
+#bar { padding: 10px; background: #252526; border-bottom: 1px solid #3c3c3c; }
+button { background: #0e639c; color: #fff; border: 0; padding: 8px 14px; cursor: pointer; border-radius: 3px; font-size: 13px; margin-right: 6px; }
+button:hover { background: #1177bb; }
+#log { padding: 10px; white-space: pre-wrap; height: 320px; overflow: auto; background: #1e1e1e; }
+iframe { width: 100%; height: calc(100vh - 400px); border: 0; background: #fff; }
+</style>
+</head>
+<body>
+<div id="bar">
+<button id="run">1. 跑诊断</button>
+<button id="loadFixture">2. 加载测试 .mentor</button>
+<button id="loadUser">3. 加载你的 DFC .mentor</button>
+<span style="color:#888; font-size:12px; margin-left:10px;">主应用在下面 iframe 里运行</span>
+</div>
+<div id="log">[等待]</div>
+<iframe id="app" src="index.html?v=44"></iframe>
+
+<script>
+const log = (s) => {
+  const el = document.getElementById('log');
+  el.textContent += '\n' + s;
+  el.scrollTop = el.scrollHeight;
+};
+const clear = () => { document.getElementById('log').textContent = ''; };
+
+// 从 iframe 拿 __mdAnnotator
+const getMentor = () => {
+  try { return document.getElementById('app').contentWindow.__mdAnnotator; }
+  catch (e) { return null; }
+};
+
+const waitForMentor = (timeoutMs = 20000) => new Promise((resolve, reject) => {
+  const start = Date.now();
+  const tick = () => {
+    const M = getMentor();
+    if (M && M.State && M.State.editor) resolve(M);
+    else if (Date.now() - start > timeoutMs) reject(new Error(`等待 Mentor 启动超时 (${timeoutMs}ms). M=${!!M} editor=${!!(M&&M.State&&M.State.editor)}`));
+    else setTimeout(tick, 200);
+  };
+  tick();
+});
+
+document.getElementById('run').onclick = async () => {
+  clear();
+  try {
+    const M = await waitForMentor();
+    const d = M.__diagMedia();
+    log('✅ Mentor 启动成功');
+    log('[1] app.js: ' + d.appJs);
+    log('[2] title: ' + d.title);
+    log('[3] saveMode: ' + d.saveMode);
+    log('[4] currentFile: ' + d.currentFileName);
+    log('[5] mediaUrls: ' + d.mediaUrlsKeys.length + ' keys');
+    if (d.mediaUrlsKeys.length) log('    ' + JSON.stringify(d.mediaUrlsKeys));
+    log('[6] mediaFiles: ' + d.mediaFilesKeys.length + ' keys');
+    log('[7] img in DOM: ' + d.imgCount);
+    if (d.imgCount > 0) {
+      d.imgDetails.forEach((im, i) => {
+        log(`    [${i}] complete=${im.complete} w=${im.naturalWidth}`);
+      });
+    }
+  } catch (e) {
+    log('❌ ' + e.message);
+    log('可能原因: iframe 里 app.js 没加载 / 报错 / 没拿到 __mdAnnotator');
+    log('→ 看 iframe 内部 Console (F12, 切到 iframe context)');
+  }
+};
+
+document.getElementById('loadFixture').onclick = async () => {
+  clear();
+  try {
+    const M = await waitForMentor();
+    log('[1] fetch fixture...');
+    const r = await fetch('tests/fixtures/dfc-with-media.mentor');
+    log('[2] HTTP ' + r.status);
+    if (!r.ok) { log('❌ fetch fail'); return; }
+    const buf = await r.arrayBuffer();
+    log('[3] bytes: ' + buf.byteLength);
+    const file = new File([buf], 'dfc-with-media.mentor', { type: 'application/zip' });
+    await M.openFromMentorFile(file);
+    log('[4] openFromMentorFile done');
+    await new Promise(r => setTimeout(r, 2500));
+    const d = M.__diagMedia();
+    log('[5] img: ' + d.imgCount);
+    d.imgDetails.forEach((im, i) => log(`    [${i}] complete=${im.complete} w=${im.naturalWidth}`));
+  } catch (e) { log('❌ ' + e.message); }
+};
+
+document.getElementById('loadUser').onclick = async () => {
+  clear();
+  try {
+    const M = await waitForMentor();
+    log('[1] fetch user fixture...');
+    const r = await fetch('tests/fixtures/user-dfc-jun23.mentor');
+    log('[2] HTTP ' + r.status);
+    if (!r.ok) { log('❌ fetch fail — server 没这个文件'); return; }
+    const buf = await r.arrayBuffer();
+    const file = new File([buf], 'DFC_Liu_Jun23_2026.mentor', { type: 'application/zip' });
+    await M.openFromMentorFile(file);
+    log('[3] load done');
+    await new Promise(r => setTimeout(r, 2500));
+    const d = M.__diagMedia();
+    log('[4] img: ' + d.imgCount);
+    d.imgDetails.forEach((im, i) => log(`    [${i}] complete=${im.complete} w=${im.naturalWidth}`));
+  } catch (e) { log('❌ ' + e.message); }
+};
+
+log('等待 iframe 加载 Mentor 主应用...');
+</script>
+</body>
+</html>

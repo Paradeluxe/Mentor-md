@@ -2,6 +2,38 @@
 
 按时间倒序记录已发布的变化。最新条目在上方。
 
+## v1.36 (2026-07-09) — F-media 图渲染修复 + 段间距调整
+
+### Bugfix: 跨 realm `.mentor` 加载 JSZip 拒读
+- `app.js` `readMentorZip()`: File.arrayBuffer() 跨 iframe / cross-realm 时拿到 parent realm 的 ArrayBuffer，旧版 JSZip 拒读 ("Can't read the data of 'the loaded zip file'")。v1.35 试过 `new Blob([buf]).arrayBuffer()` 但 Blob 构造在同一 realm，没真跨 realm → 仍挂
+- 真修法: `new Uint8Array(buf) → new Blob([typed]).arrayBuffer()`，字节真复制到当前 realm 后再喂 JSZip
+- 触发场景: diag.html iframe 模式打开 .mentor
+
+### Bugfix: `openFromMentorHandle` 漏注入 mediaUrls (handle 路径图全破图)
+- `app.js` `openFromMentorHandle()`: 之前只取 `{mdText, annotations}`，丢 `mediaFiles`。DOM img 是裸 markdown 路径 (`<img src="media/image5.png">`)，请求 server `/media/` 路径 404 → 全破图
+- 修法: 跟 `openFromMentorFile` 对齐 — `revokeMediaUrls()` + 注入 `State.mediaUrls` / `State.mediaFiles`
+- 触发场景: 用户通过 native file picker 打开 .mentor (handle 模式)
+
+### Feature: status bar 显示图片渲染状态
+- `app.js` `_doUpdateDocMeta`: 状态栏新增 `🖼 N/M (media=N)` 字段，N/M = complete/naturalWidth>0 / DOM img 总数；当 DOM 有 img 但 media=0 时加警告
+- 帮用户排查"看不到图"问题，看 status bar 一眼知道是 img 没 load / url 失效 / 还是别的
+
+### Style: 段间距体系 v1.38 (em → px, 回调过头部分)
+- `styles.css` 分层段间体系：
+  - v1.35 默认 0.4em (6px) 偏紧
+  - v1.36 调到 0.8em (12px) 标准
+  - v1.37 调到 1.0em (15px) 宽松 — 但用 em 时 H1 1.8em 实测 51px (em × 自身 1.9em font-size)，标题间距过头
+  - **v1.38** 改成 px 锁值 + 回调标题间距：p+p 15px (用户确认 OK), p→H1 24px, H1→H2 21px, p→H2 21px, 块+块 27px
+- 关键教训: CSS `em` 在 `margin-top` 是相对元素自身 font-size，heading 因为 1.9em 字号被倍乘；改用 px 或 rem (root font-size) 才一致
+
+### Chore: cache-bust 版本号
+- `index.html`: `app.js?v=45 → ?v=53`, `styles.css?v=42 → ?v=54`
+- 浏览器 cache 必须手动 bump 否则 edit 不生效 (改了文件没刷页面 = 白改)
+
+### Dev: 新增调试工具
+- `diag.html`: 浏览器内 SPA 远程诊断，按钮 1 跑 DOM diag、按钮 2/3 加载测试/用户 .mentor fixture
+- `index-direct.html`: 强制 cache-bust 跳转 (`?v=N`)
+
 ## v2.1 (2026-07-05) — 当前活跃开发
 
 ### Feature: P0 #3 AI reply 并发锁 + 内容去重
