@@ -9,7 +9,7 @@
 [![GitHub forks](https://img.shields.io/github/forks/Paradeluxe/Mentor-md.svg)](https://github.com/Paradeluxe/Mentor-md/network/members)
 [![GitHub issues](https://img.shields.io/github/issues/Paradeluxe/Mentor-md.svg)](https://github.com/Paradeluxe/Mentor-md/issues)
 
-![screenshot](screenshot.png)
+![screenshot](https://raw.githubusercontent.com/Paradeluxe/Mentor-md/main/screenshot.png)
 
 ## 协议 / License
 
