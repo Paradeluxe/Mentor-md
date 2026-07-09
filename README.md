@@ -10,20 +10,6 @@
 [![GitHub issues](https://img.shields.io/github/issues/Paradeluxe/Mentor-md.svg)](https://github.com/Paradeluxe/Mentor-md/issues)
 
 ![screenshot](screenshot.jpg)
-
-## 协议 / License
-
-Mentor 采用 **AGPL v3 + 商业许可** 双许可模式（[LICENSE](./LICENSE)）：
-
-- **AGPL v3**（默认）：开源、免费。学术 / 个人 / 非营利 / 小团队均可直接使用。
-  唯一要求：如果你把 Mentor 作为网络服务提供，必须公开源码。
-- **商业许可**：如果不接受 AGPL 的 copyleft 要求（例如商业产品集成、SaaS 服务、
-  大公司内部使用），可购买商业许可来免除 AGPL 义务。
-
-详见 [COMMERCIAL-LICENSE.md](./COMMERCIAL-LICENSE.md)。
-
----
-
 ## 特性
 
 - ✅ **WYSIWYG** Markdown 编辑（基于 [Tiptap](https://tiptap.dev/) / ProseMirror）
@@ -338,3 +324,16 @@ pending.forEach(t => {
 ## 变更记录
 
 完整 changelog 见 [CHANGELOG.md](./CHANGELOG.md)（由 `git log --oneline` 自动生成 + 已完成的 feature 段落）。
+
+---
+
+## 协议 / License
+
+Mentor 采用 **AGPL v3 + 商业许可** 双许可模式（[LICENSE](./LICENSE)）：
+
+- **AGPL v3**（默认）：开源、免费。学术 / 个人 / 非营利 / 小团队均可直接使用。
+  唯一要求：如果你把 Mentor 作为网络服务提供，必须公开源码。
+- **商业许可**：如果不接受 AGPL 的 copyleft 要求（例如商业产品集成、SaaS 服务、
+  大公司内部使用），可购买商业许可来免除 AGPL 义务。
+
+详见 [COMMERCIAL-LICENSE.md](./COMMERCIAL-LICENSE.md)。
