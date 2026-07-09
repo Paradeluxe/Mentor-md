@@ -2808,8 +2808,14 @@ function deepCloneAnnotations(arr) {
 
 // 修改 annotations 前调用: 推入 past, 清空 future
 function pushHistory() {
+  // v1.37 fix: 同时快照 PM doc 里所有 annotation marks 的物理位置
+  // 这样 undo 时, 如果 State.annotations 里的 range stale (跟 PM doc 当前位置对不上),
+  // 仍能用 markSnapshot 找回来 — 解决 "完全删除后 ctrl z 丢失批注" 问题
+  // (用户报: delete thread → undo → thread 数据在但 mark 丢了, 或 thread+mark 都丢)
+  const markSnapshot = snapshotAnnotationMarks();
   State.history.past.push({
     annotations: deepCloneAnnotations(State.annotations),
+    markSnapshot,
     ts: Date.now(),
   });
   if (State.history.past.length > State.history.capacity) {
@@ -2819,11 +2825,31 @@ function pushHistory() {
   updateHistoryButtons();
 }
 
+// v1.37: 从 PM doc 物理扫描所有 annotation marks, 输出 [{threadId, from, to}]
+function snapshotAnnotationMarks() {
+  const ed = State.editor;
+  if (!ed) return [];
+  const result = [];
+  const markType = ed.schema.marks.annotation;
+  if (!markType) return [];
+  ed.state.doc.descendants((node, pos) => {
+    if (!node.isText) return;
+    node.marks.forEach(m => {
+      if (m.type === markType && m.attrs.threadId) {
+        // 注意: text node 的 pos + nodeSize = 该 text node 末尾. mark span 跨多个 text node 时记录每个.
+        result.push({ threadId: m.attrs.threadId, from: pos, to: pos + node.nodeSize, resolved: !!m.attrs.resolved });
+      }
+    });
+  });
+  return result;
+}
+
 function undo() {
   if (State.history.past.length === 0) return false;
-  // 1. 当前状态推入 future (给 redo 用)
+  // 1. 当前状态推入 future (给 redo 用) — 同时存 markSnapshot
   State.history.future.push({
     annotations: deepCloneAnnotations(State.annotations),
+    markSnapshot: snapshotAnnotationMarks(),
     ts: Date.now(),
   });
   if (State.history.future.length > State.history.capacity) {
@@ -2837,9 +2863,10 @@ function undo() {
 
 function redo() {
   if (State.history.future.length === 0) return false;
-  // 1. 当前状态推入 past
+  // 1. 当前状态推入 past — 同时存 markSnapshot
   State.history.past.push({
     annotations: deepCloneAnnotations(State.annotations),
+    markSnapshot: snapshotAnnotationMarks(),
     ts: Date.now(),
   });
   if (State.history.past.length > State.history.capacity) {
@@ -2853,15 +2880,19 @@ function redo() {
 
 function restoreFromSnapshot(snap) {
   State.annotations = snap.annotations;
-  // 重建 ProseMirror doc 的 annotation marks (因为 mark 是 doc 的一部分, 跟 annotations 必须同步)
-  rebuildAnnotationMarks();
+  // v1.37 fix: 优先用 markSnapshot 重建 mark (PM 物理位置快照, 跟 annotations 是两个 source of truth)
+  // 旧实现只按 annotations.range 重建, range 越界或 stale 时 mark 重建失败 — 用户报的"丢失批注"症状
+  // markSnapshot 是 pushHistory 当时的 PM 物理位置, 总是跟 doc 同步
+  rebuildAnnotationMarks(snap.markSnapshot);
   renderCommentList();
   markDirty();
   updateHistoryButtons();
 }
 
-// 清空所有 annotation mark, 按 State.annotations 重建
-function rebuildAnnotationMarks() {
+// 清空所有 annotation mark, 按 State.annotations 或 markSnapshot 重建
+// v1.37: 优先用 markSnapshot (PM 物理位置快照), 没有则用 State.annotations.range 兜底
+// 解决 "deleteThread + undo 丢失批注" 根因: 旧逻辑只信 annotations.range, 没考虑 PM doc 物理位置
+function rebuildAnnotationMarks(markSnapshot) {
   const ed = State.editor;
   if (!ed) return;
   const markType = ed.schema.marks.annotation;
@@ -2870,15 +2901,40 @@ function rebuildAnnotationMarks() {
   let tr = ed.state.tr;
   // 1. 清掉所有 annotation mark
   tr = tr.removeMark(0, docSize, markType);
-  // 2. 按 State.annotations 重建 mark
-  for (const t of State.annotations) {
-    if (!t.range) continue;
-    const { from, to } = t.range;
-    if (from < 0 || to > docSize || from >= to) continue;
-    const attrs = { threadId: t.threadId, resolved: !!t.resolved };
+
+  // 2. 重建 mark — 优先 markSnapshot, fallback 用 ann.range
+  const rebuilt = [];  // [{threadId, from, to}] 已成功加入
+  const seen = new Set();  // 避免重复 addMark 同一 threadId 同一 range
+
+  const tryAdd = (threadId, from, to, resolved) => {
+    if (!threadId) return false;
+    if (from < 0 || to > docSize || from >= to) return false;
+    if (seen.has(`${threadId}:${from}-${to}`)) return false;
+    const attrs = { threadId, resolved: !!resolved };
     tr = tr.addMark(from, to, markType.create(attrs));
+    seen.add(`${threadId}:${from}-${to}`);
+    rebuilt.push({ threadId, from, to });
+    return true;
+  };
+
+  // Pass 1: markSnapshot (推荐路径, 总是跟 PM 物理位置对得上)
+  if (Array.isArray(markSnapshot) && markSnapshot.length > 0) {
+    markSnapshot.forEach(snap => {
+      tryAdd(snap.threadId, snap.from, snap.to, snap.resolved);
+    });
+  } else {
+    // Pass 2 fallback: 旧路径 — 用 State.annotations.range
+    State.annotations.forEach(t => {
+      if (!t.range) return;
+      tryAdd(t.threadId, t.range.from, t.range.to, t.resolved);
+    });
+  }
+
+  if (rebuilt.length === 0 && State.annotations.length > 0) {
+    console.warn(`[rebuildAnnotationMarks] 所有 ${State.annotations.length} 个 thread 都未重建 mark (snapshot 空 + range 越界)`);
   }
   ed.view.dispatch(tr);
+  return rebuilt;
 }
 
 // 工具栏 undo/redo 按钮的 disabled 状态
