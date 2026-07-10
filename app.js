@@ -1148,7 +1148,10 @@ async function autosaveNow() {
   if (!State.currentFile.dirty) return;  // 没改动不写
   try {
     const html = State.editor.getHTML();
-    const mdText = htmlToMarkdown(html);
+    // v1.37 fix: 用 htmlToMarkdownMedia 反查 blob URL → media/... 相对路径
+    //          旧版用 htmlToMarkdown 不会替换 src, 导致 autosave 写入 .mentor 里全是
+    //          `![](blob:http://...)` 这种跨 session 失效的引用
+    const mdText = htmlToMarkdownMedia(html);
     const sidecar = {
       version: '1',
       document: State.currentFile.name,
@@ -1164,7 +1167,10 @@ async function autosaveNow() {
         comments: t.comments,
       })),
     };
-    const blob = await buildMentorZipBlob(mdText, sidecar);
+    // v1.37 fix: 传 State.mediaFiles 把图片二进制打进 zip
+    //          旧版不传, 只写 content.md + annotations.json, media/ 子目录缺失,
+    //          下次 reload 时 img.naturalWidth=0 (虽然 markdownToHtml 反查能跑, 但缺文件)
+    const blob = await buildMentorZipBlob(mdText, sidecar, State.mediaFiles);
     const handle = State.currentFile.handle;
     if (await handle.queryPermission({ mode: 'readwrite' }) !== 'granted') {
       await handle.requestPermission({ mode: 'readwrite' });
