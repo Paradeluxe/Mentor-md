@@ -4832,12 +4832,25 @@ async function tryReconnect() {
     const handle = await HandleStore.getFile(last.fileName);
     if (!handle) return;
     // 确认权限 (用户上次授权过的文件, 多数情况仍 granted; revoke 后需要重选)
-    let perm;
+    let perm = 'prompt';
     try { perm = await handle.queryPermission({ mode: 'readwrite' }); }
     catch (e) { perm = 'prompt'; }
     if (perm !== 'granted') {
-      setStatus('上次文件未授权', `${last.fileName} (重新打开以授权)`);
-      return;
+      // v1.37: 加载时主动请求权限 (用户已 navigate tab, 一次 gesture 在我们栈里)
+      // 浏览器对 navigation gesture 通常认可 requestPermission 直接调用
+      // 如果被拒 (用户手势过期), fallback 提示手动重授权
+      try {
+        const newPerm = await handle.requestPermission({ mode: 'readwrite' });
+        if (newPerm !== 'granted') {
+          setStatus('上次文件未授权', `${last.fileName} — 点击文件树重选文件以授权`);
+          return;
+        }
+        showToast('已重新获得文件权限, autosave 启用', 3000);
+      } catch (e) {
+        console.warn('[tryReconnect] requestPermission 失败:', e);
+        setStatus('上次文件未授权', `${last.fileName} — 点击文件树重选以授权`);
+        return;
+      }
     }
     State.saveMode = 'mentor-handle';
     await openFromMentorHandle(handle);
