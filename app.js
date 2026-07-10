@@ -1223,7 +1223,17 @@ function initEditor() {
   State.editor = new Editor({
     element: editorEl,
     extensions: [
-      StarterKit,  // 默认配置 (history depth 100, 已够用)
+      StarterKit.configure({
+        history: {
+          // v1.38: 用户要求"最大连续撤回 20 个和恢复 20 个改动".
+          //   - depth: PM history plugin 的 stack 上限 (transaction 数). 设 20.
+          //   - newGroupDelay: 同类型 transaction 在 N ms 内合并为 1 步. 500ms (默认) 保留.
+          //   - 合并后用户连按 Ctrl+Z, 实际只回退 group 数, 不超过 depth.
+          //   日常编辑间隔 (>500ms) 自然每字 1 step, 20 step 足够.
+          depth: 20,
+          newGroupDelay: 500,
+        },
+      }),  // v1.38: PM Ctrl+Z 容量 20
       Highlight.configure({ multicolor: false }),
       Link.configure({ openOnClick: false, autolink: true, HTMLAttributes: { rel: 'noopener noreferrer' } }),
       Image,
