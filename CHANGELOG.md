@@ -2,6 +2,44 @@
 
 按时间倒序记录已发布的变化。最新条目在上方。
 
+## v1.40 (2026-07-10) — chaos test 4 轮 85 场景全绿 + 防御性修复
+
+### Bugfix: 多处防御性修复 (由 chaos test 暴露)
+
+#### 1. `renderCommentList` / `updateCommentCounts` 防御 null/string/缺字段
+- **触发**: chaos S18: 用户在 State.annotations 里塞 [null, {threadId:'a'}, ..., 'string'] 时整个 app 崩
+- **症状**: `TypeError: Cannot read properties of null (reading 'range' / 'resolved' / 'threadId')` at `app.js:2112`, `924`
+- **修复**:
+  - `app.js:2107` filter 阶段: `if (!t || typeof t !== 'object') return false`
+  - `app.js:2111` sort 阶段: `typeof` 防御
+  - `app.js:2123` visibleThreads: 过滤无 threadId 的损坏条目
+  - `app.js:926` updateCommentCounts: 用 `safeAnn` 兜底
+
+#### 2. `_validateMarksAfterEdit` 防御损坏 annotations
+- **触发**: S18 — PM onUpdate → validateMarks 循环里 `ann.threadId` 崩
+- **修复** `app.js:1026`: `if (!ann || typeof ann !== 'object' || !ann.threadId) continue`
+
+#### 3. `addReply` / `toggleResolved` / `deleteThread` / `toggleManualCollapse` / `scrollToThread` / copy handler 防御
+- 全部 `State.annotations.find` 加 `t && typeof t === 'object' &&` 保护
+- `app.js:2003, 2023, 2058, 2308, 2392, 2421`
+
+#### 4. `renderCommentList` 大数组性能保护
+- **触发**: chaos S33: 10000 条 noise annotations 让 onUpdate → renderCommentList 卡死 (30s 超时)
+- **症状**: O(N) 每次都全量 innerHTML 重渲染, N=10000 主线程卡死
+- **修复** `app.js:2101`: `TOTAL_LIMIT = 200`, 超过时只显示警告 + tab 计数, 不渲染卡片
+- 新增 CSS: `.comment-overflow-warn` (styles.css:1255)
+
+### Test: 4 wave 85 场景全过
+- `tests/chaos-suite.spec.js` (40 场景) — 边界 mark / 极端操作 / 异常数据 / 跨元素 / 编辑 / 边角
+- `tests/chaos-wave2.spec.js` (15 场景) — 大文档 / 密集 mark / history / HTML / 8 色循环 / 跨段 / 100 mark / 大纲 / surrogate pair / 作者切换 / offline / blur-focus / 选全部
+- `tests/chaos-wave3.spec.js` (15 场景) — 嵌套 mark / mark 跟随 edit / filter tab / AI storm / 复制粘贴 / resize storm / 拖选 / 表格 + mark / collapsed / 1000+ 字符 / float btn / 大纲跳转 / selection storm / 跨段 mark / 剪贴板
+- `tests/chaos-wave4.spec.js` (15 场景) — thread 生命周期 / delete / add reply / 复制引文 / listThreads API / 中文文件名 / create+delete 风暴 / corrupt storage / table mark / image near mark / focus 风暴 / 跨 realm / IDB / undo-redo storm / 内存监控
+
+每个 scenario 用独立 browser context + 30-60s hard timeout, 即使 app hang 也不影响后续
+
+### Chore: cache-bust 同步 bump
+- `index.html` `app.js?v=105 → ?v=106`
+
 ## v1.39 (2026-07-10) — mark 内点击光标舒服化
 
 ### Bugfix: 点击 annotation mark 边界时光标落在 mark 外 (用户原话 "插入光标不舒服")

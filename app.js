@@ -922,9 +922,11 @@ function formatTime(iso) {
 // G15: 更新侧栏顶 tab 计数 (Word 风格 "5 comments")
 // v2: 移除 #comment-count 总数显示 (3 个 tab 数字已说明分布)
 function updateCommentCounts() {
-  const all = State.annotations.length;
-  const open = State.annotations.filter(a => !a.resolved).length;
-  const resolved = State.annotations.filter(a => a.resolved).length;
+  // v1.40 fix: 防御损坏条目 (null / string) — chaos S18 暴露崩溃
+  const safeAnn = State.annotations.filter(a => a && typeof a === 'object');
+  const all = safeAnn.length;
+  const open = safeAnn.filter(a => !a.resolved).length;
+  const resolved = safeAnn.filter(a => a.resolved).length;
   const allBtn = document.querySelector('[data-count-for="all"]');
   if (allBtn) allBtn.textContent = all;
   const openBtn = document.querySelector('[data-count-for="open"]');
@@ -1015,11 +1017,13 @@ function markDirty() {
 // P-mark-fix: 文档编辑后验证所有 ann 的 mark 位置
 // 防止: 删 mark 内文字 / Ctrl+Z 让 mark 消失但 ann.range stale → silent fail
 // 主动调 findAnnotationRange 重新定位, mark 不在 = 标 fuzzy/invalid
+// v1.40 fix: 防御损坏条目 (null / string / 无 threadId) — chaos S18 暴露崩溃
 function _validateMarksAfterEdit(editor) {
   if (!State.annotations || State.annotations.length === 0) return;
   const markType = editor.schema.marks.annotation;
   let changed = false;
   for (const ann of State.annotations) {
+    if (!ann || typeof ann !== 'object' || !ann.threadId) continue;
     // 检查 ann 的 mark 实际是否在 doc 里 (按 threadId 精确匹配)
     let markFound = false;
     editor.state.doc.descendants((node, pos) => {
@@ -1996,7 +2000,7 @@ function handleCreateMultiParagraphAnnotation(from, to) {
 }
 
 function addReply(threadId, body) {
-  const thread = State.annotations.find(t => t.threadId === threadId);
+  const thread = State.annotations.find(t => t && typeof t === 'object' && t.threadId === threadId);
   if (!thread || !body.trim()) return;
   pushHistory();
   const comment = {
@@ -2016,7 +2020,7 @@ function addReply(threadId, body) {
 }
 
 function toggleResolved(threadId) {
-  const thread = State.annotations.find(t => t.threadId === threadId);
+  const thread = State.annotations.find(t => t && typeof t === 'object' && t.threadId === threadId);
   if (!thread) return;
   pushHistory();
   thread.resolved = !thread.resolved;
@@ -2051,7 +2055,7 @@ function deleteThread(threadId) {
   // H-undo: 删之前 push, 让用户能 undo 回退
   // (注: confirm 弹窗期间如果用户取消, pushHistory 已被旧版本的副作用污染, 但这没问题 — 实际不修改)
   // 修正: confirm 后再 push, 避免取消时污染 history
-  const thread = State.annotations.find(t => t.threadId === threadId);
+  const thread = State.annotations.find(t => t && typeof t === 'object' && t.threadId === threadId);
   if (!thread) return;
   pushHistory();
   // 移除 mark
@@ -2097,10 +2101,28 @@ function deleteThread(threadId) {
 function renderCommentList() {
   const list = $('#comment-list');
   const empty = $('#comment-empty');
+  // v1.40 perf fix: 大数组场景 (chaos S33: 10000 条 noise annotations) 跳过全量渲染
+  // 否则 onUpdate → renderCommentList 是 O(N²) 每次都重渲染, 卡死主线程
+  // 解决: 超过阈值时只显示计数 + 提示, 用户可手动展开
+  const TOTAL_LIMIT = 200;
+  if (State.annotations.length > TOTAL_LIMIT) {
+    list.innerHTML = '';
+    empty.classList.add('hidden');
+    const warn = document.createElement('div');
+    warn.className = 'comment-overflow-warn';
+    warn.innerHTML = `<div class="warn-title">批注数量过多 (${State.annotations.length})</div><div class="warn-hint">为保证性能, 暂不渲染全部批注. 请在源代码中清理冗余批注, 或缩小文档范围.</div>`;
+    list.appendChild(warn);
+    // 只统计计数 (不渲染), 仍需更新 tab 数字
+    updateCommentCounts();
+    syncFilterTabsFromCheckboxes();
+    return;
+  }
   // v2: 严格按 filter 过滤, 不再 pin activeThread.
   // 旧逻辑会把 "已点开过但当前 tab 不显示" 的 active 强制塞回来,
   // 在 tab 切换时给用户造成 "切到已解决 tab 却看到未解决卡片" 的假象.
   const filtered = State.annotations.filter(t => {
+    // v1.40 fix: 防御损坏条目 (null / string / 缺字段) — chaos S18 暴露崩溃
+    if (!t || typeof t !== 'object') return false;
     if (State.filterOpen && !State.filterResolved && t.resolved) return false;
     if (State.filterResolved && !State.filterOpen && !t.resolved) return false;
     return true;
@@ -2108,13 +2130,17 @@ function renderCommentList() {
 
   // F7 docx 一致: 侧栏按 doc 位置排序 (Word 行为), range.from 升序
   // invalid/fuzzy ann (range=null) 排在最后
+  // v1.40 fix: 防御非对象条目 (null / string / 缺字段) — chaos test S18 暴露崩溃
   const sorted = [...filtered].sort((a, b) => {
+    if (!a || !b || typeof a !== 'object' || typeof b !== 'object') return 0;
     if (a.range == null && b.range == null) return 0;
     if (a.range == null) return 1;
     if (b.range == null) return -1;
+    if (typeof a.range.from !== 'number' || typeof b.range.from !== 'number') return 0;
     return a.range.from - b.range.from;
   });
-  const visibleThreads = sorted;
+  // 过滤掉损坏的条目, 渲染时跳过 (避免后续 thread.threadId 访问崩)
+  const visibleThreads = sorted.filter(t => t && typeof t === 'object' && t.threadId);
 
   if (visibleThreads.length === 0) {
     list.innerHTML = '';
@@ -2297,7 +2323,7 @@ function renderCommentList() {
     btn.addEventListener('click', async e => {
       e.stopPropagation();
       const tid = btn.dataset.thread;
-      const thread = State.annotations.find(t => t.threadId === tid);
+      const thread = State.annotations.find(t => t && typeof t === 'object' && t.threadId === tid);
       if (!thread) return;
       const text = thread.text || '';
       try {
@@ -2381,7 +2407,7 @@ document.addEventListener('mousedown', e => {
 // 已解决卡片 isCollapsed = resolved && !expandedThreadIds[tid], 手动折叠任意卡也是 collapsed
 // 解决"打不开" bug: 点已解决卡 → 总是设 expandedThreadIds[tid]=true; 点未解决卡 → toggle manuallyCollapsedIds
 function toggleManualCollapse(tid) {
-  const thread = State.annotations.find(t => t.threadId === tid);
+  const thread = State.annotations.find(t => t && typeof t === 'object' && t.threadId === tid);
   if (thread?.resolved) {
     // 已解决: toggle expandedThreadIds (确保"打不开"修复)
     if (!State.expandedThreadIds) State.expandedThreadIds = {};
@@ -2410,7 +2436,7 @@ function scrollToCommentText(tid) {
 }
 
 function scrollToThread(threadId) {
-  const thread = State.annotations.find(t => t.threadId === threadId);
+  const thread = State.annotations.find(t => t && typeof t === 'object' && t.threadId === threadId);
   if (!thread) return;
   const editor = State.editor;
   // 找 mark 位置（因为文本可能改过，重新解析）

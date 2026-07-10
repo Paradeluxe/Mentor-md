@@ -1251,6 +1251,18 @@ body.file-pane-collapsed #file-pane {
 }
 #comment-list { flex: 1; overflow-y: auto; padding: 10px 12px; }
 
+/* v1.40 chaos S33 fix: 大数组 annotations 时显示的警告 */
+.comment-overflow-warn {
+  padding: 16px 18px;
+  background: #fff8e1;
+  border-left: 3px solid #f59e0b;
+  border-radius: 6px;
+  margin: 12px 0;
+  color: #78350f;
+}
+.comment-overflow-warn .warn-title { font-weight: 600; margin-bottom: 6px; font-size: 14px; }
+.comment-overflow-warn .warn-hint { font-size: 12px; line-height: 1.5; opacity: 0.85; }
+
 /* === Comment thread card (DESIGN.md: 暖黄左 border, 6px 圆角, shadow-as-border) === */
 .comment-thread {
   background: var(--panel);
