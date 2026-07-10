@@ -2,6 +2,24 @@
 
 按时间倒序记录已发布的变化。最新条目在上方。
 
+## v1.37 feat (2026-07-09) — 导出 .md / .docx 工具栏按钮
+
+### Feat: 工具栏新增 #btn-export-md 与 #btn-export-docx
+- 在"另存为"按钮后插两个按钮, SVG icon 走 CSS mask-image (downloadMd / downloadDocx SVG)
+- `exportMd()`: PM doc → turndown markdown → `text/markdown` blob 下载, 文件名 `<basename>.md`
+- `exportDocx()`: PM doc → JSZip 构造 OOXML docx 下载 (含 image, 粗体/斜体/code 等 inline run, H1-H3/列表/blockquote/code blocks)
+- `buildDocxBlob(html, mediaFiles)`: 浏览器纯前端 docx 生成, 把 blob URLs 转 word/media/* 二进制
+- 测试 `tests/verify-export-buttons.spec.js` 5 步全过 (含 JSZip 解 word/document.xml 验证)
+
+### Fix: ESM module 闭包内 `Node` 全局是 undefined
+- `processInlineContent` 用 `Node.TEXT_NODE`/`Node.ELEMENT_NODE` 比较 child.nodeType
+- 在 ESM module closure 里 `Node` 是 undefined, 比较永远 false, out 永远 0
+- **修复**: 用硬编码常量 `const TXT = 3; const ELEM = 1;`
+- 这是为什么 docx 起初输出 `<w:p></w:p>` (paragraph empty) — 不是 OOXML bug, 而是 processInlineContent 静默不工作
+- 教训: ESM module / module scope 不同于 classic script, 全局如 `Node`/`window` 不能直接访问, 用硬编码常量或 `globalThis`
+
+## v1.37 (2026-07-09) — F-media 图渲染修复 + 段间距调整
+
 ## v1.37 / v1.38 (2026-07-09) — 段间距体系 em→px 回调
 
 ### Style: 段间距体系 v1.38 (em → px, 回调过头部分)
