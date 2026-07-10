@@ -1243,6 +1243,11 @@ function initEditor() {
         // 仍然刷新侧栏 (highlight 已经 dispatch 了, renderCommentList 由 highlightActiveMark 自己触发)
         return;
       }
+      // v1.37: 用户在编辑 PM doc 时的 doc 跟踪 - 通过 PM 自己的 history plugin 处理
+      // (这里只 markDirty + 同步侧栏/大纲/mark 验证, 不主动 pushHistory)
+      // 之前尝试在 onUpdate 自动 pushHistory 是错的: pushHistory 拍的是 *已应用* 的 tr 后的 state,
+      // 多次连续编辑时栈顶和次顶 docText 相同 (snap 是 current state), undo 无效果
+      // 正确做法: PM 文本编辑走 ProseMirror 自带 history plugin, 我们 my-history 专管批注 ops
       markDirty();
       // 文本变化时，需要重新解析已存在的批注 mark 位置（保持侧栏锚定）
       // 这里只刷新侧栏显示顺序，不动数据
@@ -2891,6 +2896,8 @@ function restoreFromSnapshot(snap) {
 // 清空所有 annotation mark, 按 State.annotations 或 markSnapshot 重建
 // v1.37: 优先用 markSnapshot (PM 物理位置快照), 没有则用 State.annotations.range 兜底
 // 解决 "deleteThread + undo 丢失批注" 根因: 旧逻辑只信 annotations.range, 没考虑 PM doc 物理位置
+// v1.37 redo 修复: cross-check State.annotations.threadId, 防止 redo 删 thread 后仍
+// 通过 stale markSnapshot 加 mark (threadId 已不存在)
 function rebuildAnnotationMarks(markSnapshot) {
   const ed = State.editor;
   if (!ed) return;
@@ -2901,12 +2908,17 @@ function rebuildAnnotationMarks(markSnapshot) {
   // 1. 清掉所有 annotation mark
   tr = tr.removeMark(0, docSize, markType);
 
+  // v1.37 redo fix: 收集当前有效的 threadId (避免对已删 thread 加游离 mark)
+  const validThreadIds = new Set();
+  State.annotations.forEach(t => { if (t.threadId) validThreadIds.add(t.threadId); });
+
   // 2. 重建 mark — 优先 markSnapshot, fallback 用 ann.range
   const rebuilt = [];  // [{threadId, from, to}] 已成功加入
   const seen = new Set();  // 避免重复 addMark 同一 threadId 同一 range
 
   const tryAdd = (threadId, from, to, resolved) => {
     if (!threadId) return false;
+    if (!validThreadIds.has(threadId)) return false;  // v1.37 redo fix: thread 已被删, 别加 mark
     if (from < 0 || to > docSize || from >= to) return false;
     if (seen.has(`${threadId}:${from}-${to}`)) return false;
     const attrs = { threadId, resolved: !!resolved };
@@ -2930,7 +2942,7 @@ function rebuildAnnotationMarks(markSnapshot) {
   }
 
   if (rebuilt.length === 0 && State.annotations.length > 0) {
-    console.warn(`[rebuildAnnotationMarks] 所有 ${State.annotations.length} 个 thread 都未重建 mark (snapshot 空 + range 越界)`);
+    console.warn(`[rebuildAnnotationMarks] 所有 ${State.annotations.length} 个 thread 都未重建 mark (snapshot 空 + range 越界 或 thread 已删)`);
   }
   ed.view.dispatch(tr);
   return rebuilt;
@@ -4397,50 +4409,91 @@ function setupToolbar() {
     if (redo()) showToast('已重做');
   });
   updateHistoryButtons();  // 初始 disabled 状态
-  // 快捷键 (v2 Office 风格, 用户要求: Ctrl+Z/Ctrl+Y)
-  // - Ctrl+Z: 优先撤销批注 (my history), 没批注 history 时让 Tiptap 撤销 doc
-  // - Ctrl+Y 或 Ctrl+Shift+Z: 优先重做批注, 没批注 future 时让 Tiptap 重做 doc
-  // - Ctrl+Alt+Z / Ctrl+Alt+Shift+Z: 显式走 Tiptap (强制走 doc undo, 不管批注 history)
+  // 快捷键 (v2/v1.37 Office 风格, 用户要求: Ctrl+Z/Ctrl+Y)
+  // - Ctrl+Z: 优先撤销 PM doc 的编辑 (PM history plugin 已经处理 mark 同步)
+  //   只有当 PM 历史栈彻底空时才走我们的批注 ops history
+  // - Ctrl+Y 或 Ctrl+Shift+Z: 优先 PM redo, 否则批注 redo
+  // v1.37 fix: 之前是 "批注优先, 没有才 PM", 但用户报告 "批注内逐字删除+Ctrl+Z" 走错路
+  //   (我栈里有建批注 snapshot, 但他期望恢复字符 → 走 PM 才对)
+  //   现在改为 PM 优先, 我们 my-history 兜底处理 batch delete (那种情况 PM history 不动)
   document.addEventListener('keydown', (e) => {
     // 避免在 textarea/input 内误触 (用户在输入文字)
     const tag = e.target?.tagName;
     if (tag === 'TEXTAREA' || tag === 'INPUT') return;
     if (!((e.metaKey || e.ctrlKey) && !e.altKey)) return;
 
-    // Ctrl+Z (无 shift): 智能 undo — 批注优先, 没有就让 Tiptap
+    // Ctrl+Z (无 shift): 优先 PM undo (doc 文本编辑), 我们的 history 兜底
     if (!e.shiftKey && (e.key === 'z' || e.key === 'Z')) {
       e.preventDefault();
-      if (State.history.past.length > 0) {
-        if (undo()) showToast('已撤销');
-      } else {
-        State.editor?.commands.undo();
-        showToast('已撤销 (文档)');
-      }
+      if (undoSmartDispatch()) showToast('已撤销');
       return;
     }
     // Ctrl+Y: 智能 redo
     if (!e.shiftKey && (e.key === 'y' || e.key === 'Y')) {
       e.preventDefault();
-      if (State.history.future.length > 0) {
-        if (redo()) showToast('已重做');
-      } else {
-        State.editor?.commands.redo();
-        showToast('已重做 (文档)');
-      }
+      if (redoSmartDispatch()) showToast('已重做');
       return;
     }
     // Ctrl+Shift+Z: 备选 redo
     if (e.shiftKey && (e.key === 'z' || e.key === 'Z')) {
       e.preventDefault();
-      if (State.history.future.length > 0) {
-        if (redo()) showToast('已重做');
-      } else {
-        State.editor?.commands.redo();
-        showToast('已重做 (文档)');
-      }
+      if (redoSmartDispatch()) showToast('已重做');
       return;
     }
   });
+
+  // v1.37: PM undo 优先, my-history 兜底
+  //   - 用户编辑 PM doc (字符增删/格式化) → PM history plugin 已捕获, undo 恢复文本 + mark
+  //   - 批注 ops (deleteThread / addReply / toggleResolved 走我们 pushHistory) → 我们的 undo
+  function undoSmartDispatch() {
+    // 先尝试 PM undo (用户最近一次编辑可能是文本/mark)
+    // PM history plugin 暴露 PM 编辑历史栈, 通过编辑器命令访问
+    // 在 PM 自带 history 插件的栈里, 编辑 docContent 后再编辑 mark 维度的 patch 都是 PM 范围 (mark 跟 doc 一起回滚)
+    // 但 MARK 维度变更 (active / resolved 切换) 不走 PM history stack (用了 __activeMarkSync meta), 所以走我们
+    // 简单 rule: my-history.past 顶部项如果它是 "批注 ops" (我们 pushHistory 的, 不是 PM onUpdate 来的), 走 my
+    //           否则走 PM. PM 自带 history plugin 我们没主动 push PM history entry (v1.37 撤销了 onUpdate push),
+    //           所以 my-history 里也只剩批注 ops
+    // 用 try-undo PM first 看是否真的能改 (PM undo 会撤销 tr, docChanged 触发), 否则 fallback my
+    const ed = State.editor;
+    if (ed) {
+      // 真正测 PM undo 是否生效, 通过检查 PM history plugin stack
+      try {
+        const before = ed.state.doc.textBetween(0, ed.state.doc.content.size, ' ');
+        ed.commands.undo();
+        const after = ed.state.doc.textBetween(0, ed.state.doc.content.size, ' ');
+        if (before !== after) {
+          // PM undo 改变了 doc 文本 — 用户想要的 undo 已发生
+          // 同时更新 mark (rebuildAnnotationMarks via my-history path 不需要, 因为 PM undo 也撤销 mark)
+          return true;
+        }
+      } catch (e) {
+        // PM undo 抛错, 继续 fallback
+      }
+    }
+    // PM undo 无效 (可能 PM history 空了 / 被 my-history 接管)
+    if (State.history.past.length > 0 && undo()) {
+      showToast('已撤销 (批注)');
+      return true;
+    }
+    return false;
+  }
+
+  function redoSmartDispatch() {
+    const ed = State.editor;
+    if (ed) {
+      try {
+        const before = ed.state.doc.textBetween(0, ed.state.doc.content.size, ' ');
+        ed.commands.redo();
+        const after = ed.state.doc.textBetween(0, ed.state.doc.content.size, ' ');
+        if (before !== after) return true;
+      } catch (e) {}
+    }
+    if (State.history.future.length > 0 && redo()) {
+      showToast('已重做 (批注)');
+      return true;
+    }
+    return false;
+  }
   $('#btn-save-as').addEventListener('click', async () => {
     if (!State.currentFile) return;
     const html = State.editor.getHTML();
