@@ -2,6 +2,21 @@
 
 按时间倒序记录已发布的变化。最新条目在上方。
 
+## v1.39 (2026-07-10) — mark 内点击光标舒服化
+
+### Bugfix: 点击 annotation mark 边界时光标落在 mark 外 (用户原话 "插入光标不舒服")
+- **症状**: 用户点 mark 左边缘 → PM `inclusive: false` 边界位置 (from / to) cursor 不带 annotation mark → 输入文字插入到 mark 外, 高亮"断裂" → 用户感觉光标位置与高亮不符
+- **根因**: `setupAnnotationMarkClickObserver` 旧逻辑 `targetPos = pos` (= mark 起点 `from`) → 落在 mark 边界, 不在 mark 内
+- **修复**:
+  - 用 click X 坐标 vs mark 边界框中线: 左半 → `from+1`, 右半 → `to-1` (都在 mark 内, 都带 annotation mark)
+  - listener 改 capture phase + `stopImmediatePropagation`, 抢在 PM 自己的 mousedown handler 之前
+  - 兼容多段 mark (跨段 / table multi-cell): 按 clickY 命中对应 range
+- **测试**: `tests/verify-cursor-fix.spec.js` 6 个点击位置全过 + typing 测试 (光标在内 + 输入字符继承 annotation mark)
+- 边界防御: 多段 mark 时 clickX 判定可能不准, 兜底 `targetPos = from + min(1, halfWidth)` 确保光标至少在 mark 内
+
+### Chore: cache-bust 同步 bump
+- `index.html` `app.js?v=96 → ?v=101`
+
 ## v1.37 feat (2026-07-09) — 导出 .md / .docx 工具栏按钮
 
 ### Feat: 工具栏新增 #btn-export-md 与 #btn-export-docx

@@ -5101,32 +5101,85 @@ function setupEditorSelectionObserver() {
 // P3-A fix: mousedown 在 .annotation-mark 上时主动触发 PM selection + active 切换
 // 问题: page.mouse.click / 真实用户点击 mark 时, PM 内部有时不会自动把 selection 移到该位置
 // (尤其 mark 元素没监听 onMouseDown). 结果 State.activeThreadId 不更新, highlightActiveMark 不跑.
+//
+// v1.39 fix: mark 是 inclusive:false, 边界位置 (from / to) 光标在 mark 外.
+//   旧逻辑 targetPos = pos (=from), 光标落在 mark 起点 (mark 外) → 用户感觉光标在 mark 外
+//   新逻辑: 根据点击 X 坐标 vs mark 边界框中线, 把光标放到 (from+1) 或 (to-1) (mark 内)
 function setupAnnotationMarkClickObserver() {
   const editorEl = State.editor.view.dom;
+  // v1.39 fix: 用 capture phase + event delegation, 确保在 PM 自己 mousedown handler 之前执行
+  // 旧版 (bubble) 在 PM 把 cursor 设到 clickX 对应位置之后才跑, targetPos 被覆盖
   editorEl.addEventListener('mousedown', (e) => {
     const markEl = e.target.closest && e.target.closest('.annotation-mark');
     if (!markEl) return;
+    // v1.39: preventDefault + stopPropagation 阻止 PM 自己的 mousedown handler
+    e.preventDefault();
+    e.stopPropagation();
+    e.stopImmediatePropagation();
     const threadId = markEl.getAttribute('data-thread-id');
     if (!threadId) return;
-    // 找该 threadId mark 的 pos, 用 setTextSelection 把 cursor 放进去
     const editor = State.editor;
     const markType = editor.schema.marks.annotation;
-    let pos = null;
+    // 收集该 threadId 所有 mark 的 [from, to) 范围 (跨段/多 cell 时可能多段)
+    const ranges = [];
     editor.state.doc.descendants((node, p) => {
-      if (pos !== null) return false;
       if (!node.isText) return;
       const m = node.marks.find(mm => mm.type === markType && mm.attrs.threadId === threadId);
-      if (m) pos = p;
+      if (!m) return;
+      const last = ranges[ranges.length - 1];
+      if (last && last.to === p) {
+        last.to = p + node.nodeSize;
+      } else {
+        ranges.push({ from: p, to: p + node.nodeSize });
+      }
     });
-    if (pos === null) return;
-    // 把 cursor 设到该 mark 内部 (中间位置避免光标到边缘)
-    const targetPos = pos + Math.floor((pos + 1 - pos) / 2) || pos;
+    if (ranges.length === 0) return;
+    // 找点击位置对应的 range (用 markEl 的 clientRect 中心 vs 各 range 在 DOM 上的位置)
+    // 简化: 单段时直接用唯一 range; 多段时按 clickY 落到哪段
+    let range;
+    if (ranges.length === 1) {
+      range = ranges[0];
+    } else {
+      // 多段: 计算每段 DOM rect, 按 clickY 选最近段
+      const domRanges = [];
+      for (const r of ranges) {
+        try {
+          const domFrom = editor.view.nodeDOM(r.from);
+          const domTo = editor.view.nodeDOM(r.to - 1);
+          const rectA = domFrom?.getBoundingClientRect();
+          const rectB = domTo?.getBoundingClientRect();
+          if (rectA && rectB) {
+            domRanges.push({ from: r.from, to: r.to, top: rectA.top, bottom: rectB.bottom });
+          }
+        } catch (err) { /* 跳过 */ }
+      }
+      const hit = domRanges.find(r => e.clientY >= r.top && e.clientY <= r.bottom) || domRanges[0];
+      if (!hit) return;
+      range = { from: hit.from, to: hit.to };
+    }
+    // 关键修复: 用点击 X 坐标 vs mark 边界框中线, 决定光标放在左半还是右半
+    const rect = markEl.getBoundingClientRect();
+    const clickX = e.clientX;
+    const midpoint = rect.left + rect.width / 2;
+    const halfWidth = Math.max(1, Math.floor((range.to - range.from) / 2));
+    let targetPos;
+    if (clickX <= midpoint) {
+      // 点的左半 → 光标放在 mark 内最左 (from+1)
+      targetPos = range.from + 1;
+    } else {
+      // 点的右半 → 光标放在 mark 内最右 (to-1)
+      targetPos = range.to - 1;
+    }
+    // 防御: 多段 mark 时 clickX 判定可能不准, 兜底至少让 cursor 在 mark 内
+    if (targetPos <= range.from || targetPos >= range.to) {
+      targetPos = range.from + Math.min(1, halfWidth);
+    }
     editor.commands.setTextSelection(targetPos);
     // 主动 set activeThreadId + dispatch highlight (兜底, 防止 selectionUpdate 没触发)
     State.activeThreadId = threadId;
     highlightActiveMark();
     renderCommentList();
-  });
+  }, true);  // v1.39: capture phase, 在 PM 自己的 handler 之前跑
 }
 
 // ============================================================
