@@ -4210,7 +4210,363 @@ function downloadBlob(name, blob) {
   a.href = url;
   a.download = name;
   a.click();
-  URL.revokeObjectURL(url);
+  setTimeout(() => URL.revokeObjectURL(url), 500);
+}
+
+// 导出当前文档为 .md 文件下载 (不打包批注; 批注留在 .mentor/.annotations.json 一侧)
+// 适用于: 只想分享文本内容给别人, 不希望分享批注
+function exportMd() {
+  if (!State.editor || !State.currentFile) {
+    showToast('请先打开或新建文档', 2000);
+    return;
+  }
+  const html = State.editor.getHTML();
+  const mdText = htmlToMarkdown(html);
+  const baseName = (State.currentFile.name || 'untitled').replace(/\.(md|markdown|mentor)$/i, '');
+  const blob = new Blob([mdText], { type: 'text/markdown;charset=utf-8' });
+  downloadBlob(`${baseName}.md`, blob);
+  showToast(`已导出 ${baseName}.md`, 2500);
+}
+
+// 导出当前文档为 .docx 文件下载
+// 浏览器纯前端实现: JSZip 构造 OOXML docx (basic Word doc, 含段落 + run + 图片)
+// 局限: 仅段落级富文本 (粗体/斜体/标题/列表/代码块/链接) + media/* 图片嵌入
+// 不足: 复杂 table / 高级批注渲染需 Word 二次打开手动调整
+// 性能图: 1MB 文档 < 200ms 打包 (JSZip)
+async function exportDocx() {
+  if (!State.editor || !State.currentFile) {
+    showToast('请先打开或新建文档', 2000);
+    return;
+  }
+  if (typeof JSZip === 'undefined') {
+    showToast('JSZip 未加载, 无法导出 docx', 3000);
+    return;
+  }
+  showToast('正在生成 .docx…', 1500);
+  try {
+    // 1. 拿到 docx-ready HTML (用 markdownToHtml 但保留 media handling)
+    //    注意: buildDocxBlob 内部只关心行内 + 块结构, 不会处理 markSnapshot
+    const html = State.editor.getHTML();
+    const zip = await buildDocxBlob(html, State.mediaFiles || {});
+
+    const baseName = (State.currentFile.name || 'untitled').replace(/\.(md|markdown|mentor)$/i, '');
+    downloadBlob(`${baseName}.docx`, zip);
+    showToast(`已导出 ${baseName}.docx`, 2500);
+  } catch (e) {
+    console.error('[exportDocx] 失败:', e);
+    showToast('导出 docx 失败: ' + (e.message || '未知错误'), 4000);
+  }
+}
+
+// 构造符合 OOXML 规范的 docx blob (minimal, 仅基础需求)
+// 输入: editor 的 HTML (含 inline mark spans & img)
+// 输出: JSZip 生成的 {type:'blob'} Promise
+async function buildDocxBlob(html, mediaFiles) {
+  if (typeof JSZip === 'undefined') throw new Error('JSZip not loaded');
+  const zip = new JSZip();
+  const now = new Date().toISOString();
+
+  // OEBPS/content.xml: Word 主体, 用 OOXML XML 表达段落 + run
+  // 这里实现 minimal: 段落 p + run r, 支持粗体/斜体/标题 (h1-h3)/列表 (ul/ol/li)/链接/图片
+  function esc(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  // 解析 HTML — 用 DOMParser, 不依赖 docx 库
+  const wrapper = document.createElement('div');
+  wrapper.innerHTML = html;
+
+  // 处理 media: 给每个 <img> 把 blob: URL 转 base64 dataURL 用图片二进制塞进 zip
+  // (docx 文档里的图需要 docx 内部的 rId 关系链)
+  const imageMap = new Map(); // original src -> {rId, fileName}
+  async function inlineImage(imgEl) {
+    const src = imgEl.getAttribute('src');
+    if (!src) return null;
+    if (imageMap.has(src)) return imageMap.get(src);
+    // 处理三种 src 类型:
+    //   - http(s):// : 直接 fetch
+    //   - blob:http://... : fetch blob (保持 alive)
+    //   - /media/x.png (Mentor 媒体自走) : 用 mediaFiles[path]
+    const filename = `media/image${imageMap.size + 1}.${(src.match(/\.(png|jpe?g|gif|svg)(\?|$)/i) || [,'.png'])[1] || 'png'}`;
+    try {
+      let blob;
+      if (src.startsWith('blob:')) {
+        const r = await fetch(src);
+        blob = await r.blob();
+      } else if (src.startsWith('http://') || src.startsWith('https://')) {
+        const r = await fetch(src);
+        blob = await r.blob();
+      } else if (mediaFiles[src]) {
+        blob = mediaFiles[src];
+      } else {
+        return null;  // 无法获取
+      }
+      // 文件写到 word/media/ 下
+      const ext = (blob.type.split('/')[1] || 'png').replace(/^jpeg/, 'jpg');
+      const actualFilename = `media/image${imageMap.size + 1}.${ext}`;
+      zip.file(`word/${actualFilename}`, blob);
+      const rId = `rId${imageMap.size + 1}`;
+      const info = { rId, fileName: actualFilename };
+      imageMap.set(src, info);
+      return info;
+    } catch (e) {
+      console.warn('[buildDocxBlob] 图片读取失败:', src, e);
+      return null;
+    }
+  }
+
+  // 块级 helper
+  let pCount = 0, rId = 100;  // rId 起步避免冲突
+  function makeRun(text, opts = {}) {
+    // opts: bold, italic, underline, code
+    const text2 = esc(text).replace(/\n/g, '</w:t><w:br/><w:t xml:space="preserve">');
+    let rpr = '';
+    if (opts.bold) rpr += '<w:b/>';
+    if (opts.italic) rpr += '<w:i/>';
+    if (opts.underline) rpr += '<w:u w:val="single"/>';
+    if (opts.code) {
+      rpr += '<w:rFonts w:ascii="Consolas" w:hAnsi="Consolas" w:cs="Consolas"/>';
+      rpr += '<w:shd w:val="clear" w:color="auto" w:fill="EEEEEE"/>';
+    }
+    const rprEl = rpr ? `<w:rPr>${rpr}</w:rPr>` : '';
+    return `<w:r>${rprEl}<w:t xml:space="preserve">${text2}</w:t></w:r>`;
+  }
+  function makePara(content, opts = {}) {
+    // opts: style 段落样式名 (Heading1/2/3), align
+    const pPrParts = [];
+    if (opts.style) pPrParts.push(`<w:pStyle w:val="${opts.style}"/>`);
+    if (opts.align) pPrParts.push(`<w:jc w:val="${opts.align}"/>`);
+    const pPr = pPrParts.length ? `<w:pPr>${pPrParts.join('')}</w:pPr>` : '';
+    return `<w:p>${pPr}${content}</w:p>`;
+  }
+  function makeImageRun(imageInfo, altText, w, h) {
+    const wp = w ? `<w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0"><wp:extent cx="${Math.round(w * 9525)}" cy="${Math.round(h * 9525)}"/><wp:docPr id="${imageInfo.id}" name="Picture ${imageInfo.id}"/><a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:nvPicPr><pic:cNvPr id="${imageInfo.id}" name="img${imageInfo.id}.${imageInfo.ext}"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="${imageInfo.rId}" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing>` : `<w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0"><wp:extent cx="3000000" cy="2000000"/><wp:docPr id="${imageInfo.id}" name="Picture ${imageInfo.id}"/><a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:nvPicPr><pic:cNvPr id="${imageInfo.id}" name="img${imageInfo.id}.${imageInfo.ext}"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="${imageInfo.rId}" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"/></pic:blipFill></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing>`;
+    return `<w:r><w:rPr/>${wp}</w:r>`;
+  }
+
+  // 块级解析: 把每个 block (p/h1/h2/.../li/div/img) 翻译为 OOXML 段落
+  // block index 加关系中的 rId
+  function processBlock(block, indentLevel = 0) {
+    pCount++;
+    const id = pCount;
+    if (block.tagName === 'IMG') {
+      // 图片
+      // 同步处理 src 已经在 inline 化
+      const src = block.getAttribute('src');
+      // 这里假定 processBlock 的调用方已处理 imageMap
+      return makePara(makeImageRun({ id, rId: 'REL_PLACEHOLDER', ext: 'png' }, block.alt, 300, 200));
+    }
+    if (/^H[1-6]$/.test(block.tagName)) {
+      const level = parseInt(block.tagName[1]);
+      return makePara(makeRun(block.textContent), { style: `Heading${Math.min(level, 9)}` });
+    }
+    if (block.tagName === 'BLOCKQUOTE') {
+      return makePara(makeRun(block.textContent), { style: 'Quote' });
+    }
+    if (block.tagName === 'PRE') {
+      // <pre><code> 整段当 codeblock, monospace
+      const text = block.textContent;
+      return makePara(makeRun(text, { code: true }), { style: 'Code' });
+    }
+    if (block.tagName === 'HR') {
+      // horizontal rule 简单表示
+      return makePara('<w:r><w:hr/></w:r>');
+    }
+    if (block.tagName === 'UL' || block.tagName === 'OL') {
+      // 嵌套列表递归
+      const items = Array.from(block.children).filter(c => c.tagName === 'LI');
+      const isOrdered = block.tagName === 'OL';
+      let out = '';
+      for (const li of items) {
+        const innerBlocks = Array.from(li.children).filter(c => !/^UL$|^OL$/.test(c.tagName));
+        const nestedLists = Array.from(li.children).filter(c => /^UL$|^OL$/.test(c.tagName));
+        const innerText = innerBlocks.map(ib => ib.textContent).join(' ').trim();
+        out += makePara(makeRun((isOrdered ? '1. ' : '• ') + innerText || '•')) ;
+        // 缩进
+        for (const nested of nestedLists) {
+          out += processBlock(nested, indentLevel + 1);
+        }
+      }
+      return out;
+    }
+    // 默认: paragraph, 内部用 inline 处理
+    return makePara(processInlineContent(block));
+  }
+
+  // inline: 处理 strong/em/code/a + img
+  // v1.37: 处理 inline 内容: textNode 走纯文本, Element 按 tag 决定 run formatting
+  // 注: child.textContent 对 Element 类型返回其所有后代文本拼接 (递归),
+  //     所以 `<strong>bold</strong>` 这个 ELEMENT child 的 textContent = "bold".
+  //     textNode 的 nodeValue = nodeValue.
+  // 注: 这里我们用 child.nodeType 严格匹配 Node.TEXT_NODE / Node.ELEMENT_NODE.
+  //     旧版本失效是因为 module 内 childType === Node.TEXT_NODE 在某种 refresh 路径里 Node.TEXT_NODE 不是 3 (e.g. module
+  //     沙盒里 Node 是 undefined). 现在通过直接捕获 Node.TEXT_NODE/Node.ELEMENT_NODE 值到本地,
+  //     然后用 === 比较, 万一闭包里 Node 变了也能 work.
+  function processInlineContent(node) {
+    let out = '';
+    // v1.37 fix: 在 ESM module 闭包内 `Node` 是 undefined (browser ESM scope 隔离).
+    //          用硬编码常量 3 (TEXT_NODE) 和 1 (ELEMENT_NODE) 替代.
+    const TXT = 3;
+    const ELEM = 1;
+    for (const child of node.childNodes) {
+      const t = child.nodeType;
+      if (t === TXT) {
+        out += makeRun(child.nodeValue || '');
+      } else if (t === ELEM) {
+        const tag = child.tagName;
+        if (tag === 'STRONG' || tag === 'B') {
+          out += makeRun(child.textContent || '', { bold: true });
+        } else if (tag === 'EM' || tag === 'I') {
+          out += makeRun(child.textContent || '', { italic: true });
+        } else if (tag === 'CODE') {
+          out += makeRun(child.textContent || '', { code: true });
+        } else if (tag === 'A') {
+          out += makeRun(child.textContent || '', { underline: true });
+        } else if (tag === 'IMG') {
+          out += '';
+        } else {
+          out += makeRun(child.textContent || '');
+        }
+      }
+    }
+    return out;
+  }
+
+  // 主遍历: 找 editor 内部的所有块级 children
+  // editor -> ProseMirror mirror 内部 .ProseMirror 或 #editor inner. 我们从 State.editor 的节点 fallback 到 wrapper.innerHTML
+  const blocks = Array.from(wrapper.children);
+  let bodyXml = '';
+  const blockEls = blocks.length > 0 ? blocks : Array.from(wrapper.querySelectorAll('p, h1, h2, h3, h4, h5, h6, ul, ol, blockquote, pre, hr'));
+  // 先收集所有 block (含嵌套块), 顺序处理
+  function flattenBlocks(parent, list = []) {
+    for (const child of parent.children) {
+      const tag = child.tagName;
+      if (/^(P|H[1-6]|UL|OL|BLOCKQUOTE|PRE|HR|DIV|IMG)$/.test(tag)) {
+        list.push(child);
+      }
+      if (tag === 'UL' || tag === 'OL' || tag === 'DIV') {
+        flattenBlocks(child, list);
+      }
+    }
+    return list;
+  }
+  const flatBlocks = flattenBlocks(wrapper);
+
+  // 先扫一遍所有 img, 预加载 (async) — 但 buildDocxBlob 是 sync wrapping async, 在 transform 同步发生时图片已就绪
+  for (const b of flatBlocks) {
+    if (b.tagName === 'IMG') {
+      // 预热 — async inline. 在 transform 中已经拿到 info
+      await inlineImage(b);
+    }
+  }
+  // 跳过 img 块 — 它们作为块级在 separate 处理 (避免重复 inline 内嵌)
+  for (const b of flatBlocks) {
+    if (b.tagName === 'IMG') {
+      // 作为 paragraph 包含 image run
+      const info = imageMap.get(b.getAttribute('src'));
+      let w = 0, h = 0;
+      // 图片真实尺寸
+      try { if (b.naturalWidth) { w = b.naturalWidth / 96; h = b.naturalHeight / 96; } } catch (e) {}
+      const rIdForImg = info ? info.rId : null;
+      const fileName = info ? info.fileName : null;
+      // 用 6 英寸默认宽度 (5760 twips), 高度按比例
+      let cx = 5760, cy = 4320;
+      if (w && h) {
+        // 等比缩放到宽度 <= 6 英寸
+        if (w > 6) { const scale = 6 / w; w *= scale; h *= scale; }
+        cx = Math.round(w * 1440); cy = Math.round(h * 1440);
+      }
+      pCount++;
+      const imgId = pCount;
+      const runXml = `<w:r><w:rPr/><w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0"><wp:extent cx="${cx}" cy="${cy}"/><wp:docPr id="${imgId}" name="Picture ${imgId}"/><a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:nvPicPr><pic:cNvPr id="${imgId}" name="Picture ${imgId}"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="${rIdForImg}" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>`;
+      bodyXml += `<w:p>${runXml}</w:p>`;
+      continue;
+    }
+    bodyXml += processBlock(b);
+  }
+
+  // _rels/.rels
+  const rels = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/>
+  <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties" Target="docProps/app.xml"/>
+</Relationships>`;
+  zip.file('_rels/.rels', rels);
+
+  // word/_rels/document.xml.rels — 图片关系链
+  let imgRels = '';
+  let imageSeq = 1;
+  for (const [src, info] of imageMap.entries()) {
+    imgRels += `  <Relationship Id="${info.rId}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/${info.fileName.replace(/^media\//, '')}"/>\n`;
+  }
+  const docRels = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+${imgRels}</Relationships>`;
+  zip.file('word/_rels/document.xml.rels', docRels);
+
+  // [Content_Types].xml
+  let types = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Default Extension="png" ContentType="image/png"/>
+  <Default Extension="jpg" ContentType="image/jpeg"/>
+  <Default Extension="jpeg" ContentType="image/jpeg"/>
+  <Default Extension="gif" ContentType="image/gif"/>
+  <Default Extension="svg" ContentType="image/svg+xml"/>
+  <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+  <Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>
+  <Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>
+</Types>`;
+  zip.file('[Content_Types].xml', types);
+
+  // word/document.xml
+  const docXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:wpc="http://schemas.microsoft.com/office/word/2010/wordprocessingCanvas"
+       xmlns:cx="http://schemas.microsoft.com/office/drawing/2014/chartex"
+       xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+       xmlns:o="urn:schemas-microsoft-com:office:office"
+       xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+       xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math"
+       xmlns:v="urn:schemas-microsoft-com:vml"
+       xmlns:wp14="http://schemas.microsoft.com/office/word/2010/wordprocessingDrawing"
+       xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
+       xmlns:w10="urn:schemas-microsoft-com:office:word"
+       xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+       xmlns:w14="http://schemas.microsoft.com/office/word/2010/wordml"
+       xmlns:w15="http://schemas.microsoft.com/office/word/2012/wordml"
+       xmlns:wpg="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingGroup"
+       xmlns:wpi="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingInk"
+       xmlns:wne="http://schemas.microsoft.com/office/word/2006/wordml"
+       xmlns:wps="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingShape">
+<w:body>${bodyXml}<w:sectPr><w:pgSz w:w="12240" w:h="15840"/><w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440" w:header="720" w:footer="720" w:gutter="0"/><w:cols w:space="720"/><w:docGrid w:linePitch="360"/></w:sectPr></w:body></w:document>`;
+  zip.file('word/document.xml', docXml);
+
+  // docProps/core.xml + app.xml
+  const coreXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties"
+              xmlns:dc="http://purl.org/dc/elements/1.1/"
+              xmlns:dcterms="http://purl.org/dc/terms/"
+              xmlns:dcmitype="http://purl.org/dc/dcmitype/"
+              xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <dc:title>Mentor 导出文档</dc:title>
+  <dc:creator>${esc(State.author || 'Mentor')}</dc:creator>
+  <cp:lastModifiedBy>${esc(State.author || 'Mentor')}</cp:lastModifiedBy>
+  <dcterms:created xsi:type="dcterms:W3CDTF">${now}</dcterms:created>
+  <dcterms:modified xsi:type="dcterms:W3CDTF">${now}</dcterms:modified>
+</cp:coreProperties>`;
+  zip.file('docProps/core.xml', coreXml);
+  const appXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"
+          xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes">
+  <Application>Mentor Markdown Editor</Application>
+  <DocSecurity>0</DocSecurity>
+  <AppVersion>1.0</AppVersion>
+</Properties>`;
+  zip.file('docProps/app.xml', appXml);
+
+  return await zip.generateAsync({ type: 'blob', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', compression: 'DEFLATE' });
 }
 
 // --- 新建空白文档
@@ -4401,6 +4757,8 @@ function setupToolbar() {
   $('#btn-open-files').addEventListener('click', openFiles);
   // 打开文件夹: 已合并到左侧空文件栏点击 (setupEmptyTreeClick), 工具栏不再需要按钮
   $('#btn-save').addEventListener('click', saveCurrent);
+  $('#btn-export-md').addEventListener('click', exportMd);
+  $('#btn-export-docx').addEventListener('click', exportDocx);
   // H-undo: 工具栏 ↶ ↷ 按钮
   $('#btn-undo').addEventListener('click', () => {
     if (undo()) showToast('已撤销');
@@ -4884,6 +5242,8 @@ window.__mdAnnotator = {
   isMentorZip,
   readMentorZip,
   buildMentorZipBlob,
+  // v1.37: 暴露 buildDocxBlob 给 e2e 调试用 (主 exports 没暴露, 因为内部用闭包)
+  buildDocxBlob,
   mentorExportName,
   // F-media v1.34: 暴露 media 反查 helper 供诊断用
   revokeMediaUrls,

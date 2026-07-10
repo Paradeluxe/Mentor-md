@@ -27,6 +27,12 @@ window.MentorIcons = {
   // 重新加载
   reload: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 15.5-6.3L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15.5 6.3L3 16"/><path d="M3 21v-5h5"/></svg>`,
 
+  // 下载到本地 (.md) - 文档 + 向下箭头
+  downloadMd: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9l-6-6z"/><path d="M14 3v6h6"/><path d="M12 18V12"/><path d="m9 15 3 3 3-3"/></svg>`,
+
+  // 导出 .docx - 文档 + Word 风折角 + 向下箭头
+  downloadDocx: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h8.5"/><path d="M14 3v6h6"/><path d="M9 12h6"/><path d="M9 16h4"/><path d="m17 17 3 3 3-3"/><path d="M20 16v8"/></svg>`,
+
   // 关闭 / X
   close: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>`,
 

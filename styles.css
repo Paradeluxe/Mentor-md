@@ -206,6 +206,14 @@ code {
   -webkit-mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><path d='M12 3v12'/><path d='m7 10 5 5 5-5'/><path d='M5 21h14'/></svg>");
   mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><path d='M12 3v12'/><path d='m7 10 5 5 5-5'/><path d='M5 21h14'/></svg>");
 }
+#btn-export-md .tb-icon::before {
+  -webkit-mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><path d='M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9l-6-6z'/><path d='M14 3v6h6'/><path d='M12 18V12'/><path d='m9 15 3 3 3-3'/></svg>");
+  mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><path d='M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9l-6-6z'/><path d='M14 3v6h6'/><path d='M12 18V12'/><path d='m9 15 3 3 3-3'/></svg>");
+}
+#btn-export-docx .tb-icon::before {
+  -webkit-mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><path d='M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h8.5'/><path d='M14 3v6h6'/><path d='M9 12h6'/><path d='M9 16h4'/><path d='m17 17 3 3 3-3'/><path d='M20 16v8'/></svg>");
+  mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><path d='M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h8.5'/><path d='M14 3v6h6'/><path d='M9 12h6'/><path d='M9 16h4'/><path d='m17 17 3 3 3-3'/><path d='M20 16v8'/></svg>");
+}
 
 /* 纯图标按钮 (粗体/斜体等格式按钮) */
 .tb-format {

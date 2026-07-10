@@ -8,7 +8,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-<link rel="stylesheet" href="styles.css?v=54" />
+<link rel="stylesheet" href="styles.css?v=55" />
 <!-- KaTeX 数学公式渲染 -->
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" crossorigin="anonymous" />
 <!-- 字体：系统无衬线 + 等宽（侧栏时间戳、文件名） -->
@@ -50,6 +50,8 @@
       <button id="btn-open-files" title="打开文件 (按住 Ctrl 多选 .md + .annotations.json 可自动加载批注)" class="tb-icon-text"><span class="tb-icon"></span><span>打开文件</span></button>
       <button id="btn-save" title="保存当前 .md 和批注 (Ctrl+S)" class="tb-icon-text"><span class="tb-icon"></span><span>保存</span></button>
       <button id="btn-save-as" title="另存为 (下载副本)" class="tb-icon-text"><span class="tb-icon"></span><span>另存为</span></button>
+      <button id="btn-export-md" title="导出当前文档为 .md 文件下载到本地" class="tb-icon-text"><span class="tb-icon"></span><span>导出MD</span></button>
+      <button id="btn-export-docx" title="导出当前文档为 .docx 文件下载到本地" class="tb-icon-text"><span class="tb-icon"></span><span>导出DOCX</span></button>
       <span class="tb-sep"></span>
       <button id="btn-undo" title="撤销批注操作 (Ctrl+Alt+Z)" class="tb-icon-text" disabled aria-label="撤销"><span class="tb-icon">↶</span></button>
       <button id="btn-redo" title="重做批注操作 (Ctrl+Alt+Shift+Z)" class="tb-icon-text" disabled aria-label="重做"><span class="tb-icon">↷</span></button>
@@ -166,7 +168,7 @@
 <div id="toast" class="toast hidden"></div>
 
 <!-- 依赖：esm.sh CDN -->
-<script src="icons.js"></script>
+<script src="icons.js?v=2"></script>
 <script type="importmap">
 {
   "imports": {
@@ -192,7 +194,7 @@
   }
 }
 </script>
-<script type="module" src="app.js?v=69"></script>
+<script type="module" src="app.js?v=93"></script>
 <!-- 帮助 popover (浮在 body 顶层, 位置由 JS 动态计算) -->
 <div id="help-popover" class="help-popover hidden" role="tooltip">
   <div class="help-popover-arrow"></div>
