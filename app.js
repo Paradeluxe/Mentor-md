@@ -1057,7 +1057,9 @@ function _validateMarksAfterEdit(editor) {
       changed = true;
     }
   }
-  if (changed) renderCommentList();
+  // v1.42.5: 返回 changed 标志, 由调用方决定要不要 renderCommentList
+  // (之前内部已 render, 跟 onUpdate 的优化重复)
+  return changed;
 }
 
 // P-reload: debounce 500ms 写 IDB (markDirty 频繁触发, 不能每次都 await put)
@@ -1277,15 +1279,21 @@ function initEditor() {
       // 多次连续编辑时栈顶和次顶 docText 相同 (snap 是 current state), undo 无效果
       // 正确做法: PM 文本编辑走 ProseMirror 自带 history plugin, 我们 my-history 专管批注 ops
       markDirty();
-      // 文本变化时，需要重新解析已存在的批注 mark 位置（保持侧栏锚定）
-      // 这里只刷新侧栏显示顺序，不动数据
-      renderCommentList();
+      // v1.42.5 perf: 只在 *有 ann 变化* 时才 renderCommentList
+      // 之前每次 keystroke 都重渲整张列表 (O(N²) for N cards × N keystrokes)
+      // 优化: _validateMarksAfterEdit 内部维护 changed 标志, 仅在 ann fuzzy/invalid 真正翻转才返 true
+      // 此外 addMark/removeMark 也会经 transaction.docChanged (markDirty 包含)
+      // 文本变化不会让 ann 变 (fuzzy 不变), 所以可以跳过 renderCommentList
+      const annChanged = _validateMarksAfterEdit(editor);
+      if (annChanged) {
+        // 真的改了 fuzzy/invalid → 卡片显示需更新
+        renderCommentList();
+      } else {
+        // 只更新 status bar / outline (轻量)
+        // renderOutline 重建左侧 H1/H2/H3 列表, 但只跟 doc 节点数相关, 不跟 ann 数
+      }
       // 大纲同步
       renderOutline();
-      // P-mark-fix: 验证所有 ann 的 mark 位置仍然有效
-      // 删 mark 内文字 / Ctrl+Z 都会让 mark 消失但 ann 仍 stale
-      // 主动调 findAnnotationRange 重新定位, 标 fuzzy/invalid
-      _validateMarksAfterEdit(editor);
     },
     onSelectionUpdate: ({ editor }) => {
       handleSelectionChange();

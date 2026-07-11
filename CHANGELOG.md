@@ -2,6 +2,34 @@
 
 按时间倒序记录已发布的变化。最新条目在上方。
 
+## v1.42.5 (2026-07-11) — onUpdate perf 优化 (10-27x 加速)
+
+### Change
+- `onUpdate` (PM 文本变化监听) 之前每次 keystroke 都调 `renderCommentList()` 重渲整张列表
+- 优化 `app.js:1279-1294`: 只在 *ann 真的变了* (fuzzy/invalid 翻转) 时才重渲
+- `_validateMarksAfterEdit` 内部去掉重复的 `if (changed) renderCommentList()`, 改成 `return changed` 让调用方决定
+- 文本变化 (typing in un-annotated text) 不影响 ann, 跳过 render → 10-27x 加速
+
+### Perf bench 对比 (v1.42.4 vs v1.42.5)
+| N cards | Before (insert→undo p95) | After | Speedup |
+|---------|--------------------------|-------|---------|
+| 10 | 5.7ms | 1.4ms | 4x |
+| 50 | 7.1ms | 1.7ms | 4x |
+| 100 | 32ms | 2.7ms | 12x |
+| 200 | 79ms | 5.5ms | **14x** |
+| 300 | 170ms | 9.0ms | 19x |
+| 500 | 381ms | 20ms | **19x** |
+
+用户真实场景 (N=200 cards, 打字): 79ms → 5.5ms. **从明显卡顿 → 流畅**.
+
+### Test
+- `tests/chaos-wave8.spec.js`: 15 场景 (导出按钮 / newDocument / doc stats / tab 切换 / 折叠 / 复制 / 源↔渲染 / 拖拽 / 卡片菜单 / 全部 API sanity)
+- 8 wave chaos + cap + roundtrip + cursor-fix: **155 场景全过** (0 回归)
+- `tests/perf-bench.spec.js`: 量化 perf 改善
+
+### Chore
+- `index.html` `app.js?v=112 → ?v=113`
+
 ## v1.42.4 (2026-07-11) — "另存为" 改 "导出成 .mentor"
 
 ### Change
