@@ -2,6 +2,19 @@
 
 按时间倒序记录已发布的变化。最新条目在上方。
 
+## v1.42.4 (2026-07-11) — "另存为" 改 "导出成 .mentor"
+
+### Change
+- 工具栏按钮文本: "另存为" → "导出成 .mentor"
+- title tooltip: "导出当前文档为 .mentor 单文件包 (含 .md + 批注 + 图片)"
+- 移除 prompt 选择 (1=mentor / 2=md+json) — 现在直接导 .mentor
+- `.md + .annotations.json` 双文件导出路径已删除 (用户不需要)
+- 实际效果: 点击 → 浏览器下载 `<原文件名>.mentor`, toast 提示
+
+### Chore
+- `index.html` `app.js?v=111 → ?v=112`
+- `tests/roundtrip-real-mentor.spec.js` 6/6 PASS (回归 0)
+
 ## v1.42.3 (2026-07-10) — wave 7 AI 路径 + 真实失败模式
 
 ### Bugfix: ai.setAuthor 未暴露

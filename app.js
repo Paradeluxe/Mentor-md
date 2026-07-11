@@ -5011,6 +5011,7 @@ function setupToolbar() {
   }
   $('#btn-save-as').addEventListener('click', async () => {
     if (!State.currentFile) return;
+    // v1.42.4: 默认导 .mentor 单文件包, 不弹 prompt (.mentor 是 docx-style 单文件, 推荐)
     const html = State.editor.getHTML();
     const mdText = htmlToMarkdown(html);
     const sidecar = {
@@ -5026,26 +5027,11 @@ function setupToolbar() {
         comments: t.comments,
       })),
     };
-    // 询问格式: 旧 .md + .json / 新 .mentor 单文件包
-    const choice = prompt(
-      '另存为:\n' +
-      '1) .mentor 单文件包 (推荐 — 像 docx)\n' +
-      '2) .md + .annotations.json 两个文件 (兼容旧版)\n' +
-      '输入 1 或 2 (默认 1):',
-      '1'
-    );
-    const useMentor = choice !== '2';  // 默认 1
-    if (useMentor) {
-      const blob = await buildMentorZipBlob(mdText, sidecar);
-      const exportName = mentorExportName(State.currentFile.name);
-      downloadBlob(exportName, blob);
-      showToast(`已下载 ${exportName} ✓`);
-    } else {
-      const sidecarName = State.currentFile.name.replace(/\.md$/i, '') + '.annotations.json';
-      downloadFile(State.currentFile.name, mdText);
-      downloadFile(sidecarName, JSON.stringify(sidecar, null, 2));
-      showToast('已下载两个文件');
-    }
+    // v1.42.4: 强制导 .mentor (移除 .md + .json 选项)
+    const blob = await buildMentorZipBlob(mdText, sidecar);
+    const exportName = mentorExportName(State.currentFile.name);
+    downloadBlob(exportName, blob);
+    showToast(`已下载 ${exportName} ✓`);
   });
 
   // 格式按钮
