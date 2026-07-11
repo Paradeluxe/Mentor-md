@@ -2129,7 +2129,10 @@ function renderCommentList() {
   const list = $('#comment-list');
   const empty = $('#comment-empty');
   // v1.42: 软警告 fallback — 正常流程不会到这里 (硬上限阻止创建), 只在 import 大文件时兜底
-  const SOFT_LIMIT = Math.max(500, (State.maxAnnotations || 0) * 2);
+  // 软阈值: cap * 2 (给用户 1 轮"接近上限"警告), cap=0 → 不警告
+  // 例: cap=50 → 软=100, cap=200 → 软=400, cap=500 → 软=1000
+  // 不再 hard-floor 500 — 那样 cap=50 时实际不会触发警告 (300 > 100 但 300 < 500, 不 warn)
+  const SOFT_LIMIT = (State.maxAnnotations || 0) === 0 ? Infinity : (State.maxAnnotations || 0) * 2;
   if (State.annotations.length > SOFT_LIMIT) {
     list.innerHTML = '';
     empty.classList.add('hidden');
@@ -3081,10 +3084,24 @@ function loadMarkdownIntoEditor(name, content, annotationsData = null) {
       schemaReport.warnings.forEach(w => showToast(`⚠ 侧车数据警告: ${w}`, 5000));
       console.warn('[P0-B] 侧车验证:', schemaReport);
     }
+    // v1.42: cap check on import — 防止一次性灌入超 cap 的批注
+    // 不直接拒绝, 而是 truncate + 警告 (用户的旧 .mentor 可能本来就有 1000+, 让他能进, 但多出来的会丢弃)
+    const validAnns = annotationsData.annotations.filter(a => a && a.threadId);
+    const cap = State.maxAnnotations || 0;
+    let importsToLoad = validAnns.length;
+    if (cap > 0 && validAnns.length > cap) {
+      showToast(`⚠ 文档含 ${validAnns.length} 条批注, 超出上限 ${cap}. 仅导入前 ${cap} 条. 在 ⚙ 调整上限`, 6000);
+      setStatus('导入截断', `${validAnns.length} → ${cap} 条. ⚙ 调整上限可加载全部`);
+      importsToLoad = cap;
+    } else if (cap > 0 && validAnns.length > cap * 0.8) {
+      // 接近上限 (80%) 警告
+      showToast(`⚠ 文档含 ${validAnns.length}/${cap} 条批注, 接近上限. ⚙ 可调整`, 4000);
+    }
+    const annsToProcess = validAnns.slice(0, importsToLoad);
     // P0-B fix: 单独跟踪已出现过的 threadId (实时 in-loop), 不依赖 schemaReport
     // schemaReport 把所有重复 threadId 都加进 Set, 第 1 个 ann 也会被误标 dup
     const seenThreadIds = new Set();
-    for (const ann of annotationsData.annotations) {
+    for (const ann of annsToProcess) {
       // 重复 threadId 标 invalid (通过实时 count 判断, 不依赖 schemaReport — 后者会把所有重复的 threadId 都加进 Set, 导致首个也被标)
       const isDuplicate = ann.threadId && seenThreadIds.has(ann.threadId);
       if (ann.threadId) seenThreadIds.add(ann.threadId);
@@ -5462,6 +5479,10 @@ window.__mdAnnotator = {
   buildMentorZipBlob,
   // v1.37: 暴露 buildDocxBlob 给 e2e 调试用 (主 exports 没暴露, 因为内部用闭包)
   buildDocxBlob,
+  // v1.42: 暴露 cap 工具函数给测试 / 高级用户脚本
+  checkAnnotationCap,
+  setMaxAnnotations,
+  findAnnotationRange,
   mentorExportName,
   // F-media v1.34: 暴露 media 反查 helper 供诊断用
   revokeMediaUrls,

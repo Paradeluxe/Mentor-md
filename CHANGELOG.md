@@ -2,6 +2,35 @@
 
 按时间倒序记录已发布的变化。最新条目在上方。
 
+## v1.42.1 (2026-07-10) — v1.42 边界补全
+
+### Bugfix: renderCommentList 软警告阈值
+- **症状**: cap 改到小值 (如 200) 后, 用户继续加批注到 450 条, 应该看到 overflow 警告, 但**没有** (因为旧公式 `max(500, cap*2)` 在 cap < 500 时 hard-floor 到 500, 450 < 500 不触发)
+- **修复** `app.js:2132`: 改为 `(State.maxAnnotations || 0) === 0 ? Infinity : cap * 2`. cap=50 → 软=100, cap=200 → 软=400, cap=500 → 软=1000. cap=0 (无限制) → 不警告
+
+### Feature: 导入时 cap check + truncate
+- `app.js:3084`: loadMarkdownIntoEditor 检查 `State.maxAnnotations`, 超出截断 + toast + setStatus 警告
+- 不直接拒绝 (用户的旧 .mentor 可能有 1000+, 让他能进, 但多出来的会丢失)
+- 接近上限 (80%) 时 warn
+
+### Test
+- `tests/cap-edge.spec.js`: 8 步全过
+  - T1: ⚙ popover 在 1400x900 viewport 真实显示 (360x188 正常, 箭头位置正确)
+  - T2: cap=50 时拒绝第 51 个 + toast
+  - T3: 删几个后能继续创建
+  - T4: import 150 个 → 截到 50 + warn toast
+  - T5: import 170 个 (cap=200, 85%) → 接近上限 warn
+  - T6: ⚙ + help 互斥 (开 settings 自动关 help)
+  - T7: 改 cap 软警告阈值动态更新 (450 > 软=400 → overflow warn 显示)
+- 暴露 findAnnotationRange / setMaxAnnotations / checkAnnotationCap 给测试 + 高级用户脚本
+
+### 测试基线
+- 4 wave chaos 85 + cap-fix 8 + cap-edge 8 + cursor-fix 1 + roundtrip 6 = **108 场景全过**
+- perf-bench: 量化 baseline (已用 v1.42 cap 兜底, 真实用户不会触达 1000+ 区域)
+
+### Chore
+- `index.html` `app.js?v=108 → ?v=109`
+
 ## v1.42 (2026-07-10) — 批注数量硬上限 + 设置 UI
 
 ### 为什么改
