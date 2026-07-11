@@ -2,6 +2,29 @@
 
 按时间倒序记录已发布的变化。最新条目在上方。
 
+## v1.42.7 (2026-07-11) — _validateMarksAfterEdit O(N×doc) → O(N+doc) + renderOutline debounce
+
+### Perf 优化 (大)
+- **Bug**: `_validateMarksAfterEdit` `app.js:1029-1080` 之前是 O(N×doc) — 每条 ann 都 walk 一次 doc 找 mark, 1000 anns = 1M ops
+- **修复**: 先 walk 一次 doc 收集 (threadId → found Set, text → count Map), 然后 O(N) 查表. 对正常打字 (mark 都在), total cost ≈ O(doc + N)
+- N=1000 打字: p50 **1.5ms** (v1.42.5 是 850ms, **580x** 加速), `_validateMarksAfterEdit` 单测: N=1000 = 0.3ms avg
+
+### renderOutline debounce
+- 之前 onUpdate 每次 keystroke 都 renderOutline, 全文 doc walk
+- 优化 `app.js:2993-3000` (`scheduleRenderOutline`): 200ms debounce
+- 打字时 outline 不变 (只有 heading 插入/删除 才需要), 无谓扫整 doc
+
+### 暴露 API
+- `_validateMarksAfterEdit` 加到 `__mdAnnotator` 表面 (perf 基准用)
+
+### Test
+- `tests/perf-validate.spec.js`: 量化 _validateMarksAfterEdit 单测 perf
+- `tests/perf-bench.spec.js`: onUpdate 链路整体 (p50 N=1000 = 1.5ms)
+- 全套 175 场景回归 0
+
+### Chore
+- `index.html` `app.js?v=115 → ?v=116`
+
 ## v1.42.6 (2026-07-11) — deleted ann 存活 + reattach (docx 风格)
 
 ### Change

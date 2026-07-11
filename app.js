@@ -1029,50 +1029,30 @@ function markDirty() {
 // 防止: 删 mark 内文字 / Ctrl+Z 让 mark 消失但 ann.range stale → silent fail
 // 主动调 findAnnotationRange 重新定位, mark 不在 = 标 fuzzy/invalid
 // v1.40 fix: 防御损坏条目 (null / string / 无 threadId) — chaos S18 暴露崩溃
+// v1.42.7 perf: 之前 O(N×doc) — 每条 ann 都 walk 一次 doc, 1000 anns = 1M ops
+// 新算法: 先 walk 一次 doc 收集所有 (threadId, text) 在 doc 里, 然后 O(N) 查表
+// 对正常打字 (mark 都在), 大多数 ann 在第一遍就 "found" → total cost ≈ O(doc + N)
 function _validateMarksAfterEdit(editor) {
   if (!State.annotations || State.annotations.length === 0) return;
   const markType = editor.schema.marks.annotation;
+  // 1) walk doc 一次, 收集 (threadId → found, text → count)
+  const threadFound = new Set();
+  const textCount = new Map();
+  editor.state.doc.descendants((node, pos) => {
+    if (!node.isText) return;
+    const text = node.text;
+    if (text) textCount.set(text, (textCount.get(text) || 0) + 1);
+    for (const m of node.marks) {
+      if (m.type === markType && m.attrs.threadId) {
+        threadFound.add(m.attrs.threadId);
+      }
+    }
+  });
+  // 2) O(N) check each ann
   let changed = false;
   for (const ann of State.annotations) {
     if (!ann || typeof ann !== 'object' || !ann.threadId) continue;
-    // 检查 ann 的 mark 实际是否在 doc 里 (按 threadId 精确匹配)
-    let markFound = false;
-    editor.state.doc.descendants((node, pos) => {
-      if (node.isText && node.marks.some(m => m.type === markType && m.attrs.threadId === ann.threadId)) {
-        markFound = true;
-        return false;
-      }
-    });
-    if (!markFound) {
-      // v1.42.6: 区分 fuzzy (text 还在, 位置偏移) vs deleted (text 整个没了)
-      // docx 行为: 批注必须存活, 用户可手动 re-attach 到新文字
-      // 用 prefix+suffix+text 找, 找到 → fuzzy, 找不到 → deleted
-      let textFound = false;
-      if (ann.text) {
-        const docText = editor.state.doc.textContent || '';
-        // 简单: text 出现在 doc 里 (可能在不同位置)
-        textFound = docText.indexOf(ann.text) >= 0;
-      }
-      if (!textFound) {
-        // text 整个没了 → deleted state
-        if (!ann.deleted) {
-          ann.deleted = true;
-          ann.fuzzy = false;  // 不是模糊, 是删除
-          ann.invalid = true;
-          ann.invalidReason = ann.invalidReason || 'text-deleted';
-          changed = true;
-        }
-      } else {
-        // text 在但 mark 不在 → fuzzy (位置偏移)
-        if (!ann.fuzzy || !ann.invalid) {
-          ann.deleted = false;
-          ann.fuzzy = true;
-          ann.invalid = true;
-          ann.invalidReason = ann.invalidReason || 'mark-missing';
-          changed = true;
-        }
-      }
-    } else {
+    if (threadFound.has(ann.threadId)) {
       // mark 在 → 清除所有 invalid 标志
       if (ann.deleted) { ann.deleted = false; changed = true; }
       if (ann.fuzzy || ann.invalid) {
@@ -1081,10 +1061,32 @@ function _validateMarksAfterEdit(editor) {
         ann.invalidReason = undefined;
         changed = true;
       }
+      continue;
+    }
+    // mark 不在: 区分 fuzzy (text 还在) vs deleted (text 整个没了)
+    let textFound = false;
+    if (ann.text) {
+      textFound = (textCount.get(ann.text) || 0) > 0;
+    }
+    if (!textFound) {
+      if (!ann.deleted) {
+        ann.deleted = true;
+        ann.fuzzy = false;
+        ann.invalid = true;
+        ann.invalidReason = ann.invalidReason || 'text-deleted';
+        changed = true;
+      }
+    } else {
+      if (!ann.fuzzy || !ann.invalid) {
+        ann.deleted = false;
+        ann.fuzzy = true;
+        ann.invalid = true;
+        ann.invalidReason = ann.invalidReason || 'mark-missing';
+        changed = true;
+      }
     }
   }
   // v1.42.5: 返回 changed 标志, 由调用方决定要不要 renderCommentList
-  // (之前内部已 render, 跟 onUpdate 的优化重复)
   return changed;
 }
 
@@ -1314,12 +1316,14 @@ function initEditor() {
       if (annChanged) {
         // 真的改了 fuzzy/invalid → 卡片显示需更新
         renderCommentList();
-      } else {
-        // 只更新 status bar / outline (轻量)
-        // renderOutline 重建左侧 H1/H2/H3 列表, 但只跟 doc 节点数相关, 不跟 ann 数
       }
-      // 大纲同步
-      renderOutline();
+      // v1.42.7: renderOutline 也加 200ms debounce
+      // 打字时 outline 不变 (只有 heading 插入/删除 才需要重渲)
+      // 每 keystroke 都重渲会无谓扫整个 doc
+      scheduleRenderOutline();
+
+      // markDirty 必须每 keystroke 都跑 (IDB autosave 需要)
+      // 已经在 onUpdate 顶层做了
     },
     onSelectionUpdate: ({ editor }) => {
       handleSelectionChange();
@@ -2987,6 +2991,15 @@ function updateToggleBtnIcon() {
 }
 
 // --- 大纲视图: 扫描 Tiptap doc 的 H1/H2/H3, 渲染到左侧
+// v1.42.7: 加 200ms debounce — 打字时 outline 不会变, 无谓扫 doc
+let _renderOutlineTimer = null;
+function scheduleRenderOutline() {
+  if (_renderOutlineTimer) return;
+  _renderOutlineTimer = setTimeout(() => {
+    _renderOutlineTimer = null;
+    renderOutline();
+  }, 200);
+}
 function renderOutline() {
   const pane = $('#outline-pane');
   if (!pane) return;
@@ -5671,6 +5684,7 @@ window.__mdAnnotator = {
   redo,
   resetHistory,
   rebuildAnnotationMarks,
+  _validateMarksAfterEdit,
   // H-autosave: autosave helpers
   startAutosaveTimer,
   stopAutosaveTimer,
