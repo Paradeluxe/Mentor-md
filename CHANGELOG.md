@@ -2,6 +2,37 @@
 
 按时间倒序记录已发布的变化。最新条目在上方。
 
+## v1.42.3 (2026-07-10) — wave 7 AI 路径 + 真实失败模式
+
+### Bugfix: ai.setAuthor 未暴露
+- **症状** (W7-05): `window.__mdAnnotator.ai.setAuthor(...)` 报 `is not a function`. 外部 AI scripts 改不了 AI author 名
+- **根因** `app.js:5564`: `setAuthor` 只挂在 `__meta` 上 (协议元信息), 没暴露到 ai surface
+- **修复** `app.js:5734-5737`: 加 `setAuthor(name)` wrapper 到 ai, 返回原 `setAuthor` 的 true/false
+
+### Test
+- `tests/chaos-wave7.spec.js`: 15 场景全过
+  - W7_01: 20 个并发 AI reply (锁 + 2s 幂等窗, 全部成功, 最终 1 条 reply)
+  - W7_02: AI reply 到 resolved thread → 拒绝 (预期行为)
+  - W7_03: AI reply 到不存在 thread → `{ok:false, error:'不存在'}`
+  - W7_04: 空 body / 5001 字符 body / 5000 字符 body (boundary)
+  - W7_05: ai.setAuthor 切换 author 名 (修复后 OK)
+  - W7_06: 多 doc 切换 round-trip
+  - W7_07: heading/list/blockquote/code 内 mark
+  - W7_08: 100 replies 批注 (99 reply div + 1 first comment, 46KB card)
+  - W7_09: IDB 损坏数据 → app survive
+  - W7_10: 多 page IDB 恢复
+  - W7_11: emoji + ZWJ + RTL + 零宽 + 换行 unicode storm
+  - W7_12: 复制粘贴 mark 跟随
+  - W7_13: 零长 mark (from === to)
+  - W7_14: 完整刷新周期
+  - W7_15: API injection (null/number/object/garbage 喂所有 API, app survive)
+
+### 测试基线
+- **153 场景全过** (7 wave chaos 130 + roundtrip 6 + cap 16 + cursor-fix 1)
+
+### Chore
+- `index.html` `app.js?v=110 → ?v=111`
+
 ## v1.42.2 (2026-07-10) — wave 5/6 暴露 2 个真实 bug
 
 ### Bugfix 1: 嵌套 mark 跨段时点击外层 mark 不激活

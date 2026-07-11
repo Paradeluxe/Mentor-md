@@ -5730,6 +5730,11 @@ window.__mdAnnotator = {
       protocol() {
         return { ...this.__meta };
       },
+      // v1.42.2 fix: 暴露 setAuthor 到 ai surface (原只在 __meta 里, 外部 AI scripts 无法改)
+      // 协议设计: setAuthor 返回 true/false, 让脚本知道是否成功
+      setAuthor(name) {
+        return setAuthor(name);
+      },
     };
   })(),
   // 调试用
