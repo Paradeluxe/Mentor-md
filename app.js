@@ -141,6 +141,9 @@ const State = {
   expandedThreadIds: {},
   // v4-抽屉: 用户手动折叠的批注 (独立于"已解决自动折叠", docx 风格可手动收起任意卡)
   manuallyCollapsedIds: {},
+  // v1.42.6: reattach 流程: 哪条 deleted ann 正在等用户选新文字
+  // null = 无 reattach 进行; string = threadId 等待中
+  reattachTarget: null,
   // H-undo: 批注操作 history stack
   // - 每次 push 一次"修改前快照" (深拷贝 annotations)
   // - undo: pop past → 还原; redo: pop future → 还原
@@ -1041,20 +1044,43 @@ function _validateMarksAfterEdit(editor) {
       }
     });
     if (!markFound) {
-      // mark 不在 doc 里 → 标 fuzzy/invalid 提示用户
-      // 即使 findAnnotationRange 能找到 text, mark 也确实不在 (e.g. Ctrl+Z 撤销了 addMark)
-      if (!ann.fuzzy || !ann.invalid) {
-        ann.fuzzy = true;
-        ann.invalid = true;
-        ann.invalidReason = ann.invalidReason || 'mark-missing';
+      // v1.42.6: 区分 fuzzy (text 还在, 位置偏移) vs deleted (text 整个没了)
+      // docx 行为: 批注必须存活, 用户可手动 re-attach 到新文字
+      // 用 prefix+suffix+text 找, 找到 → fuzzy, 找不到 → deleted
+      let textFound = false;
+      if (ann.text) {
+        const docText = editor.state.doc.textContent || '';
+        // 简单: text 出现在 doc 里 (可能在不同位置)
+        textFound = docText.indexOf(ann.text) >= 0;
+      }
+      if (!textFound) {
+        // text 整个没了 → deleted state
+        if (!ann.deleted) {
+          ann.deleted = true;
+          ann.fuzzy = false;  // 不是模糊, 是删除
+          ann.invalid = true;
+          ann.invalidReason = ann.invalidReason || 'text-deleted';
+          changed = true;
+        }
+      } else {
+        // text 在但 mark 不在 → fuzzy (位置偏移)
+        if (!ann.fuzzy || !ann.invalid) {
+          ann.deleted = false;
+          ann.fuzzy = true;
+          ann.invalid = true;
+          ann.invalidReason = ann.invalidReason || 'mark-missing';
+          changed = true;
+        }
+      }
+    } else {
+      // mark 在 → 清除所有 invalid 标志
+      if (ann.deleted) { ann.deleted = false; changed = true; }
+      if (ann.fuzzy || ann.invalid) {
+        ann.fuzzy = false;
+        ann.invalid = false;
+        ann.invalidReason = undefined;
         changed = true;
       }
-    } else if (ann.invalid || ann.fuzzy) {
-      // mark 在 → 清除 invalid 标志
-      ann.fuzzy = false;
-      ann.invalid = false;
-      ann.invalidReason = undefined;
-      changed = true;
     }
   }
   // v1.42.5: 返回 changed 标志, 由调用方决定要不要 renderCommentList
@@ -2085,6 +2111,115 @@ function toggleResolved(threadId) {
   emitAI('threadChange', { threadId, change: 'resolved', resolved: thread.resolved });
 }
 
+// v1.42.6: start reattach 流程 (docx 风格: deleted ann → 选新文字 → 重新 attach)
+// 1. 设 State.reattachTarget = threadId
+// 2. status bar 提示用户选新文字
+// 3. 用户选好文字 → 按回车 / 点选中的 banner "确认" → applyReattach
+function startReattach(threadId) {
+  const thread = State.annotations.find(t => t && t.threadId === threadId);
+  if (!thread) return;
+  State.reattachTarget = threadId;
+  setStatus('重新选择正文', '请在编辑器中选中新文字 (按 Esc 取消)');
+  showToast('请选中新文字, 然后按回车或点确认', 3000);
+  // 隐藏其他 banner, 让用户聚焦
+  document.querySelectorAll('.comment-thread').forEach(c => c.classList.remove('is-active'));
+  // 视觉提示: 在卡片上显示 "等待选择"
+  if (window.__mdAnnotator.renderCommentList) {
+    // 不重渲 (会丢掉我们改的 class), 手动加 class
+  }
+  const card = document.querySelector('.comment-thread[data-thread="' + threadId + '"]');
+  if (card) card.classList.add('awaiting-reattach');
+  // 注册一次性的 selectionchange / 选区完成检测
+  // 用 PM selectionUpdate
+  // 让用户选完后按回车 / Esc 取消
+  // 用一个 keydown listener
+  document.addEventListener('keydown', reattachKeyHandler, { once: true });
+}
+
+let _reattachKeyHandler = null;
+function reattachKeyHandler(e) {
+  if (e.key === 'Escape') {
+    cancelReattach();
+    return;
+  }
+  if (e.key === 'Enter') {
+    applyReattach();
+    return;
+  }
+  // 其他键忽略, 但要重装 (once 只触发一次)
+  document.addEventListener('keydown', reattachKeyHandler, { once: true });
+}
+_reattachKeyHandler = reattachKeyHandler;
+
+function cancelReattach() {
+  const tid = State.reattachTarget;
+  if (tid) {
+    const card = document.querySelector('.comment-thread[data-thread="' + tid + '"]');
+    if (card) card.classList.remove('awaiting-reattach');
+  }
+  State.reattachTarget = null;
+  setStatus('', '已取消');
+}
+
+function applyReattach() {
+  const tid = State.reattachTarget;
+  if (!tid) return;
+  const ed = State.editor;
+  const sel = ed.state.selection;
+  if (sel.empty || sel.from === sel.to) {
+    showToast('未选文字, 请先在编辑器中选中新文字', 2500);
+    // 让用户继续选
+    document.addEventListener('keydown', reattachKeyHandler, { once: true });
+    return;
+  }
+  const thread = State.annotations.find(t => t && t.threadId === tid);
+  if (!thread) { cancelReattach(); return; }
+  // 拿新选区文字
+  const newText = ed.state.doc.textBetween(sel.from, sel.to, '\n');
+  // 删旧 mark (所有相同 threadId 的 mark)
+  const markType = ed.schema.marks.annotation;
+  const tr = ed.state.tr;
+  const toRemove = [];
+  ed.state.doc.descendants((node, pos) => {
+    if (node.isText && node.marks.some(m => m.type === markType && m.attrs.threadId === tid)) {
+      toRemove.push({ from: pos, to: pos + node.nodeSize });
+    }
+  });
+  // 合并连续 range
+  toRemove.sort((a, b) => a.from - b.from);
+  for (let i = toRemove.length - 1; i >= 0; i--) {
+    tr.removeMark(toRemove[i].from, toRemove[i].to, markType);
+  }
+  // 加新 mark
+  tr.addMark(sel.from, sel.to, markType.create({
+    threadId: tid,
+    resolved: thread.resolved,
+    authorColor: authorColorIndex(thread.text || tid),
+  }));
+  tr.setMeta('__activeMarkSync', true);
+  ed.view.dispatch(tr);
+  // 更新 ann
+  thread.text = newText;
+  thread.range = { from: sel.from, to: sel.to };
+  thread.fuzzy = false;
+  thread.deleted = false;
+  thread.invalid = false;
+  thread.invalidReason = undefined;
+  // 拿 prefix/suffix (鲁棒定位备用)
+  const docText = ed.state.doc.textContent;
+  const pStart = Math.max(0, sel.from - 20);
+  thread.prefix = docText.slice(pStart, sel.from);
+  thread.suffix = docText.slice(sel.to, Math.min(docText.length, sel.to + 20));
+  // 清理状态
+  State.reattachTarget = null;
+  document.querySelectorAll('.comment-thread.awaiting-reattach').forEach(c => c.classList.remove('awaiting-reattach'));
+  setStatus('已重新选择正文', `线程 ${tid.slice(0, 8)} · "${newText.slice(0, 20)}${newText.length > 20 ? '…' : ''}"`);
+  showToast('批注已重新选择正文 ✓', 2000);
+  markDirty();
+  renderCommentList();
+  emitAI('threadChange', { threadId: tid, change: 'reattach', range: thread.range, text: newText });
+}
+
 function deleteThread(threadId) {
   if (!confirm('删除此批注线程？此操作不可撤销。')) return;
   // H-undo: 删之前 push, 让用户能 undo 回退
@@ -2230,8 +2365,10 @@ function renderCommentList() {
     const isCollapsed = thread.resolved && !State.expandedThreadIds?.[thread.threadId] || !!State.manuallyCollapsedIds?.[thread.threadId];
     // v4: 手动折叠按钮图标 — 已解决(自动折叠)/手动折叠 都显示"展开↘"; 展开时显示"收起↗"
     return `
-      <div class="comment-thread ${isActive ? 'is-active' : ''} ${thread.resolved ? 'is-resolved' : ''} ${thread.fuzzy ? 'is-fuzzy' : ''} ${isCollapsed ? 'is-collapsed' : ''}" data-thread="${thread.threadId}">
-        ${thread.fuzzy ? '<div class="fuzzy-banner">⚠ 位置可能偏移 - 请检查文档</div>' : ''}
+      <div class="comment-thread ${isActive ? 'is-active' : ''} ${thread.resolved ? 'is-resolved' : ''} ${thread.fuzzy ? 'is-fuzzy' : ''} ${thread.deleted ? 'is-deleted' : ''} ${isCollapsed ? 'is-collapsed' : ''}" data-thread="${thread.threadId}">
+        ${thread.deleted
+          ? '<div class="deleted-banner">📍 原文已被删除 - <button class="link-btn" data-act="reattach" data-thread="' + thread.threadId + '">重新选择正文</button> · <button class="link-btn link-danger" data-act="delete-orphan" data-thread="' + thread.threadId + '">删除</button></div>'
+          : (thread.fuzzy ? '<div class="fuzzy-banner">⚠ 位置可能偏移 - 请检查文档</div>' : '')}
         <!-- 卡片头: 序号 + 引文 (可点击跳转) + ⋯ 菜单按钮 -->
         <!-- v5: 点击卡片标题区域 = 折叠/展开 (用户明确要求). 跳转正文走 ⋯ 菜单 "📍 跳转到批注处" -->
         <div class="comment-quote" data-thread="${thread.threadId}" title="点击收起/展开批注">
@@ -2354,6 +2491,22 @@ function renderCommentList() {
       e.stopPropagation();
       deleteThread(btn.dataset.thread);
       closeAllCommentMenus();
+    });
+  });
+  // v1.42.6: reattach 按钮 (deleted ann → 选新文字)
+  list.querySelectorAll('[data-act="reattach"]').forEach(btn => {
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      startReattach(btn.dataset.thread);
+    });
+  });
+  // v1.42.6: delete-orphan 按钮 (deleted ann → 真的删)
+  list.querySelectorAll('[data-act="delete-orphan"]').forEach(btn => {
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      if (confirm('确定删除此批注？此操作无法撤销。')) {
+        deleteThread(btn.dataset.thread);
+      }
     });
   });
   // P-card: 复制引文 → 用 navigator.clipboard

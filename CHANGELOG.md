@@ -2,6 +2,44 @@
 
 按时间倒序记录已发布的变化。最新条目在上方。
 
+## v1.42.6 (2026-07-11) — deleted ann 存活 + reattach (docx 风格)
+
+### Change
+- 用户原话: "确保当一个被批注的区域里的内容被删完之后, 批注还能存活 (包括正文内的, 就像 docx 的情况一样)"
+- 之前: mark 没了 → 标 fuzzy (错误, fuzzy 是位置偏移, 不是删除)
+- 现在 `app.js:1029-1076` (`_validateMarksAfterEdit`): 区分两种状态
+  - `deleted=true` (text 整段没了, mark 找不到) — 显示 "📍 原文已被删除" banner + 2 按钮
+  - `fuzzy=true` (text 在, mark 找不到) — 显示 "⚠ 位置可能偏移" banner (原行为)
+- 卡片新增 UI `app.js:2256-2259`:
+  - `📍 原文已被删除 - [重新选择正文] · [删除]` (link buttons)
+- 新增 reattach 流程 `app.js:2109-2218` (`startReattach` / `applyReattach` / `cancelReattach`):
+  - 点 "重新选择正文" → 卡片高亮 + 闪烁 + status bar 提示
+  - 选新文字 → 按 Enter → mark 重新加, ann 状态恢复 (deleted/fuzzy 都清)
+  - 按 Esc → 取消
+  - 选空 → toast 提示重新选
+- 新增 State.reattachTarget (string|null) 跟踪 reattach 状态
+
+### CSS (`styles.css:1440-1490`)
+- `.comment-thread.is-deleted` 灰色左边框 + 0.85 opacity
+- `.comment-thread .deleted-banner` 灰底 banner
+- `.comment-thread.awaiting-reattach` 蓝虚线 outline + 1.5s pulse 动画
+- `.link-btn` / `.link-btn.link-danger` 按钮样式
+
+### Test
+- `tests/survive-deleted.spec.js` 7 步全过:
+  - T1: 删 mark 文字 → `deleted=true, invalidReason='text-deleted'`
+  - T2: 卡片显示 deleted banner + 2 按钮
+  - T3: 点 reattach → `awaiting-reattach` class + State.reattachTarget 设置
+  - T4: 选新文字 + Enter → mark 重新加, ann 状态恢复
+  - T5: 再次删 → 又 deleted
+  - T6: delete-orphan → ann 真删
+  - T7: Esc 取消 reattach
+- 全套回归: **175 场景全过** (155 + 7 + 8 + 6 + 1 + 0 回归)
+
+### Chore
+- `index.html` `app.js?v=113 → ?v=114`
+- `tests/diag-survive.spec.js` 临时诊断脚本 (调试用, 留)
+
 ## v1.42.5 (2026-07-11) — onUpdate perf 优化 (10-27x 加速)
 
 ### Change
