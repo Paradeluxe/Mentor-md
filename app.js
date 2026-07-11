@@ -129,6 +129,14 @@ const State = {
   // F18: reply 草稿持久 (Word 行为: 切文档再切回草稿保留)
   // key = threadId, value = textarea 内容
   replyDrafts: {},
+  // v1.42: 批注数量硬上限 (perf + UX 双重保险)
+  // perf 实测: 200 张卡片时 insert→undo p95 = 108ms (明显卡顿)
+  // 用户可在工具栏 ⚙ 改 (50 / 200 / 500 / 1000 / 0=无限制)
+  // localStorage 持久, 跨 session 保留
+  maxAnnotations: (() => {
+    const saved = parseInt(localStorage.getItem('Mentor:maxAnnotations') || '500', 10);
+    return [0, 50, 200, 500, 1000].includes(saved) ? saved : 500;
+  })(),
   // H2 fix: 解决卡片临时展开状态 (key = threadId, value = true), 仅 session 内
   expandedThreadIds: {},
   // v4-抽屉: 用户手动折叠的批注 (独立于"已解决自动折叠", docx 风格可手动收起任意卡)
@@ -1774,12 +1782,27 @@ function emitAI(event, payload) {
   });
 }
 
+// v1.42: 批注数量硬上限检查
+// 返回 true = 可以创建, false = 已达上限 (toast 已弹, 拒绝创建)
+// maxAnnotations = 0 表示无限制
+function checkAnnotationCap() {
+  const cap = State.maxAnnotations || 0;
+  if (cap === 0) return true;
+  if (State.annotations.length < cap) return true;
+  showToast(`已达批注上限 (${cap} 条). 在工具栏 ⚙ 调整上限, 或清理已解决批注`, 4000);
+  setStatus('创建被拒', `已达 ${State.annotations.length}/${cap} 条批注上限. ⚙ 设置里改或删除旧批注`);
+  return false;
+}
+
 function createAnnotationThread(from, to, text) {
   // P2-A: 异常数据防御 - 拒绝空 text
   if (!text || text.length === 0) {
     showToast('批注文字不能为空', 2000);
     return null;
   }
+  // v1.42: 硬上限 — 阻止创建超出 State.maxAnnotations 的批注
+  // (perf + UX: 实测 200 张时 insert→undo p95 = 108ms, 超过后变半残)
+  if (!checkAnnotationCap()) return null;
   // v2: 不再弹作者 modal, 没作者时第一行 addReply 自动从 State.authorId 派生显示
   // 老逻辑: !State.author → 弹 modal → 用户卡死
   const threadId = uuid();
@@ -1823,6 +1846,8 @@ function createAnnotationThread(from, to, text) {
 // CellSelection 覆盖 N 个 cell, 给每个 cell 一段独立 mark (共享 threadId)
 function handleCreateMultiCellAnnotation(cellSel) {
   // v2: 不弹作者 modal, 无作者直接匿名创建
+  // v1.42: 硬上限 (1 thread 共享 threadId, 算 1 条)
+  if (!checkAnnotationCap()) return;
   // 收集每个 cell 的内容范围
   const ranges = [];
   let totalText = '';
@@ -1917,6 +1942,8 @@ function applyAnnotationMarksMultiCell(threadId, ranges) {
 // thread.ranges = [{from, to}, ...] (跟 multi-cell 一样用 ranges 数组存多段)
 function handleCreateMultiParagraphAnnotation(from, to) {
   // v2: 不弹作者 modal, 无作者直接匿名创建
+  // v1.42: 硬上限
+  if (!checkAnnotationCap()) return;
   const ed = State.editor;
   // 收集 from → to 之间的所有 paragraph range
   // 关键: PM addMark(from, to) 要求 from/to 都是 inline 文本内的位置
@@ -2101,18 +2128,15 @@ function deleteThread(threadId) {
 function renderCommentList() {
   const list = $('#comment-list');
   const empty = $('#comment-empty');
-  // v1.40 perf fix: 大数组场景 (chaos S33: 10000 条 noise annotations) 跳过全量渲染
-  // 否则 onUpdate → renderCommentList 是 O(N²) 每次都重渲染, 卡死主线程
-  // 解决: 超过阈值时只显示计数 + 提示, 用户可手动展开
-  const TOTAL_LIMIT = 200;
-  if (State.annotations.length > TOTAL_LIMIT) {
+  // v1.42: 软警告 fallback — 正常流程不会到这里 (硬上限阻止创建), 只在 import 大文件时兜底
+  const SOFT_LIMIT = Math.max(500, (State.maxAnnotations || 0) * 2);
+  if (State.annotations.length > SOFT_LIMIT) {
     list.innerHTML = '';
     empty.classList.add('hidden');
     const warn = document.createElement('div');
     warn.className = 'comment-overflow-warn';
-    warn.innerHTML = `<div class="warn-title">批注数量过多 (${State.annotations.length})</div><div class="warn-hint">为保证性能, 暂不渲染全部批注. 请在源代码中清理冗余批注, 或缩小文档范围.</div>`;
+    warn.innerHTML = `<div class="warn-title">批注数量过多 (${State.annotations.length})</div><div class="warn-hint">为保证性能, 暂不渲染全部批注. 调高 ⚙ 上限 或 清理冗余批注.</div>`;
     list.appendChild(warn);
-    // 只统计计数 (不渲染), 仍需更新 tab 数字
     updateCommentCounts();
     syncFilterTabsFromCheckboxes();
     return;
@@ -4722,6 +4746,77 @@ function toggleHelp() {
   else openHelp();
 }
 
+// v1.42: 设置 popover (批注数量上限)
+function isSettingsOpen() {
+  const popover = document.querySelector('#settings-popover');
+  return popover && !popover.classList.contains('hidden');
+}
+function openSettings() {
+  const btn = document.querySelector('#settings-btn');
+  const popover = document.querySelector('#settings-popover');
+  if (!btn || !popover) return;
+  // 关闭 help (互斥)
+  if (typeof isHelpOpen === 'function' && isHelpOpen()) closeHelp();
+  popover.classList.remove('hidden');
+  // 位置: 锚到 settings-btn
+  const btnRect = btn.getBoundingClientRect();
+  const popWidth = 320;
+  const popLeft = Math.max(8, Math.min(window.innerWidth - popWidth - 8, btnRect.left));
+  const popTop = btnRect.bottom + 8;
+  popover.style.left = popLeft + 'px';
+  popover.style.top = popTop + 'px';
+  // 箭头位置
+  const arrowLeftFromPop = (btnRect.left + btnRect.width / 2) - popLeft;
+  const safe = Math.max(12, Math.min(popWidth - 20, arrowLeftFromPop));
+  const arrow = popover.querySelector('.settings-popover-arrow');
+  if (arrow) arrow.style.left = safe + 'px';
+  // 同步当前 cap 的 active 状态
+  syncSettingsActiveState();
+  setTimeout(() => {
+    const closeBtn = popover.querySelector('.settings-popover-close');
+    if (closeBtn) closeBtn.focus();
+  }, 50);
+}
+function closeSettings() {
+  const btn = document.querySelector('#settings-btn');
+  const popover = document.querySelector('#settings-popover');
+  if (!btn || !popover) return;
+  popover.classList.add('hidden');
+  btn.focus();
+}
+function toggleSettings() {
+  if (isSettingsOpen()) closeSettings();
+  else openSettings();
+}
+function setMaxAnnotations(max) {
+  // v1.42: 修改上限, 持久化
+  if (![0, 50, 200, 500, 1000].includes(max)) return;
+  State.maxAnnotations = max;
+  localStorage.setItem('Mentor:maxAnnotations', String(max));
+  syncSettingsActiveState();
+  showToast(max === 0 ? '已设为无限制 (perf 可能卡)' : `批注上限设为 ${max} 条`, 2500);
+  // 重新渲染 (用户改了 cap 软警告阈值可能变)
+  if (typeof renderCommentList === 'function') renderCommentList();
+}
+function syncSettingsActiveState() {
+  const popover = document.querySelector('#settings-popover');
+  if (!popover) return;
+  const cur = State.maxAnnotations || 0;
+  popover.querySelectorAll('.settings-opt').forEach(btn => {
+    const v = parseInt(btn.dataset.max, 10);
+    btn.classList.toggle('is-active', v === cur);
+  });
+  const current = document.querySelector('#settings-max-annotations-current');
+  if (current) {
+    const open = State.annotations.length;
+    const cap = cur === 0 ? '∞' : cur;
+    current.textContent = `当前: ${open} / ${cap}`;
+  }
+}
+
+// v1.42: 设置按钮 (同 help 风格) — 实际事件绑定在 setupToolbar() 里
+// (避免跟 help 一样的 cache 双绑问题, 跟 toggleHelp 走同一路径)
+
 // 弹作者输入框
 // options.firstTime=true  -> 首次进入 (强引导, 文案不同, 不能 esc 关闭)
 // options.firstTime=false -> 手动修改 (轻量, 可 esc/cancel)
@@ -5111,6 +5206,34 @@ function updateToolbarState() {
         toggleHelp();
         e.preventDefault();
       }
+    }
+  });
+
+  // v1.42: 设置按钮 (inline onclick 跟 help 一样避免 cache 双绑)
+  const settingsBtn = document.querySelector('#settings-btn');
+  if (settingsBtn) settingsBtn.addEventListener('click', toggleSettings);
+  const settingsCloseBtn = document.querySelector('#settings-popover .settings-popover-close');
+  if (settingsCloseBtn) settingsCloseBtn.addEventListener('click', closeSettings);
+  document.querySelectorAll('#settings-max-annotations .settings-opt').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const v = parseInt(btn.dataset.max, 10);
+      setMaxAnnotations(v);
+    });
+  });
+  // 点外部关闭 settings
+  document.addEventListener('mousedown', (e) => {
+    if (!isSettingsOpen()) return;
+    const popover = document.querySelector('#settings-popover');
+    const btn = document.querySelector('#settings-btn');
+    if (popover && !popover.contains(e.target) && btn && !btn.contains(e.target)) {
+      closeSettings();
+    }
+  });
+  // Esc 关闭 settings
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && isSettingsOpen()) {
+      closeSettings();
+      e.preventDefault();
     }
   });
 }

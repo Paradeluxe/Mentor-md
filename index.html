@@ -45,6 +45,7 @@
   <header id="toolbar">
     <div class="tb-group">
       <button id="help-btn" class="help-btn" data-act="toggle-help" title="使用帮助 (按 ? 键)" aria-label="使用帮助" onclick="window.__mdAnnotator && window.__mdAnnotator.toggleHelp && window.__mdAnnotator.toggleHelp(); event.stopPropagation();">?</button>
+      <button id="settings-btn" class="settings-btn" data-act="toggle-settings" title="批注数量上限 / 设置" aria-label="设置">⚙</button>
       <span class="tb-sep"></span>
       <button id="btn-new" title="新建空白文档" class="tb-icon-text"><span class="tb-icon"></span><span>新建</span></button>
       <button id="btn-open-files" title="打开文件 (按住 Ctrl 多选 .md + .annotations.json 可自动加载批注)" class="tb-icon-text"><span class="tb-icon"></span><span>打开文件</span></button>
@@ -194,7 +195,7 @@
   }
 }
 </script>
-<script type="module" src="app.js?v=107"></script>
+<script type="module" src="app.js?v=108"></script>
 <!-- 帮助 popover (浮在 body 顶层, 位置由 JS 动态计算) -->
 <div id="help-popover" class="help-popover hidden" role="tooltip">
   <div class="help-popover-arrow"></div>
@@ -211,6 +212,25 @@
   </ul>
   <p class="help-popover-footer">快捷键: <kbd>Ctrl</kbd>+<kbd>B</kbd> 加粗 · <kbd>Ctrl</kbd>+<kbd>I</kbd> 斜体 · <kbd>Ctrl</kbd>+<kbd>S</kbd> 保存</p>
   <button class="help-popover-close" data-act="close-help" aria-label="关闭">×</button>
+</div>
+
+<!-- v1.42: 设置 popover (批注数量上限) -->
+<div id="settings-popover" class="settings-popover hidden" role="dialog" aria-label="设置">
+  <div class="settings-popover-arrow"></div>
+  <h3>⚙ 设置</h3>
+  <div class="settings-section">
+    <label class="settings-label">批注数量上限 (perf 保护)</label>
+    <p class="settings-hint">超过上限时新批注被拒绝. 0 = 无限制 (perf 可能卡). 200 条时打字已明显卡顿 (实测 108ms p95).</p>
+    <div class="settings-options" id="settings-max-annotations">
+      <button data-max="50" class="settings-opt">50</button>
+      <button data-max="200" class="settings-opt">200</button>
+      <button data-max="500" class="settings-opt">500 (默认)</button>
+      <button data-max="1000" class="settings-opt">1000</button>
+      <button data-max="0" class="settings-opt settings-opt-warn">无限制</button>
+    </div>
+    <p class="settings-current" id="settings-max-annotations-current"></p>
+  </div>
+  <button class="settings-popover-close" data-act="close-settings" aria-label="关闭">×</button>
 </div>
 </body>
 </html>

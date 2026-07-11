@@ -448,6 +448,81 @@ code {
   color: var(--text);
 }
 
+/* v1.42: 设置按钮 + popover (复刻 help-popover 风格) */
+.settings-btn {
+  font-size: 18px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 4px;
+  color: var(--text-2, #555);
+  line-height: 1;
+}
+.settings-btn:hover { background: var(--panel-2, #f0f0f0); }
+
+.settings-popover {
+  position: fixed;
+  z-index: 200;
+  background: var(--panel, #fff);
+  border: 1px solid var(--border, #ddd);
+  border-radius: 8px;
+  padding: 14px 16px 16px;
+  min-width: 300px;
+  max-width: 360px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+  color: var(--text);
+  animation: help-popover-in 0.16s ease-out;
+}
+.settings-popover-arrow {
+  position: absolute;
+  top: -6px;
+  width: 12px; height: 12px;
+  background: var(--panel, #fff);
+  border-left: 1px solid var(--border, #ddd);
+  border-top: 1px solid var(--border, #ddd);
+  transform: rotate(45deg);
+}
+.settings-popover h3 { font-size: 14px; margin: 0 0 8px; }
+.settings-section { margin: 8px 0; }
+.settings-label { display: block; font-weight: 600; font-size: 13px; margin-bottom: 4px; }
+.settings-hint { font-size: 12px; color: var(--text-2, #666); margin: 4px 0 8px; line-height: 1.45; }
+.settings-options { display: flex; gap: 6px; flex-wrap: wrap; }
+.settings-opt {
+  flex: 1 0 auto;
+  min-width: 50px;
+  padding: 6px 8px;
+  background: var(--panel-2, #f0f0f0);
+  border: 1px solid var(--border, #ddd);
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text);
+  transition: all 0.12s;
+}
+.settings-opt:hover { background: var(--accent-soft, #e3edff); border-color: var(--accent, #2563eb); }
+.settings-opt.is-active {
+  background: var(--accent, #2563eb);
+  color: #fff;
+  border-color: var(--accent, #2563eb);
+}
+.settings-opt-warn { color: #b91c1c; }
+.settings-opt-warn.is-active { background: #b91c1c; border-color: #b91c1c; color: #fff; }
+.settings-current { font-size: 11px; color: var(--text-2, #888); margin: 6px 0 0; font-style: italic; }
+.settings-popover-close {
+  position: absolute;
+  top: 8px; right: 8px;
+  width: 22px; height: 22px;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+  color: var(--text-2, #888);
+}
+.settings-popover-close:hover { background: var(--panel-2, #f0f0f0); color: var(--text); }
+
 /* ============ Main panes (三栏布局) ============ */
 #main {
   display: grid;

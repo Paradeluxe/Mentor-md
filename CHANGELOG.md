@@ -2,6 +2,37 @@
 
 按时间倒序记录已发布的变化。最新条目在上方。
 
+## v1.42 (2026-07-10) — 批注数量硬上限 + 设置 UI
+
+### 为什么改
+v1.40 软警告 (数量 > 200 时显示警告, 不渲染卡片) 是 "**软退让**" — 没真正解决, 用户在 200+ 批注时**不能编辑/回复/解决** (没有 UI).
+
+### perf bench 实测 (无 v1.42 修复时)
+| N | insert→undo p95 | 用户感受 |
+|---|----------------|----------|
+| 10 | 4ms | 流畅 |
+| 100 | 19ms | 轻微可感知 |
+| 200 | 80ms | 明显卡顿 |
+| 500 | 342ms | 输入冻结 |
+| 1000 | 1793ms | 不可用 |
+
+**结论**: 200+ 卡顿已成, 必须**阻止创建**而非 "渲染时跳过"
+
+### 修复
+1. `State.maxAnnotations`: 默认 500, 选项 50/200/500/1000/0(无限制), localStorage 持久
+2. `checkAnnotationCap()` helper, 在 3 个创建入口 (createAnnotationThread, handleCreateMultiCellAnnotation, handleCreateMultiParagraphAnnotation) 检查, 拒绝 + toast
+3. **⚙ 按钮** 在工具栏 (help 旁) + settings popover, 5 选项 + 当前计数显示 + Esc/外部点击关闭
+4. v1.40 软警告从硬限 200 改为 `max(maxAnnotations * 2, 500)`, 兜底 import 大文件
+
+### Test
+- `tests/cap-fix.spec.js`: 8 步全过 (默认 cap 500 / cap 拒绝 / ⚙ 按钮 / popover UI / 改 cap → state + localStorage + toast)
+- `tests/perf-bench.spec.js`: 量化 perf 改善基线
+- 所有 4 wave chaos + roundtrip 仍然 100% 通过 (回归 0)
+
+### Chore
+- `index.html` `app.js?v=107 → ?v=108`
+- 5 个测试文件 `?v=107 → ?v=108`
+
 ## v1.41 (2026-07-10) — bsk 真实回归 + 测试基建 + watchdog
 
 ### Bugfix: bsk 接管 Edge 跑 v1.40 暴露剩余 7 处崩溃
