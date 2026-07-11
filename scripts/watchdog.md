@@ -1,51 +1,51 @@
 # Mentor Watchdog
 
-每 30 分钟提醒你 pending todo + 未 commit 改动。
+每 30 分钟跟你 (The Machine) 说 "continue" — 但**只在有未完成 todo 或未 commit 改动时才说**, 否则安静 (per `hermes cron --no-agent` 的 silent 设计).
 
-## 用法
+## 设置 (已自动完成)
 
 ```bash
-# 单次跑 (适合 cron / Task Scheduler)
-python3 scripts/watchdog.py
+# 安装脚本到 hermes scripts dir
+mkdir -p "$APPDATA/hermes/scripts"
+cp scripts/watchdog.py "$APPDATA/hermes/scripts/watchdog.py"
 
-# 前台循环 (Ctrl-C 停)
-python3 scripts/watchdog.py --loop
-
-# 自定义间隔
-python3 scripts/watchdog.py --loop --interval 15
-
-# 自定义要 check 的 git repo
-python3 scripts/watchdog.py --repos E:/hermes_playground/Mentor /c/code/myapp
+# 创建 cron job (no-agent, 每 30 分钟)
+hermes cron create --name "Mentor watchdog" --deliver origin --no-agent --script watchdog.py "*/30 * * * *"
 ```
+
+当前 cron job ID: `565e97f1dfba` (Next run: 2026-07-11 09:30 +08:00).
 
 ## 它做什么
 
-1. 读 `~/.hermes/todos.json` (The Machine todo 列表)
-2. 列 `pending` + `in_progress` todo
-3. 对每个 `--repos` 跑 `git status --short`, 列未 commit 改动
-4. 调 `hermes notify --message ...` 推送
-   - 若 `hermes` 不在 PATH, fallback 写 `~/.hermes/watchdog.log`
+1. 读 `~/.hermes/todos.json` 或 `$APPDATA/hermes/todos.json` (Hermes todo tool 持久化文件)
+2. 跑 `git status --short` 在 `E:/hermes_playground/Mentor`
+3. **有** pending/in_progress todo **或** 未 commit 文件 → stdout 输出 "continue\nPending todo: ...\nUncommitted: ..." → 投递到你 (origin)
+4. **无** 任何东西 → stdout "" → silent, 不打扰
 
-## 设置 Windows Task Scheduler (每 30 分钟)
-
-最快: 在 cmd / PowerShell 里跑一次:
-
-```cmd
-schtasks /create /tn "MentorWatchdog" /tr "python3 E:\hermes_playground\Mentor\scripts\watchdog.py" /sc minute /mo 30
-```
-
-或写一个 `.bat` 然后用 Task Scheduler GUI:
-```bat
-@echo off
-python3 E:\hermes_playground\Mentor\scripts\watchdog.py
-```
-
-## 替代: 前台 daemon
-
-如果你有终端一直开着, 直接:
+## 手动跑
 
 ```bash
-python3 E:/hermes_playground/Mentor/scripts/watchdog.py --loop
+# 单次跑 (看输出)
+python scripts/watchdog.py
+
+# 触发 cron job 立即跑
+hermes cron run 565e97f1dfba
+
+# 检查状态
+hermes cron status
 ```
 
-放后台: `start /b python3 ...\watchdog.py --loop` (Windows) 或 `nohup ... &` (bash)
+## 暂停 / 恢复 / 删除
+
+```bash
+hermes cron pause 565e97f1dfba   # 暂停 (不删)
+hermes cron resume 565e97f1dfba  # 恢复
+hermes cron remove 565e97f1dfba  # 永久删
+```
+
+## 改 repo / 时间表
+
+```bash
+hermes cron edit 565e97f1dfba schedule "*/15 * * * *"   # 改 15 分钟
+hermes cron edit 565e97f1dfba --repos E:/path/other ... # 改 repo
+```
