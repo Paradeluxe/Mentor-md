@@ -1,0 +1,63 @@
+name: chaos-tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:  # 手动触发
+
+jobs:
+  chaos:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund || npm install --no-audit --no-fund
+
+      - name: Install Playwright Chromium
+        run: npx playwright install chromium --with-deps
+
+      - name: Start Mentor server
+        run: |
+          python3 -m http.server 8765 &
+          sleep 2
+          curl -s -o /dev/null -w "server up: HTTP %{http_code}\n" http://localhost:8765/index.html
+
+      - name: Run chaos tests
+        env:
+          CI: 'true'
+        run: |
+          echo "=== verify-cursor-fix ==="
+          node tests/verify-cursor-fix.spec.js
+          echo "=== chaos-suite (40) ==="
+          node tests/chaos-suite.spec.js
+          echo "=== chaos-wave2 (15) ==="
+          node tests/chaos-wave2.spec.js
+          echo "=== chaos-wave3 (15) ==="
+          node tests/chaos-wave3.spec.js
+          echo "=== chaos-wave4 (15) ==="
+          node tests/chaos-wave4.spec.js
+          echo "=== a11y-keyboard (8) ==="
+          node tests/a11y-keyboard.spec.js
+          # roundtrip-real-mentor 需要 fixture 3.3MB
+          echo "=== roundtrip-real-mentor (6) ==="
+          node tests/roundtrip-real-mentor.spec.js
+
+      - name: Upload failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: failure-logs
+          path: |
+            /tmp/mentor-*.log
+            tmp/*.log
+          if-no-files-found: ignore
+          retention-days: 7

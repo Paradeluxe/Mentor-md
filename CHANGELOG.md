@@ -2,6 +2,41 @@
 
 按时间倒序记录已发布的变化。最新条目在上方。
 
+## v1.41 (2026-07-10) — bsk 真实回归 + 测试基建 + watchdog
+
+### Bugfix: bsk 接管 Edge 跑 v1.40 暴露剩余 7 处崩溃
+chaos wave 1-4 用 Playwright 没暴露但 bsk 真接管 Edge + pageerror 监听暴露:
+- **scheduleIdbCacheWrite** `app.js:1068` `.map(t => ({ threadId: t.threadId ... }))` — State.annotations 含 null 时崩
+- 5 个 `State.annotations.map(t => ({ threadId: t.threadId` 序列化点 (lines 1091, 1164, 4103, 4903, ai.listThreads) 全部加 `filter(t => t && typeof t === 'object' && t.threadId)` 防御
+- `rebuildAnnotationMarks` line 2980 forEach 加 `if (!t || typeof t !== 'object' || !t.range) return` 防御
+
+**为什么 chaos 没暴露**: chaos test 用 `page.evaluate()` 抛异常时 Playwright 立即返回, 后续 scenario 不跑; bsk 真接管下 pageerror handler 是连续监听的, 触发后下一次 evaluate 就能看到 broken state 渗到后续测试
+
+### Test: 真实 .mentor roundtrip (DFC 3.3MB + 7 图 + 1 原批注)
+- `tests/roundtrip-real-mentor.spec.js`: load fixture → 加批注 → 写评论 → resolve → buildMentorZipBlob → 验证 size 3.2MB + 7 mediaFiles
+- 6 步全过, 0 page error
+
+### Test: 键盘 a11y 8 场景
+- `tests/a11y-keyboard.spec.js`: Tab → textarea/submit, Shift+Tab 回去, Enter toggle resolve, Escape 关菜单, Ctrl+Enter 提交 reply, 焦点环可见, html lang=zh-CN
+- 8/8 全过
+
+### Refactor: 共享 `_config.js` 自动检测 cache-bust
+- `tests/_config.js`: 读 `index.html` 的 `app.js?v=N` 自动解析 CURRENT_VERSION, fallback 107
+- 8 个测试文件改 `require('./_config').URL_BASE + '?v=' + require('./_config').CURRENT_VERSION`
+- **好处**: 以后 bump cache-bust 只改 `index.html` 一处, 测试自动跟新, 杜绝 "改了 v=106 忘记改测试" 这种 bug (本次就踩过 3 次)
+
+### CI: GitHub Actions chaos-tests workflow
+- `.github/workflows/chaos-tests.yml`: push/PR/manual trigger, 跑全套 99 场景 (verify-cursor-fix + chaos×4 + a11y + roundtrip)
+- timeout 15min, Playwright + Chromium headless, Ubuntu latest
+
+### Tool: watchdog.py
+- `scripts/watchdog.py`: 每 30 分钟读 `~/.hermes/todos.json`, 列 pending todo + 未 commit 改动, 推 hermes notify
+- 用法: `python3 scripts/watchdog.py --loop` 或 cron / Windows Task Scheduler 每 30 分钟跑
+- `scripts/watchdog.md` 用法文档
+
+### Chore: cache-bust 同步 bump
+- `index.html` `app.js?v=107`
+
 ## v1.40 (2026-07-10) — chaos test 4 轮 85 场景全绿 + 防御性修复
 
 ### Bugfix: 多处防御性修复 (由 chaos test 暴露)

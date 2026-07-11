@@ -1065,7 +1065,7 @@ function scheduleIdbCacheWrite() {
       document: State.currentFile.name,
       updatedAt: new Date().toISOString(),
       author: { id: State.authorId, name: State.author },
-      annotations: State.annotations.map(t => ({
+      annotations: State.annotations.filter(t => t && typeof t === 'object' && t.threadId).map(t => ({
         threadId: t.threadId,
         text: t.text,
         prefix: t.prefix || '',
@@ -1088,7 +1088,7 @@ function scheduleIdbCacheWrite() {
         document: State.currentFile.name,
         updatedAt: new Date().toISOString(),
         author: { id: State.authorId, name: State.author },
-        annotations: State.annotations.map(t => ({
+        annotations: State.annotations.filter(t => t && typeof t === 'object' && t.threadId).map(t => ({
           threadId: t.threadId,
           text: t.text,
           prefix: t.prefix || '',
@@ -1161,7 +1161,7 @@ async function autosaveNow() {
       document: State.currentFile.name,
       updatedAt: nowISO(),
       author: { id: State.authorId, name: State.author },
-      annotations: State.annotations.map(t => ({
+      annotations: State.annotations.filter(t => t && typeof t === 'object' && t.threadId).map(t => ({
         threadId: t.threadId,
         text: t.text,
         prefix: t.prefix || '',
@@ -2978,7 +2978,7 @@ function rebuildAnnotationMarks(markSnapshot) {
   } else {
     // Pass 2 fallback: 旧路径 — 用 State.annotations.range
     State.annotations.forEach(t => {
-      if (!t.range) return;
+      if (!t || typeof t !== 'object' || !t.range) return;
       tryAdd(t.threadId, t.range.from, t.range.to, t.resolved);
     });
   }
@@ -4100,7 +4100,7 @@ async function saveCurrent() {
     document: State.currentFile.name,
     updatedAt: nowISO(),
     author: { id: State.authorId, name: State.author },
-    annotations: State.annotations.map(t => ({
+    annotations: State.annotations.filter(t => t && typeof t === 'object' && t.threadId).map(t => ({
       threadId: t.threadId,
       text: t.text,
       // P-anchor: 保存 prefix/suffix 让重新打开时仍能定位 (P1/P2 算法依赖)
@@ -4900,7 +4900,7 @@ function setupToolbar() {
     const mdText = htmlToMarkdown(html);
     const sidecar = {
       version: '1', document: State.currentFile.name, updatedAt: nowISO(), author: { id: State.authorId, name: State.author },
-      annotations: State.annotations.map(t => ({
+      annotations: State.annotations.filter(t => t && typeof t === 'object' && t.threadId).map(t => ({
         threadId: t.threadId,
         text: t.text,
         // P-anchor: 保留 prefix/suffix 让 reload 时仍能精确定位
@@ -5425,7 +5425,7 @@ window.__mdAnnotator = {
       // ==================== 读 ====================
       /** 列出所有 thread（不修改任何状态） */
       listThreads() {
-        return State.annotations.map(t => ({
+        return State.annotations.filter(t => t && typeof t === 'object').map(t => ({
           threadId: t.threadId,
           text: t.text,
           resolved: t.resolved,

@@ -1,7 +1,8 @@
 // Mentor v1.40 chaos wave 3 — really absurd stress tests
 const { chromium } = require('playwright');
 
-const URL = `http://localhost:8765/index.html?v=106`;
+const { URL_BASE, CURRENT_VERSION } = require('./_config');
+const URL = URL_BASE + '?v=' + CURRENT_VERSION;
 
 async function setupEditor(page) {
   await page.goto(URL, { waitUntil: 'domcontentloaded' });

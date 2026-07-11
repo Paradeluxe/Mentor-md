@@ -9,7 +9,8 @@ const { chromium } = require('playwright');
 const path = require('path');
 
 const REPO = path.resolve(__dirname, '..');
-const URL = `http://localhost:8765/index.html?v=101`;
+const { URL_BASE, CURRENT_VERSION } = require('./_config');
+const URL = URL_BASE + '?v=' + CURRENT_VERSION;
 
 (async () => {
   const browser = await chromium.launch({ headless: true });
