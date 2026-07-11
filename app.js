@@ -2209,7 +2209,10 @@ function renderCommentList() {
     const first = thread.comments?.[0] || (thread.threadId === State.activeThreadId
       ? { author: { id: State.authorId, name: State.author }, body: '', createdAt: nowISO() }
       : { author: '匿名', body: '', createdAt: thread.createdAt || new Date().toISOString() });
-    const replies = (thread.comments || []).slice(1);
+    // v1.42.1 fix: 防御性 — thread.comments 可能是字符串/null (corrupted data, chaos W6-08 暴露)
+    // 强制是数组, 否则当 []
+    const safeComments = Array.isArray(thread.comments) ? thread.comments : [];
+    const replies = safeComments.slice(1);
     const isActive = State.activeThreadId === thread.threadId;
     // v2: 不再 pin activeThread (renderCommentList 已不再做强制显示)
     // F20 docx 一致: 侧栏 thread 加数字标号 (Word 风格 1, 2, 3)
@@ -5275,10 +5278,12 @@ function setupAnnotationMarkClickObserver() {
   const editorEl = State.editor.view.dom;
   // v1.39 fix: 用 capture phase + event delegation, 确保在 PM 自己 mousedown handler 之前执行
   // 旧版 (bubble) 在 PM 把 cursor 设到 clickX 对应位置之后才跑, targetPos 被覆盖
+  // 关键: capture phase (`true` 第 3 参) 让本 handler 在所有 bubble 之前跑 (事件流: capture → target → bubble)
+  // PM 的 mousedown 是 Tiptap 在 initEditor 时添加的 (bubble), 晚于本 capture handler
   editorEl.addEventListener('mousedown', (e) => {
     const markEl = e.target.closest && e.target.closest('.annotation-mark');
     if (!markEl) return;
-    // v1.39: preventDefault + stopPropagation 阻止 PM 自己的 mousedown handler
+    // v1.39: preventDefault + stopImmediatePropagation 阻止 PM 自己的 mousedown handler
     e.preventDefault();
     e.stopPropagation();
     e.stopImmediatePropagation();
@@ -5300,29 +5305,33 @@ function setupAnnotationMarkClickObserver() {
       }
     });
     if (ranges.length === 0) return;
-    // 找点击位置对应的 range (用 markEl 的 clientRect 中心 vs 各 range 在 DOM 上的位置)
-    // 简化: 单段时直接用唯一 range; 多段时按 clickY 落到哪段
-    let range;
-    if (ranges.length === 1) {
-      range = ranges[0];
-    } else {
-      // 多段: 计算每段 DOM rect, 按 clickY 选最近段
-      const domRanges = [];
-      for (const r of ranges) {
-        try {
-          const domFrom = editor.view.nodeDOM(r.from);
-          const domTo = editor.view.nodeDOM(r.to - 1);
-          const rectA = domFrom?.getBoundingClientRect();
-          const rectB = domTo?.getBoundingClientRect();
-          if (rectA && rectB) {
-            domRanges.push({ from: r.from, to: r.to, top: rectA.top, bottom: rectB.bottom });
+        // 找点击位置对应的 range (用 markEl 的 clientRect 中心 vs 各 range 在 DOM 上的位置)
+        // 简化: 单段时直接用唯一 range; 多段时按 clickY 落到哪段
+        let range;
+        if (ranges.length === 1) {
+          range = ranges[0];
+        } else {
+          // 多段: 计算每段 DOM rect, 按 clickY 选最近段
+          const domRanges = [];
+          for (const r of ranges) {
+            try {
+              // v1.42 fix: nodeDOM(r.to-1) 在边界位置常返回 null (PM 边界处理)
+              // 改用 domFrom (range 起始位置的 DOM 节点), rect 也用这一个
+              const domFrom = editor.view.nodeDOM(r.from);
+              if (!domFrom) continue;
+              const rect = domFrom.getBoundingClientRect();
+              if (!rect) continue;
+              domRanges.push({ from: r.from, to: r.to, top: rect.top, bottom: rect.bottom });
+            } catch (err) { /* 跳过 */ }
           }
-        } catch (err) { /* 跳过 */ }
-      }
-      const hit = domRanges.find(r => e.clientY >= r.top && e.clientY <= r.bottom) || domRanges[0];
-      if (!hit) return;
-      range = { from: hit.from, to: hit.to };
-    }
+          if (domRanges.length === 0) {
+            // 兜底: 用第一个 range (handler 总算设个 from+1 让 cursor 在 mark 内)
+            range = ranges[0];
+          } else {
+            const hit = domRanges.find(r => e.clientY >= r.top && e.clientY <= r.bottom) || domRanges[0];
+            range = { from: hit.from, to: hit.to };
+          }
+        }
     // 关键修复: 用点击 X 坐标 vs mark 边界框中线, 决定光标放在左半还是右半
     const rect = markEl.getBoundingClientRect();
     const clickX = e.clientX;

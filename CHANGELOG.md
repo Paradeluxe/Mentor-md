@@ -2,6 +2,60 @@
 
 按时间倒序记录已发布的变化。最新条目在上方。
 
+## v1.42.2 (2026-07-10) — wave 5/6 暴露 2 个真实 bug
+
+### Bugfix 1: 嵌套 mark 跨段时点击外层 mark 不激活
+- **症状** (W5-11): 一个 mark 内含另一 mark (如 outer 包 inner) 时, PM 把 outer 切成多段 (AB | CD | EFGH), 点击 outer AB 片段 → `setupAnnotationMarkClickObserver` 不激活 outer
+- **根因** `app.js:5316`: `editor.view.nodeDOM(r.to - 1)` 在边界位置常返回 null, 然后 `domTo` 是 null → `domRanges.push` 永不跑 → `hit=undefined` → `if (!hit) return;` 直接退出, 光标没设
+- **修复** `app.js:5310-5333`: 用 `domFrom.getBoundingClientRect()` 替代两个 rect; 加 `domRanges.length === 0` 兜底用第一个 range
+
+### Bugfix 2: 损坏的 State.annotations 崩溃 renderCommentList
+- **症状** (W6-08): 外部攻击 / 用户调试把 `comments: 'not array'` 写入 State, 触发 render 时 `replies.map is not a function` 崩整页
+- **根因** `app.js:2212`: `(thread.comments || []).slice(1)` — 字符串 truthy 不走 `|| []` 分支, 然后 `.slice(1)` 返回字符串, `.map` 不存在
+- **修复** `app.js:2212-2214`: `Array.isArray(thread.comments) ? thread.comments : []` 强制是数组
+
+### Test
+- `tests/chaos-wave5.spec.js`: 15 场景全过 (真实工作流)
+  - W5_01: 50 个批注 全生命周期 (创建→resolve→unresolve→全删)
+  - W5_02: 批注带 2 条回复 + reload
+  - W5_03: 在 mark 内输入 (PM mark 跟随扩展)
+  - W5_04: 跨 paragraph 同一 thread (multi-paragraph mark)
+  - W5_05: 3 个重叠 mark
+  - W5_06: 多 author 创建批注 (Alice + Bob)
+  - W5_07: 三个 mark 各点击一次验证光标位置
+  - W5_08: 空 doc + 空 annotation
+  - W5_09: 50 mark + 滚动 storm
+  - W5_10: 100 次 selection 高频采样 p50=0.2ms p95=5.8ms
+  - W5_11: 嵌套 mark 切换 (修复后 OK)
+  - W5_12: 创建→resolve→reopen→编辑
+  - W5_13: Ctrl+Z 撤销 mark
+  - W5_14: 删 inner mark, outer 仍存
+  - W5_15: 真 DFC 3.3MB .mentor 加载 (53801 字符 + 7 图 + 1 thread)
+
+- `tests/chaos-wave6.spec.js`: 15 场景全过 (UI / 视觉)
+  - W6_01: 100 次快速点击 mark (p95=0ms)
+  - W6_02: 极窄批注栏
+  - W6_03: 多个 mark 连点
+  - W6_04: resetHistory 清空
+  - W6_05: dark mode 渲染
+  - W6_06: filter tab 切换
+  - W6_07: 1000 字符批注 + 5 个 500 字符回复
+  - W6_08: State corruption (修复后 survived)
+  - W6_09: 无 Service Worker (mentor 不该有)
+  - W6_10: 并发 addReply
+  - W6_11: 复杂用户流 (filter + resolve)
+  - W6_12: 删整段 + mark 同步
+  - W6_13: 隐藏右栏后点击 mark 仍工作
+  - W6_14: readonly editor 模式点击 mark 仍工作
+  - W6_15: drag file 到页面
+
+### 测试基线
+- **138 场景全过** (4 wave chaos 85 + wave5/6 30 + cap 16 + roundtrip 6 + cursor-fix 1)
+
+### Chore
+- `index.html` `app.js?v=109 → ?v=110`
+- 测试新增 `tests/chaos-wave5.spec.js` + `tests/chaos-wave6.spec.js`
+
 ## v1.42.1 (2026-07-10) — v1.42 边界补全
 
 ### Bugfix: renderCommentList 软警告阈值
