@@ -2,6 +2,51 @@
 
 按时间倒序记录已发布的变化。最新条目在上方。
 
+## v1.43.6 (2026-07-12) — chaos-wave13 真实场景测试 (16 场景, perf 数据)
+
+### 用户原话
+"可以"
+
+### 4 大方向覆盖
+1. **大文件 perf**: 1MB / 5MB doc load + keystroke
+2. **并发**: 用户 + AI + autosave 同时操作
+3. **崩溃恢复**: reload 中断 autosave 验证
+4. **导出 import round-trip**: .mentor / .docx / .md / emoji / 中文 / 表格 / 0 ann
+
+### 真实 perf 数据
+| 场景 | 耗时 |
+|---|---|
+| 1MB doc load | **59ms** |
+| 5MB doc load | **242ms** |
+| 5MB doc + 1 char insert | **750ms - 2100ms** (v1.42.7 O(N+doc) validate) |
+| 100 concurrent setContent | 109ms total (100 ok) |
+| 200 ann mentor export+import round-trip | **48ms** |
+| Emoji+中文 ann round-trip | text 完全 match |
+
+### 测试场景
+1. W13-01..03: 大文件 perf (1MB / 5MB / 5MB+keystroke)
+2. W13-04: 并发 (用户 insert + AI reply + autosave x 3) - create + reply 事件都触发
+3. W13-05: 100 并发 setContent
+4. W13-06..07: 崩溃恢复 (autosave 中 reload / dirty 状态 reload)
+5. W13-08: mentor round-trip (2 ann + user + AI reply 完整循环)
+6. W13-09: .md export
+7. W13-10: emoji mark export (👋)
+8. W13-11: save+load 10 次循环
+9. W13-12: 0 byte doc export
+10. W13-13: emoji+中文 round-trip (🎉 中文 完 完美 match)
+11. W13-14: 200 ann export (48ms)
+12. W13-15: 0 ann export
+13. W13-16: 表格 markdown export (| A | B | 格式)
+
+### 设计观察 (非 bug)
+- 5MB doc insert 1 char 1-2s: O(N) walk 不可避免, v1.42.7 perf fix 已经把 O(N×doc) 降到 O(N+doc)
+- 崩溃恢复在 anonymous mode 不持久 — 设计 (需显式 file handle)
+- mentor export/import 走 jszip, 单 doc < 50ms
+
+### 回归
+- 282 场景全过 (175 旧 + 6 v143-empty-state + 15 v143.2-wave9 + 26 v143.3-wave10 + 24 v143.4-wave11 + 20 v143.5-wave12 + 16 v143.6-wave13 + 0 回归)
+- chaos suite/wave2-13/cap-edge/cap-fix/roundtrip/survive-deleted/perm-early 全过
+
 ## v1.43.5 (2026-07-12) — chaos-wave12 边角测试 (20 场景)
 
 ### 用户原话
