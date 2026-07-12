@@ -2,6 +2,50 @@
 
 按时间倒序记录已发布的变化。最新条目在上方。
 
+## v1.43.2 (2026-07-12) — chaos-wave9: 交叉/包含/邻接范围测试覆盖
+
+### 用户需求
+"记得多测试一下交叉范围/包含范围的批注"
+
+### 之前
+- v1.42.9 引入 "exact dup 才拒, 其他全允许" 规则
+- 只有 T04 chaos-suite 单测了 "嵌套扩展 3 批注" 1 个 case
+- 其他 (部分重叠 / 反向包含 / 邻接 / mark 内子区间 / cell 内) 都没固化测试
+
+### 改动
+- 新增 `tests/chaos-wave9.spec.js` 15 个 case:
+  - W9-01: 完全相同 x1 → 拒
+  - W9-02..W9-03: 同 from / 同 to 嵌套扩展 → 允许
+  - W9-04: 部分重叠 → 允许
+  - W9-05..W9-06: 包含 / 反向包含 → 允许
+  - W9-07..W9-09: 邻接 / 反向邻接 / 单字符邻接 → 允许
+  - W9-10: 极端包含 (整段 + 子段) → 允许
+  - W9-11: 完全相同 x3 → 仍只 1 个
+  - W9-12: 3 嵌套 (1,10) + (2,9) + (3,8) → 都允许
+  - W9-13: cell 内选区 → 正常创建
+  - W9-14: mark 内子区间创建 (新 range) → 允许
+  - W9-15: mark 内同 range 创建 → 拒
+- 通过真实 DOM 路径 (`setTextSelection` + 点 `#float-comment-btn button`),
+  跟用户拖选 + 点浮动按钮完全等价
+- 单段 test doc '0123456789ABCDEFGHIJKLMNOP' (26 chars, pos 1-26)
+
+### 视觉确认 (bsk 真实截图)
+- 3 嵌套 ann (1,10)/(2,9)/(3,8) 在编辑器渲染为 bracket-style 高亮
+  (Word/Google Docs 行业标准, 不是 layered background)
+- 3 个高亮 bracket 视觉可区分: outer→middle→inner 深浅叠加
+- 右侧栏 3 张 card 都显示
+- 不是 bug — PM mark model 默认行为就是这样
+
+### 回归
+- 196 场景全过 (175 旧 + 6 v143-empty-state + 15 v143.2-wave9 + 0 回归)
+- chaos suite / wave2-8 / wave9 / cap-edge / cap-fix / roundtrip / survive-deleted / perm-early 全过
+
+### bsk 真测修正
+- v1.43 commit message 说 "bsk 安全策略拦 127.0.0.1, 没法绕" 是错的
+- 实测 `bsk navigate http://127.0.0.1:8765/index.html` 在本机 (Edge 150 + bsk 0.1.7 + ext 0.1.3) 成功
+- bsk snapshot 拿 ARIA 树 (@e59 heading "还没有批注" / @e73 button "▶ 看示例" / 3 listitems), click @e73 触发 demo, screenshot 视觉确认
+- 修了 `references/local-dev-server-fallback.md` 把错误事实改成 "try bsk navigate first, 只有 Blocked 才 fallback"
+
 ## v1.43 (2026-07-12) — 首次空态引导 + "看示例" 按钮
 
 ### 用户需求
