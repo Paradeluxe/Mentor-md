@@ -5984,61 +5984,67 @@ window.__mdAnnotator = {
           return { ok: false, error: `body 超过最大长度 ${MAX_BODY}` };
         }
 
-        // 2. 锁合并: 同 threadId 的第 2 个调用复用第 1 个的 Promise (合并而非拒绝)
-        // 这是关键 — 防止议长 + 参议两个 AI 同时 reply 都用相同 threadId + body 时推 2 条 comment
-        if (_replyLock.has(threadId)) {
-          return _replyLock.get(threadId);
-        }
+        // 2. 锁串行: 同 threadId 的并发 reply 排队, 但每个独立执行 + 独立 dedup
+                // v1.43.4 fix: 旧实现 _replyLock.get(tid) 让后续 caller 拿到 *第 1 个* 的结果
+                // 后果: 3 个不同 body 并发 reply, 只第 1 个真正执行, 后 2 个拿到第 1 个的 reply body
+                // (死锁 + 内容错误). 现在改: 后续 caller 等 lock release 再独立跑
+                while (_replyLock.has(threadId)) {
+                  await _replyLock.get(threadId);
+                }
+                let releaseLock;
+                const lockPromise = new Promise(resolve => { releaseLock = resolve; });
+                _replyLock.set(threadId, lockPromise);
 
-        const promise = (async () => {
-          // 3. 查 thread + 状态
-          const thread = State.annotations.find(t => t.threadId === threadId);
-          if (!thread) {
-            return { ok: false, error: `thread 不存在: ${threadId}` };
-          }
-          if (thread.resolved) {
-            return { ok: false, error: 'thread 已 resolved，无法回复（请用户 reopen）' };
-          }
+                const promise = (async () => {
+                  try {
+                  // 3. 查 thread + 状态
+                  const thread = State.annotations.find(t => t.threadId === threadId);
+                  if (!thread) {
+                    return { ok: false, error: `thread 不存在: ${threadId}` };
+                  }
+                  if (thread.resolved) {
+                    return { ok: false, error: 'thread 已 resolved，无法回复（请用户 reopen）' };
+                  }
 
-          // 4. 内容去重: 最后一条 comment body 相同 + createdAt 在 2s 内 → 幂等返回
-          // 防止 sleep + accidentally re-reply
-          const lastComment = thread.comments?.[thread.comments.length - 1];
-          if (lastComment && lastComment.body === trimmed) {
-            const ms = Date.now() - new Date(lastComment.createdAt).getTime();
-            if (ms < _DEDUP_WINDOW_MS) {
-              return { ok: true, comment: lastComment, dedup: true };
-            }
-          }
+                  // 4. 内容去重: 最后一条 comment body 相同 + createdAt 在 2s 内 → 幂等返回
+                  // 防止 sleep + accidentally re-reply
+                  const lastComment = thread.comments?.[thread.comments.length - 1];
+                  if (lastComment && lastComment.body === trimmed) {
+                    const ms = Date.now() - new Date(lastComment.createdAt).getTime();
+                    if (ms < _DEDUP_WINDOW_MS) {
+                      return { ok: true, comment: lastComment, dedup: true };
+                    }
+                  }
 
-          // 5. 构造 + push
-          const author = (opts.author && typeof opts.author === 'string' && opts.author.trim())
-                         ? opts.author.trim()
-                         : AI_AUTHOR;
-          const comment = {
-            id: uuid(),
-            author,
-            body: trimmed,
-            createdAt: nowISO(),
-          };
-          try {
-            thread.comments.push(comment);
-            markDirty();
-            renderCommentList();
-            emitAI('newComment', { threadId, comment });
-            emitAI('threadChange', { threadId, change: 'reply', comment });
-            return { ok: true, comment };
-          } catch (e) {
-            return { ok: false, error: 'reply 失败: ' + e.message };
-          }
-        })();
+                  // 5. 构造 + push
+                  const author = (opts.author && typeof opts.author === 'string' && opts.author.trim())
+                                 ? opts.author.trim()
+                                 : AI_AUTHOR;
+                  const comment = {
+                    id: uuid(),
+                    author,
+                    body: trimmed,
+                    createdAt: nowISO(),
+                  };
+                  try {
+                    thread.comments.push(comment);
+                    markDirty();
+                    renderCommentList();
+                    emitAI('newComment', { threadId, comment });
+                    emitAI('threadChange', { threadId, change: 'reply', comment });
+                    return { ok: true, comment };
+                  } catch (e) {
+                    return { ok: false, error: 'reply 失败: ' + e.message };
+                  }
+                  } finally {
+                    releaseLock();
+                    // 用 microtask 延迟 delete, 避免刚 release 就被 while loop 立刻获取导致重入
+                    queueMicrotask(() => _replyLock.delete(threadId));
+                  }
+                })();
 
-        _replyLock.set(threadId, promise);
-        try {
-          return await promise;
-        } finally {
-          _replyLock.delete(threadId);
-        }
-      },
+                return await promise;
+              },
 
       // ==================== 元 ====================
       /** 获取协议元信息 */

@@ -2,6 +2,58 @@
 
 按时间倒序记录已发布的变化。最新条目在上方。
 
+## v1.43.4 (2026-07-12) — AI concurrent reply lock-merge 修复 + chaos-wave11 变态测试
+
+### 用户原话
+"还有什么极端测试我们可以做吗?"
+
+### 真 bug 发现 (W11-02)
+`ai.reply` 的并发锁实现错了:
+
+- 旧代码: `_replyLock.get(tid)` 让后续 caller 拿到 *第 1 个* reply 的 Promise (不是 mutex, 是 share)
+- 后果: 3 个 AI (议长/参议/主席) 用不同 body 并发 reply, 只第 1 个真正执行,
+  后 2 个拿到第 1 个的 reply 结果 (内容是 'Body 0', 但它们发的明明是 'Body 1' / 'Body 2')
+- 锁其实是"promise share", 不是"mutex" → 死锁 + 内容错乱
+
+### Fix
+`ai.reply` (`app.js:5986`) 现在:
+1. 用 `while (_replyLock.has(threadId)) await ...` 排队 (mutex 语义)
+2. 自己创建 lock promise, 跑完后在 finally 里 release + queueMicrotask delete
+3. 每个 caller 独立跑 dedup check + push (不共享结果)
+4. dedup 仍保留: 同 threadId 在 2s 内连续相同 body → 幂等
+
+### chaos-wave11 新增 (24 场景全过)
+1. AI reply 并发 (W11-01..05): 同 body dedup / 不同 body 串行 / max body 拒 / resolved 拒 / nonexistent 拒
+2. XSS in comment body (W11-06): img/script/onerror 全 escape
+3. Memory leak 50 cycles (W11-07): 0 MB 增长
+4. threadId 跨文件 (W11-08): 独立
+5. Cap=0 + 500 ann perf (W11-09): setup 154ms / render 194ms / insert 72ms
+6. 50K char doc (W11-10): load 8ms
+7. Code block 内 mark (W11-11)
+8. KaTeX inline mark (W11-12)
+9. Undo/redo 满栈 (W11-13)
+10. Multi-cell 共享 threadId (W11-14)
+11. Concurrent render + update (W11-15)
+12. visibilitychange hidden (W11-16)
+13. State mutation during render (W11-17)
+14. 长中文 mark (W11-18): 200 字符
+15. Link + bold + mark 三层 (W11-19)
+16. 1000 cycles memory leak (W11-20): 0 MB 增长
+17. Delete ann index 重排 (W11-21)
+18. 200 条空 comment (W11-22)
+19. AI setAuthor validation (W11-23): empty/null/number/whitespace 全拒
+20. Autosave race (W11-21b)
+
+### 视觉验证 (bsk screenshot)
+3 个 AI (议长/参议/主席) 并发 reply 后:
+- 3 条 reply 全部显示, 内容各自独立 ("议长回复: 这段文字太口语" / "参议回复: 同意改写" / "主席回复: 已审")
+- 每条带独立时间戳
+- 旧 bug: 3 条都显示 "Body 0" — 已修复
+
+### 回归
+- 246 场景全过 (175 旧 + 6 v143-empty-state + 15 v143.2-wave9 + 26 v143.3-wave10 + 24 v143.4-wave11 + 0 回归)
+- chaos suite/wave2-11/cap-edge/cap-fix/roundtrip/survive-deleted/perm-early 全过
+
 ## v1.43.3 (2026-07-12) — partial delete in mark fuzzy 修复 + chaos-wave10 变态测试
 
 ### 用户原话
