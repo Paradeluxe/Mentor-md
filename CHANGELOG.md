@@ -2,6 +2,43 @@
 
 按时间倒序记录已发布的变化。最新条目在上方。
 
+## v1.43.5 (2026-07-12) — chaos-wave12 边角测试 (20 场景)
+
+### 用户原话
+"继续"
+
+### 改动
+- 新增 `tests/chaos-wave12.spec.js` 20 场景:
+  - Cap truncate 1500 → 500 (W12-01): import 大文件超 cap 时正确截断
+  - Drag race + AI setAuthor (W12-02): 并发 setAuthor 不崩
+  - 真实 mouse drag (W12-03): PM 不接受 synthesized mouseup 作为选区结束 — 已知 PM 限制
+  - Reattach 文字 collapse (W12-04): ann.text 在新 doc 中能定位
+  - IDB write pressure (W12-05): 多次 autosave 不崩
+  - Handle 持久化 (W12-06): reload 后 IDB cache 重建 (anonymous mode 不持久, 已知)
+  - Image mark (W12-07): PM 默认 image 在 setContent 后被 strip, 已知限制
+  - 100x100 = 10000 cells table mark (W12-08): 138ms 内完成, perf OK
+  - Offline event (W12-09): autosave 不崩
+  - rebuildAnnotationMarks x 1000 (W12-10): 64ms 总耗时
+  - Sidecar corrupt 变体 (W12-11): empty/null/undef range + null text 全防御
+  - setMaxAnnotations 严格校验 (W12-12): 只接受 [0,50,200,500,1000], 30 silently 拒绝 (设计)
+  - Autosave timer 多实例 (W12-13): 多次起停不崩
+  - AI subscribe 前 trigger (W12-14): onThreadChange 后正常接收
+  - subscribe/unsubscribe (W12-15): unsub 后事件不再触发 ✓
+  - AI reply + resolve 顺序 (W12-16): resolved 后 reply 被拒 ✓
+  - Rapid markDirty (W12-17): 100 insert + autosave 26ms
+  - Filter tabs (W12-18): all/open/resolved 计数正确
+  - editor=null 时 rebuild (W12-19): 安全返回
+  - Selection focus race (W12-20): 快速 setSelection 20 次 OK
+
+### 设计观察
+- `setMaxAnnotations` 只接受 hard-coded 5 个值 (0/50/200/500/1000) — UI 限制, e2e 测自定义值被 silently 拒绝
+- handle reconnect 在 anonymous mode 不持久 (用户没显式 handle), reload 后 annotations 重置 — 不是 bug, 是设计
+- AI `onNewComment` / `onThreadChange` 是真 API, 不是 `subscribe`
+
+### 回归
+- 266 场景全过 (175 旧 + 6 v143-empty-state + 15 v143.2-wave9 + 26 v143.3-wave10 + 24 v143.4-wave11 + 20 v143.5-wave12 + 0 回归)
+- chaos suite/wave2-12/cap-edge/cap-fix/roundtrip/survive-deleted/perm-early 全过
+
 ## v1.43.4 (2026-07-12) — AI concurrent reply lock-merge 修复 + chaos-wave11 变态测试
 
 ### 用户原话
