@@ -2,6 +2,40 @@
 
 按时间倒序记录已发布的变化。最新条目在上方。
 
+## v1.42.8 (2026-07-11) — 加载时立即申请写权限 (autosave 不弹框)
+
+### 用户原话
+"我希望你在加载完成之前就直接搞定自动保存的事情, 我不喜欢写了一半被跳一个弹窗"
+
+### 问题
+- 之前: open file → load → autosave timer 30s 后触发 → 第一次写盘时弹权限框
+- 中间用户写的内容如果崩了就丢了, 而且弹框打断写作流
+
+### 修复
+- 新增 `ensureWritePermission(fileHandle)` helper `app.js:3741-3753`
+  - 先 `queryPermission`, 不是 granted 就 `requestPermission` (在用户 gesture 内)
+  - 4 个地方调用 `app.js:3758, 3803, 1218, 4430`:
+    - `openFromHandle` (单 .md handle 模式)
+    - `openFromMentorHandle` (.mentor handle 模式)
+    - `autosaveNow` (保险, 正常已 grant)
+    - `tryWriteBack` (手动 save 保险)
+- 加载文件时立即申请 → 30s 后 autosave 不再弹框
+- `tryReconnect` 已 granted 也加 console.log 让用户知道 autosave 启用
+
+### Test (`tests/perm-early.spec.js` 6 步全过)
+- T1: granted → 不调 request
+- T2: prompt → 调 request, 返 granted
+- T3: denied → 返 denied
+- T4: queryPermission throws → fallback request
+- T5: requestPermission throws → 返 unknown
+- T6: helper 暴露到 __mdAnnotator
+
+### 回归
+- 181 场景全过 (175 + 6 新 + 0 回归)
+
+### Chore
+- `index.html` `app.js?v=116 → ?v=117`
+
 ## v1.42.7 (2026-07-11) — _validateMarksAfterEdit O(N×doc) → O(N+doc) + renderOutline debounce
 
 ### Perf 优化 (大)

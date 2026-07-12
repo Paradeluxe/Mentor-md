@@ -1214,9 +1214,8 @@ async function autosaveNow() {
     //          下次 reload 时 img.naturalWidth=0 (虽然 markdownToHtml 反查能跑, 但缺文件)
     const blob = await buildMentorZipBlob(mdText, sidecar, State.mediaFiles);
     const handle = State.currentFile.handle;
-    if (await handle.queryPermission({ mode: 'readwrite' }) !== 'granted') {
-      await handle.requestPermission({ mode: 'readwrite' });
-    }
+    // v1.42.8: 用 helper 申请权限 (正常已在 openFromMentorHandle 申请过, 这里保险)
+    await ensureWritePermission(handle);
     const writable = await handle.createWritable();
     await writable.write(blob);
     await writable.close();
@@ -3735,8 +3734,27 @@ async function openFilesLegacy() {
 // --- Folder mode removed (2026-07-05): 支持单 .md 模式 only
 // (openFolder / openFolderLegacy deleted; showDirectoryPicker no longer called)
 
+// v1.42.8: 申请写权限 helper (在用户 gesture 内调一次, 后续 autosave 不会再弹框)
+// 流程: queryPermission → 如果不是 granted 就 requestPermission
+// 返回: granted / denied / unknown
+async function ensureWritePermission(fileHandle) {
+  if (!fileHandle || !fileHandle.requestPermission) return 'unknown';
+  try {
+    let perm = 'prompt';
+    try { perm = await fileHandle.queryPermission({ mode: 'readwrite' }); } catch (e) {}
+    if (perm === 'granted') return 'granted';
+    const newPerm = await fileHandle.requestPermission({ mode: 'readwrite' });
+    return newPerm;
+  } catch (e) {
+    console.warn('[ensureWritePermission] 失败:', e);
+    return 'unknown';
+  }
+}
+
 // --- 通过 FileSystemFileHandle 打开文件
 async function openFromHandle(fileHandle, sidecarHandle = null) {
+  // v1.42.8: 立即申请写权限 (趁用户 gesture 还在, 避免 30s 后 autosave 弹权限框打断写作)
+  await ensureWritePermission(fileHandle);
   const file = await fileHandle.getFile();
   const content = await file.text();
   // 加载批注: 优先级 1) 显式 sidecar handle 2) IDB 本地缓存
@@ -3773,6 +3791,8 @@ async function openFromHandle(fileHandle, sidecarHandle = null) {
 
 // --- 通过 FileSystemFileHandle 打开 .mentor 单文件包
 async function openFromMentorHandle(fileHandle) {
+  // v1.42.8: 立即申请写权限 (趁用户 gesture 还在, 避免 30s 后 autosave 弹权限框打断写作)
+  await ensureWritePermission(fileHandle);
   const file = await fileHandle.getFile();
   const { mdText, annotations, mediaFiles } = await readMentorZip(file);
   // F-media v1.36 fix: openFromMentorHandle 之前漏注入 mediaUrls — DOM img 是裸 markdown 路径
@@ -4407,10 +4427,8 @@ async function tryWriteBack(mdText, sidecarText, sidecarName) {
   // 单 .md 模式 (Chrome/Edge File System Access API)
   if (State.currentFile && State.currentFile.handle) {
     try {
-      // 确认权限
-      if (await State.currentFile.handle.queryPermission({ mode: 'readwrite' }) !== 'granted') {
-        await State.currentFile.handle.requestPermission({ mode: 'readwrite' });
-      }
+      // 确认权限 (v1.42.8: 用 helper, 之前是 inline 检查+申请)
+      await ensureWritePermission(State.currentFile.handle);
       // P0-C: 检查主 .md 是否在外部被修改
       if (State.fileMtime != null) {
         try {
@@ -5613,6 +5631,9 @@ async function tryReconnect() {
         setStatus('上次文件未授权', `${last.fileName} — 点击文件树重选以授权`);
         return;
       }
+    } else {
+      // v1.42.8: 已 granted 也提前 toast, 让用户知道 autosave 启用
+      console.log('[tryReconnect] write 权限已 granted, autosave 启用');
     }
     State.saveMode = 'mentor-handle';
     await openFromMentorHandle(handle);
@@ -5648,6 +5669,8 @@ window.__mdAnnotator = {
   buildMentorZipBlob,
   // v1.37: 暴露 buildDocxBlob 给 e2e 调试用 (主 exports 没暴露, 因为内部用闭包)
   buildDocxBlob,
+  // v1.42.8: 暴露 ensureWritePermission 给测试 + 第三方插件用
+  ensureWritePermission,
   // v1.42: 暴露 cap 工具函数给测试 / 高级用户脚本
   checkAnnotationCap,
   setMaxAnnotations,
