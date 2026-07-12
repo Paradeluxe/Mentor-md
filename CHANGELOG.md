@@ -2,6 +2,38 @@
 
 按时间倒序记录已发布的变化。最新条目在上方。
 
+## v1.42.9 (2026-07-12) — 批注范围允许重复 (同 from + to 完全相同才拒)
+
+### 用户原话
+"我希望能够批注范围允许重复 (除了完全一样的起始点)"
+
+### 问题
+- 之前: 选完全相同 range 创建批注 → State.annotations 出现 2 条 thread 共享 from+to, 侧栏显示 2 个一模一样的卡片, 信息冗余
+- 同时 PM mark 语义: 同 range + 同 markType + 不同 attrs 的 mark 会互相替换, 导致 DOM 只显示 1 个高亮 (但 data 有 2 条 thread), UI/state 割裂
+
+### 修复
+- 3 个批注创建入口加 `from + to` 完全相同守卫 (`app.js:1842-1851` `createAnnotationThread`, `1996-2002` `handleCreateMultiParagraphAnnotation`, `1913-1918` `handleCreateMultiCellAnnotation`):
+  - **拒绝**: `(from, to)` 都一致 → toast "该位置已有批注" + 返回 null
+  - **允许**: 同 from 不同 to (嵌套扩展)、不同 from 部分重叠、不同 from 不同 to
+- `_testCreateAnnotation` helper (`app.js:5958-5967`) 同步修: 守卫拒时返回 null (之前会返回被拒前的老 thread, 导致测试假阳性)
+- 3 个 E2E 场景测试更新 (`tests/e2e-annotation-overlap.spec.js`):
+  - T04 重写: "嵌套扩展 3 批注" (同 from + 不同 to 允许)
+  - T04b 新增: "完全相同 range 重复创建被拒"
+  - T10/T13 同步从"同位置 3 批注"改成"嵌套扩展 3 批注"
+
+### Test
+- `e2e-annotation-overlap.spec.js`: **37/37 通过**
+- `cap-edge.spec.js`: 8/8 通过 (硬上限守卫仍生效)
+- `e2e-multi-paragraph.spec.js`: 6/6 通过 (多段守卫协同)
+
+### 已知未触发的回归
+- `e2e.spec.js` / `e2e-p3a-active-mark.spec.js`: 默认 filter 期望 1 个实际 2 个 — `git stash` 后同样失败, pre-existing 数据假设问题
+- `verify-fixes.spec.js`: dirty dialog — 与本次改动无关
+- `chaos-wave5+`: emoji/huge-mark page crash — 内存压力测试, 无关
+
+### Chore
+- `index.html` `app.js?v=117 → ?v=118`
+
 ## v1.42.8 (2026-07-11) — 加载时立即申请写权限 (autosave 不弹框)
 
 ### 用户原话

@@ -228,22 +228,53 @@ const TEST_MD = `# 多批注测试
   });
 
   // =========================================================
-  console.log('\n=== T04: 同位置三批注 — 3 thread state ===');
+  console.log('\n=== T04: 嵌套扩展 3 批注 (同 from 不同 to 允许) — 3 thread state ===');
+  // v1.42.9: 同 from + 不同 to (嵌套扩展) 允许; 但同 from + 同 to (完全一样) 拒绝
+  // 选 middle-marker 三次: 第 1 次短, 第 2 次扩展 1 字符, 第 3 次扩展 2 字符
   // =========================================================
   await loadFresh();
-  await t('marker 位置 3 批注', async () => {
+  await t('middle-marker 嵌套扩展 3 批注', async () => {
     const ids = [];
-    for (let i = 0; i < 3; i++) {
-      const r = await selectAndCreate('middle-marker');
-      if (!r.ok) fail(`第 ${i+1} 创建失败: ${r.reason}`);
-      ids.push(r.tid);
-    }
+    const sel1 = await selectText('middle-marker');     // 13 字符
+    if (!sel1) fail('sel1 failed');
+    const r1 = await page.evaluate((args) => window.__mdAnnotator._testCreateAnnotation(args.from, args.to, 'middle-marker'), sel1);
+    if (!r1) fail('r1 创建失败');
+    ids.push(r1.threadId);
+    // 第 2 次: 从 sel1.from 起, to +1 (扩展 1 字符)
+    const r2 = await page.evaluate((args) => window.__mdAnnotator._testCreateAnnotation(args.from, args.to + 1, 'middle-marker-x'), sel1);
+    if (!r2) fail('r2 创建失败 (嵌套扩展 1 字符)');
+    ids.push(r2.threadId);
+    // 第 3 次: to +2
+    const r3 = await page.evaluate((args) => window.__mdAnnotator._testCreateAnnotation(args.from, args.to + 2, 'middle-marker-xx'), sel1);
+    if (!r3) fail('r3 创建失败 (嵌套扩展 2 字符)');
+    ids.push(r3.threadId);
     return ids;
   });
-  await t('state: 3 threads', async () => {
+  await t('state: 3 threads (嵌套扩展)', async () => {
     const st = await getMarkStats();
-    if (st.threads.length !== 3) fail(`threads=${st.threads.length}`);
+    if (st.threads.length !== 3) fail(`threads=${st.threads.length} 预期 3`);
     return { threads: st.threads.length, marks: st.inDocMarkCount };
+  });
+
+  // =========================================================
+  console.log('\n=== T04b: 完全相同 range 重复创建 — 应该被拒 (v1.42.9 守卫) ===');
+  // =========================================================
+  await loadFresh();
+  await t('middle-marker 第 1 次 OK', async () => {
+    const r = await selectAndCreate('middle-marker');
+    if (!r.ok) fail('第 1 次失败');
+    return r;
+  });
+  await t('完全相同 range 第 2 次拒绝', async () => {
+    // 同样 selectAndCreate 同样字符串 → 同样 from/to → 守卫拒
+    const r = await selectAndCreate('middle-marker');
+    if (r.ok) fail(`应该被拒, 但创建了 ${r.tid}`);
+    return { rejected: true, reason: r.reason };
+  });
+  await t('state: 只 1 thread', async () => {
+    const st = await getMarkStats();
+    if (st.threads.length !== 1) fail(`threads=${st.threads.length} 预期 1`);
+    return { threads: st.threads.length };
   });
 
   // =========================================================
@@ -402,15 +433,21 @@ const TEST_MD = `# 多批注测试
   });
 
   // =========================================================
-  console.log('\n=== T10: 同位置三批注 + 切走再切回 — marks 全部恢复 ===');
+  console.log('\n=== T10: 嵌套扩展 3 批注 + 切走再切回 — marks 全部恢复 ===');
+  // v1.42.9: 同 from 不同 to (嵌套扩展) 允许; 完全相同 range 拒绝
+  // 测 3 个不同 to 的嵌套扩展后切走再切回能恢复
   // =========================================================
   await loadFresh();
-  await t('middle-marker 同位置 3 批注', async () => {
+  await t('middle-marker 嵌套扩展 3 批注', async () => {
+    const sel1 = await selectText('middle-marker');
+    if (!sel1) fail('sel1 failed');
     const ids = [];
-    for (let i = 0; i < 3; i++) {
-      const r = await selectAndCreate('middle-marker');
-      if (!r.ok) fail(`第 ${i+1} 创建失败`);
-      ids.push(r.tid);
+    for (const delta of [0, 1, 2]) {
+      const r = await page.evaluate((args) => {
+        return window.__mdAnnotator._testCreateAnnotation(args.from, args.to + args.delta, 'middle-marker');
+      }, { from: sel1.from, to: sel1.to, delta });
+      if (!r) fail(`delta=${delta} 创建失败 (嵌套扩展)`);
+      ids.push(r.threadId);
     }
     return ids;
   });
@@ -480,15 +517,20 @@ const TEST_MD = `# 多批注测试
   });
 
   // =========================================================
-  console.log('\n=== T13: 同位置三批注 + 一删 + 一解 + 一回复 — 三独立 ===');
+  console.log('\n=== T13: 嵌套扩展 3 批注 + 一删 + 一解 + 一回复 — 三独立 ===');
+  // v1.42.9: 同 from 不同 to (嵌套扩展) 允许; 完全相同 range 拒绝
   // =========================================================
   await loadFresh();
-  await t('middle-marker 3 批注', async () => {
+  await t('middle-marker 嵌套扩展 3 批注', async () => {
+    const sel1 = await selectText('middle-marker');
+    if (!sel1) fail('sel1 failed');
     const ids = [];
-    for (let i = 0; i < 3; i++) {
-      const r = await selectAndCreate('middle-marker');
-      if (!r.ok) fail(`第 ${i+1} 创建失败`);
-      ids.push(r.tid);
+    for (const delta of [0, 1, 2]) {
+      const r = await page.evaluate((args) => {
+        return window.__mdAnnotator._testCreateAnnotation(args.from, args.to + args.delta, 'middle-marker');
+      }, { from: sel1.from, to: sel1.to, delta });
+      if (!r) fail(`delta=${delta} 创建失败`);
+      ids.push(r.threadId);
     }
     return ids;
   });

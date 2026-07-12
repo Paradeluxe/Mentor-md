@@ -1840,7 +1840,16 @@ function createAnnotationThread(from, to, text) {
   // v1.42: 硬上限 — 阻止创建超出 State.maxAnnotations 的批注
   // (perf + UX: 实测 200 张时 insert→undo p95 = 108ms, 超过后变半残)
   if (!checkAnnotationCap()) return null;
-  // v2: 不再弹作者 modal, 没作者时第一行 addReply 自动从 State.authorId 派生显示
+  // v1.42.9: 拒绝完全相同的 range (from + to 都一样即拒)
+  // 用户的语义: "批注范围允许重复 (除了完全一样的起始点)"
+  // 完全相同的 (from, to) 视为同一锚点 — 多条只会让侧栏/UI 混乱
+  // 但同 from 不同 to (嵌套扩展) 或不同 from 部分重叠 → 仍然允许
+  if (State.annotations.some(a => a.range && a.range.from === from && a.range.to === to)) {
+    showToast('该位置已有批注', 1800);
+    setStatus('提示', `范围 ${from}-${to} 已有批注，请选择不同的范围`);
+    return null;
+  }
+  // v2:
   // 老逻辑: !State.author → 弹 modal → 用户卡死
   const threadId = uuid();
   // 计算 prefix/suffix (鲁棒重定位用) — 必须立即算, 不能等用户输入第一条 comment
@@ -1885,7 +1894,7 @@ function handleCreateMultiCellAnnotation(cellSel) {
   // v2: 不弹作者 modal, 无作者直接匿名创建
   // v1.42: 硬上限 (1 thread 共享 threadId, 算 1 条)
   if (!checkAnnotationCap()) return;
-  // 收集每个 cell 的内容范围
+  // 收集每个 cell 的内容范围 (范围决定后才能判断 from, 所以先收集再守卫)
   const ranges = [];
   let totalText = '';
   cellSel.forEachCell((node, pos) => {
@@ -1899,6 +1908,13 @@ function handleCreateMultiCellAnnotation(cellSel) {
   });
   if (ranges.length === 0) {
     showToast('所选单元格为空', 2000);
+    return;
+  }
+  // v1.42.9: 拒绝主 range (ranges[0].from + ranges[0].to) 完全重复 — 跟单段一致
+  // multi-cell 共享一个 threadId, 用 ranges[0] 当主 range 跟现有 ann.range 比对
+  if (State.annotations.some(a => a.range && a.range.from === ranges[0].from && a.range.to === ranges[0].to)) {
+    showToast('该位置已有批注', 1800);
+    setStatus('提示', `范围 ${ranges[0].from}-${ranges[0].to} 已有批注，请选择不同的范围`);
     return;
   }
   const text = totalText.trim() || '(空)';
@@ -1981,6 +1997,12 @@ function handleCreateMultiParagraphAnnotation(from, to) {
   // v2: 不弹作者 modal, 无作者直接匿名创建
   // v1.42: 硬上限
   if (!checkAnnotationCap()) return;
+  // v1.42.9: 拒绝完全相同的 range (from + to 都一样即拒) — 跟单段一致
+  if (State.annotations.some(a => a.range && a.range.from === from && a.range.to === to)) {
+    showToast('该位置已有批注', 1800);
+    setStatus('提示', `范围 ${from}-${to} 已有批注，请选择不同的范围`);
+    return;
+  }
   const ed = State.editor;
   // 收集 from → to 之间的所有 paragraph range
   // 关键: PM addMark(from, to) 要求 from/to 都是 inline 文本内的位置
@@ -5935,7 +5957,11 @@ window.__mdAnnotator = {
   // 测试用: 用已知 from/to 创建批注 (绕开 findTextInDoc, 允许跨 node 选区)
   _testCreateAnnotation(from, to, text) {
     if (!from || !to || !text) return null;
+    // v1.42.9: 拦截守卫拒的 case, helper 也正确返回 null (而不是返回老 thread)
+    const beforeLen = State.annotations.length;
+    const beforeLastTid = State.annotations.length ? State.annotations[State.annotations.length - 1].threadId : null;
     createAnnotationThread(from, to, text);
+    if (State.annotations.length === beforeLen) return null;  // 守卫拒
     return State.annotations[State.annotations.length - 1];
   },
   // 测试用: 直接 toggle resolved (跳过 UI)
