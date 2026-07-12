@@ -5810,28 +5810,38 @@ window.__mdAnnotator = {
   // F-media v1.34: 暴露 media 反查 helper 供诊断用
   revokeMediaUrls,
   htmlToMarkdownMedia,
+  // v1.43.7: 暴露 cross-tab diagnostic 给测试
+  // 注意: app.js 是 type=module, 模块作用域不能直接被 __mdAnnotator 对象方法访问
+  // 用闭包 trick: 通过 import.meta / globalThis 拿不到. 改: 把 diag 暴露在 window._diagTab (module scope)
+  _diagTabRef: () => ({
+    hasDocChannel: typeof _docChannel !== 'undefined' && _docChannel !== null,
+    docChannelPath: typeof _docChannelPath !== 'undefined' ? _docChannelPath : null,
+    instanceId: typeof _instanceId !== 'undefined' ? _instanceId : null,
+    peerCount: typeof _docPeers !== 'undefined' ? _docPeers.size : 0,
+    peers: typeof _docPeers !== 'undefined' ? Array.from(_docPeers) : [],
+  }),
   __diagMedia: () => {
-    // 用户在 DevTools console 输入 __mdAnnotator.__diagMedia() 调出全状态
-    const M = window.__mdAnnotator;
-    const S = M.State;
-    const imgs = Array.from(document.querySelectorAll('#editor img'));
-    return {
-      appJs: document.querySelector('script[src*="app.js"]')?.src || '?',
-      title: document.title,
-      saveMode: S.saveMode,
-      currentFileName: S.currentFile?.name,
-      mediaUrlsKeys: Object.keys(S.mediaUrls || {}),
-      mediaFilesKeys: Object.keys(S.mediaFiles || {}),
-      mediaUrlsSample: Object.entries(S.mediaUrls || {}).slice(0, 2),
-      imgCount: imgs.length,
-      imgDetails: imgs.map(i => ({
-        srcPrefix: i.src.slice(0, 30),
-        complete: i.complete,
-        naturalWidth: i.naturalWidth,
-        naturalHeight: i.naturalHeight,
-      })),
-    };
-  },
+      // 用户在 DevTools console 输入 __mdAnnotator.__diagMedia() 调出全状态
+      const M = window.__mdAnnotator;
+      const S = M.State;
+      const imgs = Array.from(document.querySelectorAll('#editor img'));
+      return {
+        appJs: document.querySelector('script[src*="app.js"]')?.src || '?',
+        title: document.title,
+        saveMode: S.saveMode,
+        currentFileName: S.currentFile?.name,
+        mediaUrlsKeys: Object.keys(S.mediaUrls || {}),
+        mediaFilesKeys: Object.keys(S.mediaFiles || {}),
+        mediaUrlsSample: Object.entries(S.mediaUrls || {}).slice(0, 2),
+        imgCount: imgs.length,
+        imgDetails: imgs.map(i => ({
+          srcPrefix: i.src.slice(0, 30),
+          complete: i.complete,
+          naturalWidth: i.naturalWidth,
+          naturalHeight: i.naturalHeight,
+        })),
+      };
+    },
   // H-undo: history stack helpers
   pushHistory,
   undo,
@@ -6144,3 +6154,19 @@ window.__mdAnnotator = {
     renderAuthorChip();
   },
 };
+
+
+// v1.43.7: cross-tab diag (在 module scope 里, 能直接访问 _docChannel 等 module-scope vars)
+// 绕过 type=module 闭包限制 (window.__mdAnnotator.* 不能直接拿 _docChannel)
+window.__mdAnnotator__diagTab = () => ({
+  hasDocChannel: _docChannel !== null,
+  docChannelPath: _docChannelPath,
+  instanceId: _instanceId,
+  peerCount: _docPeers.size,
+  peers: Array.from(_docPeers),
+});
+
+// v1.43.7: 测试入口 - 暴露 module-scope 函数 (避开 type=module 闭包)
+window.__mdAnnotator__openDocChannel = _openDocChannel;
+window.__mdAnnotator__closeDocChannel = _closeDocChannelFull;
+window.__mdAnnotator__getDocPath = _getDocPath;

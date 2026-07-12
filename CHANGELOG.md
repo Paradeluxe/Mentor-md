@@ -2,6 +2,50 @@
 
 按时间倒序记录已发布的变化。最新条目在上方。
 
+## v1.43.7 (2026-07-12) — chaos-wave14 disk roundtrip + cross-tab + AI stress (14 场景)
+
+### 用户原话
+"继续做呗"
+
+### 改动
+- 新增 `tests/chaos-wave14.spec.js` 14 场景, 覆盖:
+  1. **disk roundtrip**: build → 写 .mentor 文件 → read → 验证 3 ann + reply 完整恢复
+  2. **disk roundtrip + image**: mediaFiles 空 round-trip
+  3. **cross-tab same file**: BroadcastChannel 双向 peer 检测 (peerCount=1)
+  4. **cross-tab isolation**: 不同文件名 → 不同 channel
+  5. **AI 100 reply same thread diff body**: 100 个不同 body 全部成功 (49ms total)
+  6. **AI 50 reply 50 threads**: 50 个独立 thread 各 1 reply 全部成功 (181ms)
+  7. **5MB autosave + reload**: autosaveNow 766ms, reload 后 IDB cache 恢复
+  8. **50KB autosave 10x**: 0ms total (debounce 合并)
+  9. **autosave + renderCommentList 并发**: 不崩
+  10. **1MB autosave perf**: autosaveNow 计时
+  11. **delete thread mark cleanup**: 删 ann + rebuild → markCount=0 ✓
+  12. **跨段 ann**: multi-paragraph, hasRanges=true, rangeCount=2 ✓
+  13. **ann 含特殊字符**: < > & " ' / \\ ` ~ ! @ # $ % ^ * ( ) - + = 全 OK
+  14. **100 ann + 200 字 reply**: renderCommentList 11ms
+
+### Test infra 改进
+- 新增 `window.__mdAnnotator__diagTab`: 暴露 cross-tab 模块状态 (绕过 type=module 闭包)
+- 新增 `window.__mdAnnotator__openDocChannel` / `__closeDocChannel` / `__getDocPath`: 测试入口
+- 验证 `type="module"` 下 module-scope vars 不能被对象方法访问, 必须在 module scope 直接 export
+
+### 真实 perf 数据
+| 场景 | 耗时 |
+|---|---|
+| 100 AI reply 同 thread | **49ms total** |
+| 50 AI reply 50 threads | **181ms total** |
+| 5MB autosave + reload | **766ms autosaveNow** |
+| 100 ann + 200 字 reply render | **11ms** |
+| 50KB autosave 10x | **0ms** (debounce) |
+
+### 验证设计 (非 bug)
+- BroadcastChannel 模块-scope vars 不能被 `__mdAnnotator.__diagTab` 访问, 必须 `window.__mdAnnotator__diagTab` (直接 module scope 暴露)
+- cross-tab 协调需要 2 个 page 同 context (ctx.newPage) 才能共享 BroadcastChannel
+
+### 回归
+- 296 场景全过 (175 旧 + 6 v143-empty-state + 15 v143.2-wave9 + 26 v143.3-wave10 + 24 v143.4-wave11 + 20 v143.5-wave12 + 16 v143.6-wave13 + 14 v143.7-wave14 + 0 回归)
+- chaos suite/wave2-14/cap-edge/cap-fix/roundtrip/survive-deleted/perm-early 全过
+
 ## v1.43.6 (2026-07-12) — chaos-wave13 真实场景测试 (16 场景, perf 数据)
 
 ### 用户原话
