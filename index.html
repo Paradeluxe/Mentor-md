@@ -3,12 +3,12 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Mentor v1.35 — 像 docx 一样批注 Markdown</title>
-<meta name="build" content="v1.35 20260709: crossRealmFix" />
+<title>Mentor v1.43 — 像 docx 一样批注 Markdown</title>
+<meta name="build" content="v1.43 20260712: first-time-empty-state" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-<link rel="stylesheet" href="styles.css?v=95" />
+<link rel="stylesheet" href="styles.css?v=97" />
 <!-- KaTeX 数学公式渲染 -->
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" crossorigin="anonymous" />
 <!-- 字体：系统无衬线 + 等宽（侧栏时间戳、文件名） -->
@@ -138,10 +138,25 @@
         </div>
       </div>
       <div id="comment-list"></div>
-      <div id="comment-empty" class="empty-hint">
-        <p>尚无批注</p>
-        <p class="hint">在编辑器中拖选文字以添加批注</p>
-      </div>
+      <!-- v1.43: 空态引导 (首次 / 0 批注 时显示; 加首条后自动消失) -->
+            <div id="comment-empty" class="empty-hint">
+              <div class="empty-hint-icon" aria-hidden="true">
+                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                  <polyline points="14 2 14 8 20 8"/>
+                  <path d="M8 13h6M8 17h4" stroke="#f54e00" stroke-width="2"/>
+                </svg>
+              </div>
+              <h2>还没有批注</h2>
+              <p class="hint-lead">像 docx 一样, 拖选任意文字即可加批注</p>
+              <ol class="empty-hint-steps">
+                <li><span class="step-num">1</span> 在编辑器中拖选一段文字</li>
+                <li><span class="step-num">2</span> 弹出按钮点 <kbd>批注</kbd></li>
+                <li><span class="step-num">3</span> 右侧侧栏写批注, 嵌套回复, 标解决</li>
+              </ol>
+              <button id="empty-demo-btn" class="empty-hint-cta" title="加载一段示例文档, 看完整批注流程">▶ 看示例</button>
+              <p class="empty-hint-foot">需要更多帮助? 点工具栏 <kbd>?</kbd> 看完整快捷键</p>
+            </div>
     </aside>
   </main>
 
@@ -195,7 +210,7 @@
   }
 }
 </script>
-<script type="module" src="app.js?v=118"></script>
+<script type="module" src="app.js?v=121"></script>
 <!-- 帮助 popover (浮在 body 顶层, 位置由 JS 动态计算) -->
 <div id="help-popover" class="help-popover hidden" role="tooltip">
   <div class="help-popover-arrow"></div>

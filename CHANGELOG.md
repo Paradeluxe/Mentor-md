@@ -2,6 +2,55 @@
 
 按时间倒序记录已发布的变化。最新条目在上方。
 
+## v1.43 (2026-07-12) — 首次空态引导 + "看示例" 按钮
+
+### 用户需求
+"继续优化mentor的用户交互" — 之前首次打开 app 的空态只有角落里的 "尚无批注 / 在编辑器中拖选文字以添加批注" 一行小字, 几乎所有新用户都会忽略.
+
+### 改动
+
+1. **新空态结构** (`index.html` 138-160, `styles.css` 1179-1285):
+   - 图标方块 (橙色高亮笔 + 文档 SVG, 56x56)
+   - "还没有批注" 大字标题
+   - "像 docx 一样, 拖选任意文字即可加批注" 引导句
+   - 3 步骤编号列表 (橙色圆圈 1/2/3):
+     1. 在编辑器中拖选一段文字
+     2. 弹出按钮点 批注
+     3. 右侧侧栏写批注, 嵌套回复, 标解决
+   - "▶ 看示例" 橙色 CTA 按钮
+   - 底部脚注提示 `?` 快捷键
+
+2. **`loadDemoDocument()` 新函数** (`app.js:4885-4962`):
+   - 加载 Markdown 演示文档 (含 1 级标题 + 段落 + 已解决说明 + 表格)
+   - 通过 `findAnnotationRange(doc, {text:...})` 自动定位 (不写死 from/to, 抗文本微调)
+   - 加 2 条示例批注: 1 open + 1 resolved, 各带 1 条 demo 评论
+   - 自动调用 `createAnnotationThread()` (已返回 thread 对象, 之前没 return)
+   - 写 `localStorage['mentor.onboarded.v1'] = '1'` flag
+   - 设 `saveMode = 'idle'` 关掉 autosave (demo 没真文件)
+
+3. **`createAnnotationThread()` 返回 thread** (`app.js:1890`):
+   - 之前没返回值, 调用方拿不到引用
+   - 现在 `return thread`, 让 loadDemoDocument 等可以立即挂评论
+
+4. **CTA 接线** (`app.js:5204`): `$('#empty-demo-btn').addEventListener('click', loadDemoDocument)`
+
+5. **暴露给 e2e** (`app.js:5774`): `__mdAnnotator.loadDemoDocument`
+
+### Test (`tests/v143-empty-state.spec.js` 6/6 通过)
+- T1: 空态新结构 (icon + 3 steps + CTA + foot)
+- T2: CTA 按钮无错接线
+- T3: 点 CTA 加载演示 → 2 anns (1 open + 1 resolved, 各 1 comment), fileName=演示文档.md, saveMode=idle, onboardedFlag=1, empty hidden
+- T4: 编辑器中 ≥2 高亮 mark
+- T5: N>0 时 empty hidden
+- T6: 清空 annotations 后 empty 重新显示
+
+### 回归
+- 181 场景全过 (175 旧 + 6 新 + 0 回归)
+- chaos suite / wave2-8 / cap-edge / cap-fix / roundtrip / survive-deleted / perm-early 全过
+
+### Cache
+- `styles.css?v=95→97` `app.js?v=118→121`
+
 ## v1.42.9 (2026-07-12) — 批注范围允许重复 (同 from + to 完全相同才拒)
 
 ### 用户原话

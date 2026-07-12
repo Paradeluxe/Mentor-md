@@ -1886,6 +1886,8 @@ function createAnnotationThread(from, to, text) {
   setStatus('已创建批注', `线程 ${threadId.slice(0, 8)}`);
   // AI 协作协议：通知
   emitAI('threadChange', { threadId, change: 'create', thread });
+  // v1.43: 返回新创建的 thread 对象, 让调用方 (loadDemoDocument 等) 可立即附加 demo 评论
+  return thread;
 }
 
 // 处理多 cell 选区 (CellSelection) 的批注创建
@@ -4883,6 +4885,79 @@ function newDocument() {
   setStatus('新建空白文档');
 }
 
+// v1.43: 首次空态 "看示例" 按钮 - 加载一段演示文档 + 2 条示例批注
+// 让新用户 5 秒内看到完整批注形态 (open + resolve + reply), 不需要先学 UI
+function loadDemoDocument() {
+  // 直接重置 (demo 不要求 dirty check, 用户是在空态点的, 不会有未保存内容)
+  State.editor.commands.setContent('', false);
+  const DEMO_MD = `# Mentor 演示文档
+
+这是一段用于演示批注流程的示例文字. 你可以尝试拖选**"示例文字"**这几个字, 然后按浮动按钮加批注.
+
+## 已解决的批注
+
+下面这句话之前讨论过, 现在已经解决. 你可以点 "重新打开" 把它恢复为未解决状态.
+
+## 数据表
+
+| 列1 | 列2 |
+|----|----|
+| 数据1 | 数据2 |
+
+试试给表格里的 "数据1" 加批注.
+
+> 提示: 在这里直接打字也可以 - 你刚才打开的就是一个真实的 .md 文件, 可以保存到任意位置.
+`;
+  const html = markdownToHtml(DEMO_MD, State.mediaUrls);
+  State.editor.commands.setContent(html, false);
+  State.annotations = [];
+  resetHistory();
+  // 重置 currentFile (demo 模式: 没真实 handle, 不进 autosave)
+  State.currentFile = { name: '演示文档.md', content: DEMO_MD, annotations: null, dirty: false };
+  State.saveMode = 'idle';  // 关 autosave (demo 没真文件可写)
+  stopAutosaveTimer();
+  $('#current-file-name').textContent = '演示文档.md';
+  setStatus('演示模式', '此文档不会自动保存. 想保留请用 导出成 .mentor 或 Ctrl+S');
+
+  // 通过 findAnnotationRange 自动定位 (不写死 from/to, 抗文本微调)
+  const doc = State.editor.state.doc;
+
+  // 示例 1: 给 "示例文字" 加一条未解决的批注 + 一条评论
+  const r1 = findAnnotationRange(doc, { text: '示例文字' });
+  if (r1) {
+    const t1 = createAnnotationThread(r1.from, r1.to, '示例文字');
+    if (t1) {
+      t1.comments.push({
+        id: uuid(),
+        author: State.author || 'Mentor',
+        body: '👋 这是一条示例批注. 试着回复我, 或者标为已解决.',
+        createdAt: nowISO(),
+      });
+    }
+  }
+
+  // 示例 2: 给 "数据1" 加一条已解决的批注 (让用户看到 resolved 状态)
+  const r2 = findAnnotationRange(doc, { text: '数据1' });
+  if (r2) {
+    const t2 = createAnnotationThread(r2.from, r2.to, '数据1');
+    if (t2) {
+      t2.resolved = true;
+      t2.comments.push({
+        id: uuid(),
+        author: State.author || 'Mentor',
+        body: '这是一条已解决的示例批注 (点 "重新打开" 可恢复).',
+        createdAt: nowISO(),
+      });
+    }
+  }
+  // demo 完成: 写 flag (即使 N=0 也不显示空态)
+  try { localStorage.setItem('mentor.onboarded.v1', '1'); } catch {}
+  rebuildAnnotationMarks();
+  renderCommentList();
+  renderOutline();
+  showToast('已加载演示文档, 试试拖选文字加批注', 3500);
+}
+
 // ============================================================
 // 9. 作者管理
 // ============================================================
@@ -5130,6 +5205,8 @@ function setupToolbar() {
   $('#btn-save').addEventListener('click', saveCurrent);
   $('#btn-export-md').addEventListener('click', exportMd);
   $('#btn-export-docx').addEventListener('click', exportDocx);
+  // v1.43: 空态 "看示例" 按钮 - 加载演示文档
+  $('#empty-demo-btn').addEventListener('click', loadDemoDocument);
   // H-undo: 工具栏 ↶ ↷ 按钮
   $('#btn-undo').addEventListener('click', () => {
     if (undo()) showToast('已撤销');
@@ -5698,6 +5775,8 @@ window.__mdAnnotator = {
   setMaxAnnotations,
   findAnnotationRange,
   mentorExportName,
+  // v1.43: 演示文档 (first-time empty state CTA)
+  loadDemoDocument,
   // F-media v1.34: 暴露 media 反查 helper 供诊断用
   revokeMediaUrls,
   htmlToMarkdownMedia,
