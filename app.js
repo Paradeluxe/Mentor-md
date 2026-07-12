@@ -1035,8 +1035,12 @@ function markDirty() {
 function _validateMarksAfterEdit(editor) {
   if (!State.annotations || State.annotations.length === 0) return;
   const markType = editor.schema.marks.annotation;
-  // 1) walk doc 一次, 收集 (threadId → found, text → count)
+  // 1) walk doc 一次, 收集 (threadId → found, threadId → currentText)
+  // v1.43.3 fix: 之前只判断 mark 在不在, 没看 mark 实际 text 是否还匹配 ann.text
+  // 后果: mark 被部分删时 (e.g. "45678" → "4678"), mark 还在, validation 直接清掉 fuzzy
+  // 但 ann.text 仍是 "45678" 跟实际 mark 不一致 — 视觉错乱 (侧栏显示 "45678" 但编辑器高亮 "4678")
   const threadFound = new Set();
+  const threadCurrentText = new Map();  // threadId → 当前 mark text (first occurrence)
   const textCount = new Map();
   editor.state.doc.descendants((node, pos) => {
     if (!node.isText) return;
@@ -1044,7 +1048,10 @@ function _validateMarksAfterEdit(editor) {
     if (text) textCount.set(text, (textCount.get(text) || 0) + 1);
     for (const m of node.marks) {
       if (m.type === markType && m.attrs.threadId) {
-        threadFound.add(m.attrs.threadId);
+        const tid = m.attrs.threadId;
+        threadFound.add(tid);
+        if (!threadCurrentText.has(tid)) threadCurrentText.set(tid, text);
+        else threadCurrentText.set(tid, threadCurrentText.get(tid) + text);
       }
     }
   });
@@ -1053,13 +1060,36 @@ function _validateMarksAfterEdit(editor) {
   for (const ann of State.annotations) {
     if (!ann || typeof ann !== 'object' || !ann.threadId) continue;
     if (threadFound.has(ann.threadId)) {
-      // mark 在 → 清除所有 invalid 标志
-      if (ann.deleted) { ann.deleted = false; changed = true; }
-      if (ann.fuzzy || ann.invalid) {
-        ann.fuzzy = false;
-        ann.invalid = false;
-        ann.invalidReason = undefined;
-        changed = true;
+      // mark 在 → 检查 text 是否一致 (v1.43.3)
+      const currentText = threadCurrentText.get(ann.threadId) || '';
+      const textMatches = currentText === ann.text;
+      if (textMatches) {
+        // 完全匹配, 清除 invalid 标志
+        if (ann.deleted) { ann.deleted = false; changed = true; }
+        if (ann.fuzzy || ann.invalid) {
+          ann.fuzzy = false;
+          ann.invalid = false;
+          ann.invalidReason = undefined;
+          changed = true;
+        }
+      } else {
+        // v1.43.3: mark 在但 text 已被部分修改 — 设 fuzzy + 自动更新 ann.text
+        // (Word 行为: mark 还在就更新锚定文字, 不让 user 看到错位)
+        if (ann.text !== currentText) {
+          ann.text = currentText;
+          changed = true;
+        }
+        if (!ann.fuzzy) {
+          ann.fuzzy = true;
+          ann.deleted = false;
+          ann.invalidReason = 'text-edited';
+          changed = true;
+        }
+        // invalid 不设 (mark 还在, 不是真的 invalid, 只是 fuzzy)
+        if (ann.invalid) {
+          ann.invalid = false;
+          changed = true;
+        }
       }
       continue;
     }
@@ -1308,9 +1338,9 @@ function initEditor() {
       markDirty();
       // v1.42.5 perf: 只在 *有 ann 变化* 时才 renderCommentList
       // 之前每次 keystroke 都重渲整张列表 (O(N²) for N cards × N keystrokes)
-      // 优化: _validateMarksAfterEdit 内部维护 changed 标志, 仅在 ann fuzzy/invalid 真正翻转才返 true
-      // 此外 addMark/removeMark 也会经 transaction.docChanged (markDirty 包含)
-      // 文本变化不会让 ann 变 (fuzzy 不变), 所以可以跳过 renderCommentList
+      // 优化: _validateMarksAfterEdit 内部维护 changed 标志, 仅在 ann 真的翻转才返 true
+      // v1.43.3: 之前以为"文本变化不会让 ann 变 (fuzzy 不变)" 是错的 — partial delete in mark
+      // 会触发 ann.text 更新 (fuzzy=true), changed=true → 需 renderCommentList
       const annChanged = _validateMarksAfterEdit(editor);
       if (annChanged) {
         // 真的改了 fuzzy/invalid → 卡片显示需更新

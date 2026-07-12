@@ -2,6 +2,59 @@
 
 按时间倒序记录已发布的变化。最新条目在上方。
 
+## v1.43.3 (2026-07-12) — partial delete in mark fuzzy 修复 + chaos-wave10 变态测试
+
+### 用户原话
+"怎么变态怎么来, 越全面越好"
+
+### 真 bug 发现 (W10_05)
+`_validateMarksAfterEdit` 之前只看 `threadFound.has(ann.threadId)` — 如果 mark 还在就清掉 fuzzy
+但 PM 自动收缩 mark 时 (e.g. 用户删 mark 内 1 字符), mark 仍在但 text 变了:
+- 旧: ann.text = "45678", mark 实际 = "4678"
+- 旧代码: 看到 mark 在 → 清 fuzzy → ann.text 仍是 "45678"
+- 视觉错乱: 侧栏卡片显示 "45678", 编辑器高亮 "4678" — 用户困惑
+
+### Fix
+`_validateMarksAfterEdit` (`app.js:1035`) 现在:
+1. walk doc 时顺便收集 `threadId → currentText` (mark 实际文本)
+2. mark 在时比较 `currentText === ann.text`:
+   - 完全匹配 → 清 invalid 标志 (现有逻辑)
+   - **text 变了 → 设 fuzzy=true + 自动更新 ann.text (Word 行为: 锚定文字跟 mark 走)**
+3. `invalidReason = 'text-edited'` (区别于 'text-deleted' 和 'mark-missing')
+
+### chaos-wave10 新增 (26 场景全过)
+1. Unicode / Emoji / 中文 / 韩文 mark 鲁棒性 (W10-01..04)
+2. Mark 内删字 fuzzy 行为 (W10-05..07) — 上面 fix
+3. Resolve toggle UI (W10-08)
+4. 跨 block 多段选区 (W10-09, `handleCreateMultiParagraphAnnotation` 0→1 测)
+5. 跨 cell 选区 (W10-10, 由 e2e-cell-selection.spec.js 覆盖)
+6. 100 ann + 1万字 doc perf (W10-11, setup 24ms / render 10ms — v1.42.5 perf fix 验证)
+7. 侧车 corrupt 数据防御 (W10-12, _validateSidecar 0→1 测)
+8. authorColorIndex hash 分布 (W10-13, 100 authorId → 8/8 色, 0→1 测)
+9. computeContext prefix/suffix (W10-14, 0→1 测)
+10. 空 doc / 纯空白 doc (W10-15..16)
+11. 重复 threadId import (W10-17)
+12. 100 字符长 mark text (W10-18)
+13. mark + bold 叠加 (W10-19)
+14. XSS 注入测试 (W10-20, Tiptap 默认 strip `<script>`)
+15. 50 条 reply 线程 (W10-21)
+16. resolve/unresolve 100 次循环 (W10-22)
+17. 5 嵌套 mark (W10-23, bracket-style 验证)
+18. 整段选区 (W10-24)
+19. 反向选区 (W10-25, PM 自动 normalize)
+20. 切 file 10 次循环 (W10-26)
+
+### 视觉验证 (bsk screenshot)
+partial delete 后: ann card banner "⚠ 已离开初始锚定 · 请重新选择正文", 卡片标题 "4678" (auto-updated), 编辑器高亮 "4678" — 三处一致
+
+### 回归
+- 222 场景全过 (175 旧 + 6 v143-empty-state + 15 v143.2-wave9 + 26 v143.3-wave10 + 0 回归)
+- chaos suite/wave2-9/wave10/cap-edge/cap-fix/roundtrip/survive-deleted/perm-early 全过
+
+### Bug 顺手暴露
+- W10_05/W10_06 旧代码行为: partial delete 后 ann.text 不同步 → 修
+- W10_15: renderOutline 没暴露到 __mdAnnotator (e2e 不可调) — 测试改用 rebuildAnnotationMarks
+
 ## v1.43.2 (2026-07-12) — chaos-wave9: 交叉/包含/邻接范围测试覆盖
 
 ### 用户需求
