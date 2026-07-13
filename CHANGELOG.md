@@ -2,6 +2,39 @@
 
 按时间倒序记录已发布的变化。最新条目在上方。
 
+## v1.43.18 (2026-07-13) — 文件关联 + 图标 + 最近文件 + 导出进度 + autosave 设置
+
+### 用户原话
+"我觉得你按顺序做吧，都挺好的" (1 文件关联 → 2 图标 → 3 最近文件 → 4 导出进度 → 5 Worker vendor → 6 autosave 设置)
+
+### 改动
+**Windows 双击 .mentor**
+- `scripts/register-mentor-assoc.ps1` + `install-file-association.cmd` (HKCU, 无 admin)
+- `uninstall-file-association.cmd` 卸载
+- ProgID `Mentor.File` → `mentor.cmd "%1"`
+- 桌面 `Mentor.lnk` 图标 → `assets/mentor.ico`
+
+**空态最近文件**
+- HandleStore.listFiles()
+- 空态 `#empty-recent` 列表，点击重开 .mentor (权限申请)
+
+**导出进度**
+- `#export-progress` 状态栏角标 + pulse
+- saveCurrent / tryWriteBackMentor / exportDocx 走 showExportProgress
+
+**autosave 设置**
+- ⚙ 设置: 1s / 3s / 5s / 10s / 30s
+- localStorage `Mentor:autosaveDebounce`
+
+**Worker 离线 JSZip**
+- `workers/jszip.min.js` (vendor, 97KB)
+- classic Worker + importScripts (不再依赖 esm.sh CDN)
+
+### 验证
+- 文件关联 registry OK
+- Worker build size=283, ready=true, builds=1
+- 本地 chaos-suite / wave22-23 / empty-state 回归
+
 ## v1.43.17 (2026-07-13) — 桌面快捷方式 + 双击 .mentor 打开 (8 场景)
 
 ### 用户原话

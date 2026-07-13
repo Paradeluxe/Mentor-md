@@ -229,6 +229,12 @@ const HandleStore = {
     });
   },
   async deleteFile(name) { return this._deleteFromStore('files', name); },
+  // v1.43.18: 列出所有已缓存 handle (空态「最近文件」)
+  async listFiles() {
+    const rows = await this._getAllFromStore('files');
+    return (rows || []).map(r => ({ name: r.name, updatedAt: r.updatedAt || 0 }))
+      .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+  },
 
   // --- lastFile (跨 reload 记住最后一次打开的 .md) ---
   async putLastFile(fileName) {
@@ -1196,7 +1202,13 @@ function markClean() {
 let _autosaveTimer = null;
 let _autosaveLastTrigger = 0;
 const AUTOSAVE_INTERVAL = 30000;  // 30 秒兜底 (用户长时间不操作)
-const AUTOSAVE_DEBOUNCE = 5000;   // v1.43.14: 5 秒 debounce — 停手后 5s 自动保存 (vs 旧 30s setInterval)
+// v1.43.18: 可配置 debounce (localStorage Mentor:autosaveDebounce, 允许 1/3/5/10/30s)
+const AUTOSAVE_DEBOUNCE_ALLOWED = [1000, 3000, 5000, 10000, 30000];
+function getAutosaveDebounceMs() {
+  const v = parseInt(localStorage.getItem('Mentor:autosaveDebounce') || '5000', 10);
+  return AUTOSAVE_DEBOUNCE_ALLOWED.includes(v) ? v : 5000;
+}
+let AUTOSAVE_DEBOUNCE = getAutosaveDebounceMs();
 
 function startAutosaveTimer() {
   stopAutosaveTimer();
@@ -2391,6 +2403,8 @@ function renderCommentList() {
   if (visibleThreads.length === 0) {
     list.innerHTML = '';
     empty.classList.remove('hidden');
+    // v1.43.18: 空态时刷新「最近文件」列表
+    refreshEmptyRecentFiles();
     updateCommentCounts();
     syncFilterTabsFromCheckboxes();
     return;
@@ -4456,7 +4470,7 @@ let _zipWorkerStats = { builds: 0, loads: 0, errors: 0, lastError: null, fallbac
 
 async function _initZipWorker() {
   try {
-    const worker = new Worker(new URL('./workers/zip-worker.js', import.meta.url), { type: 'module' });
+    const worker = new Worker(new URL('./workers/zip-worker.js', import.meta.url)); // v1.43.18 classic + local jszip.min.js
     worker.onmessage = (e) => {
       const { id, ok, result, error } = e.data;
       if (id === 'init') {
@@ -4570,8 +4584,10 @@ async function saveCurrent() {
       setStatus('保存失败', result.error);
     } else {
       // download 模式 / 写回失败 → 浏览器下载
+      showExportProgress('正在打包 .mentor…');
       const blob = await buildMentorZipBlob(mdText, sidecar, State.mediaFiles);
       downloadBlob(State.currentFile.name, blob);
+      hideExportProgress('已下载');
       showToast('已下载 ✓ (.mentor)');
       setStatus('已下载', State.currentFile.name);
     }
@@ -4603,10 +4619,12 @@ async function tryWriteBackMentor(mdText, sidecar, mentorName) {
       if (await handle.queryPermission({ mode: 'readwrite' }) !== 'granted') {
         await handle.requestPermission({ mode: 'readwrite' });
       }
+      showExportProgress('正在打包 .mentor…');
       const blob = await buildMentorZipBlob(mdText, sidecar, State.mediaFiles);
       const writable = await handle.createWritable();
       await writable.write(blob);
       await writable.close();
+      hideExportProgress('已保存');
       return { handle: true };
     } catch (e) {
       if (e.name === 'NotAllowedError') return { handle: false, error: '权限被拒' };
@@ -4715,18 +4733,18 @@ async function exportDocx() {
     showToast('JSZip 未加载, 无法导出 docx', 3000);
     return;
   }
+  showExportProgress('正在生成 .docx…');
   showToast('正在生成 .docx…', 1500);
   try {
-    // 1. 拿到 docx-ready HTML (用 markdownToHtml 但保留 media handling)
-    //    注意: buildDocxBlob 内部只关心行内 + 块结构, 不会处理 markSnapshot
     const html = State.editor.getHTML();
     const zip = await buildDocxBlob(html, State.mediaFiles || {});
-
     const baseName = (State.currentFile.name || 'untitled').replace(/\.(md|markdown|mentor)$/i, '');
     downloadBlob(`${baseName}.docx`, zip);
+    hideExportProgress('已导出');
     showToast(`已导出 ${baseName}.docx`, 2500);
   } catch (e) {
     console.error('[exportDocx] 失败:', e);
+    hideExportProgress('导出失败');
     showToast('导出 docx 失败: ' + (e.message || '未知错误'), 4000);
   }
 }
@@ -5056,6 +5074,97 @@ function newDocument() {
   setStatus('新建空白文档');
 }
 
+// v1.43.18: 空态「最近文件」— 从 HandleStore 列 .mentor, 点击重开
+async function refreshEmptyRecentFiles() {
+  const box = document.querySelector('#empty-recent');
+  const list = document.querySelector('#empty-recent-list');
+  if (!box || !list) return;
+  try {
+    const files = await HandleStore.listFiles();
+    const mentors = (files || []).filter(f => /\.mentor$/i.test(f.name)).slice(0, 8);
+    if (mentors.length === 0) {
+      box.classList.add('hidden');
+      list.innerHTML = '';
+      return;
+    }
+    box.classList.remove('hidden');
+    list.innerHTML = mentors.map(f => {
+      const when = f.updatedAt ? new Date(f.updatedAt).toLocaleString() : '';
+      return `<button type="button" class="empty-recent-item" data-name="${escapeHtml(f.name)}" title="${escapeHtml(when)}">
+        <span class="empty-recent-name">${escapeHtml(f.name)}</span>
+        <span class="empty-recent-time">${escapeHtml(when)}</span>
+      </button>`;
+    }).join('');
+    list.querySelectorAll('.empty-recent-item').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const name = btn.dataset.name;
+        if (!name) return;
+        try {
+          const handle = await HandleStore.getFile(name);
+          if (!handle) {
+            showToast('文件句柄已失效, 请手动打开', 3000);
+            return;
+          }
+          let perm = 'prompt';
+          try { perm = await handle.queryPermission({ mode: 'readwrite' }); } catch {}
+          if (perm !== 'granted') {
+            try {
+              const np = await handle.requestPermission({ mode: 'readwrite' });
+              if (np !== 'granted') {
+                showToast('未获得文件权限', 2500);
+                return;
+              }
+            } catch (e) {
+              showToast('权限请求失败', 2500);
+              return;
+            }
+          }
+          if (typeof openFromMentorHandle === 'function') {
+            await openFromMentorHandle(handle);
+          } else {
+            showToast('openFromMentorHandle 不可用', 2000);
+          }
+        } catch (e) {
+          console.warn('[recent] open failed', e);
+          showToast('打开失败: ' + (e.message || e), 3000);
+        }
+      });
+    });
+  } catch (e) {
+    console.warn('[recent] list failed', e);
+    box.classList.add('hidden');
+  }
+}
+
+// v1.43.18: 导出进度 — 状态栏 + 角标
+function showExportProgress(label) {
+  setStatus(label || '导出中…', '请稍候');
+  const bar = document.querySelector('#export-progress');
+  if (bar) {
+    bar.classList.remove('hidden');
+    bar.setAttribute('aria-busy', 'true');
+    bar.textContent = label || '导出中…';
+  }
+}
+function hideExportProgress(okMsg) {
+  const bar = document.querySelector('#export-progress');
+  if (bar) {
+    bar.classList.add('hidden');
+    bar.setAttribute('aria-busy', 'false');
+    bar.textContent = '';
+  }
+  if (okMsg) setStatus(okMsg, '');
+}
+
+// v1.43.18: autosave debounce 设置
+function setAutosaveDebounce(ms) {
+  if (!AUTOSAVE_DEBOUNCE_ALLOWED.includes(ms)) return;
+  AUTOSAVE_DEBOUNCE = ms;
+  localStorage.setItem('Mentor:autosaveDebounce', String(ms));
+  syncSettingsActiveState();
+  showToast('自动保存延迟: ' + (ms / 1000) + 's', 2000);
+}
+
 // v1.43: 首次空态 "看示例" 按钮 - 加载一段演示文档 + 2 条示例批注
 // 让新用户 5 秒内看到完整批注形态 (open + resolve + reply), 不需要先学 UI
 function loadDemoDocument() {
@@ -5282,7 +5391,7 @@ function syncSettingsActiveState() {
   const popover = document.querySelector('#settings-popover');
   if (!popover) return;
   const cur = State.maxAnnotations || 0;
-  popover.querySelectorAll('.settings-opt').forEach(btn => {
+  popover.querySelectorAll('#settings-max-annotations .settings-opt').forEach(btn => {
     const v = parseInt(btn.dataset.max, 10);
     btn.classList.toggle('is-active', v === cur);
   });
@@ -5292,6 +5401,14 @@ function syncSettingsActiveState() {
     const cap = cur === 0 ? '∞' : cur;
     current.textContent = `当前: ${open} / ${cap}`;
   }
+  // v1.43.18: autosave debounce 按钮状态
+  const deb = getAutosaveDebounceMs();
+  popover.querySelectorAll('#settings-autosave-debounce .settings-opt').forEach(btn => {
+    const v = parseInt(btn.dataset.ms, 10);
+    btn.classList.toggle('is-active', v === deb);
+  });
+  const debCur = document.querySelector('#settings-autosave-debounce-current');
+  if (debCur) debCur.textContent = `当前: ${deb / 1000}s 停手后自动保存`;
 }
 
 // v1.42: 设置按钮 (同 help 风格) — 实际事件绑定在 setupToolbar() 里
@@ -5688,6 +5805,13 @@ function updateToolbarState() {
       setMaxAnnotations(v);
     });
   });
+  // v1.43.18: autosave debounce options
+  document.querySelectorAll('#settings-autosave-debounce .settings-opt').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const v = parseInt(btn.dataset.ms, 10);
+      setAutosaveDebounce(v);
+    });
+  });
   // 点外部关闭 settings
   document.addEventListener('mousedown', (e) => {
     if (!isSettingsOpen()) return;
@@ -6035,7 +6159,9 @@ window.__mdAnnotator = {
   stopAutosaveTimer,
   autosaveNow,
   scheduleAutosaveDebounce,  // v1.43.14
-  AUTOSAVE_DEBOUNCE: 5000,   // v1.43.14
+  get AUTOSAVE_DEBOUNCE() { return getAutosaveDebounceMs(); },  // v1.43.18
+  setAutosaveDebounce,
+  refreshEmptyRecentFiles,
   // v1.43.16: Worker 状态 + stats (e2e 验证 fallback)
   getZipWorkerState: () => ({
     ready: _zipWorkerReady,
