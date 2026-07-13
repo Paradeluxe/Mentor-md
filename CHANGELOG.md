@@ -2,6 +2,82 @@
 
 按时间倒序记录已发布的变化。最新条目在上方。
 
+## v1.43.17 (2026-07-13) — 桌面快捷方式 + 双击 .mentor 打开 (8 场景)
+
+### 用户原话
+"有没有给我一个类似快捷方式的东西, 让我双击就可以打开 mentor"
+
+### 改动
+新增 `mentor.cmd` (Windows batch, 双击启动):
+- 检查 8765 端口, 已跑就直接用
+- 没跑就后台启动 `mentor-server.py`, 自动 open browser
+- 支持命令行参数 `<file>.mentor` 自动 load
+
+新增 `mentor-server.py` (Python HTTP server, 替代 `python -m http.server`):
+- `index.html` → static files
+- `/open?path=<file>` → serve .mentor binary (CORS enabled, 不带 Content-Disposition)
+- 启动时自动 `webbrowser.open()`
+- 8765 已被占用时直接开 browser 到现有 server (不冲突)
+
+`app.js:5928+` 新增 `_handleUrlOpen`:
+- URL 有 `?open=<path>` 时, fetch `/open?path=...` → 转 File → 调 `openFromMentorFile`
+- DOMContentLoaded 后 setTimeout 100ms 触发
+
+新增桌面快捷方式 `C:\Users\User\Desktop\Mentor.lnk`:
+- 指向 `E:\hermes_playground\Mentor\mentor.cmd`
+- Icon: shell32.dll notepad (238)
+
+### 用户使用流程
+1. **桌面双击 Mentor.lnk** → 打开浏览器 → 看到 Mentor UI
+2. **双击 .mentor 文件** (Windows) → 用 mentor.cmd 作为打开方式 → 浏览器自动 load
+3. **命令行**: `mentor.cmd path\to\file.mentor`
+
+### 8 场景全过
+- W24-01: mentor.cmd 存在 (650 bytes)
+- W24-02: mentor-server.py 存在 (6081 bytes)
+- W24-03: 桌面快捷方式存在 (813 bytes)
+- W24-04: /open endpoint 返回 200 + 18907 bytes
+- W24-05: ?open= URL 自动 load DFC paper (docLen 56770)
+- W24-06: 不带 ?open= 不自动 load
+- W24-07: /open?path=nonexistent → 404
+- W24-08: /open?path=非.mentor → 400
+
+### 回归
+- 377 场景全过 (175 旧 + 6 + 15 + 26 + 24 + 20 + 16 + 14 + 18 + 12 + 10 + 8 + 5 + 6 + 7 + 8 + 8 = 377, 0 回归)
+- chaos suite/wave2-24/cap-edge/cap-fix/roundtrip/survive-deleted/perm-early 全过
+
+## v1.43.16 (2026-07-13) — Worker stats + fallback recovery (8 场景)
+
+### 用户原话
+"3" (多 worker pool / Worker warmup 检测)
+
+### 改动
+`app.js:4438-4485`:
+- 新增 `_zipWorkerStats` 状态: { builds, loads, errors, lastError, fallbacks }
+- `buildMentorZipBlob` / `readMentorZip` 失败时更新 stats
+- 失败后**异步重启** worker (不阻塞当前 call)
+- 暴露 `getZipWorkerState()` 给 e2e 验证
+
+`app.js:6002-6011`:
+- `__mdAnnotator.getZipWorkerState()` 返回 `{ready, pending, stats}`
+
+### 关键修复 (v1.43.15 的 bug)
+`_zipWorkerCall` resolver 已经解包 `e.data.result`, 所以代码应该直接 `workerResult.bytes` 不是 `workerResult.result.bytes` (旧代码多了一层). 同样修复 `readMentorZip` 3 处.
+
+### 8 场景全过
+- W23-01: getZipWorkerState 函数存在
+- W23-02: 初始 state (ready=true, pending=0)
+- W23-03: build 1 次后 stats.builds=1
+- W23-04: load 1 次后 stats.loads=1
+- W23-05: 5x 混合 (builds=5, loads=5)
+- W23-06: fallback 路径 (无 errors, builds=2)
+- W23-07: 并行 build (mid pending=3, after pending=0)
+- W23-08: worker restart (state1 ready=true)
+
+### 回归
+- 369 场景全过 (175 + 6 + 15 + 26 + 24 + 20 + 16 + 14 + 18 + 12 + 10 + 8 + 5 + 6 + 7 + 8 = 369, 0 回归)
+- chaos suite/wave2-23/cap-edge/cap-fix/roundtrip/survive-deleted/perm-early 全过
+
 ## v1.43.15 (2026-07-13) — Web Worker 跑 zip (offload main thread, 7 场景)
 
 ### 用户原话

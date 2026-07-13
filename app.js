@@ -4265,11 +4265,11 @@ async function readMentorZip(file) {
       const workerResult = await _zipWorkerCall('load', { bytes: transferBuf }, [transferBuf]);
       // 还原 Blob: mediaFiles[key] = ArrayBuffer → Blob
       const mediaFiles = {};
-      for (const [k, ab] of Object.entries(workerResult.result.mediaFiles || {})) {
+      for (const [k, ab] of Object.entries(workerResult.mediaFiles || {})) {
         mediaFiles[k] = new Blob([ab]);
       }
       // v1.37 fix: 检测 corrupt .mentor
-      const mdText = workerResult.result.mdText;
+      const mdText = workerResult.mdText;
       const blobUrlCount = (mdText.match(/!\[[^\]]*\]\(blob:[^)]+\)/g) || []).length;
       const mediaKeysCount = Object.keys(mediaFiles).length;
       if (blobUrlCount > 0) {
@@ -4280,12 +4280,18 @@ async function readMentorZip(file) {
           console.log(`[readMentorZip] zip 含 ${mediaKeysCount} 个 media 文件但 mdText 没引用`);
         }
       }
-      return { mdText, annotations: workerResult.result.annotations, mediaFiles, _diag: { blobUrlCount, mediaKeysCount } };
+      _zipWorkerStats.loads++;
+      return { mdText, annotations: workerResult.annotations, mediaFiles, _diag: { blobUrlCount, mediaKeysCount } };
     } catch (e) {
       console.warn('[zip-worker] load failed, falling back to main thread:', e);
+      _zipWorkerStats.errors++;
+      _zipWorkerStats.lastError = e.message || String(e);
+      _zipWorkerStats.fallbacks++;
       _zipWorker.terminate();
       _zipWorker = null;
       _zipWorkerReady = false;
+      // 异步重启 worker
+      _initZipWorker().then(w => { _zipWorker = w; });
     }
   }
   // v1.43.13: 移除 v1.35 double-copy
@@ -4402,12 +4408,19 @@ async function buildMentorZipBlob(mdText, annotations, mediaFiles) {
         }
       }
       const workerResult = await _zipWorkerCall('build', { mdText, sidecar: annotations, mediaFiles: mediaList }, transferList);
-      return new Blob([workerResult.result.bytes], { type: 'application/zip' });
+      _zipWorkerStats.builds++;
+      // v1.43.16 fix: _zipWorkerCall resolver 拆了 e.data.result, 所以直接拿 bytes (不要 .result)
+      return new Blob([workerResult.bytes], { type: 'application/zip' });
     } catch (e) {
       console.warn('[zip-worker] build failed, falling back to main thread:', e);
+      _zipWorkerStats.errors++;
+      _zipWorkerStats.lastError = e.message || String(e);
+      _zipWorkerStats.fallbacks++;
       _zipWorker.terminate();
       _zipWorker = null;
       _zipWorkerReady = false;
+      // 异步重启 worker (后台, 不阻塞当前 call)
+      _initZipWorker().then(w => { _zipWorker = w; });
     }
   }
   // 同步 path (fallback / 兼容)
@@ -4438,6 +4451,8 @@ let _zipWorker = null;
 let _zipWorkerReady = false;
 let _zipWorkerId = 0;
 const _zipWorkerPending = new Map();
+// v1.43.16: 错误追踪 + 调用计数 — 让 e2e 可验证 fallback 行为
+let _zipWorkerStats = { builds: 0, loads: 0, errors: 0, lastError: null, fallbacks: 0 };
 
 async function _initZipWorker() {
   try {
@@ -5911,6 +5926,36 @@ async function tryReconnect() {
 
 document.addEventListener('DOMContentLoaded', boot);
 
+// v1.43.17: URL ?open=<path> 自动加载 .mentor (双击 .mentor → 浏览器自动 load)
+async function _handleUrlOpen() {
+  const params = new URLSearchParams(location.search);
+  const openPath = params.get('open');
+  if (!openPath) return;
+  try {
+    // 用 server 端 /open endpoint (返回 application/zip, 不影响 index.html 路由)
+    // mentor-server.py 会在 /open?path=<file> 返回 .mentor 二进制
+    const url = location.origin + '/open?path=' + encodeURIComponent(openPath);
+    const r = await fetch(url);
+    if (!r.ok) {
+      console.warn('[?open] fetch failed:', r.status, r.statusText);
+      return;
+    }
+    const blob = await r.blob();
+    const file = new File([blob], openPath.split('/').pop() || 'open.mentor', { type: 'application/zip' });
+    // 等 boot 完成后调 openFromMentorFile
+    await new Promise(r => setTimeout(r, 500));
+    if (typeof openFromMentorFile === 'function') {
+      await openFromMentorFile(file);
+    } else {
+      console.warn('[?open] openFromMentorFile 不可用');
+    }
+  } catch (e) {
+    console.warn('[?open] error:', e);
+  }
+}
+// 延迟到 boot 后执行
+document.addEventListener('DOMContentLoaded', () => setTimeout(_handleUrlOpen, 100));
+
 // 暴露给 e2e 测试的全局 API
 window.__mdAnnotator = {
   State,
@@ -5991,6 +6036,12 @@ window.__mdAnnotator = {
   autosaveNow,
   scheduleAutosaveDebounce,  // v1.43.14
   AUTOSAVE_DEBOUNCE: 5000,   // v1.43.14
+  // v1.43.16: Worker 状态 + stats (e2e 验证 fallback)
+  getZipWorkerState: () => ({
+    ready: _zipWorkerReady,
+    pending: _zipWorkerPending.size,
+    stats: { ..._zipWorkerStats },
+  }),
   // HTML → markdown 内部 helper（暴露给 e2e 测试 + 第三方插件使用）
   htmlToMarkdown,
   // File pane 测试 API
