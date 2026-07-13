@@ -2,6 +2,22 @@
 
 按时间倒序记录已发布的变化。最新条目在上方。
 
+## v1.43.19 (2026-07-13) — bugfix: 打开路径编码 + 导出进度泄漏 + basename
+
+### 审视发现并修复
+1. **mentor.cmd `?open=` 未 URL 编码** — 路径含空格/中文时双击失败
+2. **tryWriteBackMentor catch 不关进度条** — 保存失败后状态栏一直转
+3. **saveCurrent 下载打包 throw 不关进度** — 同上
+4. **`?open=` basename 用 split('/')** — Windows `C:.mentor` 显示整路径
+5. **basename 正则写坏导致 app.js 模块语法错误** — 整站白屏 (replace(/\/g) 只有一个反斜杠)
+
+### 验证
+- module parse OK
+- basename `C:\...\my paper.mentor` → `my paper.mentor`
+- worker build OK
+- chaos-suite / wave22 回归
+
+
 ## v1.43.18 (2026-07-13) — 文件关联 + 图标 + 最近文件 + 导出进度 + autosave 设置
 
 ### 用户原话

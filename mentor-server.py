@@ -144,7 +144,7 @@ def start_server(port, open_url=None):
             webbrowser.open(open_url)
         else:
             time.sleep(0.5)
-            webbrowser.open(f'http://127.0.0.1:{port}/')
+            webbrowser.open(f'http://127.0.0.1:{port}/index.html')
         try:
             httpd.serve_forever()
         except KeyboardInterrupt:
@@ -158,12 +158,12 @@ def main():
     args = parser.parse_args()
     if is_port_in_use(args.port):
         print(f'Port {args.port} already in use. Opening existing server in browser...')
-        url = f'http://127.0.0.1:{args.port}/'
+        url = f'http://127.0.0.1:{args.port}/index.html'
         if args.open:
             url += f'?open={urllib.parse.quote(os.path.abspath(args.open))}'
         webbrowser.open(url)
         return
-    start_server(args.port, open_url=f'http://127.0.0.1:{args.port}/?open={urllib.parse.quote(os.path.abspath(args.open))}' if args.open else None)
+    start_server(args.port, open_url=f'http://127.0.0.1:{args.port}/index.html?open={urllib.parse.quote(os.path.abspath(args.open))}' if args.open else None)
 
 
 if __name__ == '__main__':

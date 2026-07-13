@@ -4584,12 +4584,19 @@ async function saveCurrent() {
       setStatus('保存失败', result.error);
     } else {
       // download 模式 / 写回失败 → 浏览器下载
-      showExportProgress('正在打包 .mentor…');
-      const blob = await buildMentorZipBlob(mdText, sidecar, State.mediaFiles);
-      downloadBlob(State.currentFile.name, blob);
-      hideExportProgress('已下载');
-      showToast('已下载 ✓ (.mentor)');
-      setStatus('已下载', State.currentFile.name);
+      try {
+        showExportProgress('正在打包 .mentor…');
+        const blob = await buildMentorZipBlob(mdText, sidecar, State.mediaFiles);
+        downloadBlob(State.currentFile.name, blob);
+        hideExportProgress('已下载');
+        showToast('已下载 ✓ (.mentor)');
+        setStatus('已下载', State.currentFile.name);
+      } catch (e) {
+        // v1.43.19: 打包失败关进度
+        hideExportProgress('导出失败');
+        showToast('导出失败: ' + (e.message || e), 4000);
+        setStatus('导出失败', e.message || String(e));
+      }
     }
     return;
   }
@@ -4627,6 +4634,8 @@ async function tryWriteBackMentor(mdText, sidecar, mentorName) {
       hideExportProgress('已保存');
       return { handle: true };
     } catch (e) {
+      // v1.43.19: 失败必须关进度条, 否则状态栏一直转
+      hideExportProgress('保存失败');
       if (e.name === 'NotAllowedError') return { handle: false, error: '权限被拒' };
       return { handle: false, error: e.message };
     }
@@ -6062,16 +6071,23 @@ async function _handleUrlOpen() {
     const r = await fetch(url);
     if (!r.ok) {
       console.warn('[?open] fetch failed:', r.status, r.statusText);
+      showToast('无法打开: ' + openPath + ' (HTTP ' + r.status + ')', 4000);
       return;
     }
     const blob = await r.blob();
-    const file = new File([blob], openPath.split('/').pop() || 'open.mentor', { type: 'application/zip' });
-    // 等 boot 完成后调 openFromMentorFile
-    await new Promise(r => setTimeout(r, 500));
-    if (typeof openFromMentorFile === 'function') {
+    // v1.43.19: Windows 路径用 \, 不能只 split('/')
+    const baseName = openPath.split('\\').pop().split('/').pop() || 'open.mentor';
+    const file = new File([blob], baseName, { type: 'application/zip' });
+    // v1.43.19: 等 boot/editor 就绪 (固定 500ms 在慢机/冷启动不够)
+    for (let i = 0; i < 100 && !(State.editor && typeof openFromMentorFile === 'function'); i++) {
+      await new Promise(r => setTimeout(r, 50));
+    }
+    if (typeof openFromMentorFile === 'function' && State.editor) {
       await openFromMentorFile(file);
+      showToast('已打开 ' + baseName, 2500);
     } else {
-      console.warn('[?open] openFromMentorFile 不可用');
+      console.warn('[?open] openFromMentorFile 不可用或 editor 未就绪');
+      showToast('应用未就绪, 请稍后手动打开文件', 4000);
     }
   } catch (e) {
     console.warn('[?open] error:', e);
