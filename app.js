@@ -4257,9 +4257,38 @@ async function isMentorZip(file) {
 // 失败抛错; 返回 { mdText, annotations, mediaFiles: { [path]: Blob } }
 // mediaFiles 只列 zip 顶层下的 media/ 子目录, 其它路径忽略 (避免 zip slip / 恶意 entry)
 async function readMentorZip(file) {
-  // v1.43.13: 移除 v1.35 double-copy (file.arrayBuffer → typed → Blob → arrayBuffer)
-  // 实测: ArrayBuffer 直接喂 JSZip 比 Blob 中间层快 ~3x (50KB content 20 轮 avg 0.45ms vs 0.065ms)
+  // v1.43.15: 用 Worker offload (失败时 fallback 到 sync path)
   const rawBuf = await file.arrayBuffer();
+  if (_zipWorker && _zipWorkerReady) {
+    try {
+      const transferBuf = rawBuf.slice(0);  // copy 因为 file.arrayBuffer 已返回
+      const workerResult = await _zipWorkerCall('load', { bytes: transferBuf }, [transferBuf]);
+      // 还原 Blob: mediaFiles[key] = ArrayBuffer → Blob
+      const mediaFiles = {};
+      for (const [k, ab] of Object.entries(workerResult.result.mediaFiles || {})) {
+        mediaFiles[k] = new Blob([ab]);
+      }
+      // v1.37 fix: 检测 corrupt .mentor
+      const mdText = workerResult.result.mdText;
+      const blobUrlCount = (mdText.match(/!\[[^\]]*\]\(blob:[^)]+\)/g) || []).length;
+      const mediaKeysCount = Object.keys(mediaFiles).length;
+      if (blobUrlCount > 0) {
+        console.warn(`[readMentorZip] ⚠ 检测到 ${blobUrlCount} 张图用 blob: 引用 (来自之前 session, 当前已失效).`);
+        if (mediaKeysCount === 0) {
+          console.warn(`[readMentorZip] ⚠ zip 里无 media/ 子目录, ${blobUrlCount} 张图永远无法显示. 这是 corrupt .mentor.`);
+        } else {
+          console.log(`[readMentorZip] zip 含 ${mediaKeysCount} 个 media 文件但 mdText 没引用`);
+        }
+      }
+      return { mdText, annotations: workerResult.result.annotations, mediaFiles, _diag: { blobUrlCount, mediaKeysCount } };
+    } catch (e) {
+      console.warn('[zip-worker] load failed, falling back to main thread:', e);
+      _zipWorker.terminate();
+      _zipWorker = null;
+      _zipWorkerReady = false;
+    }
+  }
+  // v1.43.13: 移除 v1.35 double-copy
   const zip = await JSZip.loadAsync(rawBuf);
   // v1.43.13: 并行提取 md + annotations + media (顺序提取 157ms → 并行 36ms, 4.35x speedup)
   const mdEntry = zip.file(MENTOR_MD_NAME);
@@ -4360,6 +4389,28 @@ async function openFromMentorFile(file) {
 //     image5.png
 //     ...
 async function buildMentorZipBlob(mdText, annotations, mediaFiles) {
+  // v1.43.15: 用 Worker offload (失败时 fallback 到 sync path)
+  if (_zipWorker && _zipWorkerReady) {
+    try {
+      const mediaList = [];
+      const transferList = [];
+      if (mediaFiles && Object.keys(mediaFiles).length > 0) {
+        for (const [path, blob] of Object.entries(mediaFiles)) {
+          const buf = await blob.arrayBuffer();
+          mediaList.push({ path, bytes: buf });
+          transferList.push(buf);
+        }
+      }
+      const workerResult = await _zipWorkerCall('build', { mdText, sidecar: annotations, mediaFiles: mediaList }, transferList);
+      return new Blob([workerResult.result.bytes], { type: 'application/zip' });
+    } catch (e) {
+      console.warn('[zip-worker] build failed, falling back to main thread:', e);
+      _zipWorker.terminate();
+      _zipWorker = null;
+      _zipWorkerReady = false;
+    }
+  }
+  // 同步 path (fallback / 兼容)
   const zip = new JSZip();
   zip.file(MENTOR_MD_NAME, mdText);
   zip.file(MENTOR_ANN_NAME, JSON.stringify(annotations, null, 2));
@@ -4381,6 +4432,61 @@ async function buildMentorZipBlob(mdText, annotations, mediaFiles) {
     compressionOptions: { level: 6 },
   });
 }
+
+// v1.43.15: Worker 状态 + init
+let _zipWorker = null;
+let _zipWorkerReady = false;
+let _zipWorkerId = 0;
+const _zipWorkerPending = new Map();
+
+async function _initZipWorker() {
+  try {
+    const worker = new Worker(new URL('./workers/zip-worker.js', import.meta.url), { type: 'module' });
+    worker.onmessage = (e) => {
+      const { id, ok, result, error } = e.data;
+      if (id === 'init') {
+        _zipWorkerReady = true;
+        return;
+      }
+      const pending = _zipWorkerPending.get(id);
+      if (pending) {
+        _zipWorkerPending.delete(id);
+        if (ok) pending.resolve(result);
+        else pending.reject(new Error(error));
+      }
+    };
+    worker.onerror = (e) => {
+      console.warn('[zip-worker] error:', e.message || e);
+    };
+    // 标记 ready 在 'init' 消息到达时
+    return worker;
+  } catch (e) {
+    console.warn('[zip-worker] init failed:', e);
+    return null;
+  }
+}
+
+function _zipWorkerCall(cmd, args, transferList = []) {
+  return new Promise((resolve, reject) => {
+    if (!_zipWorker) {
+      reject(new Error('worker not ready'));
+      return;
+    }
+    const id = ++_zipWorkerId;
+    _zipWorkerPending.set(id, { resolve, reject });
+    _zipWorker.postMessage({ id, cmd, ...args }, transferList);
+  });
+}
+
+// v1.43.15: 启动 worker (不阻塞 boot — 失败时所有 build/load 用 sync path)
+(async () => {
+  const worker = await _initZipWorker();
+  if (worker) {
+    _zipWorker = worker;
+    // 等待 init 消息确认 ready
+    await new Promise(r => setTimeout(r, 50));
+  }
+})();
 
 // 生成导出用 .mentor 文件名: 同前缀, 后缀改 .mentor
 function mentorExportName(mdName) {

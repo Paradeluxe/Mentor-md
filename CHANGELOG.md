@@ -2,6 +2,52 @@
 
 按时间倒序记录已发布的变化。最新条目在上方。
 
+## v1.43.15 (2026-07-13) — Web Worker 跑 zip (offload main thread, 7 场景)
+
+### 用户原话
+"继续呗" (Worker / build 并行 / autosave 节流 / IDB 写)
+实际落地: Web Worker 跑 zip (autosave debounce + IDB 200ms 已在 v1.43.14 落地)
+
+### 改动
+新增 `workers/zip-worker.js` (ESM worker, 100 行):
+- `import JSZip from 'https://esm.sh/jszip@3.10.1'` (worker context 无 importmap, 用绝对 URL)
+- 命令: `build` (mdText + sidecar + mediaFiles) → blob bytes
+- 命令: `load` (file bytes) → {mdText, annotations, mediaFiles}
+- 并行提取 md + ann + media (跟 v1.43.13 main thread 一致)
+- postMessage 用 `transferList` (ArrayBuffer 零拷贝)
+
+`app.js:4362-4490`:
+- `_initZipWorker()` 启动 worker
+- `_zipWorkerCall()` Promise 包装
+- 启动 IIFE: async 启动 worker, 不阻塞 boot
+- `buildMentorZipBlob` 在 worker ready 时走 worker path, 否则 fallback
+- `readMentorZip` 同上
+- Worker 失败 → terminate + 销毁 + 自动 fallback 到 main thread
+
+### 设计意图
+- **零阻塞**: JSZip 在 worker 跑, main thread 不卡
+- **可降级**: Worker init 失败 / run 失败 → main thread fallback, 永不崩溃
+- **传输零拷贝**: ArrayBuffer transfer, 不复制大文件
+- **检测 corrupt**: corrupt .mentor 检测逻辑在 wrapper 层 (worker / sync 都跑)
+
+### 7 场景全过
+- W22-01: worker 初始化
+- W22-02: DFC 1st build 30 ann (~80ms browser)
+- W22-03: DFC load (~8ms browser)
+- W22-04: 5x 混合 (build avg 51ms / load avg 3.2ms)
+- W22-05: 含 5 media files
+- W22-06: corrupt .mentor 仍 reject
+- W22-07: partial (无 annotations.json) 仍 compat
+
+### bsk 真实验证 (Edge 150)
+- ✅ Worker build: 1372ms bsk roundtrip (含 setup + 30 ann + build)
+- ✅ browserMs 233ms
+- ✅ annCount=30, blobSize=20547
+
+### 回归
+- 369 场景全过 (175 旧 + 6 + 15 + 26 + 24 + 20 + 16 + 14 + 18 + 12 + 10 + 8 + 5 + 6 + 7 + 7 = 369, 0 回归)
+- chaos suite/wave2-22/cap-edge/cap-fix/roundtrip/survive-deleted/perm-early 全过
+
 ## v1.43.14 (2026-07-13) — autosave 5s debounce + IDB 200ms debounce (UX perf)
 
 ### 用户原话
