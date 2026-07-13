@@ -11,7 +11,7 @@ const { chromium } = require('playwright');
   const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage();
   page.on('pageerror', e => console.log('  [err]', e.message));
-  await page.goto('http://localhost:8765/index.html?v=114', { waitUntil: 'domcontentloaded' });
+  await page.goto('http://localhost:8787/index.html?v=114', { waitUntil: 'domcontentloaded' });
   await page.waitForFunction(() => window.__mdAnnotator?.State?.editor != null, { timeout: 15000 });
   await page.waitForTimeout(500);
   await page.evaluate(() => localStorage.clear());

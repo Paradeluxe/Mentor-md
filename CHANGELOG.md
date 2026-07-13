@@ -2,6 +2,27 @@
 
 按时间倒序记录已发布的变化。最新条目在上方。
 
+## v1.43.20 (2026-07-13) — 端口 8787 + Python PATH + 最近文件 forget
+
+### 用户
+"做吧。或者你换个别的什么端口"
+
+### 改动
+1. **默认端口 8765 → 8787** (`PORT` 文件可改)
+   - mentor.cmd / mentor-server.py / tests / CI / package.json / README
+   - 启动时校验页面含 "Mentor", 防止占到别人服务
+2. **mentor.cmd 找 Python**
+   - `python` → `py -3` → 常见安装路径
+   - 找不到则 pause 提示安装
+3. **最近文件权限失效**
+   - 行内 × 移除
+   - handle 失效/NotFound 自动从 IDB 删除并刷新列表
+   - 权限被拒时提示可点 × 清除
+
+### 验证
+- http://127.0.0.1:8787 title Mentor v1.43.20
+- chaos-suite / empty-state
+
 ## v1.43.19 (2026-07-13) — bugfix: 打开路径编码 + 导出进度泄漏 + basename
 
 ### 审视发现并修复

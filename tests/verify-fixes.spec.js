@@ -1,6 +1,6 @@
 // 简化的定向验证脚本
 const { chromium } = require('playwright');
-const URL = 'http://127.0.0.1:8765/index.html';
+const URL = 'http://127.0.0.1:8787/index.html';
 
 (async () => {
   const browser = await chromium.launch();

@@ -21,7 +21,7 @@ function detectRoot() {
 }
 
 const ROOT = detectRoot();
-const URL = 'http://127.0.0.1:8765/index.html';
+const URL = 'http://127.0.0.1:8787/index.html';
 
 // 含丰富内容类型的 markdown
 const RICH_MD = `# 一级标题这是压测文档

@@ -22,7 +22,7 @@ const path = require('path');
     buildLogs.push(txt);
   });
 
-  await page.goto(`http://127.0.0.1:8765/index.html?v=${Date.now()}-${Math.random().toString(36).slice(2)}`, { waitUntil: 'networkidle' });
+  await page.goto(`http://127.0.0.1:8787/index.html?v=${Date.now()}-${Math.random().toString(36).slice(2)}`, { waitUntil: 'networkidle' });
   await page.waitForFunction(() => window.__mdAnnotator && window.__mdAnnotator.State.editor, { timeout: 10000 });
   await page.evaluate(() => window.__mdAnnotator.setAuthor('export-test'));
 

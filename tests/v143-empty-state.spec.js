@@ -18,7 +18,7 @@ const { chromium } = require('playwright');
 
   console.log('=== v1.43 first-time empty state test ===');
 
-  await page.goto('http://127.0.0.1:8765/index.html?v=121&cb=' + Date.now());
+  await page.goto('http://127.0.0.1:8787/index.html?v=121&cb=' + Date.now());
   await page.waitForFunction(() => window.__mdAnnotator?.State?.editor, { timeout: 10000 });
   await page.waitForSelector('#empty-demo-btn', { timeout: 3000 });
 

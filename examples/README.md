@@ -15,10 +15,10 @@
 ```bash
 # 1. 启动 Mentor (如果还没在跑)
 cd /path/to/Mentor
-python3 -m http.server 8765
+python3 -m http.server 8787
 
 # 2. 浏览器打开
-#    http://localhost:8765
+#    http://localhost:8787
 
 # 3. 工具栏 → 📁 打开文件夹 → 选 examples/<你想试的>/
 # 4. 双击 .md 文件查看预置批注

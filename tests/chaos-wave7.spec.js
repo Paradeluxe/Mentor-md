@@ -1,7 +1,7 @@
 // Mentor v1.42 wave 7 — AI 路径 + 多 doc + 跨刷新 + 真实失败模式
 
 const { chromium } = require('playwright');
-const URL = 'http://localhost:8765/index.html?v=110';
+const URL = 'http://localhost:8787/index.html?v=110';
 
 async function setup(page) {
   await page.goto(URL, { waitUntil: 'domcontentloaded' });

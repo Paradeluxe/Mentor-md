@@ -1,7 +1,7 @@
 // Mentor v1.43.15 chaos wave 22 — Web Worker zip offload
 const { chromium } = require('playwright');
 const fs = require('fs');
-const URL = 'http://localhost:8765/index.html?v=129';
+const URL = 'http://localhost:8787/index.html?v=129';
 const DFC_PAPER = 'C:/Users/User/Desktop/dFC/literature/papers/markdown/scholar.Abnormal.dynamic.properties.of.FC.in.dis.md';
 
 async function setup(page) {

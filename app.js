@@ -161,7 +161,7 @@ const State = {
   // - 渲染前: markdownToHtml 用 mediaUrls 把 ![](media/x.png) 重写成 ![](blob:...)
   // - 保存时: 反查 src 把 blob URL 还原成原 path, mediaFiles 一起打进新 ZIP
   // - 切/重开文件前: revoke 所有旧 blob URL 防内存泄漏
-  mediaUrls: {},            // { 'media/image5.png': 'blob:http://127.0.0.1:8765/abc-123' }
+  mediaUrls: {},            // { 'media/image5.png': 'blob:http://127.0.0.1:8787/abc-123' }
   mediaFiles: {},           // { 'media/image5.png': Blob } — save 时用, 跟当前 doc 绑定
 };
 
@@ -5099,19 +5099,36 @@ async function refreshEmptyRecentFiles() {
     box.classList.remove('hidden');
     list.innerHTML = mentors.map(f => {
       const when = f.updatedAt ? new Date(f.updatedAt).toLocaleString() : '';
-      return `<button type="button" class="empty-recent-item" data-name="${escapeHtml(f.name)}" title="${escapeHtml(when)}">
-        <span class="empty-recent-name">${escapeHtml(f.name)}</span>
-        <span class="empty-recent-time">${escapeHtml(when)}</span>
-      </button>`;
+      return `<div class="empty-recent-row" data-name="${escapeHtml(f.name)}">
+        <button type="button" class="empty-recent-item" data-act="open" title="${escapeHtml(when)}">
+          <span class="empty-recent-name">${escapeHtml(f.name)}</span>
+          <span class="empty-recent-time">${escapeHtml(when)}</span>
+        </button>
+        <button type="button" class="empty-recent-forget" data-act="forget" title="从最近列表移除">×</button>
+      </div>`;
     }).join('');
-    list.querySelectorAll('.empty-recent-item').forEach(btn => {
-      btn.addEventListener('click', async () => {
-        const name = btn.dataset.name;
-        if (!name) return;
+    list.querySelectorAll('.empty-recent-row').forEach(row => {
+      const name = row.dataset.name;
+      if (!name) return;
+      row.querySelector('[data-act="forget"]')?.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        try {
+          await HandleStore.deleteFile(name);
+          const last = await HandleStore.getLastFile();
+          if (last && last.fileName === name) await HandleStore.removeLastFile();
+          showToast('已从最近列表移除', 2000);
+          refreshEmptyRecentFiles();
+        } catch (err) {
+          showToast('移除失败', 2000);
+        }
+      });
+      row.querySelector('[data-act="open"]')?.addEventListener('click', async () => {
         try {
           const handle = await HandleStore.getFile(name);
           if (!handle) {
-            showToast('文件句柄已失效, 请手动打开', 3000);
+            showToast('文件句柄已失效, 已从列表移除 — 请手动打开', 3500);
+            try { await HandleStore.deleteFile(name); } catch {}
+            refreshEmptyRecentFiles();
             return;
           }
           let perm = 'prompt';
@@ -5120,11 +5137,12 @@ async function refreshEmptyRecentFiles() {
             try {
               const np = await handle.requestPermission({ mode: 'readwrite' });
               if (np !== 'granted') {
-                showToast('未获得文件权限', 2500);
+                // v1.43.20: 权限被拒 — 提示 + 可一键忘记
+                showToast('未获得权限。点 × 可从最近列表移除', 3500);
                 return;
               }
-            } catch (e) {
-              showToast('权限请求失败', 2500);
+            } catch (err) {
+              showToast('权限请求失败。点 × 可从最近列表移除', 3500);
               return;
             }
           }
@@ -5133,9 +5151,17 @@ async function refreshEmptyRecentFiles() {
           } else {
             showToast('openFromMentorHandle 不可用', 2000);
           }
-        } catch (e) {
-          console.warn('[recent] open failed', e);
-          showToast('打开失败: ' + (e.message || e), 3000);
+        } catch (err) {
+          console.warn('[recent] open failed', err);
+          // NotFoundError / InvalidStateError: handle dead
+          const msg = (err && err.name) || '';
+          if (msg === 'NotFoundError' || msg === 'InvalidStateError' || /not found|invalid/i.test(String(err.message || ''))) {
+            try { await HandleStore.deleteFile(name); } catch {}
+            showToast('文件已不存在或句柄失效, 已移除', 3500);
+            refreshEmptyRecentFiles();
+          } else {
+            showToast('打开失败: ' + (err.message || err), 3000);
+          }
         }
       });
     });

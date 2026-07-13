@@ -33,8 +33,8 @@
 
 ```bash
 cd Mentor
-python3 -m http.server 8765
-# 浏览器打开 http://127.0.0.1:8765
+python3 -m http.server 8787
+# 浏览器打开 http://127.0.0.1:8787
 ```
 
 然后：
@@ -194,7 +194,7 @@ Mentor/
 
 ```bash
 # 1. 启动 HTTP server
-python3 -m http.server 8765 &
+python3 -m http.server 8787 &
 
 # 2. 跑 Playwright E2E
 node tests/e2e.spec.js
@@ -293,9 +293,9 @@ const result = ai.reply(threadId, '回复内容');
 ```bash
 # 1. 启动服务
 cd /mnt/e/hermes_playground/Mentor
-python3 -m http.server 8765 &
+python3 -m http.server 8787 &
 
-# 2. 浏览器打开 http://localhost:8765
+# 2. 浏览器打开 http://localhost:8787
 # 3. 加载任意 .md + 加几个批注
 
 # 4. 在 DevTools Console 跑：

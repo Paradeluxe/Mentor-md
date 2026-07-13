@@ -3,7 +3,7 @@
 // 不止验证已有规则, 还要找漏洞
 
 const { chromium } = require('playwright');
-const URL = 'http://localhost:8765/index.html?v=121';
+const URL = 'http://localhost:8787/index.html?v=121';
 
 async function setup(page) {
   await page.goto(URL, { waitUntil: 'domcontentloaded' });

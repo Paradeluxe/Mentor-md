@@ -3,7 +3,7 @@
 // 不重复 wave1-10, 找新坑
 
 const { chromium } = require('playwright');
-const URL = 'http://localhost:8765/index.html?v=122';
+const URL = 'http://localhost:8787/index.html?v=122';
 
 async function setup(page) {
   await page.goto(URL, { waitUntil: 'domcontentloaded' });

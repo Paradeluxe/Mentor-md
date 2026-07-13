@@ -18,7 +18,7 @@ function assert(cond, msg) {
   const page = await ctx.newPage();
   page.on('pageerror', e => console.log('PAGE ERR:', e.message));
   page.on('dialog', d => d.accept());
-  await page.goto('http://127.0.0.1:8765/index.html', { waitUntil: 'networkidle' });
+  await page.goto('http://127.0.0.1:8787/index.html', { waitUntil: 'networkidle' });
   await page.waitForFunction(() => window.__mdAnnotator && window.__mdAnnotator.State.editor, { timeout: 10000 });
   await page.evaluate(() => window.__mdAnnotator.setAuthor('张三'));
 

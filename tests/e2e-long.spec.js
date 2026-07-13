@@ -22,7 +22,7 @@ function detectRoot() {
 }
 
 const ROOT = detectRoot();
-const URL = 'http://127.0.0.1:8765/index.html';
+const URL = 'http://127.0.0.1:8787/index.html';
 const SHOT_DIR = path.join(ROOT, 'tests/screenshots');
 
 if (!fs.existsSync(SHOT_DIR)) fs.mkdirSync(SHOT_DIR, { recursive: true });

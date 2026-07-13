@@ -14,7 +14,7 @@ function detectRoot() {
   return path.resolve(__dirname, '..');
 }
 const ROOT = detectRoot();
-const URL = 'http://127.0.0.1:8765/index.html';
+const URL = 'http://127.0.0.1:8787/index.html';
 
 // 测试用 markdown
 const TEST_MD_FILENAME = 'overlap-test.md';

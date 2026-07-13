@@ -6,7 +6,7 @@ const { chromium } = require('playwright');
   const page = await browser.newPage();
   page.on('pageerror', e => console.log('  [pageerror]', e.message));
 
-  await page.goto('http://localhost:8765/index.html?v=108', { waitUntil: 'domcontentloaded' });
+  await page.goto('http://localhost:8787/index.html?v=108', { waitUntil: 'domcontentloaded' });
   await page.waitForFunction(() => window.__mdAnnotator?.State?.editor != null, { timeout: 15000 });
   await page.waitForTimeout(1000);
 

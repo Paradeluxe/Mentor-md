@@ -6,7 +6,7 @@
 const { chromium } = require('playwright');
 const fs = require('fs');
 const path = require('path');
-const URL = 'http://localhost:8765/index.html?v=125';
+const URL = 'http://localhost:8787/index.html?v=125';
 const DFC_PAPER = 'C:/Users/User/Desktop/dFC/literature/papers/markdown/scholar.Abnormal.dynamic.properties.of.FC.in.dis.md';
 const MENTOR_PATH = 'C:/Users/User/Desktop/dFC/.test-dfc-e2e.mentor';
 

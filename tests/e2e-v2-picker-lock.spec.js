@@ -2,7 +2,7 @@
 // 检查 openFiles 的 showOpenFilePicker.types 和 openFilesLegacy 的 input.accept
 const { chromium } = require('playwright');
 const path = require('path');
-const URL = 'http://127.0.0.1:8765/index.html';
+const URL = 'http://127.0.0.1:8787/index.html';
 
 function assert(cond, msg) {
   if (!cond) throw new Error('ASSERT FAIL: ' + msg);

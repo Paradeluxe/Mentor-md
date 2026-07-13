@@ -15,7 +15,7 @@ const { chromium } = require('playwright');
   page.on('dialog', d => d.accept());
   page.on('pageerror', e => pageErrors.push(e.message));
 
-  await page.goto('http://127.0.0.1:8765/index.html', { waitUntil: 'networkidle' });
+  await page.goto('http://127.0.0.1:8787/index.html', { waitUntil: 'networkidle' });
   await page.waitForFunction(() => window.__mdAnnotator && window.__mdAnnotator.State.editor, { timeout: 10000 });
   await page.evaluate(() => window.__mdAnnotator.setAuthor('char-delete-test'));
 

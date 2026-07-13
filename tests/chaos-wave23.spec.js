@@ -1,7 +1,7 @@
 // Mentor v1.43.16 chaos wave 23 — Worker stats + fallback recovery + state diag
 const { chromium } = require('playwright');
 const fs = require('fs');
-const URL = 'http://localhost:8765/index.html?v=130';
+const URL = 'http://localhost:8787/index.html?v=130';
 const DFC_PAPER = 'C:/Users/User/Desktop/dFC/literature/papers/markdown/scholar.Abnormal.dynamic.properties.of.FC.in.dis.md';
 
 async function setup(page) {

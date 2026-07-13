@@ -1,6 +1,6 @@
 // Mentor v1.43.14 chaos wave 21 — autosave debounce + IDB debounce shorten
 const { chromium } = require('playwright');
-const URL = 'http://localhost:8765/index.html?v=128';
+const URL = 'http://localhost:8787/index.html?v=128';
 
 async function setup(page) {
   await page.goto(URL, { waitUntil: 'domcontentloaded' });

@@ -3,7 +3,7 @@
 
 const { chromium } = require('playwright');
 
-const URL = 'http://localhost:8765/index.html?v=109';
+const URL = 'http://localhost:8787/index.html?v=109';
 
 async function setup(page) {
   await page.goto(URL, { waitUntil: 'domcontentloaded' });

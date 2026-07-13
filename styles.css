@@ -1327,6 +1327,30 @@ body.file-pane-collapsed #file-pane {
   font-size: 10px;
   color: var(--text-3);
 }
+.empty-recent-row {
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+}
+.empty-recent-row .empty-recent-item {
+  flex: 1;
+}
+.empty-recent-forget {
+  flex: 0 0 28px;
+  border: 1px solid var(--border-warm-medium);
+  border-radius: 8px;
+  background: var(--panel-2, #faf8f5);
+  color: var(--text-3);
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+}
+.empty-recent-forget:hover {
+  border-color: #cf2d56;
+  color: #cf2d56;
+  background: #fff5f7;
+}
+
 /* v1.43.18: 导出进度 */
 .export-progress {
   font-size: 12px;

@@ -18,7 +18,7 @@ function detectRoot() {
   return path.resolve(__dirname, '..');
 }
 const ROOT = detectRoot();
-const URL = 'http://127.0.0.1:8765/index.html';
+const URL = 'http://127.0.0.1:8787/index.html';
 const TARGET = path.join(ROOT, 'tests/e2e-annotation-overlap.spec.js');
 const N_ROUNDS = parseInt(process.env.SOAK_ROUNDS || '5', 10);
 
@@ -47,7 +47,7 @@ const FULL_TARGETS = MODE === 'full' ? [
     });
   } catch (e) {
     console.log('✗ HTTP server not up at ' + URL);
-    console.log('  Start: cd /e/hermes_playground/Mentor && python -m http.server 8765 --bind 127.0.0.1');
+    console.log('  Start: cd /e/hermes_playground/Mentor && python -m http.server 8787 --bind 127.0.0.1');
     process.exit(1);
   }
 

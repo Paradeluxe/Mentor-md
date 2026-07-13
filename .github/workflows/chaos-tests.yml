@@ -32,11 +32,11 @@ jobs:
 
       - name: Start Mentor server
         run: |
-          python3 -m http.server 8765 &
+          python3 -m http.server 8787 &
           sleep 2
-          curl -s -o /dev/null -w "server up: HTTP %{http_code}\n" http://localhost:8765/index.html
+          curl -s -o /dev/null -w "server up: HTTP %{http_code}\n" http://localhost:8787/index.html
           # 确认 workers/ 静态文件可访问 (Web Worker 需要)
-          curl -s -o /dev/null -w "worker: HTTP %{http_code}\n" http://localhost:8765/workers/zip-worker.js
+          curl -s -o /dev/null -w "worker: HTTP %{http_code}\n" http://localhost:8787/workers/zip-worker.js
 
       - name: Run chaos tests
         env:

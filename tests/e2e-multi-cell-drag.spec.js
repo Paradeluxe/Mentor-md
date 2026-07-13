@@ -1,6 +1,6 @@
 // 端到端: 跨 4 cell 拖选 → 创建批注 → 验证批注 mark 落在起始 cell
 const { chromium } = require('playwright');
-const URL = 'http://127.0.0.1:8765/index.html';
+const URL = 'http://127.0.0.1:8787/index.html';
 
 (async () => {
   const browser = await chromium.launch();

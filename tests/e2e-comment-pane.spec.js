@@ -1,6 +1,6 @@
 // 视觉验证: 批注栏包含各种状态时正常渲染
 const { chromium } = require('playwright');
-const URL = 'http://127.0.0.1:8765/index.html';
+const URL = 'http://127.0.0.1:8787/index.html';
 
 (async () => {
   const browser = await chromium.launch();

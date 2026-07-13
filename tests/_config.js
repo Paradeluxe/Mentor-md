@@ -1,18 +1,28 @@
-// Shared test config — single source of truth for cache-bust version
-// To bump: update CURRENT_VERSION here + index.html's app.js?v=N
-// 然后所有测试自动跟新 (它们 require 这文件)
+// Shared test config — single source of truth for cache-bust version + port
+// Port: 8787 (Mentor dedicated; 8765 often stolen by other tools)
+const fs = require('fs');
+const path = require('path');
+
+function readPort() {
+  try {
+    const p = fs.readFileSync(path.resolve(__dirname, '../PORT'), 'utf-8').trim();
+    const n = parseInt(p, 10);
+    if (n > 0 && n < 65536) return n;
+  } catch (e) {}
+  return 8787;
+}
+
 module.exports = {
-  // 从 index.html 自动检测 (本地读文件), fallback 手动
-  // 自动检测: 匹配 <script src="app.js?v=N"> 取 N
   CURRENT_VERSION: (() => {
     try {
-      const fs = require('fs');
-      const path = require('path');
       const html = fs.readFileSync(path.resolve(__dirname, '../index.html'), 'utf-8');
       const m = html.match(/app\.js\?v=(\d+)/);
       if (m) return parseInt(m[1], 10);
     } catch (e) {}
-    return 107;  // fallback
+    return 133;
   })(),
-  URL_BASE: 'http://localhost:8765/index.html',
+  MENTOR_PORT: readPort(),
+  get URL_BASE() {
+    return `http://localhost:${readPort()}/index.html`;
+  },
 };

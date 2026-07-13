@@ -11,7 +11,7 @@ const fs = require('fs');
 const path = require('path');
 
 const ROOT = path.resolve('E:/hermes_playground/Mentor');
-const URL = 'http://127.0.0.1:8765/index.html';
+const URL = 'http://127.0.0.1:8787/index.html';
 
 const SAMPLE_MD = fs.readFileSync(path.join(ROOT, 'test-data/sample.md'), 'utf-8');
 const SAMPLE_ANN = JSON.parse(fs.readFileSync(path.join(ROOT, 'test-data/sample.md.annotations.json'), 'utf-8'));

@@ -6,7 +6,7 @@
 // 跟用户拖选 + 点浮动按钮完全等价
 
 const { chromium } = require('playwright');
-const URL = 'http://localhost:8765/index.html?v=121';
+const URL = 'http://localhost:8787/index.html?v=121';
 
 const TEST_DOC = '0123456789ABCDEFGHIJKLMNOP';  // 26 chars, 单段, 位置 1-26
 

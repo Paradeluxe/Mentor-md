@@ -6,7 +6,7 @@
   "scripts": {
     "test": "node tests/e2e.spec.js",
     "test:report": "node tests/run-with-report.js",
-    "dev": "python3 -m http.server 8765 --bind 127.0.0.1"
+    "dev": "python3 -m http.server 8787 --bind 127.0.0.1"
   },
   "scripts_comment": "Run 'npm run test' for plain console, 'npm run test:report' for HTML report",
   "author": "",

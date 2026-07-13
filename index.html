@@ -3,8 +3,8 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Mentor v1.43.19 — 像 docx 一样批注 Markdown</title>
-<meta name="build" content="v1.43.19 20260713: bugfix-open-url-export-progress" />
+<title>Mentor v1.43.20 — 像 docx 一样批注 Markdown</title>
+<meta name="build" content="v1.43.20 20260713: port-8787-python-path-recent-forget" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
@@ -155,7 +155,7 @@
                 <li><span class="step-num">3</span> 右侧侧栏写批注, 嵌套回复, 标解决</li>
               </ol>
               <button id="empty-demo-btn" class="empty-hint-cta" title="加载一段示例文档, 看完整批注流程">▶ 看示例</button>
-                            <!-- v1.43.19: 最近打开的 .mentor -->
+                            <!-- v1.43.20: 最近打开的 .mentor -->
                             <div id="empty-recent" class="empty-recent hidden">
                               <div class="empty-recent-title">最近文件</div>
                               <div id="empty-recent-list" class="empty-recent-list"></div>
@@ -216,7 +216,7 @@
   }
 }
 </script>
-<script type="module" src="app.js?v=133"></script>
+<script type="module" src="app.js?v=134"></script>
 <!-- 帮助 popover (浮在 body 顶层, 位置由 JS 动态计算) -->
 <div id="help-popover" class="help-popover hidden" role="tooltip">
   <div class="help-popover-arrow"></div>

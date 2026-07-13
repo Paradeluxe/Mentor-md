@@ -1,7 +1,7 @@
 // Mentor v1.42 wave 8 — 文档级操作 + 导出 + UI 优化点
 
 const { chromium } = require('playwright');
-const URL = 'http://localhost:8765/index.html?v=112';
+const URL = 'http://localhost:8787/index.html?v=112';
 
 async function setup(page) {
   await page.goto(URL, { waitUntil: 'domcontentloaded' });

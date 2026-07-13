@@ -1,6 +1,6 @@
 // 完整 e2e: 单 cell 拖选 + 跨 cell 拖选 + 创建批注 + 验证批注覆盖多 cell
 const { chromium } = require('playwright');
-const URL = 'http://127.0.0.1:8765/index.html';
+const URL = 'http://127.0.0.1:8787/index.html';
 
 (async () => {
   const browser = await chromium.launch();

@@ -3,7 +3,7 @@
 // 范围: 不做 RTL / 印地语 / 阿拉伯文 — 用户确认只要 zh + en
 
 const { chromium } = require('playwright');
-const URL = 'http://localhost:8765/index.html?v=125';
+const URL = 'http://localhost:8787/index.html?v=125';
 
 async function setup(page) {
   await page.goto(URL, { waitUntil: 'domcontentloaded' });
