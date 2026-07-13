@@ -2,6 +2,48 @@
 
 按时间倒序记录已发布的变化。最新条目在上方。
 
+## v1.43.8 (2026-07-12) — chaos-wave15 多语言测试 (zh + en, 18 场景)
+
+### 用户原话
+"多语言吧, 我们现在只要支持中文和英文就行"
+
+### 范围
+- **支持**: 中文 + 英文 (CJK + Latin)
+- **不做**: RTL / 印地语 / 阿拉伯文 (按用户确认)
+
+### 改动
+新增 `tests/chaos-wave15.spec.js` 18 场景, 覆盖:
+1. **纯中文 mark**: 短 / 长 (100 字)
+2. **纯英文 mark**: 短 / 长
+3. **中英混合**: 'English 中文 mixed 混合' / 'start 中间 end' / 'English 中文' + '中文 mixed' 重叠
+4. **emoji + 中文 + 英文**: 👋 + 你好 + world 多 mark
+5. **中文 / 英文 mark partial delete**: fuzzy 自动 + text 更新 (v1.43.3 fix 在两种语言下都验证)
+6. **中文 comment body**: '中文 AI 回复内容'
+7. **中英混合 comment body**: 'Mixed 中英文 comment 混合内容 with English'
+8. **中文 author 名称**: '张三' 渲染正确
+9. **中文 Markdown 导出**: # 中文标题 / 中文段落 / **粗体**
+10. **中文 mentor roundtrip**: build → 写盘 → 读回 → 中文/中文 author 完整
+11. **30 中文 ann perf**: 143ms total
+12. **数学符号 + 中文**: x² (superscript) 正确处理
+13. **数字 + 英文 + 中文 + 中文标点**: 'iPhone 15' + '¥8999' 各自 mark
+14. **20 条中文 reply thread render**: 1ms
+
+### 真实 perf
+| 场景 | 耗时 |
+|---|---|
+| 30 中文 ann 创建 | **143ms total** |
+| 20 条中文 reply thread render | **1ms** |
+
+### 关键发现
+- 中英文 mark 行为完全一致 (PM text node 模型无关语言)
+- 中文 comment body / author 正常 escape, DOM 渲染正确
+- Markdown 导出 + mentor roundtrip 中文完全无损
+- 数学符号 (x² superscript) 正确 mark
+
+### 回归
+- 314 场景全过 (175 旧 + 6 v143-empty-state + 15 v143.2-wave9 + 26 v143.3-wave10 + 24 v143.4-wave11 + 20 v143.5-wave12 + 16 v143.6-wave13 + 14 v143.7-wave14 + 18 v143.8-wave15 + 0 回归)
+- chaos suite/wave2-15/cap-edge/cap-fix/roundtrip/survive-deleted/perm-early 全过
+
 ## v1.43.7 (2026-07-12) — chaos-wave14 disk roundtrip + cross-tab + AI stress (14 场景)
 
 ### 用户原话
