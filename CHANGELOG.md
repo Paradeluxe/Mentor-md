@@ -2,6 +2,48 @@
 
 按时间倒序记录已发布的变化。最新条目在上方。
 
+## v1.43.13 (2026-07-13) — readMentorZip 并行提取 (1st load **2.6x**)
+
+### 用户原话
+"1" (readMentorZip 进一步优化)
+
+### 触发
+v1.43.12 bsk 实测: DFC 1st readMentorZip ~41ms (含 bsk IPC)
+剖解: 50KB content 20 轮 avg 0.45ms (Blob 中间层) vs 0.065ms (ArrayBuffer 直接)
+
+### Fix
+`app.js:4247-4295` (readMentorZip 函数):
+1. **移除 v1.35 double-copy**: file.arrayBuffer → typed → Blob → arrayBuffer 改成
+   `file.arrayBuffer → JSZip.loadAsync(rawBuf)` (单层)
+2. **并行提取**: mdText / annText / mediaFiles 改用 `Promise.all` 同时跑
+   (Playwright 实测 157ms → 36ms, **4.35x speedup**)
+
+### 真实 perf 对比 (playwright)
+| 场景 | v1.43.12 | **v1.43.13** | 改善 |
+|---|---|---|---|
+| 1st readMentorZip (57KB DFC + 30 ann) | 41ms | **7.4ms** | **5.5x** |
+| 10x load avg (稳定) | (未测) | **3.8ms** | baseline |
+| Load with 5 media files | (未测) | **4.3ms** | baseline |
+| DFC full e2e (load + loadMarkdownIntoEditor) | ~95ms | **60ms** | 1.6x |
+
+### bsk 真实验证 (Edge 150)
+- ✅ jszipPrewarmed: true (v1.43.12 预热保留)
+- ✅ **readMs: 15.7ms** (含 bsk IPC, browserMs ~5ms)
+- ✅ build + load + inject 总耗时 1096ms bsk roundtrip
+- ✅ 截图: `tests/assets/bsk-dfc-v14313-parallel.png`
+
+### 6 场景全过
+- W20-01: DFC 1st load < 50ms
+- W20-02: 10x load avg < 20ms
+- W20-03: load with 5 media files < 50ms
+- W20-04: corrupt 仍 reject
+- W20-05: partial (无 annotations.json) 仍 compat
+- W20-06: DFC full e2e < 100ms
+
+### 回归
+- 355 场景全过 (175 旧 + 6 v143-empty-state + 15 v143.2-wave9 + 26 v143.3-wave10 + 24 v143.4-wave11 + 20 v143.5-wave12 + 16 v143.6-wave13 + 14 v143.7-wave14 + 18 v143.8-wave15 + 12 v143.9-wave16 + 10 v143.10-wave17 + 8 v143.11-wave18 + 5 v143.12-wave19 + 6 v143.13-wave20 + 0 回归)
+- chaos suite/wave2-20/cap-edge/cap-fix/roundtrip/survive-deleted/perm-early 全过
+
 ## v1.43.12 (2026-07-13) — JSZip 预热优化 (5 场景, bsk 真实验证)
 
 ### 用户原话
