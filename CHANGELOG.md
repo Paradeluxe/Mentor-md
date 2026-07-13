@@ -2,6 +2,55 @@
 
 按时间倒序记录已发布的变化。最新条目在上方。
 
+## v1.43.14 (2026-07-13) — autosave 5s debounce + IDB 200ms debounce (UX perf)
+
+### 用户原话
+"全都做" (4 优化方向: Worker / 并行 build / autosave 节流 / IDB 写)
+实际落地: autosave debounce + IDB debounce shorten (Worker 和 build 并行另起 PR)
+
+### 改动
+`app.js:1196-1234` (新增 `scheduleAutosaveDebounce` 函数):
+- 旧版 autosave 是固定 30s `setInterval`, 用户停手后要等 30s 才存盘
+- v1.43.14: `onUpdate` 里调用 `scheduleAutosaveDebounce`, 5s debounce
+- 30s setInterval 改为兜底 timer (只在 dirty 时才 autosave)
+- 多次连续编辑 → 1 次保存 (debounce 合并)
+
+`app.js:1176` (IDB write debounce):
+- 旧版 500ms → v1.43.14 200ms (更快的脏数据保护)
+
+`app.js:1355-1357` (onUpdate 里 markDirty 后调 scheduleAutosaveDebounce)
+
+`__mdAnnotator` 新增导出:
+- `scheduleAutosaveDebounce` 函数
+- `AUTOSAVE_DEBOUNCE = 5000` 常量
+
+### 设计意图
+- **5s debounce**: 用户停手 5s 内没新编辑就保存, 平衡"不要太频繁写盘"和"丢失风险"
+- **30s 兜底**: 即使 onUpdate 没触发 (e.g. 浏览器后台), 30s 后也会强制检查 dirty 状态
+- **200ms IDB debounce**: 用户刷新页面/崩溃前有 200ms 缓冲, 旧版 500ms 风险稍高
+
+### 7 场景全过
+- W21-01: AUTOSAVE_DEBOUNCE 常量 = 5000
+- W21-02: scheduleAutosaveDebounce 函数存在
+- W21-03: autosaveNow() 调用成功
+- W21-04: 5 次连续 schedule → 只 1 个 timer (debounce dedup)
+- W21-05: onUpdate 后 timer 自动设置
+- W21-06: IDB cache 写入 200ms 后触发 (实测 253ms)
+- W21-07: 5s < 30s 设计意图验证
+
+### bsk 真实验证 (Edge 150)
+- ✅ AUTOSAVE_DEBOUNCE = 5000
+- ✅ scheduleAutosaveDebounce: timerSet=true → 5.5s 后 timerCleared=true
+
+### 回归
+- 362 场景全过 (175 旧 + 6 + 15 + 26 + 24 + 20 + 16 + 14 + 18 + 12 + 10 + 8 + 5 + 6 + 7 = 362, 0 回归)
+- chaos suite/wave2-21/cap-edge/cap-fix/roundtrip/survive-deleted/perm-early 全过
+
+### 后续 (单独 PR)
+- Web Worker 跑 zip (offload main thread)
+- buildMentorZipBlob 并行化 (file() 已同步, generateAsync 可拆 worker)
+- 自定义 autosave debounce 时间设置
+
 ## v1.43.13 (2026-07-13) — readMentorZip 并行提取 (1st load **2.6x**)
 
 ### 用户原话

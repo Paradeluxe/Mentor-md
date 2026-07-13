@@ -1171,7 +1171,7 @@ function scheduleIdbCacheWrite() {
       State.idbCache[State.currentFile.name] = { sidecar, updatedAt: Date.now() };
     } catch (e) { console.warn('[P-reload] debounce IDB put 失败:', e); }
     finally { _idbCacheWriting = false; }
-  }, 500);
+  }, 200);  // v1.43.14: IDB 写 debounce 500ms → 200ms (更快的脏数据保护)
 }
 
 function markClean() {
@@ -1194,7 +1194,9 @@ function markClean() {
 // - 写盘失败 (权限 revoke 等) → 停 timer + toast, 让用户重选文件
 
 let _autosaveTimer = null;
-const AUTOSAVE_INTERVAL = 30000;  // 30 秒
+let _autosaveLastTrigger = 0;
+const AUTOSAVE_INTERVAL = 30000;  // 30 秒兜底 (用户长时间不操作)
+const AUTOSAVE_DEBOUNCE = 5000;   // v1.43.14: 5 秒 debounce — 停手后 5s 自动保存 (vs 旧 30s setInterval)
 
 function startAutosaveTimer() {
   stopAutosaveTimer();
@@ -1202,9 +1204,10 @@ function startAutosaveTimer() {
   if (State.saveMode !== 'mentor-handle') return;
   if (!State.currentFile || !State.currentFile.handle) return;
   _autosaveTimer = setInterval(() => {
-    autosaveNow();
+    // v1.43.14: 兜底 timer — 如果 30s 内没触发 markDirty 但用户可能仍有未保存 (e.g. 浏览器后台), 兜底保存
+    if (State.currentFile && State.currentFile.dirty) autosaveNow();
   }, AUTOSAVE_INTERVAL);
-  console.log('[autosave] timer started (30s interval, handle mode)');
+  console.log('[autosave] timer started (5s debounce + 30s safety net, handle mode)');
 }
 
 function stopAutosaveTimer() {
@@ -1212,6 +1215,20 @@ function stopAutosaveTimer() {
     clearInterval(_autosaveTimer);
     _autosaveTimer = null;
   }
+}
+
+// v1.43.14: 用户停止输入 5 秒后自动保存 (旧版是固定 30s setInterval, 用户体验差)
+// 在 onUpdate 里 markDirty 后调用, 会重置 timer
+function scheduleAutosaveDebounce() {
+  if (State.saveMode !== 'mentor-handle') return;
+  if (!State.currentFile || !State.currentFile.handle) return;
+  if (!State.currentFile.dirty) return;
+  // 简单 setTimeout 替换: 5 秒内再次调用会清掉旧 timer
+  if (scheduleAutosaveDebounce._t) clearTimeout(scheduleAutosaveDebounce._t);
+  scheduleAutosaveDebounce._t = setTimeout(() => {
+    scheduleAutosaveDebounce._t = null;
+    if (State.currentFile && State.currentFile.dirty) autosaveNow();
+  }, AUTOSAVE_DEBOUNCE);
 }
 
 async function autosaveNow() {
@@ -1336,6 +1353,8 @@ function initEditor() {
       // 多次连续编辑时栈顶和次顶 docText 相同 (snap 是 current state), undo 无效果
       // 正确做法: PM 文本编辑走 ProseMirror 自带 history plugin, 我们 my-history 专管批注 ops
       markDirty();
+      // v1.43.14: 触发 autosave debounce — 5 秒停手后自动保存 (旧版固定 30s setInterval)
+      scheduleAutosaveDebounce();
       // v1.42.5 perf: 只在 *有 ann 变化* 时才 renderCommentList
       // 之前每次 keystroke 都重渲整张列表 (O(N²) for N cards × N keystrokes)
       // 优化: _validateMarksAfterEdit 内部维护 changed 标志, 仅在 ann 真的翻转才返 true
@@ -5864,6 +5883,8 @@ window.__mdAnnotator = {
   startAutosaveTimer,
   stopAutosaveTimer,
   autosaveNow,
+  scheduleAutosaveDebounce,  // v1.43.14
+  AUTOSAVE_DEBOUNCE: 5000,   // v1.43.14
   // HTML → markdown 内部 helper（暴露给 e2e 测试 + 第三方插件使用）
   htmlToMarkdown,
   // File pane 测试 API
