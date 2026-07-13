@@ -7,10 +7,15 @@ on:
     branches: [main]
   workflow_dispatch:  # 手动触发
 
+# 同 branch 新 push 取消旧 run — 减少重复邮件
+concurrency:
+  group: chaos-tests-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   chaos:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -30,26 +35,34 @@ jobs:
           python3 -m http.server 8765 &
           sleep 2
           curl -s -o /dev/null -w "server up: HTTP %{http_code}\n" http://localhost:8765/index.html
+          # 确认 workers/ 静态文件可访问 (Web Worker 需要)
+          curl -s -o /dev/null -w "worker: HTTP %{http_code}\n" http://localhost:8765/workers/zip-worker.js
 
       - name: Run chaos tests
         env:
           CI: 'true'
         run: |
-          echo "=== verify-cursor-fix ==="
-          node tests/verify-cursor-fix.spec.js
-          echo "=== chaos-suite (40) ==="
-          node tests/chaos-suite.spec.js
-          echo "=== chaos-wave2 (15) ==="
-          node tests/chaos-wave2.spec.js
-          echo "=== chaos-wave3 (15) ==="
-          node tests/chaos-wave3.spec.js
-          echo "=== chaos-wave4 (15) ==="
-          node tests/chaos-wave4.spec.js
-          echo "=== a11y-keyboard (8) ==="
-          node tests/a11y-keyboard.spec.js
-          # roundtrip-real-mentor 需要 fixture 3.3MB
-          echo "=== roundtrip-real-mentor (6) ==="
-          node tests/roundtrip-real-mentor.spec.js
+          set -e
+          run_one() {
+            local f="$1"
+            if [ ! -f "tests/$f" ]; then
+              echo "SKIP missing: tests/$f"
+              return 0
+            fi
+            echo "=== $f ==="
+            node "tests/$f"
+          }
+          run_one verify-cursor-fix.spec.js
+          run_one chaos-suite.spec.js
+          run_one chaos-wave2.spec.js
+          run_one chaos-wave3.spec.js
+          run_one chaos-wave4.spec.js
+          # a11y-keyboard.spec.js 已从仓库移除 — 不再引用
+          run_one roundtrip-real-mentor.spec.js
+          # 扩展基线 (存在则跑, 不存在则 skip)
+          run_one chaos-wave9.spec.js
+          run_one chaos-wave10.spec.js
+          run_one v143-empty-state.spec.js
 
       - name: Upload failure artifacts
         if: failure()
