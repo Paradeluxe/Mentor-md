@@ -2,6 +2,51 @@
 
 按时间倒序记录已发布的变化。最新条目在上方。
 
+## v1.43.10 (2026-07-13) — chaos-wave17 D2D perf baseline (10 场景, bsk 真实验证)
+
+### 用户原话
+"2" (D2D perf baseline)
+
+### 改动
+新增 `tests/chaos-wave17.spec.js` 10 场景, 用真实 DFC 论文 (57KB):
+- 论文: `C:/Users/User/Desktop/dFC/literature/papers/markdown/scholar.Abnormal.dynamic.properties.of.FC.in.dis.md`
+
+### 真实 perf 数据 (playwright 测试 + bsk 真实验证)
+| 场景 | Playwright | **bsk 真实** |
+|---|---|---|
+| DFC 57KB 加载 | 9ms | **95ms** (含 BSK roundtrip + fetch) |
+| 50 ann 创建 | 22ms | **86ms** (含 BSK roundtrip) |
+| 200 ann 创建 | 80ms | (not tested in bsk) |
+| 200 ann render | 76ms | (not tested in bsk) |
+| 100 ann mentor export | 112ms (21KB) | **119ms** (20KB) |
+| DFC+50ann autosave | 0ms | **63ms** (含 IDB 写) |
+| DFC+200ann autosave | 1ms | (not tested in bsk) |
+| 端到端 (load→add→save→reload) | 182ms | **363ms** (含 BSK roundtrip) |
+| 100 ann 打字 (5 chars) | 125ms | (not tested in bsk) |
+| 100 ann filter 切换 (3 tab) | 20ms | (not tested in bsk) |
+
+### bsk 真实验证 (在 Edge 150 真实浏览器)
+- **browsers connected: 1** (Edge 150)
+- **DFC 论文 57418 字节** 完整加载到 Tiptap editor (browserMs 7ms)
+- **50 个 ann** 添加到 DFC 文本, 全部 17 已解决 + 33 未解决 = 50 ✓
+- **IDB cache** 写入: `DFC_Liu_Jun23_2026.mentor` + 2 others
+- **buildMentorZipBlob** 第一次 ~2.4s (JSZip 初始化), 后续 ~120ms
+- **Tab 计数 UI** 全部/未解决/已解决 全部正确显示
+
+### bsk 验证脚本
+- `_bsk_dfc_perf.js`: 端到端 perf 测量脚本
+- 截图: `C:/Users/User/AppData/Local/Temp/bsk-dfc-v5.png` (50 ann 状态, 33 open + 17 resolved)
+
+### 关键 perf 发现
+- **buildMentorZipBlob 首次 2.4s** — JSZip 模块冷启动开销, 后续 120ms OK
+- **autosaveNow < 1ms** (playwright) / **63ms** (bsk) — BSK roundtrip + IPC 占大头
+- **reload + loadMarkdownIntoEditor 缓存命中 < 100ms** — IDB cache 工作正常
+- **导出 100 ann .mentor ~120ms** — 合理
+
+### 回归
+- 336 场景全过 (175 旧 + 6 v143-empty-state + 15 v143.2-wave9 + 26 v143.3-wave10 + 24 v143.4-wave11 + 20 v143.5-wave12 + 16 v143.6-wave13 + 14 v143.7-wave14 + 18 v143.8-wave15 + 12 v143.9-wave16 + 10 v143.10-wave17 + 0 回归)
+- chaos suite/wave2-17/cap-edge/cap-fix/roundtrip/survive-deleted/perm-early 全过
+
 ## v1.43.9 (2026-07-12) — chaos-wave16 崩溃恢复测试 (12 场景)
 
 ### 用户原话
