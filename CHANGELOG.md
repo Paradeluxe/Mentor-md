@@ -2,6 +2,45 @@
 
 按时间倒序记录已发布的变化。最新条目在上方。
 
+## v1.43.9 (2026-07-12) — chaos-wave16 崩溃恢复测试 (12 场景)
+
+### 用户原话
+"1"
+
+### 4 大方向
+1. **kill -9 模拟** (page.close 中断)
+2. **reload during autosave** (IDB 写一半 reload)
+3. **reload during AI reply** (reply 进行中 kill)
+4. **IDB write failure 模拟** (intercept put/open)
+
+### 改动
+新增 `tests/chaos-wave16.spec.js` 12 场景:
+1. W16-01: kill -9 无 autosave — 恢复后内容空 (anonymous mode, 已知)
+2. W16-02: kill -9 after autosave — IDB cache 恢复 (autosaved.md)
+3. W16-03: kill -9 during AI reply — 不崩
+4. W16-04: reload during IDB write — 不崩
+5. W16-05: reload right after markDirty (0ms) — 不崩
+6. W16-06: IDBObjectStore.put throws QuotaExceededError — autosave 不崩 ✓
+7. W16-07: indexedDB.open throws InvalidStateError — autosave 不崩 ✓
+8. W16-08: 10 reload cycles 循环 — 不崩
+9. W16-09: kill during renderCommentList (100 ann) — 不崩
+10. W16-10: 100KB doc + 修改 + kill + 重启 — 恢复
+11. W16-11: 多 ctx 隔离 — ctx1 kill 不影响 ctx2 ✓
+12. W16-12: 删 IDB + autosave — IDB 重建 ✓
+
+### 关键验证
+- **autosave 用 try/catch 包了 IDB 写**: put 抛错 / db 损坏 / open 失败 都不崩
+- **IDB cache + state.idbCache 内存缓存**: reload 后 loadMarkdownIntoEditor 命中
+- **ctx 隔离**: Playwright 不同 context = 独立 IndexedDB, 互不干扰
+
+### 设计观察 (非 bug)
+- anonymous mode (无 file handle) 数据 reload 不持久 — 设计 (需显式 handle)
+- 大 doc 加载 + 修改时间随 doc size 增长 (1MB ~ 5s, 5MB ~ 30s+)
+
+### 回归
+- 326 场景全过 (175 旧 + 6 v143-empty-state + 15 v143.2-wave9 + 26 v143.3-wave10 + 24 v143.4-wave11 + 20 v143.5-wave12 + 16 v143.6-wave13 + 14 v143.7-wave14 + 18 v143.8-wave15 + 12 v143.9-wave16 + 0 回归)
+- chaos suite/wave2-13/wave15-16/cap-edge/cap-fix/roundtrip/survive-deleted/perm-early 全过
+
 ## v1.43.8 (2026-07-12) — chaos-wave15 多语言测试 (zh + en, 18 场景)
 
 ### 用户原话
