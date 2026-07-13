@@ -2,6 +2,52 @@
 
 按时间倒序记录已发布的变化。最新条目在上方。
 
+## v1.43.11 (2026-07-13) — 真实 DFC .mentor e2e (8 场景, bsk 真实验证)
+
+### 用户原话
+"1" (真实 .mentor e2e + 崩溃恢复 — 崩溃恢复 v1.43.9 已做过, 这里做真实 e2e)
+
+### 改动
+新增 `tests/chaos-wave18.spec.js` 8 场景, 端到端真实 DFC 论文:
+- DFC 论文: 57KB / 57418 字节
+- 写 .mentor 到 DFC 项目目录 (真实文件)
+- loadMentorZip 读回 + loadMarkdownIntoEditor 注入
+- 编辑 (insert + 新 ann) + 重新导出
+- reload 验证
+- corrupt .mentor graceful reject
+- partial .mentor (no annotations.json) 兼容
+
+### 真实 perf 数据 (Playwright + bsk)
+| 场景 | Playwright | **bsk 真实** |
+|---|---|---|
+| Build .mentor (含 30 ann) | 211ms | **3687ms** (首次 JSZip 冷启动) |
+| Load .mentor (readMentorZip + loadMarkdownIntoEditor) | 71ms (read 26 + load 45) | **2495ms** (read 2372 + load 123) |
+| Edit + re-export | (单次) | **4935ms** |
+| Reload modified .mentor | (单次) | **1634ms** |
+| 端到端 load + addAnn + save | 241ms | (not directly measured) |
+| Edit + re-export 验证 hasMarker | **true** | **true** ✓ |
+| ann 数 (30 → 31) | 31 | **31** ✓ |
+| docLen (57266 → 57275 = +9 ' BSK-EDIT') | OK | OK ✓ |
+| corrupt .mentor reject | gracefully | "Can't find end of central directory" ✓ |
+| partial .mentor (no annotations) | OK | mdLen 31, hasAnnotations=true ✓ |
+
+### bsk 真实验证 (在 Edge 150)
+- ✅ DFC 论文 57418 字节完整加载 (browserMs 7ms)
+- ✅ 30 ann + 1 resolved (i=0 resolved=true)
+- ✅ Tab 计数: **全部 30 / 未解决 29 / 已解决 1** (UI 渲染)
+- ✅ BSK-EDIT 标记 + 第 31 ann 完美 round-trip
+- ✅ 截图: `tests/assets/bsk-dfc-v14311-e2e.png`
+
+### 关键发现
+- **buildMentorZipBlob 首次 ~3.7s** (含 JSZip 模块冷启动)
+- **readMentorZip 真实 ~2.4s** (含 File.arrayBuffer 复制 + JSZip 解析 + base64 to bytes)
+- **2.4s 真实 disk load** 对 21KB .mentor 是合理 (读 + parse + setup), 但不是 ideal
+- **二次 build 正常 ~120ms** (JSZip 已 loaded)
+
+### 回归
+- 344 场景全过 (175 旧 + 6 v143-empty-state + 15 v143.2-wave9 + 26 v143.3-wave10 + 24 v143.4-wave11 + 20 v143.5-wave12 + 16 v143.6-wave13 + 14 v143.7-wave14 + 18 v143.8-wave15 + 12 v143.9-wave16 + 10 v143.10-wave17 + 8 v143.11-wave18 + 0 回归)
+- chaos suite/wave2-18/cap-edge/cap-fix/roundtrip/survive-deleted/perm-early 全过
+
 ## v1.43.10 (2026-07-13) — chaos-wave17 D2D perf baseline (10 场景, bsk 真实验证)
 
 ### 用户原话
