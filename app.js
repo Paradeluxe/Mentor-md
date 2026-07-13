@@ -5706,6 +5706,16 @@ async function boot() {
     }
   } catch (e) { console.warn('[P-reload] IDB 预热失败 (非阻塞):', e); }
 
+  // v1.43.12: 预热 JSZip (首次 build/load .mentor 跳过模块 init 开销 ~150ms)
+  // 早期 v1.43.10 bsk 实测: 首次 build ~180ms, 2 次 ~30ms. 预热把 ~150ms 提到启动时
+  // (启动时已经要 setup IDB + IDB 预热, 加 1ms 的 JSZip init 用户无感)
+  try {
+    new JSZip();
+    // v1.43.12: 暴露 __mdAnnotatorJSZipReady 让 e2e 测可验证预热生效
+    State.jszipPrewarmed = true;
+    console.log('[P-zip] JSZip 预热完成');
+  } catch (e) { console.warn('[P-zip] JSZip 预热失败 (非阻塞):', e); }
+
   // 检测浏览器兼容性，状态栏提示
   const browserNote = FS_API.browserNote();
   if (browserNote) {

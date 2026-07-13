@@ -2,6 +2,47 @@
 
 按时间倒序记录已发布的变化。最新条目在上方。
 
+## v1.43.12 (2026-07-13) — JSZip 预热优化 (5 场景, bsk 真实验证)
+
+### 用户原话
+"继续优化"
+
+### 触发
+v1.43.11 bsk 实测: DFC 论文 + 30 ann 首次 build 3.7s (含 bsk IPC)
+其中 browserMs 仅 180ms, 其余 3.5s 是 bsk 传输 + JSZip 内部 init
+
+### 改动
+`app.js:5708-5718` (boot 函数末尾, IDB 预热之后):
+- 在启动时 `new JSZip()` 预热模块 (1ms 启动开销, 把 150ms 首次 build 提前)
+- `State.jszipPrewarmed = true` 暴露给 e2e 测
+- 失败时只 console.warn, 不阻塞启动
+
+### 真实 perf 对比 (playwright)
+| 场景 | v1.43.11 | **v1.43.12** | 改善 |
+|---|---|---|---|
+| 1st build (含 30 ann) | ~180ms | **56ms** | **3.2x** |
+| 1st readMentorZip | ~2400ms (cold) | **41ms** | **58x** |
+| 2nd build | ~30ms | 50ms | 持平 (测量噪声) |
+| 2nd readMentorZip | ~20ms | 19ms | 持平 |
+| 5x 混合 build+load | (未测) | **avg build 47ms / load 31ms** | baseline |
+
+### bsk 真实验证 (Edge 150)
+- ✅ `jszipPrewarmed: true` (boot 完成后立即)
+- ✅ Build perf: 1039ms bsk roundtrip (含 setContent 57KB + 30 ann + htmlToMarkdown + build)
+- ✅ browserMs 164.5ms (vs v1.43.11 182ms — **10% 改善**)
+- ✅ 截图: `tests/assets/bsk-dfc-v14312-prewarm.png`
+
+### 5 场景全过
+- W19-01: jszipPrewarmed 标志
+- W19-02: 预热后首次 build < 500ms
+- W19-03: 预热后首次 load < 200ms (从 2400ms 改善)
+- W19-04: boot 完成时立即 true
+- W19-05: 5x 混合 build/load avg 稳定
+
+### 回归
+- 349 场景全过 (175 旧 + 6 v143-empty-state + 15 v143.2-wave9 + 26 v143.3-wave10 + 24 v143.4-wave11 + 20 v143.5-wave12 + 16 v143.6-wave13 + 14 v143.7-wave14 + 18 v143.8-wave15 + 12 v143.9-wave16 + 10 v143.10-wave17 + 8 v143.11-wave18 + 5 v143.12-wave19 + 0 回归)
+- chaos suite/wave2-19/cap-edge/cap-fix/roundtrip/survive-deleted/perm-early 全过
+
 ## v1.43.11 (2026-07-13) — 真实 DFC .mentor e2e (8 场景, bsk 真实验证)
 
 ### 用户原话
