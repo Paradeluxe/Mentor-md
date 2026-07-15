@@ -1,7 +1,19 @@
-# Register .mentor → Mentor (HKCU, no admin)
+# Register .mentor → Mentor (HKCU, no admin). Portable: paths relative to this script.
+# Layout: <root>/scripts/register-mentor-assoc.ps1 → root = parent
 $ErrorActionPreference = 'Stop'
-$cmd = 'E:\hermes_playground\Mentor\mentor.cmd'
-$ico = 'E:\hermes_playground\Mentor\assets\mentor.ico'
+$root = Split-Path -Parent $PSScriptRoot
+if (-not (Test-Path (Join-Path $root 'mentor.cmd'))) {
+  # fallback: script next to mentor.cmd
+  $root = $PSScriptRoot
+}
+$cmd = Join-Path $root 'mentor.cmd'
+$ico = Join-Path $root 'assets\mentor.ico'
+if (-not (Test-Path $ico)) { $ico = Join-Path $root 'mentor.ico' }
+
+if (-not (Test-Path $cmd)) {
+  Write-Error "mentor.cmd not found under $root"
+  exit 1
+}
 
 # ProgID
 New-Item -Path 'HKCU:\Software\Classes\Mentor.File' -Force | Out-Null
@@ -29,5 +41,6 @@ $type = Add-Type -MemberDefinition $sig -Name ShellNotify -Namespace Win32 -Pass
 $type::SHChangeNotify(0x8000000, 0x1000, [IntPtr]::Zero, [IntPtr]::Zero)
 
 Write-Host 'OK: .mentor registered'
+Write-Host ('root    = ' + $root)
 Write-Host ('command = ' + (Get-ItemProperty 'HKCU:\Software\Classes\Mentor.File\shell\open\command').'(default)')
 Write-Host ('.mentor  = ' + (Get-ItemProperty 'HKCU:\Software\Classes\.mentor').'(default)')

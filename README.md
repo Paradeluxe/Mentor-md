@@ -27,6 +27,18 @@
 
 ---
 
+## 下载（Windows 便携包）
+
+1. 打开 [Releases](https://github.com/Paradeluxe/Mentor-md/releases) 下载最新 `Mentor-*-win.zip`
+2. 解压 → 双击 **安装.cmd**（桌面快捷方式 + `.mentor` 关联）
+3. 桌面双击 **Mentor**
+
+本地打包：`python scripts/pack-release.py` → `dist/Mentor-<ver>-win.zip`
+
+需要 **Python 3** + Chrome/Edge。详见 `README-用户.md`。
+
+---
+
 ## 快速开始
 
 ### 方式 1：本地 HTTP server（推荐，自动配对侧车）

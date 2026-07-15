@@ -35,4 +35,4 @@ tests/pack-*.js
 
 # Local env
 .env
-.env.local
+.env.localdist/

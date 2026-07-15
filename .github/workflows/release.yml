@@ -1,0 +1,85 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version label (e.g. v1.43.35). Empty = from CHANGELOG / tag."
+        required: false
+        default: ""
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  pack:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Pack portable zip
+        id: pack
+        run: |
+          set -euo pipefail
+          VER="${{ github.event.inputs.version }}"
+          if [ -z "$VER" ]; then
+            if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+              VER="${GITHUB_REF_NAME}"
+            else
+              VER=""
+            fi
+          fi
+          if [ -n "$VER" ]; then
+            python scripts/pack-release.py --version "$VER" --out dist
+          else
+            python scripts/pack-release.py --out dist
+          fi
+          ZIP=$(ls dist/Mentor-*-win.zip | head -1)
+          echo "zip=$ZIP" >> "$GITHUB_OUTPUT"
+          echo "name=$(basename "$ZIP")" >> "$GITHUB_OUTPUT"
+          ls -la dist/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mentor-win-portable
+          path: dist/Mentor-*-win.zip
+          if-no-files-found: error
+
+      - name: Create or update GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          ZIP="${{ steps.pack.outputs.zip }}"
+          NOTES_FILE=$(mktemp)
+          cat > "$NOTES_FILE" <<'EOF'
+          Mentor portable (Windows)
+
+          1. Unzip
+          2. Run install.cmd (or 安装.cmd) — desktop shortcut + .mentor association
+          3. Double-click desktop Mentor
+
+          Requires Python 3 + Chrome/Edge. See README-用户.md inside the zip.
+          EOF
+          # strip leading spaces from heredoc indent
+          sed -i 's/^          //' "$NOTES_FILE"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$ZIP" --clobber
+          else
+            gh release create "$TAG" "$ZIP" --title "Mentor $TAG" --notes-file "$NOTES_FILE"
+          fi

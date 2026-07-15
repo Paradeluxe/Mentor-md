@@ -2,6 +2,26 @@
 
 按时间倒序记录已发布的变化。最新条目在上方。
 
+## v1.43.36 (2026-07-15) — Windows 便携包 + GitHub Release
+
+### 用户
+"可以zip下载然后用户双击快捷方式打开…放在github release"
+
+### 改动
+1. `安装.cmd` / `install.cmd` — 桌面快捷方式 + .mentor 关联 + Python 检查
+2. `scripts/register-mentor-assoc.ps1` — 去掉硬编码路径，相对解压目录
+3. `scripts/pack-release.py` — 打 Mentor-<ver>-win.zip
+4. `.github/workflows/release.yml` — tag v* 自动打包上传 Release
+5. `README-用户.md` — 三步安装说明
+
+### 用法
+```
+python scripts/pack-release.py
+# 或 git tag v1.43.36 && git push --tags
+```
+
+---
+
 ## v1.43.35 (2026-07-15) — 全套图标升级 (Lucide)
 
 ### 用户
