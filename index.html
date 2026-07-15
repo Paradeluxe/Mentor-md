@@ -3,38 +3,30 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Mentor v1.43.27 — 像 docx 一样批注 Markdown</title>
-<meta name="build" content="v1.43.32 20260715: compact multi-doc tabs" />
+<title>Mentor — 像 docx 一样批注 Markdown</title>
+<meta name="build" content="v1.43.33 20260715: aesthetic chrome polish" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-<link rel="stylesheet" href="styles.css?v=102" />
+<link rel="stylesheet" href="styles.css?v=103" />
 <!-- KaTeX 数学公式渲染 -->
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" crossorigin="anonymous" />
 <!-- 字体：系统无衬线 + 等宽（侧栏时间戳、文件名） -->
 <style>
+  /* tokens live in styles.css — keep only critical FOUC fallbacks */
   :root {
-    /* Cursor 化色板 - 与 DESIGN.md colors 块保持一致 */
     --bg: #f2f1ed;
     --panel: #ffffff;
     --panel-2: #f7f7f4;
     --panel-3: #ebeae5;
-    --border-warm: rgba(38, 37, 30, 0.1);
-    --border-warm-medium: rgba(38, 37, 30, 0.2);
+    --chrome: #fafaf8;
+    --border-warm: rgba(38, 37, 30, 0.09);
+    --border-warm-medium: rgba(38, 37, 30, 0.16);
     --text: #26251e;
-    --text-2: rgba(38, 37, 30, 0.6);
-    --text-3: rgba(38, 37, 30, 0.4);
-    --muted: #8a8780;
+    --text-2: rgba(38, 37, 30, 0.62);
+    --text-3: rgba(38, 37, 30, 0.42);
     --accent: #f54e00;
     --accent-soft: rgba(245, 78, 0, 0.08);
-    --highlight: #fef3c7;
-    --highlight-active: #fcd34d;
-    --resolved: #e5e7eb;
-    --comment-bg: #fff8e1;
-    --reply-bg: #f3f4f6;
-    --danger: #cf2d56;
-    --success: #1f8a65;
-    --warning: #d97706;
   }
 </style>
 </head>
@@ -45,14 +37,14 @@
   <header id="toolbar">
     <div class="tb-group">
       <button id="help-btn" class="help-btn" data-act="toggle-help" title="使用帮助 (按 ? 键)" aria-label="使用帮助" onclick="window.__mdAnnotator && window.__mdAnnotator.toggleHelp && window.__mdAnnotator.toggleHelp(); event.stopPropagation();">?</button>
-      <button id="settings-btn" class="settings-btn" data-act="toggle-settings" title="批注数量上限 / 设置" aria-label="设置">⚙</button>
+      <button id="settings-btn" class="settings-btn" data-act="toggle-settings" title="设置" aria-label="设置"></button>
       <span class="tb-sep"></span>
       <button id="btn-new" title="新建空白文档" class="tb-icon-text"><span class="tb-icon"></span><span>新建</span></button>
-      <button id="btn-open-files" title="打开文件 (按住 Ctrl 多选 .md + .annotations.json 可自动加载批注)" class="tb-icon-text"><span class="tb-icon"></span><span>打开文件</span></button>
+      <button id="btn-open-files" title="打开文件 (Ctrl 多选 .md + .annotations.json)" class="tb-icon-text"><span class="tb-icon"></span><span>打开</span></button>
       <button id="btn-save" title="保存当前 .md 和批注 (Ctrl+S)" class="tb-icon-text"><span class="tb-icon"></span><span>保存</span></button>
-      <button id="btn-save-as" title="导出当前文档为 .mentor 单文件包 (含 .md + 批注 + 图片)" class="tb-icon-text"><span class="tb-icon"></span><span>导出成 .mentor</span></button>
-      <button id="btn-export-md" title="导出当前文档为 .md 文件下载到本地" class="tb-icon-text"><span class="tb-icon"></span><span>导出MD</span></button>
-      <button id="btn-export-docx" title="导出当前文档为 .docx 文件下载到本地" class="tb-icon-text"><span class="tb-icon"></span><span>导出DOCX</span></button>
+      <button id="btn-save-as" title="导出 .mentor 单文件包 (md + 批注 + 图片)" class="tb-icon-text"><span class="tb-icon"></span><span>.mentor</span></button>
+      <button id="btn-export-md" title="导出 Markdown" class="tb-icon-text"><span class="tb-icon"></span><span>MD</span></button>
+      <button id="btn-export-docx" title="导出 DOCX" class="tb-icon-text"><span class="tb-icon"></span><span>DOCX</span></button>
       <span class="tb-sep"></span>
       <button id="btn-undo" title="撤销批注操作 (Ctrl+Alt+Z)" class="tb-icon-text" disabled aria-label="撤销"><span class="tb-icon">↶</span></button>
       <button id="btn-redo" title="重做批注操作 (Ctrl+Alt+Shift+Z)" class="tb-icon-text" disabled aria-label="重做"><span class="tb-icon">↷</span></button>
@@ -95,9 +87,9 @@
           </div>
           <span id="dirty-indicator" class="dirty-dot" title="有未保存修改"></span>
           <button id="author-chip" class="author-chip" data-act="edit-author" title="点击修改作者名">
-            <span class="author-chip-icon" aria-hidden="true">👤</span>
+            <span class="author-chip-icon" aria-hidden="true"></span>
             <span id="author-chip-name">未设置</span>
-            <span class="author-chip-edit" aria-hidden="true">✏️</span>
+            <span class="author-chip-edit" aria-hidden="true"></span>
           </button>
         </div>
   </header>
@@ -167,14 +159,12 @@
       <!-- v1.43 / v1.43.20: 空态引导 — cold/doc/filter 由 syncCommentEmptyPresentation 分型 -->
                   <div id="comment-empty" class="empty-hint" data-empty-mode="cold">
                     <div class="empty-hint-icon" aria-hidden="true">
-                      <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-                        <polyline points="14 2 14 8 20 8"/>
-                        <path d="M8 13h6M8 17h4" stroke="#f54e00" stroke-width="2"/>
+                      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M21 12a8 8 0 0 1-8 8H4l3-3a8 8 0 0 1 14-5z"/>
                       </svg>
                     </div>
                     <h2>还没有批注</h2>
-                    <p class="hint-lead">像 docx 一样, 拖选任意文字即可加批注</p>
+                    <p class="hint-lead">拖选文字，点「批注」即可</p>
                     <ol class="empty-hint-steps">
                       <li><span class="step-num">1</span> 在编辑器中拖选一段文字</li>
                       <li><span class="step-num">2</span> 弹出按钮点 <kbd>批注</kbd></li>
@@ -237,7 +227,7 @@
   }
 }
 </script>
-<script type="module" src="app.js?v=148"></script>
+<script type="module" src="app.js?v=149"></script>
 <!-- 帮助 popover (浮在 body 顶层, 位置由 JS 动态计算) -->
 <div id="help-popover" class="help-popover hidden" role="tooltip">
   <div class="help-popover-arrow"></div>
@@ -261,7 +251,7 @@
 <!-- v1.42: 设置 popover (批注数量上限) -->
 <div id="settings-popover" class="settings-popover hidden" role="dialog" aria-label="设置">
   <div class="settings-popover-arrow"></div>
-  <h3>⚙ 设置</h3>
+  <h3>设置</h3>
   <div class="settings-section">
     <label class="settings-label">批注数量上限 (perf 保护)</label>
     <p class="settings-hint">超过上限时新批注被拒绝. 0 = 无限制 (perf 可能卡). 200 条时打字已明显卡顿 (实测 108ms p95).</p>

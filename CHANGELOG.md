@@ -2,6 +2,27 @@
 
 按时间倒序记录已发布的变化。最新条目在上方。
 
+## v1.43.33 (2026-07-15) — 编辑器美学整体精修
+
+### 用户
+"整体优化mentor编辑器的美学设计，参考大厂的设计规范，我要一个简洁好用的编辑器前端"
+
+### 方向
+Cursor cream 色板 + Linear 分段控件 + Notion 安静 chrome。只改视觉层，不改行为。
+
+### 改动
+1. design tokens: chrome 表面、radius/space 刻度、accent-hover、shadow-float
+2. 工具栏/标签/状态栏统一 chrome 底；按钮文案压短（打开 / .mentor / MD / DOCX）
+3. 设置/作者去 emoji → SVG mask；settings popover 对齐 tokens
+4. 批注 filter → 分段控件；空态降噪；浮动批注按钮去掉蓝色阴影改橙
+5. 标签 active 底线 accent；卡片 shadow-as-border
+
+### Cache
+- styles.css?v=102→103
+- app.js?v=148→149
+
+---
+
 ## v1.43.32 (2026-07-15) — 标签条压成 26px
 
 ### 用户
