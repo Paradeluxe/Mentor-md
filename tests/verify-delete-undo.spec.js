@@ -15,7 +15,7 @@ const { chromium } = require('playwright');
   page.on('dialog', d => d.accept());
   page.on('pageerror', e => pageErrors.push(e.message + ' @ ' + (e.stack || '').split('\n')[1]));
 
-  await page.goto('http://127.0.0.1:8787/index.html', { waitUntil: 'networkidle' });
+  await page.goto('http://127.0.0.1:8787/index.html?v=135&cb=' + Date.now(), { waitUntil: 'networkidle' });
   await page.waitForFunction(() => window.__mdAnnotator && window.__mdAnnotator.State.editor, { timeout: 10000 });
   await page.evaluate(() => window.__mdAnnotator.setAuthor('verify-user'));
 
@@ -59,25 +59,32 @@ const { chromium } = require('playwright');
   const originalTid = after.threadId;
 
   console.log('\n=== 2) 模拟 deleteThread 内部动作 (绕过 confirm) ===');
-  await page.evaluate((tid) => {
-    const M = window.__mdAnnotator;
-    // 调用 pushHistory + 删 mark + 删 thread (跟 deleteThread 一致, 但跳过 confirm)
-    M.pushHistory();
-    const ed = M.State.editor;
-    const tr = ed.state.tr;
-    const markType = ed.schema.marks.annotation;
-    ed.state.doc.descendants((node, pos) => {
-      node.marks.forEach(m => {
-        if (m.type === markType && m.attrs.threadId === tid) {
-          tr.removeMark(pos, pos + node.nodeSize, markType);
-        }
+    await page.evaluate((tid) => {
+      const M = window.__mdAnnotator;
+      // v1.43.21: 走真实 deleteThread 路径 (_testDeleteThread 跳过 confirm)
+      // 旧测试手写 removeMark 未 setMeta(addToHistory,false), 与生产路径不一致
+      if (typeof M._testDeleteThread === 'function') {
+        M._testDeleteThread(tid);
+        return;
+      }
+      M.pushHistory();
+      const ed = M.State.editor;
+      const tr = ed.state.tr;
+      const markType = ed.schema.marks.annotation;
+      ed.state.doc.descendants((node, pos) => {
+        node.marks.forEach(m => {
+          if (m.type === markType && m.attrs.threadId === tid) {
+            tr.removeMark(pos, pos + node.nodeSize, markType);
+          }
+        });
       });
-    });
-    ed.view.dispatch(tr);
-    M.State.annotations = M.State.annotations.filter(t => t.threadId !== tid);
-    M.renderCommentList();
-    M.updateDocMeta && M.updateDocMeta({immediate: true});
-  }, originalTid);
+      tr.setMeta('addToHistory', false);
+      tr.setMeta('__activeMarkSync', true);
+      ed.view.dispatch(tr);
+      M.State.annotations = M.State.annotations.filter(t => t.threadId !== tid);
+      M.renderCommentList();
+      M.updateDocMeta && M.updateDocMeta({immediate: true});
+    }, originalTid);
   await page.waitForTimeout(300);
 
   after = await page.evaluate(() => ({
@@ -191,21 +198,7 @@ const { chromium } = require('playwright');
   const middleTid = await page.evaluate(() => window.__mdAnnotator.State.annotations[1].threadId);
   console.log(`deleting middle tid=${middleTid}`);
   await page.evaluate((tid) => {
-    const M = window.__mdAnnotator;
-    M.pushHistory();
-    const ed = M.State.editor;
-    const tr = ed.state.tr;
-    const markType = ed.schema.marks.annotation;
-    ed.state.doc.descendants((node, pos) => {
-      node.marks.forEach(m => {
-        if (m.type === markType && m.attrs.threadId === tid) {
-          tr.removeMark(pos, pos + node.nodeSize, markType);
-        }
-      });
-    });
-    ed.view.dispatch(tr);
-    M.State.annotations = M.State.annotations.filter(t => t.threadId !== tid);
-    M.renderCommentList();
+    window.__mdAnnotator._testDeleteThread(tid);
   }, middleTid);
   await page.waitForTimeout(300);
 
@@ -268,20 +261,7 @@ const { chromium } = require('playwright');
   // 删除
   const onlyTid = await page.evaluate(() => window.__mdAnnotator.State.annotations[0].threadId);
   await page.evaluate((tid) => {
-    const M = window.__mdAnnotator;
-    M.pushHistory();
-    const ed = M.State.editor;
-    const tr = ed.state.tr;
-    ed.schema.marks.annotation && ed.state.doc.descendants((node, pos) => {
-      node.marks.forEach(m => {
-        if (m.type.name === 'annotation' && m.attrs.threadId === tid) {
-          tr.removeMark(pos, pos + node.nodeSize, ed.schema.marks.annotation);
-        }
-      });
-    });
-    ed.view.dispatch(tr);
-    M.State.annotations = M.State.annotations.filter(t => t.threadId !== tid);
-    M.renderCommentList();
+    window.__mdAnnotator._testDeleteThread(tid);
   }, onlyTid);
   await page.waitForTimeout(200);
 
@@ -333,21 +313,8 @@ const { chromium } = require('playwright');
 
   // 删 B
   await page.evaluate(() => {
-    const M = window.__mdAnnotator;
-    const tidB = M.State.annotations.find(t => t.threadId === 'real-B').threadId;
-    M.pushHistory();
-    const ed = M.State.editor;
-    const tr = ed.state.tr;
-    ed.state.doc.descendants((node, pos) => {
-      node.marks.forEach(m => {
-        if (m.type.name === 'annotation' && m.attrs.threadId === tidB) {
-          tr.removeMark(pos, pos + node.nodeSize, ed.schema.marks.annotation);
-        }
-      });
-    });
-    ed.view.dispatch(tr);
-    M.State.annotations = M.State.annotations.filter(t => t.threadId !== tidB);
-    M.renderCommentList();
+    const tidB = window.__mdAnnotator.State.annotations.find(t => t.threadId === 'real-B').threadId;
+    window.__mdAnnotator._testDeleteThread(tidB);
   });
   await page.waitForTimeout(300);
 
@@ -419,20 +386,7 @@ const { chromium } = require('playwright');
   const targetTid = beforeEdit[0].tid;
   console.log(`deleting stale tid=${targetTid}`);
   await page.evaluate((tid) => {
-    const M = window.__mdAnnotator;
-    M.pushHistory();
-    const ed = M.State.editor;
-    const tr = ed.state.tr;
-    ed.state.doc.descendants((node, pos) => {
-      node.marks.forEach(m => {
-        if (m.type.name === 'annotation' && m.attrs.threadId === tid) {
-          tr.removeMark(pos, pos + node.nodeSize, ed.schema.marks.annotation);
-        }
-      });
-    });
-    ed.view.dispatch(tr);
-    M.State.annotations = M.State.annotations.filter(t => t.threadId !== tid);
-    M.renderCommentList();
+    window.__mdAnnotator._testDeleteThread(tid);
   }, targetTid);
   await page.waitForTimeout(300);
 

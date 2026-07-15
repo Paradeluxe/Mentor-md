@@ -1,4 +1,4 @@
-// v1.43 first-time empty state + 看示例 demo flow
+// v1.43 / v1.43.26 empty state + 看示例 in ? help popover
 const { chromium } = require('playwright');
 
 (async () => {
@@ -16,34 +16,46 @@ const { chromium } = require('playwright');
     catch (e) { console.log(`  ✗ ${name}: ${e.message}`); fail++; }
   };
 
-  console.log('=== v1.43 first-time empty state test ===');
+  console.log('=== v1.43.26 empty state + help demo ===');
 
-  await page.goto('http://127.0.0.1:8787/index.html?v=121&cb=' + Date.now());
+  await page.goto('http://127.0.0.1:8787/index.html?v=141&cb=' + Date.now());
   await page.waitForFunction(() => window.__mdAnnotator?.State?.editor, { timeout: 10000 });
-  await page.waitForSelector('#empty-demo-btn', { timeout: 3000 });
 
-  await t('empty state shows new structure', async () => {
+  await t('cold empty: no empty-demo-btn, foot mentions ?', async () => {
     const r = await page.evaluate(() => ({
       iconVisible: !!document.querySelector('.empty-hint-icon svg'),
       stepsCount: document.querySelectorAll('.empty-hint-steps li').length,
-      ctaText: document.querySelector('#empty-demo-btn')?.textContent?.trim(),
+      hasDemoBtn: !!document.querySelector('#empty-demo-btn'),
       h2Text: document.querySelector('.empty-hint h2')?.textContent,
       hasFoot: !!document.querySelector('.empty-hint-foot'),
+      footText: document.querySelector('.empty-hint-foot')?.textContent || '',
+      mode: document.querySelector('#comment-empty')?.dataset.emptyMode,
     }));
     if (!r.iconVisible) throw new Error('no icon');
     if (r.stepsCount !== 3) throw new Error(`expected 3 steps, got ${r.stepsCount}`);
-    if (!r.ctaText?.includes('看示例')) throw new Error(`bad CTA: ${r.ctaText}`);
+    if (r.hasDemoBtn) throw new Error('empty-demo-btn should be removed');
     if (r.h2Text !== '还没有批注') throw new Error(`bad h2: ${r.h2Text}`);
     if (!r.hasFoot) throw new Error('no foot');
+    if (!r.footText.includes('?')) throw new Error(`foot missing ?: ${r.footText}`);
+    if (r.mode !== 'cold') throw new Error(`expected mode cold, got ${r.mode}`);
   });
 
-  await t('CTA button is wired (no error on click)', async () => {
-    // clear onboarded flag first so demo works
+  await t('? help popover has 看示例 button', async () => {
     await page.evaluate(() => localStorage.removeItem('mentor.onboarded.v1'));
+    await page.click('#help-btn');
+    await page.waitForTimeout(200);
+    const r = await page.evaluate(() => ({
+      helpOpen: !document.querySelector('#help-popover')?.classList.contains('hidden'),
+      demoBtn: !!document.querySelector('#help-demo-btn'),
+      demoText: document.querySelector('#help-demo-btn')?.textContent?.trim(),
+    }));
+    if (!r.helpOpen) throw new Error('help not open');
+    if (!r.demoBtn) throw new Error('no help-demo-btn');
+    if (!r.demoText?.includes('看示例')) throw new Error(`bad demo btn: ${r.demoText}`);
   });
 
-  await t('click 看示例 loads demo doc + 2 annotations', async () => {
-    await page.click('#empty-demo-btn');
+  await t('click 看示例 in help loads demo + closes help', async () => {
+    await page.click('#help-demo-btn');
     await page.waitForTimeout(800);
     const r = await page.evaluate(() => {
       const s = window.__mdAnnotator.State;
@@ -55,6 +67,7 @@ const { chromium } = require('playwright');
         onboardedFlag: localStorage.getItem('mentor.onboarded.v1'),
         emptyHidden: document.querySelector('#comment-empty')?.classList.contains('hidden'),
         listChildren: document.querySelectorAll('#comment-list > *').length,
+        helpOpen: !document.querySelector('#help-popover')?.classList.contains('hidden'),
       };
     });
     if (r.annCount !== 2) throw new Error(`expected 2 anns, got ${r.annCount}`);
@@ -67,35 +80,63 @@ const { chromium } = require('playwright');
     if (r.onboardedFlag !== '1') throw new Error('onboarded flag not set');
     if (!r.emptyHidden) throw new Error('empty hint not hidden');
     if (r.listChildren !== 2) throw new Error(`bad list children: ${r.listChildren}`);
+    if (r.helpOpen) throw new Error('help should close after demo');
   });
 
   await t('demo has highlights in editor', async () => {
     const highlightCount = await page.evaluate(() => {
-      // marks with comment threadId
       return document.querySelectorAll('.ProseMirror [data-thread-id], .ProseMirror mark').length;
     });
     if (highlightCount < 2) throw new Error(`expected ≥2 highlights, got ${highlightCount}`);
   });
 
-  await t('second click "看示例" no longer shows hint (flag set, but hint still hidden by N>0)', async () => {
-    // N > 0 → empty hint stays hidden regardless of flag
-    const emptyHidden = await page.evaluate(() => document.querySelector('#comment-empty')?.classList.contains('hidden'));
-    if (!emptyHidden) throw new Error('empty visible after demo');
-  });
-
-  await t('resetting annotations brings back empty state', async () => {
+  await t('doc mode: clear anns keeps empty, no demo btn', async () => {
     await page.evaluate(() => {
       const s = window.__mdAnnotator.State;
       s.annotations = [];
-      // Manually re-trigger renderCommentList
       window.__mdAnnotator.renderCommentList();
     });
     await page.waitForTimeout(200);
-    const emptyVisible = await page.evaluate(() => {
+    const r = await page.evaluate(() => {
       const e = document.querySelector('#comment-empty');
-      return e && !e.classList.contains('hidden');
+      return {
+        emptyVisible: e && !e.classList.contains('hidden'),
+        mode: e?.dataset.emptyMode,
+        hasDemoBtn: !!document.querySelector('#empty-demo-btn'),
+        lead: e?.querySelector('.hint-lead')?.textContent,
+      };
     });
-    if (!emptyVisible) throw new Error('empty not shown when annotations=0');
+    if (!r.emptyVisible) throw new Error('empty not shown when annotations=0');
+    if (r.mode !== 'doc') throw new Error(`expected doc mode, got ${r.mode}`);
+    if (r.hasDemoBtn) throw new Error('empty-demo-btn should not exist');
+    if (!r.lead?.includes('本篇')) throw new Error(`bad lead: ${r.lead}`);
+  });
+
+  await t('filter mode works', async () => {
+    await page.evaluate(() => {
+      const M = window.__mdAnnotator;
+      M.loadMarkdownIntoEditor('paper2.md', '# T\n\nhello world text here\n', null);
+      M.State.annotations = [{
+        threadId: 't-filter-1',
+        text: 'hello',
+        range: { from: 1, to: 6 },
+        resolved: true,
+        comments: [{ id: 'c1', author: 'T', body: 'x', createdAt: new Date().toISOString() }],
+      }];
+      M.State.filterOpen = true;
+      M.State.filterResolved = false;
+      M.renderCommentList();
+    });
+    await page.waitForTimeout(200);
+    const r = await page.evaluate(() => {
+      const e = document.querySelector('#comment-empty');
+      return {
+        emptyVisible: e && !e.classList.contains('hidden'),
+        mode: e?.dataset.emptyMode,
+        h2: e?.querySelector('h2')?.textContent,
+      };
+    });
+    if (!r.emptyVisible || r.mode !== 'filter' || !r.h2?.includes('筛选')) throw new Error(JSON.stringify(r));
   });
 
   console.log(`\n=== RESULT: ${pass} pass / ${fail} fail ===`);

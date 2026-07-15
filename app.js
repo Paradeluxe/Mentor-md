@@ -13,6 +13,9 @@ import Image from '@tiptap/extension-image';
 import Placeholder from '@tiptap/extension-placeholder';
 import Superscript from '@tiptap/extension-superscript';
 import Subscript from '@tiptap/extension-subscript';
+// v1.43.27: 显式注册 Gapcursor — StarterKit 已 bundle, 但显式 import 防止意外过滤
+//   且让单测 / 静态检查能直接看到该 extension 在 extensions 数组里
+import Gapcursor from '@tiptap/extension-gapcursor';
 import { Table } from '@tiptap/extension-table';
 import { TableRow } from '@tiptap/extension-table-row';
 import { TableHeader } from '@tiptap/extension-table-header';
@@ -148,7 +151,7 @@ const State = {
   // - 每次 push 一次"修改前快照" (深拷贝 annotations)
   // - undo: pop past → 还原; redo: pop future → 还原
   // - doc 文本撤销走 Tiptap 自带 Ctrl+Z (history: { depth: 100 }), 不入这个 stack
-  history: { past: [], future: [], capacity: 100 },
+  history: { past: [], future: [], capacity: 100, lastOp: null },  // lastOp: 'pm'|'ann' v1.43.21
   saveMode: 'unknown',      // 'handle' | 'download' | 'unknown' | 'mentor-handle' | 'mentor-download'
   readOnlyMode: false,      // P0-A: 另一 tab 在编辑时启用只读 (Ctrl+S 禁用)
   fileMtime: null,          // P0-C: 主 .md 的 mtime (last save 时记录的)
@@ -163,6 +166,9 @@ const State = {
   // - 切/重开文件前: revoke 所有旧 blob URL 防内存泄漏
   mediaUrls: {},            // { 'media/image5.png': 'blob:http://127.0.0.1:8787/abc-123' }
   mediaFiles: {},           // { 'media/image5.png': Blob } — save 时用, 跟当前 doc 绑定
+  // v1.43.31: 多标签 — 同时开多份文档, 测试/新开不再覆盖 dFC
+  tabs: [],                 // [{ id, name, html, annotations, dirty, handle, saveMode, mediaUrls, mediaFiles, ... }]
+  activeTabId: null,
 };
 
 // ============================================================
@@ -886,6 +892,145 @@ const AnnotationBubbleExtension = Extension.create({
   },
 });
 
+// v1.43.22: figure/image 批注 — PM mark 无法挂 atom image
+// 不用 Decoration (esm 多实例 prosemirror-view 会 localsInner 崩), 直接写 DOM class
+function _imageAnnClass(resolved, active) {
+  return `annotation-image${resolved ? ' is-resolved' : ''}${active ? ' is-active' : ''}`;
+}
+function collectImageAnchors(doc, from, to) {
+  const anchors = [];
+  if (from == null || to == null || from > to) return anchors;
+  try {
+    doc.nodesBetween(from, to, (node, pos) => {
+      if (node.type.name === 'image') {
+        anchors.push({
+          from: pos,
+          to: pos + node.nodeSize,
+          src: node.attrs.src || '',
+          alt: node.attrs.alt || '',
+          title: node.attrs.title || '',
+        });
+      }
+    });
+  } catch (e) { /* ignore */ }
+  return anchors;
+}
+function imageAnchorLabel(anc) {
+  if (!anc) return '[图片]';
+  const a = (anc.alt || '').trim();
+  if (a) return a;
+  const ti = (anc.title || '').trim();
+  if (ti) return ti;
+  return '[图片]';
+}
+
+// v1.43.28: NodeSelection on image?
+function isImageNodeSelection(sel) {
+  if (!sel) return false;
+  if (sel.node && sel.node.type && sel.node.type.name === 'image') return true;
+  // 兼容 minify 后无 .node 字段的极端情况: 单位置 span 且 doc 上是 image
+  try {
+    if (sel.from != null && sel.to === sel.from + 1 && State.editor) {
+      const n = State.editor.state.doc.nodeAt(sel.from);
+      if (n && n.type.name === 'image') return true;
+    }
+  } catch (e) { /* ignore */ }
+  return false;
+}
+
+// v1.43.28: 浮动批注按钮定位 — 图片用 DOM rect (coordsAtPos 对 atom 常是 0×0)
+function positionFloatCommentAt(editor, from, sel) {
+  const btn = $('#float-comment-btn');
+  const editorPane = $('#editor-pane');
+  if (!btn || !editorPane || !editor) return false;
+  try {
+    let leftV = null, topV = null;
+    if (isImageNodeSelection(sel) || (sel && sel.node && sel.node.type.name === 'image')) {
+      let dom = null;
+      try { dom = editor.view.nodeDOM(sel.from != null ? sel.from : from); } catch (e) { dom = null; }
+      const img = dom && (dom.tagName === 'IMG' ? dom : (dom.querySelector && dom.querySelector('img')));
+      if (img) {
+        const r = img.getBoundingClientRect();
+        const paneRect = editorPane.getBoundingClientRect();
+        // v1.43.29: 贴在图右上角内侧, 不要 -36 伸到上一行 (会挡住从上一行拖进图的起点)
+        topV = r.top - paneRect.top + editorPane.scrollTop + 8;
+        leftV = r.left - paneRect.left + editorPane.scrollLeft + Math.max(24, r.width - 48);
+      }
+    }
+    if (leftV == null) {
+      const start = editor.view.coordsAtPos(from);
+      const paneRect = editorPane.getBoundingClientRect();
+      topV = start.top - paneRect.top + editorPane.scrollTop - 32;
+      leftV = start.left - paneRect.left + editorPane.scrollLeft;
+    }
+    btn.style.top = `${Math.max(0, topV)}px`;
+    btn.style.left = `${Math.max(0, leftV)}px`;
+    btn.classList.remove('hidden');
+    return true;
+  } catch (e) {
+    btn.classList.add('hidden');
+    return false;
+  }
+}
+
+function refreshAnnotationImageDecos() {
+  const ed = State.editor;
+  if (!ed || !ed.view) return;
+  try {
+    const root = ed.view.dom;
+    root.querySelectorAll('img[data-annotation-image], img.annotation-image').forEach(el => {
+      el.classList.remove('annotation-image', 'is-active', 'is-resolved');
+      el.removeAttribute('data-thread-id');
+      el.removeAttribute('data-annotation-image');
+    });
+    const anns = State.annotations || [];
+    const activeTid = State.activeThreadId;
+    ed.state.doc.descendants((node, pos) => {
+      if (node.type.name !== 'image') return;
+      const src = node.attrs.src || '';
+      const nodeEnd = pos + node.nodeSize;
+      const hits = [];
+      for (const a of anns) {
+        if (!a || typeof a !== 'object' || !a.threadId || a.invalid) continue;
+        let hit = false;
+        const anchors = Array.isArray(a.imageAnchors) ? a.imageAnchors : [];
+        for (const anc of anchors) {
+          if (!anc) continue;
+          if (typeof anc.from === 'number' && anc.from === pos) { hit = true; break; }
+          if (anc.src && src && anc.src === src) { hit = true; break; }
+        }
+        if (!hit && a.range && typeof a.range.from === 'number') {
+          if (a.range.from === pos && a.range.to === nodeEnd) hit = true;
+          else if (a.range.from <= pos && a.range.to >= nodeEnd) hit = true;
+        }
+        if (!hit && Array.isArray(a.ranges)) {
+          for (const r of a.ranges) {
+            if (r && r.from <= pos && r.to >= nodeEnd) { hit = true; break; }
+            if (r && r.from === pos && r.to === nodeEnd) { hit = true; break; }
+          }
+        }
+        if (hit) hits.push(a);
+      }
+      if (!hits.length) return;
+      let dom = null;
+      try { dom = ed.view.nodeDOM(pos); } catch (e) { dom = null; }
+      if (!dom) return;
+      const img = (dom.tagName === 'IMG') ? dom : (dom.querySelector && dom.querySelector('img'));
+      if (!img) return;
+      const active = hits.some(h => h.threadId === activeTid);
+      const resolved = hits.every(h => h.resolved);
+      const primary = hits.find(h => h.threadId === activeTid) || hits[0];
+      img.classList.add('annotation-image');
+      if (active) img.classList.add('is-active');
+      if (resolved) img.classList.add('is-resolved');
+      img.setAttribute('data-annotation-image', '1');
+      img.setAttribute('data-thread-id', String(primary.threadId));
+    });
+  } catch (e) {
+    console.warn('[AnnotationImage] refresh failed:', e);
+  }
+}
+
 // ============================================================
 // 3. 工具函数
 // ============================================================
@@ -1025,6 +1170,11 @@ function markDirty() {
     State.currentFile.dirty = true;
     $('#dirty-indicator').classList.add('is-dirty');
     $('#current-file-name').textContent = State.currentFile.name;
+    try {
+      const t = State.tabs.find(x => x && x.id === State.activeTabId);
+      if (t) { t.dirty = true; t.name = State.currentFile.name; }
+      renderDocTabs();
+    } catch {}
     updateTreeDirtyDots();
     // P-reload: 任何 dirty 变更都触发 IDB 缓存 debounce 写 (用户刷新前不存盘也能恢复批注)
     scheduleIdbCacheWrite();
@@ -1046,29 +1196,43 @@ function _validateMarksAfterEdit(editor) {
   // 后果: mark 被部分删时 (e.g. "45678" → "4678"), mark 还在, validation 直接清掉 fuzzy
   // 但 ann.text 仍是 "45678" 跟实际 mark 不一致 — 视觉错乱 (侧栏显示 "45678" 但编辑器高亮 "4678")
   const threadFound = new Set();
-  const threadCurrentText = new Map();  // threadId → 当前 mark text (first occurrence)
-  const textCount = new Map();
-  editor.state.doc.descendants((node, pos) => {
-    if (!node.isText) return;
-    const text = node.text;
-    if (text) textCount.set(text, (textCount.get(text) || 0) + 1);
-    for (const m of node.marks) {
-      if (m.type === markType && m.attrs.threadId) {
-        const tid = m.attrs.threadId;
-        threadFound.add(tid);
-        if (!threadCurrentText.has(tid)) threadCurrentText.set(tid, text);
-        else threadCurrentText.set(tid, threadCurrentText.get(tid) + text);
+    const threadCurrentText = new Map();  // threadId → 当前 mark text (first occurrence)
+    const threadMarkRange = new Map();    // v1.43.25: threadId → {from,to} 当前 mark 物理范围
+    const textCount = new Map();
+    editor.state.doc.descendants((node, pos) => {
+      if (!node.isText) return;
+      const text = node.text;
+      if (text) textCount.set(text, (textCount.get(text) || 0) + 1);
+      for (const m of node.marks) {
+        if (m.type === markType && m.attrs.threadId) {
+          const tid = m.attrs.threadId;
+          threadFound.add(tid);
+          if (!threadCurrentText.has(tid)) threadCurrentText.set(tid, text);
+          else threadCurrentText.set(tid, threadCurrentText.get(tid) + text);
+          const end = pos + node.nodeSize;
+          if (!threadMarkRange.has(tid)) threadMarkRange.set(tid, { from: pos, to: end });
+          else {
+            const r = threadMarkRange.get(tid);
+            if (pos < r.from) r.from = pos;
+            if (end > r.to) r.to = end;
+          }
+        }
       }
-    }
-  });
-  // 2) O(N) check each ann
-  let changed = false;
-  for (const ann of State.annotations) {
-    if (!ann || typeof ann !== 'object' || !ann.threadId) continue;
-    if (threadFound.has(ann.threadId)) {
-      // mark 在 → 检查 text 是否一致 (v1.43.3)
-      const currentText = threadCurrentText.get(ann.threadId) || '';
-      const textMatches = currentText === ann.text;
+    });
+    // 2) O(N) check each ann
+    let changed = false;
+    for (const ann of State.annotations) {
+      if (!ann || typeof ann !== 'object' || !ann.threadId) continue;
+      if (threadFound.has(ann.threadId)) {
+        // v1.43.25: 正文编辑后同步 range 到 PM 物理位置 (避免 stale range)
+        const live = threadMarkRange.get(ann.threadId);
+        if (live && (!ann.range || ann.range.from !== live.from || ann.range.to !== live.to)) {
+          ann.range = { from: live.from, to: live.to };
+          changed = true;
+        }
+        // mark 在 → 检查 text 是否一致 (v1.43.3)
+        const currentText = threadCurrentText.get(ann.threadId) || '';
+        const textMatches = currentText === ann.text;
       if (textMatches) {
         // 完全匹配, 清除 invalid 标志
         if (ann.deleted) { ann.deleted = false; changed = true; }
@@ -1185,6 +1349,11 @@ function markClean() {
     State.currentFile.dirty = false;
     $('#dirty-indicator').classList.remove('is-dirty');
     $('#current-file-name').textContent = State.currentFile.name;
+    try {
+      const t = State.tabs.find(x => x && x.id === State.activeTabId);
+      if (t) { t.dirty = false; t.name = State.currentFile.name; }
+      renderDocTabs();
+    } catch {}
     updateTreeDirtyDots();
   }
 }
@@ -1314,6 +1483,129 @@ function updateTreeDirtyDots() {
   });
 }
 
+// v1.43.22: Image → block-level atom. 原生 Image (group:'inline', inline:true, draggable:true)
+//   - 既不能让光标停在前面/后面 (inline atom 严格意义上是 inline 文本节点)
+//   - 也不希望随便拖动. Override schema via Image.extend():
+//     group:'block', inline:false, atom:true, draggable:false.
+// v1.43.27: 显式 selectable:true — Image 默认就是 true, 这里再加一份做 defense-in-depth,
+//   并保证点击图片 = NodeSelection (只选图片) 而不是跨块 TextSelection
+const ImageBlock = Image.extend({
+  inline: false,
+  group: 'block',
+  atom: true,
+  draggable: false,
+  selectable: true,
+  allowBase64: true,
+  parseHTML() {
+    return [{
+      tag: 'img[src]',
+    }];
+  },
+  addAttributes() {
+    return {
+      src: {
+        default: null,
+        parseHTML: el => el.getAttribute('src'),
+        renderHTML: a => (a.src ? { src: a.src } : {}),
+      },
+      alt: {
+        default: null,
+        parseHTML: el => el.getAttribute('alt'),
+        renderHTML: a => (a.alt ? { alt: a.alt } : {}),
+      },
+      title: {
+        default: null,
+        parseHTML: el => el.getAttribute('title'),
+        renderHTML: a => (a.title ? { title: a.title } : {}),
+      },
+      width: {
+        default: null,
+        parseHTML: el => el.getAttribute('width'),
+        renderHTML: a => (a.width ? { width: a.width } : {}),
+      },
+      height: {
+        default: null,
+        parseHTML: el => el.getAttribute('height'),
+        renderHTML: a => (a.height ? { height: a.height } : {}),
+      },
+    };
+  },
+});
+
+// v1.43.30: 图片前后光标导航
+// 根因: prosemirror-gapcursor 的 GapCursor.valid() 要求 closedBefore&&closedAfter;
+// 相邻 paragraph 有 inlineContent → closedBefore=false → 段落↔图片之间 **永远不出现 gapcursor**。
+// 箭头从段末右移会变成 NodeSelection(image), 再打字会整图替换掉。
+// 本扩展: 箭头跨图跳到对侧 textblock; 点图旁空隙插入/聚焦空段。
+const ImageCaretNav = Extension.create({
+  name: 'imageCaretNav',
+  addKeyboardShortcuts() {
+    const jump = (dir, dirStr) => () => {
+      const editor = this.editor;
+      const { state, view } = editor;
+      const sel = state.selection;
+      const doc = state.doc;
+
+      // A) 已 NodeSelection 在 image 上 → 离开到对侧, 不让方向键卡在图上
+      if (sel.node && sel.node.type.name === 'image') {
+        const imgPos = sel.from;
+        const imgEnd = sel.to;
+        if (dir > 0) {
+          const $a = doc.resolve(imgEnd);
+          if ($a.nodeAfter && $a.nodeAfter.isTextblock) {
+            return editor.commands.setTextSelection(imgEnd + 1);
+          }
+          return editor.chain().insertContentAt(imgEnd, { type: 'paragraph' }).setTextSelection(imgEnd + 1).run();
+        }
+        const $b = doc.resolve(imgPos);
+        if ($b.nodeBefore && $b.nodeBefore.isTextblock) {
+          return editor.commands.setTextSelection(imgPos - 1);
+        }
+        return editor.chain().insertContentAt(imgPos, { type: 'paragraph' }).setTextSelection(imgPos + 1).run();
+      }
+
+      // B) 段末/段首跨过相邻 image (跳过 NodeSelection)
+      if (!sel.empty) return false;
+      if (!view.endOfTextblock(dirStr)) return false;
+
+      const $pos = dir > 0 ? sel.$to : sel.$from;
+      if (dir > 0) {
+        // 当前 textblock 之后
+        let after;
+        try { after = $pos.after($pos.depth); } catch (e) { return false; }
+        const node = doc.nodeAt(after);
+        if (!node || node.type.name !== 'image') return false;
+        const imgEnd = after + node.nodeSize;
+        const $a = doc.resolve(imgEnd);
+        if ($a.nodeAfter && $a.nodeAfter.isTextblock) {
+          return editor.commands.setTextSelection(imgEnd + 1);
+        }
+        return editor.chain().insertContentAt(imgEnd, { type: 'paragraph' }).setTextSelection(imgEnd + 1).run();
+      }
+
+      // dir < 0: 当前 textblock 之前
+      let before;
+      try { before = $pos.before($pos.depth); } catch (e) { return false; }
+      if (before <= 0) return false;
+      const $b = doc.resolve(before);
+      const prev = $b.nodeBefore;
+      if (!prev || prev.type.name !== 'image') return false;
+      const imgPos = before - prev.nodeSize;
+      const $i = doc.resolve(imgPos);
+      if ($i.nodeBefore && $i.nodeBefore.isTextblock) {
+        return editor.commands.setTextSelection(imgPos - 1);
+      }
+      return editor.chain().insertContentAt(imgPos, { type: 'paragraph' }).setTextSelection(imgPos + 1).run();
+    };
+    return {
+      ArrowRight: jump(1, 'right'),
+      ArrowDown: jump(1, 'down'),
+      ArrowLeft: jump(-1, 'left'),
+      ArrowUp: jump(-1, 'up'),
+    };
+  },
+});
+
 // ============================================================
 // 4. Tiptap 初始化
 // ============================================================
@@ -1333,10 +1625,17 @@ function initEditor() {
           depth: 20,
           newGroupDelay: 500,
         },
+        // v1.43.30: 关掉 StarterKit 内置 gapcursor, 只留下面显式 Gapcursor 一份
+        // 双注册会 log "Duplicate extension names: gapCursor", 实测箭头/点击进 gap 失败
+        gapcursor: false,
       }),  // v1.38: PM Ctrl+Z 容量 20
       Highlight.configure({ multicolor: false }),
       Link.configure({ openOnClick: false, autolink: true, HTMLAttributes: { rel: 'noopener noreferrer' } }),
-      Image,
+      ImageBlock,
+      // v1.43.27/30: 显式唯一 Gapcursor — 仅对 atom↔atom / 文档边界等 closed 缝有效
+      Gapcursor,
+      // v1.43.30: 段落↔图片 的箭头跨图 + (配合 setupImageGapClick) 点空隙插空段
+      ImageCaretNav,
       Placeholder.configure({ placeholder: '在此输入 Markdown，或从工具栏打开文件…' }),
       Table.configure({
         resizable: false,
@@ -1358,6 +1657,10 @@ function initEditor() {
       if (transaction?.getMeta('__activeMarkSync') || transaction?.getMeta('__tableDragSelect')) {
         // 仍然刷新侧栏 (highlight 已经 dispatch 了, renderCommentList 由 highlightActiveMark 自己触发)
         return;
+      }
+      // v1.43.21: 记录最近一次用户操作来源, 供 undoSmartDispatch 按时间优先
+      if (transaction?.docChanged && transaction?.getMeta('addToHistory') !== false) {
+        State.history.lastOp = 'pm';
       }
       // v1.37: 用户在编辑 PM doc 时的 doc 跟踪 - 通过 PM 自己的 history plugin 处理
       // (这里只 markDirty + 同步侧栏/大纲/mark 验证, 不主动 pushHistory)
@@ -1387,6 +1690,7 @@ function initEditor() {
     },
     onSelectionUpdate: ({ editor }) => {
       handleSelectionChange();
+      updateTableControls();
     },
   });
   // P-2: 表格内跨 cell 拖选 - 浏览器原生 table 把 selection 限制在单 cell 内
@@ -1656,6 +1960,27 @@ function handleSelectionChange() {
     }
   }
 
+  // v1.43.28: 先处理图片 NodeSelection (from/to 差 1, empty=false, 但不是文字选区)
+  const sel0 = State.editor.state.selection;
+  if (isImageNodeSelection(sel0)) {
+    // 若图上已有批注, 激活对应 thread
+    try {
+      const imgNode = sel0.node || editor.state.doc.nodeAt(sel0.from);
+      const src = imgNode?.attrs?.src || '';
+      const hit = (State.annotations || []).find(a =>
+        a && !a.invalid && Array.isArray(a.imageAnchors) && a.imageAnchors.some(x => x && (x.from === sel0.from || (src && x.src === src)))
+      );
+      if (hit) {
+        if (State.activeThreadId !== hit.threadId) State.activeThreadId = hit.threadId;
+        highlightActiveMark();
+        renderCommentList();
+        refreshAnnotationImageDecos();
+      }
+    } catch (e) { /* ignore */ }
+    positionFloatCommentAt(editor, from, sel0);
+    return;
+  }
+
   if (empty || from === to) {
     // CellSelection 不是 empty (覆盖多 cell), 不在这里 return
     const isCellSel = State.editor.state.selection.forEachCell
@@ -1731,30 +2056,20 @@ function handleSelectionChange() {
     } else if (($from.parent.type.name === 'paragraph' && $to.parent.type.name === 'paragraph')
             || ($from.parent.type.name === 'heading' && $to.parent.type.name === 'heading')
             || ($from.parent.type.name === 'heading' && $to.parent.type.name === 'paragraph')
-            || ($from.parent.type.name === 'paragraph' && $to.parent.type.name === 'heading')) {
-      // 跨 textblock 选区 (含 heading + paragraph 组合): 不 reject, 让 handleCreateMultiParagraphAnnotation 后续处理
-      // 按钮继续显示 (定位到 from 上沿)
+            || ($from.parent.type.name === 'paragraph' && $to.parent.type.name === 'heading')
+            || ($from.parent.isTextblock && $to.parent.isTextblock)
+            || collectImageAnchors(editor.state.doc, from, to).length > 0) {
+      // 跨 textblock / 选区覆盖 figure: 不 reject
     } else {
       // 其他跨 block (list item, blockquote, codeBlock 跨段) → reject
       btn.classList.add('hidden');
-      setStatus('提示', '批注暂不支持跨块选区, 请选段落内或跨段连续文字');
+      setStatus('提示', '批注暂不支持跨块选区, 请选段落内、跨段文字或图片');
       return;
     }
   }
 
-  // 定位按钮：选区上沿
-  try {
-    const start = editor.view.coordsAtPos(from);
-    const editorPane = $('#editor-pane');
-    const paneRect = editorPane.getBoundingClientRect();
-    const top = start.top - paneRect.top + editorPane.scrollTop - 32;
-    const left = start.left - paneRect.left + editorPane.scrollLeft;
-    btn.style.top = `${Math.max(0, top)}px`;
-    btn.style.left = `${left}px`;
-    btn.classList.remove('hidden');
-  } catch (e) {
-    btn.classList.add('hidden');
-  }
+  // 定位按钮：选区上沿 (含跨段选中 figure 时尽量贴起点)
+  positionFloatCommentAt(editor, from, sel);
 }
 
 // Pane resizer (左/右栏宽度拖拽)
@@ -1836,20 +2151,43 @@ function setupFloatCommentButton() {
       handleCreateMultiCellAnnotation(sel);
       return;
     }
-    // 判断是不是跨 textblock 多行选区 (PM 标记无法跨 block, 我们对每段各打 mark 共享 threadId)
-    // v2.1: 任何 textblock 组合 (paragraph + heading + ...) 都走多段路径
     const { from, to } = sel;
     if (from === to) return;
-    const $from = State.editor.state.doc.resolve(from);
-    const $to = State.editor.state.doc.resolve(to);
-    if ($from.parent !== $to.parent && $from.parent.isTextblock && $to.parent.isTextblock) {
-      handleCreateMultiParagraphAnnotation(from, to);
+    // v1.43.22/28: NodeSelection on image / 选区覆盖 figure
+    let node = sel.node;
+    if ((!node || node.type.name !== 'image') && isImageNodeSelection(sel)) {
+      try { node = State.editor.state.doc.nodeAt(sel.from); } catch (e) { node = null; }
+    }
+    if (node && node.type && node.type.name === 'image') {
+      const anc = {
+        from, to: from + node.nodeSize,
+        src: node.attrs.src || '',
+        alt: node.attrs.alt || '',
+        title: node.attrs.title || '',
+      };
+      createAnnotationThread(anc.from, anc.to, imageAnchorLabel(anc), {
+        imageAnchors: [anc],
+        skipMark: true,
+      });
       return;
     }
+    const imageAnchors = collectImageAnchors(State.editor.state.doc, from, to);
+    const $from = State.editor.state.doc.resolve(from);
+    const $to = State.editor.state.doc.resolve(to);
+    // 跨 textblock (含中间夹 image block): 多段 mark + imageAnchors
+    if ($from.parent !== $to.parent) {
+      if (($from.parent.isTextblock && $to.parent.isTextblock) || imageAnchors.length > 0) {
+        handleCreateMultiParagraphAnnotation(from, to);
+        return;
+      }
+    }
     const text = State.editor.state.doc.textBetween(from, to, ' ');
-    // v2: 不再弹作者 modal 拦截用户, 没作者直接以匿名创建批注 (作者可后改)
-    // 老逻辑: !State.author → 弹 modal → then() 再创建 → 用户点不动浮按钮
-    createAnnotationThread(from, to, text);
+    if ((!text || !text.trim()) && imageAnchors.length) {
+      const label = imageAnchors.map(imageAnchorLabel).join(' ');
+      createAnnotationThread(from, to, label, { imageAnchors, skipMark: true });
+      return;
+    }
+    createAnnotationThread(from, to, text, imageAnchors.length ? { imageAnchors } : null);
   });
   // mark 删除按钮: 从正文删除当前 active 批注
   $('#mark-delete-btn').addEventListener('click', () => {
@@ -1859,13 +2197,330 @@ function setupFloatCommentButton() {
   });
   // 点击空白处 / 切换 active 时隐藏 popover
   document.addEventListener('mousedown', e => {
-    if (!e.target.closest('#float-comment-btn') && !e.target.closest('.ProseMirror')) {
+    // v1.43.29: 点在按钮外都藏 (含 ProseMirror) — 避免 float 叠在正文上吞掉拖选
+    if (!e.target.closest('#float-comment-btn')) {
       $('#float-comment-btn').classList.add('hidden');
     }
   });
   // 编辑器滚动时同步 popover 位置
   const editorPane = $('#editor-pane');
   if (editorPane) editorPane.addEventListener('scroll', positionMarkDeletePopover);
+  // v1.43.28: 点击图片强制 NodeSelection + 弹出批注按钮
+  setupImageAnnotationSelect();
+}
+
+// v1.43.28/29: 图片选区
+// 1) mousedown 在 img 上 → NodeSelection (单击只选图)
+// 2) 从文字拖到 img 松手 → 选区自动吞进 image (否则 PM TextSelection 停在图前一行, 必须再拖多一行)
+// 根因: block atom 的 TextSelection 端点只能落在 textblock 内; 拖到图上 to 停在 prev paragraph 末尾, 不含 image
+function resolveImagePosFromDom(img) {
+  if (!img || !State.editor) return -1;
+  let imgPos = -1;
+  try {
+    const posInfo = State.editor.view.posAtDOM(img, 0);
+    let p = typeof posInfo === 'number' ? posInfo : (posInfo && posInfo.pos);
+    if (typeof p === 'number') {
+      const $p = State.editor.state.doc.resolve(Math.min(Math.max(p, 0), State.editor.state.doc.content.size));
+      if ($p.nodeAfter && $p.nodeAfter.type.name === 'image') imgPos = $p.pos;
+      else if ($p.nodeBefore && $p.nodeBefore.type.name === 'image') imgPos = $p.pos - $p.nodeBefore.nodeSize;
+    }
+    if (imgPos < 0) {
+      State.editor.state.doc.descendants((n, pos) => {
+        if (n.type.name === 'image' && imgPos < 0) {
+          const dom = State.editor.view.nodeDOM(pos);
+          const el = dom && (dom.tagName === 'IMG' ? dom : dom.querySelector && dom.querySelector('img'));
+          if (el === img || (el && el.contains && el.contains(img)) || dom === img) imgPos = pos;
+        }
+      });
+    }
+  } catch (err) {
+    console.warn('[imageSelect] pos fail', err);
+  }
+  return imgPos;
+}
+
+function selectionCoversImage(sel, imgPos, imgEnd) {
+  if (!sel) return false;
+  if (sel.node && sel.from === imgPos) return true;
+  if (!sel.empty && sel.from <= imgPos && sel.to >= imgEnd) return true;
+  return false;
+}
+
+// TextSelection 端点必须在 inline content 内; imgEnd (block 边界, parent=doc) 会触发
+// "endpoint not pointing into a node with inline content" 并可能丢选区。
+// 图后合法点: 下一 textblock 内容起点 (imgEnd+1); 图前合法点: 上一 textblock 内容末 (imgPos-1)。
+function posJustAfterImage(imgPos, imgEnd) {
+  const doc = State.editor.state.doc;
+  if (imgEnd >= doc.content.size) return imgEnd;
+  try {
+    const $a = doc.resolve(imgEnd);
+    if ($a.parent && $a.parent.inlineContent) return imgEnd;
+    if ($a.nodeAfter && $a.nodeAfter.isTextblock) return imgEnd + 1;
+  } catch (e) { /* ignore */ }
+  return Math.min(imgEnd + 1, doc.content.size);
+}
+function posJustBeforeImage(imgPos) {
+  const doc = State.editor.state.doc;
+  if (imgPos <= 0) return 0;
+  try {
+    const $b = doc.resolve(imgPos);
+    if ($b.parent && $b.parent.inlineContent) return imgPos;
+    if ($b.nodeBefore && $b.nodeBefore.isTextblock) return imgPos - 1;
+  } catch (e) { /* ignore */ }
+  return Math.max(imgPos - 1, 0);
+}
+
+function extendSelectionThroughImage(img) {
+  if (!State.editor || !img) return false;
+  const imgPos = resolveImagePosFromDom(img);
+  if (imgPos < 0) return false;
+  const node = State.editor.state.doc.nodeAt(imgPos);
+  if (!node || node.type.name !== 'image') return false;
+  const imgEnd = imgPos + node.nodeSize;
+  const sel = State.editor.state.selection;
+  if (selectionCoversImage(sel, imgPos, imgEnd)) return false;
+
+  let from = sel.from;
+  let to = sel.to;
+  if (from > to) { const t = from; from = to; to = t; }
+
+  // 空选区 / 光标落在图上 → 纯 NodeSelection
+  if (sel.empty || from === to) {
+    try {
+      State.editor.chain().focus().setNodeSelection(imgPos).run();
+    } catch (err) {
+      try { State.editor.commands.setNodeSelection(imgPos); } catch (e2) { /* ignore */ }
+    }
+    return true;
+  }
+
+  // 选区在图前 (to 卡在 prev textblock 末尾) → 终点改到图后合法 text 位
+  // nodesBetween(from, after) 会包含 image; after 在下一 textblock 起点不吞下一行文字
+  if (to <= imgPos) {
+    to = posJustAfterImage(imgPos, imgEnd);
+  } else if (from >= imgEnd) {
+    // 选区在图后 → 起点改到图前合法 text 位
+    from = posJustBeforeImage(imgPos);
+  } else {
+    // 半截 — 对齐到合法 text 端点并保证覆盖 image
+    if (from > imgPos) from = posJustBeforeImage(imgPos);
+    if (to < imgEnd) to = posJustAfterImage(imgPos, imgEnd);
+  }
+
+  // 若归一化后没有文字、只包住图 → NodeSelection
+  const onlyImage =
+    (from === imgPos && to === imgEnd) ||
+    (from === posJustBeforeImage(imgPos) && to === posJustAfterImage(imgPos, imgEnd) &&
+      !State.editor.state.doc.textBetween(from, to, '').trim());
+
+  try {
+    if (onlyImage || (from >= imgPos && to <= imgEnd)) {
+      State.editor.chain().focus().setNodeSelection(imgPos).run();
+    } else {
+      State.editor.chain().focus().setTextSelection({ from, to }).run();
+    }
+  } catch (err) {
+    try {
+      State.editor.commands.setNodeSelection(imgPos);
+    } catch (e2) {
+      try { State.editor.commands.setTextSelection({ from, to }); } catch (e3) { /* ignore */ }
+    }
+  }
+  return true;
+}
+
+// v1.43.30: 点击图片前后空隙 → 确保有空段落并放光标 (PM gapcursor 在 paragraph↔image 间无效)
+// 注意: posAtCoords 在图后空隙也常返回 image 的 pos (nodeAfter=image), 不能用 nodeBefore 判 after;
+// 必须用 clientY 相对图片中线判断 before/after。
+function tryPlaceCaretInImageGap(e) {
+  if (!State.editor || !State.editor.view) return false;
+  const view = State.editor.view;
+  let coords;
+  try {
+    coords = view.posAtCoords({ left: e.clientX, top: e.clientY });
+  } catch (err) {
+    return false;
+  }
+  // inside === -1: 点在节点之间的空隙; 也接受点在紧贴图的 margin 区
+  if (!coords) return false;
+  if (coords.inside !== -1) {
+    // 若 inside 是 image, 交给图片 mousedown (NodeSelection), 这里不抢
+    try {
+      const n = view.state.doc.nodeAt(coords.inside);
+      if (n && n.type.name === 'image') return false;
+    } catch (err) { /* ignore */ }
+    return false;
+  }
+
+  const doc = view.state.doc;
+  // 找最近的 image: 先看 coords.pos 旁, 再扫 DOM 几何
+  let imgPos = -1;
+  try {
+    const $pos = doc.resolve(Math.min(Math.max(coords.pos, 0), doc.content.size));
+    if ($pos.nodeAfter && $pos.nodeAfter.type.name === 'image') imgPos = $pos.pos;
+    else if ($pos.nodeBefore && $pos.nodeBefore.type.name === 'image') imgPos = $pos.pos - $pos.nodeBefore.nodeSize;
+  } catch (err) { /* ignore */ }
+
+  if (imgPos < 0) {
+    // 几何兜底: 找垂直距离最近的 image
+    let best = null;
+    doc.descendants((n, pos) => {
+      if (n.type.name !== 'image') return;
+      let dom = null;
+      try { dom = view.nodeDOM(pos); } catch (err) { return; }
+      const el = dom && (dom.tagName === 'IMG' ? dom : (dom.querySelector && dom.querySelector('img')));
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      // 只考虑点在图左右范围内、垂直在图外 margin 带 (±24px)
+      if (e.clientX < r.left - 8 || e.clientX > r.right + 8) return;
+      const distBefore = r.top - e.clientY; // >0 点在图上方
+      const distAfter = e.clientY - r.bottom; // >0 点在图下方
+      if (distBefore >= 0 && distBefore <= 28) {
+        if (!best || distBefore < best.d) best = { pos, d: distBefore, side: 'before' };
+      } else if (distAfter >= 0 && distAfter <= 28) {
+        if (!best || distAfter < best.d) best = { pos, d: distAfter, side: 'after' };
+      }
+    });
+    if (!best) return false;
+    imgPos = best.pos;
+    var sideFromGeom = best.side;
+  }
+
+  const node = doc.nodeAt(imgPos);
+  if (!node || node.type.name !== 'image') return false;
+  const imgEnd = imgPos + node.nodeSize;
+
+  // 用 Y 相对图中线判前后 (比 nodeAfter/Before 靠谱)
+  let side = typeof sideFromGeom !== 'undefined' ? sideFromGeom : null;
+  if (!side) {
+    let el = null;
+    try {
+      const dom = view.nodeDOM(imgPos);
+      el = dom && (dom.tagName === 'IMG' ? dom : (dom.querySelector && dom.querySelector('img')));
+    } catch (err) { /* ignore */ }
+    if (el) {
+      const r = el.getBoundingClientRect();
+      side = e.clientY < (r.top + r.bottom) / 2 ? 'before' : 'after';
+    } else {
+      side = 'before';
+    }
+  }
+
+  const ed = State.editor;
+  if (side === 'before') {
+    const $b = doc.resolve(imgPos);
+    const prev = $b.nodeBefore;
+    if (prev && prev.type.name === 'paragraph' && prev.content.size === 0) {
+      ed.chain().focus().setTextSelection(imgPos - 1).run();
+    } else {
+      ed.chain().focus().insertContentAt(imgPos, { type: 'paragraph' }).setTextSelection(imgPos + 1).run();
+    }
+  } else {
+    const $a = doc.resolve(imgEnd);
+    const next = $a.nodeAfter;
+    if (next && next.type.name === 'paragraph' && next.content.size === 0) {
+      ed.chain().focus().setTextSelection(imgEnd + 1).run();
+    } else {
+      ed.chain().focus().insertContentAt(imgEnd, { type: 'paragraph' }).setTextSelection(imgEnd + 1).run();
+    }
+  }
+  try { view.focus(); } catch (err) { /* ignore */ }
+  queueMicrotask(() => handleSelectionChange());
+  return true;
+}
+
+function setupImageAnnotationSelect() {
+  const editorEl = $('#editor');
+  if (!editorEl || editorEl._imageAnnSelectBound) return;
+  editorEl._imageAnnSelectBound = true;
+
+  let downOnImage = false;
+  let pointerDown = false;
+  let lastImgOver = null;
+  let finishScheduled = false;
+
+  const imgFromEvent = (e) => {
+    let img = e.target && e.target.closest && e.target.closest('.ProseMirror img, .ProseMirror .ProseMirror-selectednode img');
+    if (!img && typeof e.clientX === 'number') {
+      try {
+        const el = document.elementFromPoint(e.clientX, e.clientY);
+        img = el && el.closest && el.closest('.ProseMirror img, .ProseMirror .ProseMirror-selectednode img');
+      } catch (err) { /* ignore */ }
+    }
+    return img || null;
+  };
+
+  editorEl.addEventListener('mousedown', (e) => {
+    if (e.button !== 0 || !State.editor) return;
+    pointerDown = true;
+    finishScheduled = false;
+    // 新手势开始: 先藏旧 float, 避免挡在正文/图上吞掉后续 drag 事件
+    // (选区确定后 handleSelectionChange / positionFloatCommentAt 会再显示)
+    try {
+      const fb = $('#float-comment-btn');
+      if (fb && !fb.classList.contains('hidden') && !(e.target && e.target.closest && e.target.closest('#float-comment-btn'))) {
+        fb.classList.add('hidden');
+      }
+    } catch (err) { /* ignore */ }
+    const img = imgFromEvent(e);
+    downOnImage = !!img;
+    lastImgOver = img;
+    if (!img) {
+      // v1.43.30: 点在图前/后空隙 (posAtCoords.inside === -1) → 插/聚焦空段, 让光标真正落在 fig 前后
+      if (tryPlaceCaretInImageGap(e)) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+      return;
+    }
+    const imgPos = resolveImagePosFromDom(img);
+    if (imgPos < 0) return;
+    // capture: 抢在 PM / 浏览器原生拖图前, 强制 NodeSelection
+    e.preventDefault();
+    e.stopPropagation();
+    try {
+      State.editor.chain().focus().setNodeSelection(imgPos).run();
+    } catch (err) {
+      try { State.editor.commands.setNodeSelection(imgPos); } catch (e2) { /* ignore */ }
+    }
+    queueMicrotask(() => handleSelectionChange());
+  }, true);
+
+  // 拖选过程记录最后经过的 img (mouseup target 在 headless/OS 下可能丢)
+  const onMove = (e) => {
+    if (!pointerDown || !State.editor || downOnImage) return;
+    const img = imgFromEvent(e);
+    if (img) lastImgOver = img;
+  };
+  editorEl.addEventListener('mousemove', onMove, true);
+  document.addEventListener('mousemove', onMove, true);
+
+  // v1.43.29: 从文字拖到图片松手 — PM 不会把 atom 算进 TextSelection, 这里补吞
+  // 等 PM mouseup 写完选区再改 (双 rAF + setTimeout 兜底)
+  const finishDrag = (e) => {
+    if (e && e.button != null && e.button !== 0) return;
+    if (!pointerDown && !downOnImage) return;
+    const startedOnImage = downOnImage;
+    const img = (e && imgFromEvent(e)) || lastImgOver;
+    pointerDown = false;
+    downOnImage = false;
+    lastImgOver = null;
+    if (startedOnImage) return; // mousedown 已 NodeSelection
+    if (!img || !State.editor) return;
+    if (finishScheduled) return;
+    finishScheduled = true;
+    const run = () => {
+      finishScheduled = false;
+      if (!State.editor) return;
+      if (extendSelectionThroughImage(img)) {
+        queueMicrotask(() => handleSelectionChange());
+      }
+    };
+    requestAnimationFrame(() => { requestAnimationFrame(run); });
+    setTimeout(run, 0);
+  };
+  editorEl.addEventListener('mouseup', finishDrag, true);
+  document.addEventListener('mouseup', finishDrag, true);
 }
 
 // ============================================================
@@ -1892,7 +2547,8 @@ function checkAnnotationCap() {
   return false;
 }
 
-function createAnnotationThread(from, to, text) {
+function createAnnotationThread(from, to, text, opts = null) {
+  const options = opts && typeof opts === 'object' ? opts : {};
   // P2-A: 异常数据防御 - 拒绝空 text
   if (!text || text.length === 0) {
     showToast('批注文字不能为空', 2000);
@@ -1921,19 +2577,40 @@ function createAnnotationThread(from, to, text) {
   // comments 数组在用户输入第一条后由 addReply 写入 (跟 addReply 路径一致)
   // 这样侧栏显示的就是用户实际输入, 不是空 placeholder
   const thread = {
-    threadId,
-    range: { from, to },
-    text,                  // 锚定文字
-    prefix,                // text 前的上下文 (max 20 字符, 换行截断)
-    suffix,                // text 后的上下文
-    resolved: false,
-    createdAt: nowISO(),
-    comments: [],          // P-card fix: 初始空, 第一次 addReply 时填充
-  };
-  pushHistory();
-  State.annotations.push(thread);
-  // 在编辑器中加 mark
-  applyAnnotationMark(threadId, from, to);
+      threadId,
+      range: { from, to },
+      text,                  // 锚定文字
+      prefix,                // text 前的上下文 (max 20 字符, 换行截断)
+      suffix,                // text 后的上下文
+      resolved: false,
+      createdAt: nowISO(),
+      comments: [],          // P-card fix: 初始空, 第一次 addReply 时填充
+      // v1.43.25: 未提交首条评论前是 draft — 不入 undo 栈, 避免改正文/Ctrl+Z 误删整条
+      pending: true,
+    };
+    // v1.43.22: figure/image 锚点 (mark 无法挂 atom)
+    if (Array.isArray(options.imageAnchors) && options.imageAnchors.length) {
+      thread.imageAnchors = options.imageAnchors.map(a => ({ ...a }));
+    } else if (State.editor) {
+      const autoImg = collectImageAnchors(State.editor.state.doc, from, to);
+      if (autoImg.length) thread.imageAnchors = autoImg;
+    }
+    if (Array.isArray(options.ranges) && options.ranges.length) {
+      thread.ranges = options.ranges.map(r => ({ ...r }));
+    }
+    // v1.43.25: 创建 draft 不 pushHistory — 旧逻辑先 push 空快照再 push thread,
+    // 用户改正文后 Ctrl+Z 会落到 ann 栈 → 整条未确认批注被撤销
+    State.annotations.push(thread);
+  // 纯 image atom: skip mark (无效); 否则打 mark
+  let skipMark = !!options.skipMark;
+  if (!skipMark && thread.imageAnchors && thread.imageAnchors.length === 1) {
+    const a0 = thread.imageAnchors[0];
+    if (a0.from === from && a0.to === to) skipMark = true;
+  }
+  if (!skipMark && from < to) {
+    applyAnnotationMark(threadId, from, to);
+  }
+  refreshAnnotationImageDecos();
   // 高亮新批注
   State.activeThreadId = threadId;
   renderCommentList();
@@ -1987,23 +2664,24 @@ function handleCreateMultiCellAnnotation(cellSel) {
   const docText = State.editor.state.doc.textBetween(0, State.editor.state.doc.content.size, ' ');
   const { prefix, suffix } = computeContext(ranges[0].from === cellSel.from ? text : text, docText);
   const thread = {
-    threadId,
-    range: ranges[0],       // 主 range 用于 activeMark 等单点逻辑
-    ranges,                 // 多 cell 范围数组 (table multi-cell annotation)
-    text,
-    prefix,
-    suffix,
-    resolved: false,
-    createdAt: nowISO(),
-    comments: [{
-      id: commentId,
-      author: { id: State.authorId, name: State.author },
-      body: '',
+      threadId,
+      range: ranges[0],       // 主 range 用于 activeMark 等单点逻辑
+      ranges,                 // 多 cell 范围数组 (table multi-cell annotation)
+      text,
+      prefix,
+      suffix,
+      resolved: false,
       createdAt: nowISO(),
-    }],
-  };
-  pushHistory();
-  State.annotations.push(thread);
+      comments: [{
+        id: commentId,
+        author: { id: State.authorId, name: State.author },
+        body: '',
+        createdAt: nowISO(),
+      }],
+      pending: true, // v1.43.25
+    };
+    // v1.43.25: draft 不入 undo 栈
+    State.annotations.push(thread);
   // 给每个 cell 加 mark
   applyAnnotationMarksMultiCell(threadId, ranges);
   // 清理 CellSelection (回到普通光标, 防止后续 markDirty 误判)
@@ -2034,6 +2712,9 @@ function applyAnnotationMark(threadId, from, to) {
     // P-D10: addMark 时带 authorColor (从 state 算)
     authorColor: authorColorIndex(State.authorId || threadId),
   }));
+  // v1.43.21: 批注 mark 不进 PM history — 否则 Ctrl+Z 的 mark-only 步会与 my-history 叠成 double-undo
+  tr.setMeta('addToHistory', false);
+  tr.setMeta('__activeMarkSync', true);
   State.editor.view.dispatch(tr);
   // 不调用 markDirty（这是结构性 mark 变化，已在 onUpdate 触发）
   // 但 markDirty 只在 doc 文本变化时——这里 mark 变化也会触发 onUpdate
@@ -2050,6 +2731,9 @@ function applyAnnotationMarksMultiCell(threadId, ranges) {
   for (const r of ranges) {
     tr.addMark(r.from, r.to, mark);
   }
+  // v1.43.21: 批注 mark 不进 PM history
+  tr.setMeta('addToHistory', false);
+  tr.setMeta('__activeMarkSync', true);
   State.editor.view.dispatch(tr);
 }
 
@@ -2099,12 +2783,28 @@ function handleCreateMultiParagraphAnnotation(from, to) {
       }
     }
   });
-  if (ranges.length === 0) {
+  // v1.43.22: 选区内 figure/image
+  const imageAnchors = collectImageAnchors(ed.state.doc, from, to);
+  if (ranges.length === 0 && imageAnchors.length === 0) {
     showToast('所选段落为空', 2000);
     return;
   }
-  // 收集 text (跨段用 \n 分隔, doc.textBetween 会自动跨段拼接)
-  const text = ed.state.doc.textBetween(from, to, ' ');
+  let text = ed.state.doc.textBetween(from, to, ' ');
+  if ((!text || !text.trim()) && imageAnchors.length) {
+    text = imageAnchors.map(imageAnchorLabel).join(' ');
+  } else if (imageAnchors.length) {
+    const labels = imageAnchors.map(imageAnchorLabel).filter(Boolean);
+    if (labels.length) {
+      text = (text + ' ' + labels.map(l => (l.startsWith('[') ? l : `[图:${l}]`)).join(' ')).trim();
+    }
+  }
+  if (ranges.length === 0 && imageAnchors.length) {
+    createAnnotationThread(imageAnchors[0].from, imageAnchors[imageAnchors.length - 1].to, text, {
+      imageAnchors,
+      skipMark: true,
+    });
+    return;
+  }
   const threadId = uuid();
   const commentId = uuid();
   const docText = ed.state.doc.textBetween(0, ed.state.doc.content.size, ' ');
@@ -2125,8 +2825,10 @@ function handleCreateMultiParagraphAnnotation(from, to) {
       createdAt: nowISO(),
     }],
   };
-  pushHistory();
-  State.annotations.push(thread);
+  if (imageAnchors.length) thread.imageAnchors = imageAnchors;
+    thread.pending = true; // v1.43.25: draft 不入 undo
+    // v1.43.25: 创建不 pushHistory
+    State.annotations.push(thread);
   // 每段各打 mark (跳过 0 长度 range, 因为 PM addMark 会 no-op)
   const tr = ed.state.tr;
   const mark = ed.schema.marks.annotation.create({ threadId, resolved: false });
@@ -2135,7 +2837,11 @@ function handleCreateMultiParagraphAnnotation(from, to) {
       tr.addMark(r.from, r.to, mark);
     }
   }
+  // v1.43.21: 批注 mark 不进 PM history
+  tr.setMeta('addToHistory', false);
+  tr.setMeta('__activeMarkSync', true);
   ed.view.dispatch(tr);
+  refreshAnnotationImageDecos();
   // 回到普通光标
   ed.commands.setTextSelection(ranges[0].from);
   State.activeThreadId = threadId;
@@ -2158,7 +2864,15 @@ function addReply(threadId, body) {
     body: body.trim(),
     createdAt: nowISO(),
   };
-  thread.comments.push(comment);
+  // v1.43.25: 首条有效评论提交后 draft → 正式, 之后才可被 undo 成「无评论」状态
+  if (thread.pending) thread.pending = false;
+  // 若 comments 里有空 body 的占位首条 (multi-para 路径), 用真内容填满
+  if (Array.isArray(thread.comments) && thread.comments.length === 1 && !String(thread.comments[0].body || '').trim()) {
+    thread.comments[0] = { ...thread.comments[0], ...comment, body: comment.body };
+  } else {
+    if (!Array.isArray(thread.comments)) thread.comments = [];
+    thread.comments.push(comment);
+  }
   // F18: 提交成功清草稿
   delete State.replyDrafts[threadId];
   markDirty();
@@ -2284,6 +2998,7 @@ function applyReattach() {
     resolved: thread.resolved,
     authorColor: authorColorIndex(thread.text || tid),
   }));
+  tr.setMeta('addToHistory', false);  // v1.43.21
   tr.setMeta('__activeMarkSync', true);
   ed.view.dispatch(tr);
   // 更新 ann
@@ -2331,6 +3046,9 @@ function deleteThread(threadId) {
       }
     });
   });
+  // v1.43.21: 删批注 mark 不进 PM history (undo 走 my-history)
+  tr.setMeta('addToHistory', false);
+  tr.setMeta('__activeMarkSync', true);
   editor.view.dispatch(tr);
   // 移除数据
   State.annotations = State.annotations.filter(t => t.threadId !== threadId);
@@ -2351,6 +3069,7 @@ function deleteThread(threadId) {
   } catch (e) { /* ignore */ }
   // AI 协作协议：通知
   emitAI('threadChange', { threadId, change: 'delete' });
+  refreshAnnotationImageDecos();
 }
 
 // ============================================================
@@ -2359,6 +3078,8 @@ function deleteThread(threadId) {
 function renderCommentList() {
   const list = $('#comment-list');
   const empty = $('#comment-empty');
+  // v1.43.22: 图批注 class 与侧栏同步
+  queueMicrotask(() => refreshAnnotationImageDecos());
   // v1.42: 软警告 fallback — 正常流程不会到这里 (硬上限阻止创建), 只在 import 大文件时兜底
   // 软阈值: cap * 2 (给用户 1 轮"接近上限"警告), cap=0 → 不警告
   // 例: cap=50 → 软=100, cap=200 → 软=400, cap=500 → 软=1000
@@ -2401,15 +3122,18 @@ function renderCommentList() {
   const visibleThreads = sorted.filter(t => t && typeof t === 'object' && t.threadId);
 
   if (visibleThreads.length === 0) {
-    list.innerHTML = '';
-    empty.classList.remove('hidden');
-    // v1.43.18: 空态时刷新「最近文件」列表
-    refreshEmptyRecentFiles();
-    updateCommentCounts();
-    syncFilterTabsFromCheckboxes();
-    return;
-  }
-  empty.classList.add('hidden');
+      list.innerHTML = '';
+      empty.classList.remove('hidden');
+      // v1.43.20: 分型空态 cold / doc / filter — 已有正文时不推「看示例」
+      syncCommentEmptyPresentation();
+      // v1.43.18: 空态时刷新「最近文件」列表
+      refreshEmptyRecentFiles();
+      updateCommentCounts();
+      syncFilterTabsFromCheckboxes();
+      return;
+    }
+    empty.classList.add('hidden');
+    empty.removeAttribute('data-empty-mode');
 
   // G15 + G16: 更新 thread count + tab 状态
   updateCommentCounts();
@@ -2787,6 +3511,7 @@ function highlightActiveMark() {
     });
   }
   if (changed) {
+    tr.setMeta('addToHistory', false);  // v1.43.21
     tr.setMeta('__activeMarkSync', true);
     editor.view.dispatch(tr);
   }
@@ -2797,6 +3522,7 @@ function highlightActiveMark() {
   if (targetTid) {
     editorEl.querySelectorAll(`.annotation-mark[data-thread-id="${targetTid}"]`).forEach(el => el.classList.add('is-active'));
   }
+  refreshAnnotationImageDecos();
   // 同步 mark-delete popover 位置
   positionMarkDeletePopover();
 }
@@ -2867,11 +3593,35 @@ function markdownToHtml(mdText, mediaUrls) {
 
 // F-media: 释放旧 doc 的所有 blob URL, 切/重开文件前调用防内存泄漏
 function revokeMediaUrls() {
+  // v1.43.31: 其它 tab 仍在用的 blob 不 revoke
+  const keep = new Set();
+  for (const t of State.tabs || []) {
+    if (t && t.id !== State.activeTabId) {
+      for (const u of Object.values(t.mediaUrls || {})) if (u) keep.add(u);
+    }
+  }
   for (const url of Object.values(State.mediaUrls || {})) {
-    try { URL.revokeObjectURL(url); } catch (e) { /* ignore */ }
+    if (url && !keep.has(url)) {
+      try { URL.revokeObjectURL(url); } catch (e) { /* ignore */ }
+    }
   }
   State.mediaUrls = {};
   State.mediaFiles = {};
+}
+
+function revokeTabMedia(tab) {
+  if (!tab) return;
+  const keep = new Set();
+  for (const t of State.tabs || []) {
+    if (!t || t.id === tab.id) continue;
+    for (const u of Object.values(t.mediaUrls || {})) if (u) keep.add(u);
+  }
+  for (const u of Object.values(State.mediaUrls || {})) if (u) keep.add(u);
+  for (const url of Object.values(tab.mediaUrls || {})) {
+    if (url && !keep.has(url)) {
+      try { URL.revokeObjectURL(url); } catch (e) { /* ignore */ }
+    }
+  }
 }
 
 // --- HTML → markdown (turndown)
@@ -3000,6 +3750,7 @@ function setRenderMode(mode) {
             console.warn(`[P-mark] mark restore 失败: text="${snap.text.slice(0,20)}..." threadId=${snap.threadId.slice(0,8)}`);
           }
         }
+        tr.setMeta('addToHistory', false);  // v1.43.21
         tr.setMeta('__activeMarkSync', true);  // 不标 dirty
         editor.view.dispatch(tr);
         // P-mark-fix: mark 失败的 ann 在侧栏标 fuzzy (range 失效, 提醒用户检查)
@@ -3159,6 +3910,7 @@ function pushHistory() {
     State.history.past.shift();
   }
   State.history.future = [];
+  State.history.lastOp = 'ann';  // v1.43.21: 最近是批注 ops
   updateHistoryButtons();
 }
 
@@ -3182,6 +3934,20 @@ function snapshotAnnotationMarks() {
 }
 function undo() {
   if (State.history.past.length === 0) return false;
+  // v1.43.25: 不撤销「未提交 draft 批注」— 旧 create 会 push 空快照, Ctrl+Z 误删整条
+  // 丢弃会抹掉当前 pending thread 的 past 帧
+  while (State.history.past.length > 0) {
+    const peek = State.history.past[State.history.past.length - 1];
+    const prevIds = new Set((peek.annotations || []).filter(a => a && a.threadId).map(a => a.threadId));
+    const pendingNow = State.annotations.filter(a => a && a.pending && a.threadId);
+    const wouldLoseDraft = pendingNow.some(a => !prevIds.has(a.threadId));
+    if (!wouldLoseDraft) break;
+    State.history.past.pop(); // 丢掉有害空快照
+  }
+  if (State.history.past.length === 0) {
+    updateHistoryButtons();
+    return false;
+  }
   // 1. 当前状态推入 future (给 redo 用) — 同时存 markSnapshot
   State.history.future.push({
     annotations: deepCloneAnnotations(State.annotations),
@@ -3276,6 +4042,9 @@ function rebuildAnnotationMarks(markSnapshot) {
   if (rebuilt.length === 0 && State.annotations.length > 0) {
     console.warn(`[rebuildAnnotationMarks] 所有 ${State.annotations.length} 个 thread 都未重建 mark (snapshot 空 + range 越界 或 thread 已删)`);
   }
+  // v1.43.21: rebuild 不进 PM history
+  tr.setMeta('addToHistory', false);
+  tr.setMeta('__activeMarkSync', true);
   ed.view.dispatch(tr);
   return rebuilt;
 }
@@ -3292,24 +4061,302 @@ function updateHistoryButtons() {
 function resetHistory() {
   State.history.past = [];
   State.history.future = [];
+  State.history.lastOp = null;
   updateHistoryButtons();
 }
 
+// v1.43.21: 清 PM history (setContent/load 会留下可 undo 的大替换, 污染 smart dispatch)
+function clearPmHistory() {
+  const ed = State.editor;
+  if (!ed) return;
+  try {
+    const EditorState = ed.state.constructor;
+    const next = EditorState.create({
+      schema: ed.schema,
+      doc: ed.state.doc,
+      selection: ed.state.selection,
+      plugins: ed.state.plugins,
+    });
+    ed.view.updateState(next);
+  } catch (e) {
+    console.warn('[clearPmHistory]', e);
+  }
+}
+
 // 从 .md 加载到编辑器
+
+// ============================================================
+// v1.43.31 多标签页 — 多文档并行, 打开新文档不再覆盖旧文档
+// ============================================================
+function genTabId() {
+  return 't_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 7);
+}
+
+function snapshotActiveTab() {
+  if (!State.editor) return null;
+  // 无文档且空 → 不建 tab
+  const hasFile = !!(State.currentFile && State.currentFile.name);
+  const bodyLen = (() => {
+    try { return (State.editor.state.doc.textContent || '').trim().length; } catch { return 0; }
+  })();
+  if (!hasFile && bodyLen === 0 && !(State.annotations || []).length) {
+    return null;
+  }
+  if (!State.activeTabId) State.activeTabId = genTabId();
+  const id = State.activeTabId;
+  const name = (State.currentFile && State.currentFile.name) || '未命名';
+  let html = '';
+  try { html = State.editor.getHTML(); } catch { html = ''; }
+  const snap = {
+    id,
+    name,
+    html,
+    annotations: JSON.parse(JSON.stringify(State.annotations || [])),
+    dirty: !!(State.currentFile && State.currentFile.dirty),
+    handle: State.currentFile && State.currentFile.handle ? State.currentFile.handle : null,
+    saveMode: State.saveMode || 'unknown',
+    mediaUrls: Object.assign({}, State.mediaUrls || {}),
+    mediaFiles: Object.assign({}, State.mediaFiles || {}),
+    activeThreadId: State.activeThreadId || null,
+    replyDrafts: Object.assign({}, State.replyDrafts || {}),
+    currentFile: State.currentFile
+      ? {
+          name: State.currentFile.name,
+          content: State.currentFile.content,
+          dirty: !!State.currentFile.dirty,
+          handle: State.currentFile.handle || null,
+          path: State.currentFile.path || null,
+        }
+      : { name, content: '', dirty: false, handle: null },
+  };
+  const idx = State.tabs.findIndex(t => t && t.id === id);
+  if (idx >= 0) State.tabs[idx] = snap;
+  else State.tabs.push(snap);
+  return snap;
+}
+
+function restoreTab(tab) {
+  if (!tab || !State.editor) return false;
+  stopAutosaveTimer();
+  State.activeTabId = tab.id;
+  // 不 revoke 其它 tab 的 media; 当前 State.media 直接换指针
+  State.mediaUrls = Object.assign({}, tab.mediaUrls || {});
+  State.mediaFiles = Object.assign({}, tab.mediaFiles || {});
+  State.saveMode = tab.saveMode || 'unknown';
+  State.activeThreadId = tab.activeThreadId || null;
+  State.replyDrafts = Object.assign({}, tab.replyDrafts || {});
+  State.reattachTarget = null;
+  try {
+    State.editor.commands.setContent(tab.html || '<p></p>', false);
+  } catch (e) {
+    console.warn('[tabs] setContent fail', e);
+    State.editor.commands.setContent('<p></p>', false);
+  }
+  clearPmHistory();
+  resetHistory();
+  State.annotations = JSON.parse(JSON.stringify(tab.annotations || []));
+  // 重建 mark
+  try { rebuildAnnotationMarks(); } catch (e) { console.warn('[tabs] rebuild marks', e); }
+  State.currentFile = tab.currentFile
+    ? {
+        name: tab.currentFile.name || tab.name,
+        content: tab.currentFile.content || '',
+        dirty: !!tab.dirty,
+        handle: tab.handle || tab.currentFile.handle || null,
+        path: tab.currentFile.path || null,
+        annotations: null,
+      }
+    : { name: tab.name, content: '', dirty: !!tab.dirty, handle: tab.handle || null };
+  if (tab.dirty) markDirty();
+  else markClean();
+  const nameEl = $('#current-file-name');
+  if (nameEl) nameEl.textContent = tab.name || '未命名';
+  renderCommentList();
+  try { refreshAnnotationImageDecos(); } catch {}
+  renderOutline();
+  renderDocTabs();
+  updateDocMeta({ immediate: true });
+  setStatus('已切换', tab.name || '');
+  if (State.saveMode === 'mentor-handle' || State.saveMode === 'handle') {
+    try { startAutosaveTimer(); } catch {}
+  }
+  return true;
+}
+
+function switchToTab(tabId) {
+  if (!tabId || tabId === State.activeTabId) return false;
+  const target = State.tabs.find(t => t && t.id === tabId);
+  if (!target) return false;
+  snapshotActiveTab();
+  return restoreTab(target);
+}
+
+function closeTab(tabId) {
+  if (!tabId) return false;
+  // 若关的是当前, 先 snapshot 拿最新 dirty
+  if (tabId === State.activeTabId) snapshotActiveTab();
+  const tab = State.tabs.find(t => t && t.id === tabId);
+  if (!tab) return false;
+  if (tab.dirty) {
+    if (!confirm(`「${tab.name}」有未保存修改，确定关闭？`)) return false;
+  }
+  State.tabs = State.tabs.filter(t => t && t.id !== tabId);
+  revokeTabMedia(tab);
+  if (State.activeTabId === tabId) {
+    if (State.tabs.length > 0) {
+      restoreTab(State.tabs[State.tabs.length - 1]);
+    } else {
+      State.activeTabId = null;
+      State.currentFile = null;
+      State.annotations = [];
+      State.mediaUrls = {};
+      State.mediaFiles = {};
+      resetHistory();
+      try {
+        State.editor.commands.setContent('', false);
+        clearPmHistory();
+      } catch {}
+      markClean();
+      const nameEl = $('#current-file-name');
+      if (nameEl) nameEl.textContent = '未打开文档';
+      renderCommentList();
+      renderOutline();
+      setStatus('已关闭全部标签');
+    }
+  }
+  renderDocTabs();
+  return true;
+}
+
+function openNewTabBlank() {
+  snapshotActiveTab();
+  State.activeTabId = genTabId();
+  // 清空当前编辑面 (不走 newDocument 的 confirm)
+  stopAutosaveTimer();
+  revokeMediaUrls();
+  State.editor.commands.setContent('<h1>新文档</h1><p></p>', false);
+  State.annotations = [];
+  resetHistory();
+  clearPmHistory();
+  State.currentFile = { name: 'untitled.md', content: '', annotations: null, dirty: true };
+  State.saveMode = 'unknown';
+  State.activeThreadId = null;
+  markDirty();
+  renderCommentList();
+  renderOutline();
+  snapshotActiveTab();
+  renderDocTabs();
+  setStatus('新建标签');
+}
+
+function findTabByName(name) {
+  if (!name) return null;
+  return State.tabs.find(t => t && t.name === name) || null;
+}
+
+function prepareOpenDocument(name) {
+  // 打开/加载另一文档前: 把当前文档收进标签, 新文档占新 activeTabId
+  // 同名已打开 → 切过去 (由调用方决定是否 reload)
+  if (name && State.currentFile && State.currentFile.name === name && State.activeTabId) {
+    return { mode: 'reload-same' };
+  }
+  const existing = name ? findTabByName(name) : null;
+  if (existing) {
+    if (State.activeTabId) snapshotActiveTab();
+    restoreTab(existing);
+    return { mode: 'switch-existing', tab: existing };
+  }
+  // activeTabId 非空 → 当前面还没收进 tabs, 先 snapshot
+  // activeTabId 为空 → openFromMentor* 已 snapshot 并置 null, 勿重复
+  if (State.activeTabId) {
+    snapshotActiveTab();
+  }
+  State.activeTabId = genTabId();
+  return { mode: 'new-tab' };
+}
+
+function renderDocTabs() {
+  const bar = $('#doc-tabs');
+  if (!bar) return;
+  // 保证 active 在列表里
+  if (State.activeTabId && State.currentFile && State.currentFile.name) {
+    const exists = State.tabs.some(t => t && t.id === State.activeTabId);
+    if (!exists) snapshotActiveTab();
+    else {
+      // 刷新 active 的 name/dirty 显示
+      const t = State.tabs.find(x => x && x.id === State.activeTabId);
+      if (t) {
+        t.name = State.currentFile.name;
+        t.dirty = !!State.currentFile.dirty;
+      }
+    }
+  }
+  const tabs = State.tabs.slice();
+  if (tabs.length === 0 && State.currentFile && State.currentFile.name) {
+    snapshotActiveTab();
+  }
+  const list = State.tabs;
+  bar.innerHTML = '';
+  bar.classList.toggle('is-empty', list.length === 0);
+
+  for (const t of list) {
+    if (!t) continue;
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'doc-tab' + (t.id === State.activeTabId ? ' is-active' : '') + (t.dirty ? ' is-dirty' : '');
+    btn.dataset.tabId = t.id;
+    btn.title = t.name + (t.dirty ? ' (未保存)' : '');
+    const label = document.createElement('span');
+    label.className = 'doc-tab-label';
+    label.textContent = t.name || '未命名';
+    btn.appendChild(label);
+    const x = document.createElement('span');
+    x.className = 'doc-tab-close';
+    x.setAttribute('role', 'button');
+    x.setAttribute('aria-label', '关闭');
+    x.textContent = '×';
+    btn.appendChild(x);
+    btn.addEventListener('click', (e) => {
+      if (e.target.closest('.doc-tab-close')) {
+        e.preventDefault();
+        e.stopPropagation();
+        closeTab(t.id);
+        return;
+      }
+      switchToTab(t.id);
+    });
+    bar.appendChild(btn);
+  }
+  // + 新标签
+  const add = document.createElement('button');
+  add.type = 'button';
+  add.id = 'doc-tab-new';
+  add.className = 'doc-tab-new';
+  add.title = '新建标签页';
+  add.setAttribute('aria-label', '新建标签页');
+  add.textContent = '+';
+  add.addEventListener('click', () => openNewTabBlank());
+  bar.appendChild(add);
+}
+
+function setupDocTabs() {
+  renderDocTabs();
+}
+
 function loadMarkdownIntoEditor(name, content, annotationsData = null) {
   // P1 #6: 立即清掉状态栏, 避免切换文档时短暂闪旧文件名
   $('#status-right').textContent = '加载中...';
   // H-autosave: 切文件停旧 timer (新文件 loadMarkdownIntoEditor 后会按 saveMode 重启)
   stopAutosaveTimer();
 
-  $('#current-file-name').textContent = name;
-  // D3 docx 一致性: 切文档时, 如果当前文档 dirty, 弹"是否保存" (Word 行为)
-  // 注意: IDB 兜底已经防止数据丢失, 但 Word 仍会让用户主动选择
-  if (State.currentFile && State.currentFile.dirty && State.currentFile.name !== name) {
-    if (!confirm(`当前文档 "${State.currentFile.name}" 有未保存修改, 确定切换吗?\n(批注会保存到本地, 刷新页面可恢复)`)) {
-      return false;  // 用户取消, 不切换
-    }
+  // v1.43.31: 多标签 — 打开另一文档时把当前收入标签, 不再 confirm 丢弃
+  // 同名已在某标签 → 切到该标签 (仍 reload 内容, 保证 open 最新)
+  const prep = prepareOpenDocument(name);
+  if (prep.mode === 'switch-existing') {
+    // 已切到同名 tab; 下面继续 reload 内容到该 tab
   }
+
+  $('#current-file-name').textContent = name;
   // 如果当前是源码模式，先把 <pre> 的最新内容写回 content（避免被覆盖）
   const sourceEl = $('#source-view');
   if (State.renderMode === 'source' && sourceEl && sourceEl.style.display !== 'none') {
@@ -3339,6 +4386,8 @@ function loadMarkdownIntoEditor(name, content, annotationsData = null) {
   State.annotations = [];
   // H-undo: 切文件清空 history (旧 history 不属于新文档)
   resetHistory();
+  // v1.43.21: setContent 会进 PM history — 清空, 否则 Ctrl+Z 先撤销整篇 load
+  clearPmHistory();
   // 加载侧车批注数据
   if (annotationsData && annotationsData.annotations) {
     // === P0-B: 侧车 schema 验证 - 检测重复 threadId / 缺字段 ===
@@ -3391,6 +4440,7 @@ function loadMarkdownIntoEditor(name, content, annotationsData = null) {
         );
         // P-mark-fix: setMeta 避免 _validateMarksAfterEdit 清除 fuzzy 标记
         // load path 一次性 addMark 多个 ann, onUpdate 触发会清 fuzzy
+        tr.setMeta('addToHistory', false);  // v1.43.21
         tr.setMeta('__activeMarkSync', true);
         State.editor.view.dispatch(tr);
       } else {
@@ -3418,7 +4468,9 @@ function loadMarkdownIntoEditor(name, content, annotationsData = null) {
   };
   markClean();
   $('#current-file-name').textContent = name;
+  try { refreshFileListDropdown(); } catch {}
   renderCommentList();
+  refreshAnnotationImageDecos();
   renderOutline();
   // M15 docx 一致: status bar 实时显示字数 + 行数 (Word 行为)
   // 加载时初始化一次, 后续编辑由 onTransaction 触发 updateDocMeta 实时刷新
@@ -3432,6 +4484,10 @@ function loadMarkdownIntoEditor(name, content, annotationsData = null) {
       State.fileMtime = f.lastModified;
     }).catch(() => { /* 忽略 */ });
   }
+  // v1.43.31: 注册/刷新当前标签
+  if (!State.activeTabId) State.activeTabId = genTabId();
+  snapshotActiveTab();
+  renderDocTabs();
 }
 
 // 在 ProseMirror doc 中定位批注范围 (4 优先级鲁棒匹配)
@@ -3740,7 +4796,9 @@ async function openFiles() {
         State.saveMode = 'mentor-handle';
         await openFromMentorHandle(mentorHandle);
         try { await HandleStore.putFile(mentorHandle.name, mentorHandle); } catch (e) { console.warn('putFile failed:', e); }
-        try { await HandleStore.putLastFile(mentorHandle.name); } catch (e) { console.warn('putLastFile failed:', e); }
+        try { await HandleStore.putLastFile(mentorHandle.name);
+        try { refreshFileListDropdown(); } catch {}
+ } catch (e) { console.warn('putLastFile failed:', e); }
         renderFilePaneCurrent();
         setStatus('已加载 .mentor 包', `${mentorHandle.name} (Ctrl+S 直接写回原位置)`);
         updateDocMeta();
@@ -3756,7 +4814,9 @@ async function openFiles() {
       // 单 .md 模式: 持久化 handle, 直接进入 handle 模式 (可写回原位置)
       State.saveMode = 'handle';
       try { await HandleStore.putFile(mdHandle.name, mdHandle); } catch (e) { console.warn('putFile failed:', e); }
-      try { await HandleStore.putLastFile(mdHandle.name); } catch (e) { console.warn('putLastFile failed:', e); }
+      try { await HandleStore.putLastFile(mdHandle.name);
+        try { refreshFileListDropdown(); } catch {}
+ } catch (e) { console.warn('putLastFile failed:', e); }
       renderFilePaneCurrent();
       const statusMsg = sidecarHandle
         ? `${mdHandle.name} + 批注已加载`
@@ -3873,6 +4933,8 @@ async function openFromHandle(fileHandle, sidecarHandle = null) {
   try {
     await HandleStore.putFile(file.name, fileHandle);
     await HandleStore.putLastFile(file.name);
+        try { refreshFileListDropdown(); } catch {}
+
   } catch (e) { console.warn('handle persist failed:', e); }
 }
 
@@ -3885,6 +4947,10 @@ async function openFromMentorHandle(fileHandle) {
   // F-media v1.36 fix: openFromMentorHandle 之前漏注入 mediaUrls — DOM img 是裸 markdown 路径
   // (e.g. <img src="media/image5.png">) ,请求 server /media/ 路径 404 → 图全破图.
   // 现在: revMediaUrls + 注入 State.mediaUrls/State.mediaFiles, 跟 openFromMentorFile 对齐.
+  // v1.43.31: 先把当前文档收进 tab (含 media blob), 再 revoke 当前面
+  try { snapshotActiveTab(); } catch {}
+  // 断开 active 与已 snapshot 的 tab, 避免 revoke/load 写回旧 tab
+  State.activeTabId = null;
   revokeMediaUrls();
   for (const [path, blob] of Object.entries(mediaFiles || {})) {
     State.mediaUrls[path] = URL.createObjectURL(blob);
@@ -4374,6 +5440,9 @@ async function openFromMentorFile(file) {
   const { mdText, annotations, mediaFiles } = await readMentorZip(file);
   console.log('[F-media diag] readMentorZip done, mediaFiles keys=', Object.keys(mediaFiles || {}));
   // F-media: 释放旧 doc 的 blob URL, 把新 mediaFiles 转 blob URL 注入 State
+  // v1.43.31: 先 snapshot 再 revoke, 避免抹掉其它标签的图
+  try { snapshotActiveTab(); } catch {}
+  State.activeTabId = null;
   revokeMediaUrls();
   for (const [path, blob] of Object.entries(mediaFiles || {})) {
     State.mediaUrls[path] = URL.createObjectURL(blob);
@@ -5071,43 +6140,166 @@ ${imgRels}</Relationships>`;
 
 // --- 新建空白文档
 function newDocument() {
-  if (State.currentFile && State.currentFile.dirty && !confirm('当前文档有未保存修改，确定新建吗？')) return;
-  State.editor.commands.setContent('<h1>新文档</h1><p></p>', false);
-  State.annotations = [];
-  // H-undo: 新建文档重置 history
-  resetHistory();
-  State.currentFile = { name: 'untitled.md', content: '', annotations: null, dirty: true };
-  markDirty();
-  renderCommentList();
-  renderOutline();
-  setStatus('新建空白文档');
+  // v1.43.31: 新建 = 新标签, 旧文档保留在其它 tab (不再 confirm 覆盖)
+  openNewTabBlank();
 }
 
-// v1.43.18: 空态「最近文件」— 从 HandleStore 列 .mentor, 点击重开
-async function refreshEmptyRecentFiles() {
-  const box = document.querySelector('#empty-recent');
-  const list = document.querySelector('#empty-recent-list');
-  if (!box || !list) return;
+// v1.43.20: 侧栏空态分型
+// cold  — 无文档 / 正文为空: 全引导 (看示例已移到 ? 帮助里)
+// doc   — 已导入/打开正文但 0 批注: 短引导
+// filter— 有批注但当前 tab 滤光: 提示换筛选, 无步骤/示例
+function _emptyBodyLen() {
+  try {
+    if (State.editor) {
+      const n = (State.editor.state.doc.textContent || '').trim().length;
+      if (n > 0) return n;
+    }
+  } catch { /* ignore */ }
+  if (State.currentFile && typeof State.currentFile.content === 'string') {
+    return State.currentFile.content.trim().length;
+  }
+  return 0;
+}
+
+function syncCommentEmptyPresentation() {
+  const empty = $('#comment-empty');
+  if (!empty) return;
+  const h2 = empty.querySelector('h2');
+  const lead = empty.querySelector('.hint-lead');
+  const steps = empty.querySelector('.empty-hint-steps');
+  const totalAnn = (State.annotations || []).filter(t => t && typeof t === 'object' && t.threadId).length;
+
+  if (totalAnn > 0) {
+    empty.dataset.emptyMode = 'filter';
+    if (h2) h2.textContent = '当前筛选下无批注';
+    if (lead) lead.textContent = '切换上方「全部 / 未解决 / 已解决」查看其它批注';
+    if (steps) steps.classList.add('hidden');
+    return;
+  }
+
+  const hasFile = !!(State.currentFile && State.currentFile.name);
+  const bodyLen = _emptyBodyLen();
+  if (hasFile && bodyLen > 0) {
+    empty.dataset.emptyMode = 'doc';
+    if (h2) h2.textContent = '还没有批注';
+    if (lead) lead.textContent = '拖选正文任意文字, 点「批注」即可添加到本篇';
+    if (steps) steps.classList.remove('hidden');
+    return;
+  }
+
+  empty.dataset.emptyMode = 'cold';
+  if (h2) h2.textContent = '还没有批注';
+  if (lead) lead.textContent = '像 docx 一样, 拖选任意文字即可加批注, 点 ? 看示例';
+  if (steps) steps.classList.remove('hidden');
+}
+
+// v1.43.24: 顶栏文件列表 (最近文件) — 替代侧栏 empty-recent
+async function openRecentFileByName(name) {
+  if (!name) return false;
+  try {
+    const handle = await HandleStore.getFile(name);
+    if (!handle) {
+      showToast('文件句柄已失效, 已从列表移除 — 请手动打开', 3500);
+      try { await HandleStore.deleteFile(name); } catch {}
+      refreshFileListDropdown();
+      return false;
+    }
+    let perm = 'prompt';
+    try { perm = await handle.queryPermission({ mode: 'readwrite' }); } catch {}
+    if (perm !== 'granted') {
+      try {
+        const np = await handle.requestPermission({ mode: 'readwrite' });
+        if (np !== 'granted') {
+          showToast('未获得权限。可点 × 从最近列表移除', 3500);
+          return false;
+        }
+      } catch (err) {
+        showToast('权限请求失败。可点 × 从最近列表移除', 3500);
+        return false;
+      }
+    }
+    const isMentor = /\.mentor$/i.test(name);
+    if (isMentor && typeof openFromMentorHandle === 'function') {
+      await openFromMentorHandle(handle);
+    } else if (typeof openFromHandle === 'function') {
+      await openFromHandle(handle);
+    } else if (isMentor && typeof openFromMentorHandle === 'function') {
+      await openFromMentorHandle(handle);
+    } else {
+      // fallback: mentor path only
+      if (typeof openFromMentorHandle === 'function') await openFromMentorHandle(handle);
+      else {
+        showToast('无法打开此文件类型', 2000);
+        return false;
+      }
+    }
+    closeFileListDropdown();
+    refreshFileListDropdown();
+    return true;
+  } catch (err) {
+    console.warn('[file-list] open failed', err);
+    const msg = (err && err.name) || '';
+    if (msg === 'NotFoundError' || msg === 'InvalidStateError' || /not found|invalid/i.test(String(err.message || ''))) {
+      try { await HandleStore.deleteFile(name); } catch {}
+      showToast('文件已不存在或句柄失效, 已移除', 3500);
+      refreshFileListDropdown();
+    } else {
+      showToast('打开失败: ' + (err.message || err), 3000);
+    }
+    return false;
+  }
+}
+
+function closeFileListDropdown() {
+  const wrap = document.querySelector('#file-list-wrap');
+  const dd = document.querySelector('#file-list-dropdown');
+  const trigger = document.querySelector('#file-list-trigger');
+  if (dd) dd.classList.add('hidden');
+  if (wrap) wrap.classList.remove('is-open');
+  if (trigger) trigger.setAttribute('aria-expanded', 'false');
+}
+
+function toggleFileListDropdown() {
+  const dd = document.querySelector('#file-list-dropdown');
+  if (!dd) return;
+  if (dd.classList.contains('hidden')) {
+    refreshFileListDropdown().then(() => {
+      dd.classList.remove('hidden');
+      document.querySelector('#file-list-wrap')?.classList.add('is-open');
+      document.querySelector('#file-list-trigger')?.setAttribute('aria-expanded', 'true');
+    });
+  } else {
+    closeFileListDropdown();
+  }
+}
+
+async function refreshFileListDropdown() {
+  const list = document.querySelector('#file-list-items');
+  const empty = document.querySelector('#file-list-empty');
+  if (!list) return;
   try {
     const files = await HandleStore.listFiles();
-    const mentors = (files || []).filter(f => /\.mentor$/i.test(f.name)).slice(0, 8);
-    if (mentors.length === 0) {
-      box.classList.add('hidden');
+    // 优先 .mentor, 也列 .md (用户可能开过 md)
+    const rows = (files || []).slice(0, 12);
+    const cur = State.currentFile?.name || '';
+    if (rows.length === 0) {
       list.innerHTML = '';
+      if (empty) empty.classList.remove('hidden');
       return;
     }
-    box.classList.remove('hidden');
-    list.innerHTML = mentors.map(f => {
+    if (empty) empty.classList.add('hidden');
+    list.innerHTML = rows.map(f => {
       const when = f.updatedAt ? new Date(f.updatedAt).toLocaleString() : '';
-      return `<div class="empty-recent-row" data-name="${escapeHtml(f.name)}">
-        <button type="button" class="empty-recent-item" data-act="open" title="${escapeHtml(when)}">
-          <span class="empty-recent-name">${escapeHtml(f.name)}</span>
-          <span class="empty-recent-time">${escapeHtml(when)}</span>
+      const isCur = f.name === cur ? ' is-current' : '';
+      return `<div class="file-list-row${isCur}" data-name="${escapeHtml(f.name)}" role="option" aria-selected="${f.name === cur ? 'true' : 'false'}">
+        <button type="button" class="file-list-item" data-act="open" title="${escapeHtml(when || f.name)}">
+          <span class="file-list-item-name">${escapeHtml(f.name)}</span>
+          <span class="file-list-item-time">${escapeHtml(when)}</span>
         </button>
-        <button type="button" class="empty-recent-forget" data-act="forget" title="从最近列表移除">×</button>
+        <button type="button" class="file-list-forget" data-act="forget" title="从最近列表移除">×</button>
       </div>`;
     }).join('');
-    list.querySelectorAll('.empty-recent-row').forEach(row => {
+    list.querySelectorAll('.file-list-row').forEach(row => {
       const name = row.dataset.name;
       if (!name) return;
       row.querySelector('[data-act="forget"]')?.addEventListener('click', async (e) => {
@@ -5117,58 +6309,57 @@ async function refreshEmptyRecentFiles() {
           const last = await HandleStore.getLastFile();
           if (last && last.fileName === name) await HandleStore.removeLastFile();
           showToast('已从最近列表移除', 2000);
-          refreshEmptyRecentFiles();
+          refreshFileListDropdown();
         } catch (err) {
           showToast('移除失败', 2000);
         }
       });
       row.querySelector('[data-act="open"]')?.addEventListener('click', async () => {
-        try {
-          const handle = await HandleStore.getFile(name);
-          if (!handle) {
-            showToast('文件句柄已失效, 已从列表移除 — 请手动打开', 3500);
-            try { await HandleStore.deleteFile(name); } catch {}
-            refreshEmptyRecentFiles();
-            return;
-          }
-          let perm = 'prompt';
-          try { perm = await handle.queryPermission({ mode: 'readwrite' }); } catch {}
-          if (perm !== 'granted') {
-            try {
-              const np = await handle.requestPermission({ mode: 'readwrite' });
-              if (np !== 'granted') {
-                // v1.43.20: 权限被拒 — 提示 + 可一键忘记
-                showToast('未获得权限。点 × 可从最近列表移除', 3500);
-                return;
-              }
-            } catch (err) {
-              showToast('权限请求失败。点 × 可从最近列表移除', 3500);
-              return;
-            }
-          }
-          if (typeof openFromMentorHandle === 'function') {
-            await openFromMentorHandle(handle);
-          } else {
-            showToast('openFromMentorHandle 不可用', 2000);
-          }
-        } catch (err) {
-          console.warn('[recent] open failed', err);
-          // NotFoundError / InvalidStateError: handle dead
-          const msg = (err && err.name) || '';
-          if (msg === 'NotFoundError' || msg === 'InvalidStateError' || /not found|invalid/i.test(String(err.message || ''))) {
-            try { await HandleStore.deleteFile(name); } catch {}
-            showToast('文件已不存在或句柄失效, 已移除', 3500);
-            refreshEmptyRecentFiles();
-          } else {
-            showToast('打开失败: ' + (err.message || err), 3000);
-          }
+        if (State.currentFile?.name === name) {
+          closeFileListDropdown();
+          return;
         }
+        await openRecentFileByName(name);
       });
     });
   } catch (e) {
-    console.warn('[recent] list failed', e);
-    box.classList.add('hidden');
+    console.warn('[file-list] list failed', e);
+    list.innerHTML = '';
+    if (empty) empty.classList.remove('hidden');
   }
+}
+
+// 兼容旧调用点 (侧栏空态曾用 refreshEmptyRecentFiles)
+async function refreshEmptyRecentFiles() {
+  return refreshFileListDropdown();
+}
+
+function setupFileListDropdown() {
+  const trigger = document.querySelector('#file-list-trigger');
+  const more = document.querySelector('#file-list-open-more');
+  if (trigger) {
+    trigger.addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleFileListDropdown();
+    });
+  }
+  if (more) {
+    more.addEventListener('click', (e) => {
+      e.stopPropagation();
+      closeFileListDropdown();
+      const openBtn = document.querySelector('#btn-open-files');
+      if (openBtn) openBtn.click();
+      else if (typeof openFiles === 'function') openFiles();
+    });
+  }
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('#file-list-wrap')) closeFileListDropdown();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeFileListDropdown();
+  });
+  // 启动时预填
+  refreshFileListDropdown();
 }
 
 // v1.43.18: 导出进度 — 状态栏 + 角标
@@ -5203,7 +6394,13 @@ function setAutosaveDebounce(ms) {
 // v1.43: 首次空态 "看示例" 按钮 - 加载一段演示文档 + 2 条示例批注
 // 让新用户 5 秒内看到完整批注形态 (open + resolve + reply), 不需要先学 UI
 function loadDemoDocument() {
-  // 直接重置 (demo 不要求 dirty check, 用户是在空态点的, 不会有未保存内容)
+  // v1.43.20: 已有正文/批注时必须确认 — 会替换当前文档
+  const bodyLen = _emptyBodyLen();
+  const hasAnn = (State.annotations || []).length > 0;
+  const dirty = !!(State.currentFile && State.currentFile.dirty);
+  if (bodyLen > 0 || hasAnn || dirty) {
+    if (!confirm('将用演示文档替换当前内容, 未导出的修改会丢失. 继续?')) return;
+  }
   State.editor.commands.setContent('', false);
   const DEMO_MD = `# Mentor 演示文档
 
@@ -5232,6 +6429,7 @@ function loadDemoDocument() {
   State.saveMode = 'idle';  // 关 autosave (demo 没真文件可写)
   stopAutosaveTimer();
   $('#current-file-name').textContent = '演示文档.md';
+  try { refreshFileListDropdown(); } catch {}
   setStatus('演示模式', '此文档不会自动保存. 想保留请用 导出成 .mentor 或 Ctrl+S');
 
   // 通过 findAnnotationRange 自动定位 (不写死 from/to, 抗文本微调)
@@ -5528,101 +6726,101 @@ function setupToolbar() {
   $('#btn-save').addEventListener('click', saveCurrent);
   $('#btn-export-md').addEventListener('click', exportMd);
   $('#btn-export-docx').addEventListener('click', exportDocx);
-  // v1.43: 空态 "看示例" 按钮 - 加载演示文档
-  $('#empty-demo-btn').addEventListener('click', loadDemoDocument);
-  // H-undo: 工具栏 ↶ ↷ 按钮
-  $('#btn-undo').addEventListener('click', () => {
-    if (undo()) showToast('已撤销');
-  });
-  $('#btn-redo').addEventListener('click', () => {
-    if (redo()) showToast('已重做');
-  });
-  updateHistoryButtons();  // 初始 disabled 状态
-  // 快捷键 (v2/v1.37 Office 风格, 用户要求: Ctrl+Z/Ctrl+Y)
-  // - Ctrl+Z: 优先撤销 PM doc 的编辑 (PM history plugin 已经处理 mark 同步)
-  //   只有当 PM 历史栈彻底空时才走我们的批注 ops history
-  // - Ctrl+Y 或 Ctrl+Shift+Z: 优先 PM redo, 否则批注 redo
-  // v1.37 fix: 之前是 "批注优先, 没有才 PM", 但用户报告 "批注内逐字删除+Ctrl+Z" 走错路
-  //   (我栈里有建批注 snapshot, 但他期望恢复字符 → 走 PM 才对)
-  //   现在改为 PM 优先, 我们 my-history 兜底处理 batch delete (那种情况 PM history 不动)
-  document.addEventListener('keydown', (e) => {
-    // 避免在 textarea/input 内误触 (用户在输入文字)
-    const tag = e.target?.tagName;
-    if (tag === 'TEXTAREA' || tag === 'INPUT') return;
-    if (!((e.metaKey || e.ctrlKey) && !e.altKey)) return;
-
-    // Ctrl+Z (无 shift): 优先 PM undo (doc 文本编辑), 我们的 history 兜底
-    if (!e.shiftKey && (e.key === 'z' || e.key === 'Z')) {
-      e.preventDefault();
+  // H-undo: 工具栏 ↶ ↷ 按钮 — v1.43.21 与 Ctrl+Z 同一 smart dispatch (PM 优先)
+    $('#btn-undo').addEventListener('click', () => {
       if (undoSmartDispatch()) showToast('已撤销');
-      return;
-    }
-    // Ctrl+Y: 智能 redo
-    if (!e.shiftKey && (e.key === 'y' || e.key === 'Y')) {
-      e.preventDefault();
+    });
+    $('#btn-redo').addEventListener('click', () => {
       if (redoSmartDispatch()) showToast('已重做');
-      return;
-    }
-    // Ctrl+Shift+Z: 备选 redo
-    if (e.shiftKey && (e.key === 'z' || e.key === 'Z')) {
-      e.preventDefault();
-      if (redoSmartDispatch()) showToast('已重做');
-      return;
-    }
-  });
+    });
+    updateHistoryButtons();  // 初始 disabled 状态
+    // 快捷键 (v2/v1.37 Office 风格, 用户要求: Ctrl+Z/Ctrl+Y)
+    // - Ctrl+Z: 优先撤销 PM doc 的编辑 (PM history plugin 已经处理 mark 同步)
+    //   只有当 PM 历史栈彻底空时才走我们的批注 ops history
+    // - Ctrl+Y 或 Ctrl+Shift+Z: 优先 PM redo, 否则批注 redo
+    // v1.37 fix: 之前是 "批注优先, 没有才 PM", 但用户报告 "批注内逐字删除+Ctrl+Z" 走错路
+    //   (我栈里有建批注 snapshot, 但他期望恢复字符 → 走 PM 才对)
+    //   现在改为 PM 优先, 我们 my-history 兜底处理 batch delete (那种情况 PM history 不动)
+    document.addEventListener('keydown', (e) => {
+      // 避免在 textarea/input 内误触 (用户在输入文字)
+      const tag = e.target?.tagName;
+      if (tag === 'TEXTAREA' || tag === 'INPUT') return;
+      if (!((e.metaKey || e.ctrlKey) && !e.altKey)) return;
 
-  // v1.37: PM undo 优先, my-history 兜底
-  //   - 用户编辑 PM doc (字符增删/格式化) → PM history plugin 已捕获, undo 恢复文本 + mark
-  //   - 批注 ops (deleteThread / addReply / toggleResolved 走我们 pushHistory) → 我们的 undo
-  function undoSmartDispatch() {
-    // 先尝试 PM undo (用户最近一次编辑可能是文本/mark)
-    // PM history plugin 暴露 PM 编辑历史栈, 通过编辑器命令访问
-    // 在 PM 自带 history 插件的栈里, 编辑 docContent 后再编辑 mark 维度的 patch 都是 PM 范围 (mark 跟 doc 一起回滚)
-    // 但 MARK 维度变更 (active / resolved 切换) 不走 PM history stack (用了 __activeMarkSync meta), 所以走我们
-    // 简单 rule: my-history.past 顶部项如果它是 "批注 ops" (我们 pushHistory 的, 不是 PM onUpdate 来的), 走 my
-    //           否则走 PM. PM 自带 history plugin 我们没主动 push PM history entry (v1.37 撤销了 onUpdate push),
-    //           所以 my-history 里也只剩批注 ops
-    // 用 try-undo PM first 看是否真的能改 (PM undo 会撤销 tr, docChanged 触发), 否则 fallback my
-    const ed = State.editor;
-    if (ed) {
-      // 真正测 PM undo 是否生效, 通过检查 PM history plugin stack
-      try {
-        const before = ed.state.doc.textBetween(0, ed.state.doc.content.size, ' ');
-        ed.commands.undo();
-        const after = ed.state.doc.textBetween(0, ed.state.doc.content.size, ' ');
-        if (before !== after) {
-          // PM undo 改变了 doc 文本 — 用户想要的 undo 已发生
-          // 同时更新 mark (rebuildAnnotationMarks via my-history path 不需要, 因为 PM undo 也撤销 mark)
+      // Ctrl+Z (无 shift): 优先 PM undo (doc 文本编辑), 我们的 history 兜底
+      if (!e.shiftKey && (e.key === 'z' || e.key === 'Z')) {
+        e.preventDefault();
+        if (undoSmartDispatch()) showToast('已撤销');
+        return;
+      }
+      // Ctrl+Y: 智能 redo
+      if (!e.shiftKey && (e.key === 'y' || e.key === 'Y')) {
+        e.preventDefault();
+        if (redoSmartDispatch()) showToast('已重做');
+        return;
+      }
+      // Ctrl+Shift+Z: 备选 redo
+      if (e.shiftKey && (e.key === 'z' || e.key === 'Z')) {
+        e.preventDefault();
+        if (redoSmartDispatch()) showToast('已重做');
+        return;
+      }
+    });
+
+    // v1.37: PM undo 优先, my-history 兜底
+    //   - 用户编辑 PM doc (字符增删/格式化) → PM history plugin 已捕获, undo 恢复文本 + mark
+    //   - 批注 ops (deleteThread / addReply / toggleResolved 走我们 pushHistory) → 我们的 undo
+    function undoSmartDispatch() {
+      // v1.43.21:
+      // 1) 批注 mark 不进 PM history (addToHistory:false)
+      // 2) 用 doc 引用判断 PM undo 是否生效 (含 bold 等 mark-only)
+      // 3) lastOp 时间优先: 最近是 ann ops → my-history 先; 最近是 pm 编辑 → PM 先
+      //    解决: 打字后再删批注, Ctrl+Z 应恢复批注而非先撤销打字
+      const ed = State.editor;
+      const preferAnn = State.history.lastOp === 'ann' && State.history.past.length > 0;
+      if (preferAnn) {
+        if (undo()) {
+          State.history.lastOp = State.history.past.length ? 'ann' : (ed?.can()?.undo() ? 'pm' : null);
+          showToast('已撤销 (批注)');
           return true;
         }
-      } catch (e) {
-        // PM undo 抛错, 继续 fallback
       }
+      if (ed) {
+        try {
+          const beforeDoc = ed.state.doc;
+          if (ed.commands.undo() && ed.state.doc !== beforeDoc) {
+            State.history.lastOp = ed.can().undo() ? 'pm' : (State.history.past.length ? 'ann' : null);
+            return true;
+          }
+        } catch (e) {}
+      }
+      if (State.history.past.length > 0 && undo()) {
+        State.history.lastOp = State.history.past.length ? 'ann' : null;
+        showToast('已撤销 (批注)');
+        return true;
+      }
+      return false;
     }
-    // PM undo 无效 (可能 PM history 空了 / 被 my-history 接管)
-    if (State.history.past.length > 0 && undo()) {
-      showToast('已撤销 (批注)');
-      return true;
-    }
-    return false;
-  }
 
-  function redoSmartDispatch() {
-    const ed = State.editor;
-    if (ed) {
-      try {
-        const before = ed.state.doc.textBetween(0, ed.state.doc.content.size, ' ');
-        ed.commands.redo();
-        const after = ed.state.doc.textBetween(0, ed.state.doc.content.size, ' ');
-        if (before !== after) return true;
-      } catch (e) {}
+    function redoSmartDispatch() {
+      const ed = State.editor;
+      // redo: PM 与 my 都有时, 先 PM (与常见编辑器一致); 否则各自
+      if (ed) {
+        try {
+          const beforeDoc = ed.state.doc;
+          if (ed.commands.redo() && ed.state.doc !== beforeDoc) {
+            State.history.lastOp = 'pm';
+            return true;
+          }
+        } catch (e) {}
+      }
+      if (State.history.future.length > 0 && redo()) {
+        State.history.lastOp = 'ann';
+        showToast('已重做 (批注)');
+        return true;
+      }
+      return false;
     }
-    if (State.history.future.length > 0 && redo()) {
-      showToast('已重做 (批注)');
-      return true;
-    }
-    return false;
-  }
   $('#btn-save-as').addEventListener('click', async () => {
     if (!State.currentFile) return;
     // v1.42.4: 默认导 .mentor 单文件包, 不弹 prompt (.mentor 是 docx-style 单文件, 推荐)
@@ -5675,6 +6873,17 @@ function setupToolbar() {
         case 'image': {
           const url = prompt('图片 URL:');
           if (url) c.setImage({ src: url }).run();
+          break;
+        }
+        case 'table': {
+          // v1.43.23: 光标在表内 → 聚焦控件; 否则插入 3×3 (含表头)
+          if (State.editor.isActive('table')) {
+            updateTableControls();
+            setStatus('表格', '已在表格内 — 用浮动条增删行列');
+          } else {
+            c.insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run();
+            setStatus('已插入表格', '3×3 · 点单元格用浮动条 +行/+列');
+          }
           break;
         }
       }
@@ -5788,6 +6997,7 @@ function updateToolbarState() {
         case 'blockquote': isActive = editor.isActive('blockquote'); break;
         case 'codeBlock': isActive = editor.isActive('codeBlock'); break;
         case 'link': isActive = editor.isActive('link'); break;
+        case 'table': isActive = editor.isActive('table'); break;
       }
     } catch (e) {}
     btn.classList.toggle('is-active', isActive);
@@ -5799,6 +7009,14 @@ function updateToolbarState() {
   // 现在只走 inline onclick 一条路径
   // popover 内关闭按钮
   const helpCloseBtn = document.querySelector('#help-popover .help-popover-close');
+  // v1.43.26: "看示例" 移到 ? 帮助 popover 里
+  const helpDemoBtn = document.querySelector('#help-demo-btn');
+  if (helpDemoBtn) {
+    helpDemoBtn.addEventListener('click', () => {
+      loadDemoDocument();
+      closeHelp();
+    });
+  }
   if (helpCloseBtn) {
     helpCloseBtn.addEventListener('click', closeHelp);
   }
@@ -5964,19 +7182,149 @@ function setupAnnotationMarkClickObserver() {
   }, true);  // v1.39: capture phase, 在 PM 自己的 handler 之前跑
 }
 
+
+// ============================================================
+// 4.6 表格浮动工具条 (增删行列)
+// ============================================================
+function isSelectionInTable(editor) {
+  if (!editor) return false;
+  try {
+    if (editor.isActive('table')) return true;
+    const sel = editor.state.selection;
+    if (sel && sel.$anchorCell) return true;
+    const $from = editor.state.doc.resolve(sel.from);
+    for (let d = $from.depth; d > 0; d--) {
+      const n = $from.node(d).type.name;
+      if (n === 'table' || n === 'tableCell' || n === 'tableHeader' || n === 'tableRow') return true;
+    }
+  } catch (e) { /* ignore */ }
+  return false;
+}
+
+function updateTableControls() {
+  const bar = document.querySelector('#table-controls');
+  const editor = State.editor;
+  if (!bar || !editor) return;
+  if (State.renderMode === 'source' || !isSelectionInTable(editor)) {
+    bar.classList.add('hidden');
+    return;
+  }
+  try {
+    const sel = editor.state.selection;
+    const pos = sel.from;
+    const coords = editor.view.coordsAtPos(pos);
+    const editorPane = document.querySelector('#editor-pane');
+    if (!editorPane) return;
+    const paneRect = editorPane.getBoundingClientRect();
+    let top = coords.top - paneRect.top + editorPane.scrollTop - 40;
+    let left = coords.left - paneRect.left + editorPane.scrollLeft;
+    try {
+      const domAt = editor.view.domAtPos(pos);
+      let el = domAt && domAt.node;
+      if (el && el.nodeType === 3) el = el.parentElement;
+      const tableEl = el && el.closest ? el.closest('table') : null;
+      if (tableEl) {
+        const tr = tableEl.getBoundingClientRect();
+        top = tr.top - paneRect.top + editorPane.scrollTop - 38;
+        left = tr.left - paneRect.left + editorPane.scrollLeft;
+      }
+    } catch (e) { /* ignore */ }
+    bar.style.top = Math.max(4, top) + 'px';
+    bar.style.left = Math.max(4, left) + 'px';
+    bar.classList.remove('hidden');
+  } catch (e) {
+    bar.classList.add('hidden');
+  }
+}
+
+function runTableCommand(act) {
+  const ed = State.editor;
+  if (!ed || !isSelectionInTable(ed)) {
+    setStatus('提示', '请先把光标放进表格');
+    return;
+  }
+  const c = ed.chain().focus();
+  let ok = false;
+  switch (act) {
+    case 'row-before': ok = c.addRowBefore().run(); break;
+    case 'row-after': ok = c.addRowAfter().run(); break;
+    case 'col-before': ok = c.addColumnBefore().run(); break;
+    case 'col-after': ok = c.addColumnAfter().run(); break;
+    case 'del-row': ok = c.deleteRow().run(); break;
+    case 'del-col': ok = c.deleteColumn().run(); break;
+    case 'del-table':
+      if (!confirm('删除整张表格？')) return;
+      ok = c.deleteTable().run();
+      break;
+    default: return;
+  }
+  if (!ok) {
+    showToast('表格操作失败', 1800);
+    setStatus('表格', '操作未生效 — 确认光标在单元格内');
+  } else {
+    const labels = {
+      'row-before': '已在上方插入行',
+      'row-after': '已在下方插入行',
+      'col-before': '已在左侧插入列',
+      'col-after': '已在右侧插入列',
+      'del-row': '已删除行',
+      'del-col': '已删除列',
+      'del-table': '已删除表格',
+    };
+    setStatus('表格', labels[act] || '已更新');
+  }
+  queueMicrotask(() => updateTableControls());
+}
+
+function setupTableControls() {
+  const bar = document.querySelector('#table-controls');
+  if (!bar) return;
+  bar.addEventListener('mousedown', e => {
+    // 避免点按钮时编辑器失焦导致 selection 丢、命令 no-op
+    e.preventDefault();
+  });
+  bar.addEventListener('click', e => {
+    const btn = e.target.closest('[data-table-act]');
+    if (!btn) return;
+    runTableCommand(btn.dataset.tableAct);
+  });
+  // Tab: 跳下一格; 末格则 +行
+  document.addEventListener('keydown', e => {
+    if (e.key !== 'Tab' || e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) return;
+    const ed = State.editor;
+    if (!ed || !isSelectionInTable(ed)) return;
+    e.preventDefault();
+    const canNext = typeof ed.can().goToNextCell === 'function' ? ed.can().goToNextCell() : true;
+    if (canNext && ed.commands.goToNextCell()) {
+      updateTableControls();
+      return;
+    }
+    ed.chain().focus().addRowAfter().run();
+    // 尽量进到新行
+    try { ed.commands.goToNextCell(); } catch (err) { /* ignore */ }
+    setStatus('表格', '已自动添加一行 (Tab)');
+    queueMicrotask(() => updateTableControls());
+  }, true);
+  const pane = document.querySelector('#editor-pane');
+  if (pane) pane.addEventListener('scroll', () => updateTableControls(), { passive: true });
+}
+
 // ============================================================
 // 11. 启动
 // ============================================================
 async function boot() {
   initEditor();
+  try { setupDocTabs(); } catch (e) { console.warn('[tabs] setup', e); }
   setupToolbar();
   setupFloatCommentButton();
-  setupPaneResizer();
-  setupEditorSelectionObserver();
-  setupAnnotationMarkClickObserver();
-  setupTreeActionDelegation();
-  setupEmptyTreeClick();
-  setupTreeSearch();
+    setupTableControls();
+    setupFileListDropdown();
+    setupPaneResizer();
+    setupEditorSelectionObserver();
+    setupAnnotationMarkClickObserver();
+    setupTreeActionDelegation();
+    setupEmptyTreeClick();
+    setupTreeSearch();
 
   // 工具栏 author chip 点击 → 弹修改 modal
   const chip = document.querySelector('#author-chip');
@@ -6129,6 +7477,13 @@ window.__mdAnnotator = {
   HandleStore,
   loadMarkdownIntoEditor,
   newDocument,
+  // v1.43.31 multi-tab
+  snapshotActiveTab,
+  switchToTab,
+  closeTab,
+  openNewTabBlank,
+  renderDocTabs,
+  prepareOpenDocument,
   saveCurrent,
   tryWriteBack,
   tryReconnect,
@@ -6153,7 +7508,17 @@ window.__mdAnnotator = {
   findAnnotationRange,
   mentorExportName,
   // v1.43: 演示文档 (first-time empty state CTA)
-  loadDemoDocument,
+    loadDemoDocument,
+    syncCommentEmptyPresentation,
+  // v1.43.22 figure
+  collectImageAnchors,
+  refreshAnnotationImageDecos,
+  isImageNodeSelection,
+  updateTableControls,
+  runTableCommand,
+  isSelectionInTable,
+  refreshFileListDropdown,
+  openRecentFileByName,
   // F-media v1.34: 暴露 media 反查 helper 供诊断用
   revokeMediaUrls,
   htmlToMarkdownMedia,

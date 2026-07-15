@@ -2,6 +2,153 @@
 
 按时间倒序记录已发布的变化。最新条目在上方。
 
+## v1.43.32 (2026-07-15) — 标签条压成 26px
+
+### 用户
+"你上完自己用视觉确认一下，这也太丑了，这么大坨"
+
+### 根因
+`#app` 仍是 `grid-template-rows: auto 1fr auto`（3 行），多出来的 `#doc-tabs` 吃掉了 **1fr**，整条被撑到 ~220px。
+
+### 改动
+1. grid → `auto auto 1fr auto`（toolbar | tabs | main | status）
+2. 标签条固定 **26px**，pill 22px，11.5px 字，无大圆角底板
+3. dirty 用 5px 橙点代替 `• ` 前缀
+
+### 验证
+- 实测 tabsH=26, grid=`69px 26px 676px 28px`
+- multi-tabs 6/6
+
+## v1.43.31 (2026-07-15) — 多文档标签页
+
+### 用户
+"你测试的时候把我的dfc文档给覆盖了——要不我们还是要开发一个多标签页的功能吧，允许多开文档"
+
+### 行为
+1. 顶栏下新增标签条 `#doc-tabs`（Chrome 风格）
+2. 打开另一文档 / 新建 → **当前文档收入标签**，不再 confirm 丢弃
+3. 点标签切换，正文+批注+dirty+media 整包恢复
+4. 标签 × 关闭（dirty 才确认）；`+` 新建空白标签
+5. `revokeMediaUrls` 不释放其它 tab 仍在用的 blob
+
+### API
+`snapshotActiveTab` / `switchToTab` / `closeTab` / `openNewTabBlank` / `renderDocTabs`
+
+### 验证
+- `tests/v143-multi-tabs.spec.js` 6/5 (6 pass)
+- figure-select / image-caret / empty-state 回归
+
+## v1.43.30 (2026-07-15) — 图片前后可插光标 (fig gap caret)
+
+### 用户
+"光标还是无法插入fig2之前或者之后" + "做完的时候自己用browser-skill测试一下"
+
+### 根因
+`prosemirror-gapcursor` 的 `GapCursor.valid()` 要求 `closedBefore && closedAfter`。
+相邻 **paragraph 有 inlineContent** → `closedBefore=false` → **段落↔图片之间永远不出现 gapcursor**。
+段末 ArrowRight 会变成 `NodeSelection(image)`，再打字会把整张图替换掉。
+
+### 改动
+1. StarterKit `gapcursor: false`，只留一份显式 Gapcursor（去重）
+2. 新扩展 `ImageCaretNav`：Arrow 跨图跳到对侧 textblock；从 NodeSelection(image) 方向键离开
+3. `tryPlaceCaretInImageGap`：点图前/后空隙（`posAtCoords.inside===-1`）→ 插入/聚焦空段；用 **clientY 相对图中线** 判前后（pos 在图后空隙也常落在 image pos）
+4. 图 margin 8→14px
+
+### 验证
+- `tests/v143-image-caret-nav.spec.js` 5/5
+- figure-select / figure-ann / image-gapcursor 回归
+- bsk: imageCaretNav 在、ArrowRight 不删图、插 BEFORE 在 img 前
+
+## v1.43.29 (2026-07-15) — 拖选吞 image (不必再多选一行)
+
+### 用户
+"无法选取图片这一行，必须选取多一行才可以选中"
+
+### 根因
+Image 是 block atom。PM `TextSelection` 的端点只能落在 textblock 内。
+从上一行文字拖到图片上松手时，`to` 停在 prev paragraph 末尾（= image pos），**不含 image**；
+必须再拖进图片下面那一行，`to` 越过 `imgEnd` 后 image 才进入 `nodesBetween`。
+
+单击图片走 NodeSelection（v1.43.27/28）本来就对；坏的是**拖选到图上**这条路径。
+
+### 改动
+`setupImageAnnotationSelect` 增加 mouseup 补吞:
+1. 起点不在图、终点在图上
+2. rAF 等 PM 写完选区后：若选区未覆盖 image，则
+   - 空选区 → `setNodeSelection`
+   - 选区在图前 (`to <= imgPos`) → `to = imgEnd`
+   - 选区在图后 (`from >= imgEnd`) → `from = imgPos`
+3. 恰好等于 `[imgPos, imgEnd]` 时仍用 NodeSelection
+
+### 验证
+- `tests/v143-figure-select.spec.js` 增补 drag-stop-on-image
+- 回归 figure-ann / image-gapcursor
+
+## v1.43.27 (2026-07-14) — image gapcursor + NodeSelection CSS
+
+### 用户
+"图片前后没法放光标" / "点图片选中会带上上下两行文字"
+
+### 根因
+1. StarterKit 默认 bundle `@tiptap/extension-gapcursor` 但 **样式没画** — 默认 `.ProseMirror-gapcursor` 是 `display: none`, 用户看不到闪烁光标
+2. 图片 `<img>` 直接紧贴 `<p>` (0 margin), "空隙"也是 0px → PM gapcursor 检测不到可放置位置
+3. ImageBlock 已经 selectable:true (继承自 Image), 点图片应该 NodeSelection, 但视觉无反馈 (浏览器对 block-level atom 不画原生 selection 高亮)
+
+### 改动
+1. **`app.js`**: 显式 `import Gapcursor from '@tiptap/extension-gapcursor'` + 注册到 `extensions[]` (defense-in-depth, 防止未来 StarterKit 默认 bundle 变化)
+2. **`app.js`**: ImageBlock 显式 `selectable: true` (虽然 Image 默认就是 true, 显式声明让意图清晰)
+3. **`index.html`**: import map 加 `@tiptap/extension-gapcursor` (避免依赖 StarterKit 内部 transitive import 路径)
+4. **`styles.css`**: 加 `.ProseMirror-gapcursor` CSS (`display:none` + `::after` 画 20px 黑色细线 + 1.1s blink) — 标准 PM gapcursor 实现
+5. **`styles.css`**: `.tiptap > img` 加 `margin: 8px 0` (前后空隙 → gapcursor 可触发)
+6. **`styles.css`**: `img.ProseMirror-selectednode` 加 `outline: 2px solid var(--accent)` — 给 NodeSelection 视觉反馈
+
+### 行为
+- 点 `<p>` 末尾 + `<img>` 之间的空隙 → 看到闪烁光标, 输入文字 → 新 `<p>` 插在图片前/后
+- 点图片 → 只选图片 (高亮 outline), 不再带上下两行
+- 跨图片拖选 (text 上 → text 下) → 仍按 PM 默认 TextSelection 覆盖全部, 没改
+
+### 验证
+- `tests/v143-image-gapcursor.spec.js`: 4 个场景 — gapcursor 元素出现 / 文字可输入 / NodeSelection only-image / drag 跨块不变
+
+## v1.43.22 (2026-07-14) — figure: image block atom (no drag, cursor before/after)
+
+### 用户
+"figure/图片标注最好让 image 单独成块，不要拖动，光标能放在图片前后"
+
+### 改动
+1. Tiptap Image 默认 `group:'inline'`/`inline:true`/`draggable:true`
+   → 改为 `Image.extend({ inline:false, group:'block', atom:true, draggable:false })`
+2. 保留所有 attrs (src/alt/title/width/height) + `allowBase64:true`
+3. Editor 必须用 `Image.extend`，`Image.configure(...)` 无法覆盖 `group/inline/draggable`（属于 schema 而非 options）
+
+### 行为
+- Image 现在是 block 级 atom：像 `<p>` 一样占一行，光标能落在图片前/后正常输入文字
+- 不能用鼠标拖拽图片乱放位置（图标注位置是 PM `imageAnchors` 坐标，需要稳定）
+
+### 验证
+- v143-figure-ann: data: 图不被 strip / NodeSelection 建批注 + deco class / 跨 text+figure 双 anchor / 删除清 deco
+
+## v1.43.21 (2026-07-14) — Ctrl+Z mark-only double-undo
+
+### 真 bug
+1. 建批注后对正文 **加粗/斜体**（text 不变）再 Ctrl+Z：
+   - PM undo 已撤销 bold，但旧逻辑用 `textBetween` 误判失败 → 再跑 my-history → **批注一并被撤销**
+2. 工具栏 ↶ 只调 `undo()`（批注栈），与 Ctrl+Z 的 smart dispatch 不一致
+3. `setContent`/load 进 PM history → Ctrl+Z 先撤销整篇 load
+4. 打字后再删批注，纯 PM-first 会先撤销打字而非恢复批注
+
+### Fix
+1. 批注结构性 mark：`setMeta('addToHistory', false)`
+2. `undoSmartDispatch`/`redoSmartDispatch`：用 `ed.state.doc` 引用判断 PM 是否生效
+3. `clearPmHistory()`：load/newDocument 后清空 PM history
+4. `history.lastOp`（`pm`|`ann`）：最近是批注 ops 则 my-history 优先
+5. 工具栏 ↶↷ 与 Ctrl+Z 同一 smart dispatch
+6. `verify-delete-undo` 改走 `_testDeleteThread`（与生产路径一致）
+
+### 验证
+- bold-after-ann / create-only / edit-then-delete probes
+- verify-delete-undo 9/9、verify-char-delete-undo、chaos-suite 40、wave11、empty-state
+
 ## v1.43.20 (2026-07-13) — 端口 8787 + Python PATH + 最近文件 forget
 
 ### 用户

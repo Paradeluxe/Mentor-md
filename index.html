@@ -3,12 +3,12 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Mentor v1.43.20 — 像 docx 一样批注 Markdown</title>
-<meta name="build" content="v1.43.20 20260713: port-8787-python-path-recent-forget" />
+<title>Mentor v1.43.27 — 像 docx 一样批注 Markdown</title>
+<meta name="build" content="v1.43.32 20260715: compact multi-doc tabs" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-<link rel="stylesheet" href="styles.css?v=97" />
+<link rel="stylesheet" href="styles.css?v=102" />
 <!-- KaTeX 数学公式渲染 -->
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" crossorigin="anonymous" />
 <!-- 字体：系统无衬线 + 等宽（侧栏时间戳、文件名） -->
@@ -77,18 +77,33 @@
       <button data-cmd="codeBlock" title="代码块" class="tb-format" aria-label="代码块"></button>
       <span class="tb-sep"></span>
       <button data-cmd="link" title="插入链接" class="tb-format" aria-label="链接"></button>
-      <button data-cmd="image" title="插入图片" class="tb-format" aria-label="图片"></button>
-    </div>
+            <button data-cmd="image" title="插入图片" class="tb-format" aria-label="图片"></button>
+            <button data-cmd="table" title="插入表格 (3×3)" class="tb-format" aria-label="表格"></button>
+          </div>
     <div class="tb-group" id="title-group">
-      <span id="current-file-name">未打开文档</span>
-      <span id="dirty-indicator" class="dirty-dot" title="有未保存修改"></span>
-      <button id="author-chip" class="author-chip" data-act="edit-author" title="点击修改作者名">
-        <span class="author-chip-icon" aria-hidden="true">👤</span>
-        <span id="author-chip-name">未设置</span>
-        <span class="author-chip-edit" aria-hidden="true">✏️</span>
-      </button>
-    </div>
+          <div id="file-list-wrap" class="file-list-wrap">
+            <button type="button" id="file-list-trigger" class="file-list-trigger" title="最近文件 / 切换文档" aria-haspopup="listbox" aria-expanded="false">
+              <span id="current-file-name" class="file-list-name">未打开文档</span>
+              <span class="file-list-caret" aria-hidden="true">▾</span>
+            </button>
+            <div id="file-list-dropdown" class="file-list-dropdown hidden" role="listbox" aria-label="最近文件">
+              <div class="file-list-section-title">最近文件</div>
+              <div id="file-list-items" class="file-list-items"></div>
+              <div class="file-list-empty hidden" id="file-list-empty">暂无最近文件</div>
+              <button type="button" id="file-list-open-more" class="file-list-open-more">打开其他文件…</button>
+            </div>
+          </div>
+          <span id="dirty-indicator" class="dirty-dot" title="有未保存修改"></span>
+          <button id="author-chip" class="author-chip" data-act="edit-author" title="点击修改作者名">
+            <span class="author-chip-icon" aria-hidden="true">👤</span>
+            <span id="author-chip-name">未设置</span>
+            <span class="author-chip-edit" aria-hidden="true">✏️</span>
+          </button>
+        </div>
   </header>
+
+  <!-- v1.43.31: 多文档标签栏 -->
+  <div id="doc-tabs" class="doc-tabs" role="tablist" aria-label="打开的文档"></div>
 
   <!-- Main 3-pane layout -->
   <main id="main">
@@ -116,12 +131,23 @@
       <div id="editor"></div>
       <!-- 浮动批注按钮，选中文本后出现 -->
       <div id="float-comment-btn" class="float-btn hidden">
-        <button aria-label="批注"></button>
-      </div>
-      <!-- 浮动删除批注按钮，active mark 上出现 -->
-      <div id="mark-delete-popover" class="mark-delete-popover hidden" role="toolbar" aria-label="批注操作">
-        <button id="mark-delete-btn" class="mark-delete-btn" title="删除此批注" aria-label="删除批注"></button>
-      </div>
+              <button aria-label="批注"></button>
+            </div>
+            <!-- v1.43.23: 表格内浮动工具条 — 增删行列 -->
+            <div id="table-controls" class="table-controls hidden" role="toolbar" aria-label="表格编辑">
+              <button type="button" data-table-act="row-before" title="在上方插入行">+行↑</button>
+              <button type="button" data-table-act="row-after" title="在下方插入行">+行↓</button>
+              <button type="button" data-table-act="col-before" title="在左侧插入列">+列←</button>
+              <button type="button" data-table-act="col-after" title="在右侧插入列">+列→</button>
+              <span class="table-controls-sep" aria-hidden="true"></span>
+              <button type="button" data-table-act="del-row" title="删除当前行" class="table-controls-danger">删行</button>
+              <button type="button" data-table-act="del-col" title="删除当前列" class="table-controls-danger">删列</button>
+              <button type="button" data-table-act="del-table" title="删除整表" class="table-controls-danger">删表</button>
+            </div>
+            <!-- 浮动删除批注按钮，active mark 上出现 -->
+            <div id="mark-delete-popover" class="mark-delete-popover hidden" role="toolbar" aria-label="批注操作">
+              <button id="mark-delete-btn" class="mark-delete-btn" title="删除此批注" aria-label="删除批注"></button>
+            </div>
     </section>
 
     <!-- 右：批注面板 -->
@@ -138,30 +164,24 @@
         </div>
       </div>
       <div id="comment-list"></div>
-      <!-- v1.43: 空态引导 (首次 / 0 批注 时显示; 加首条后自动消失) -->
-            <div id="comment-empty" class="empty-hint">
-              <div class="empty-hint-icon" aria-hidden="true">
-                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-                  <polyline points="14 2 14 8 20 8"/>
-                  <path d="M8 13h6M8 17h4" stroke="#f54e00" stroke-width="2"/>
-                </svg>
-              </div>
-              <h2>还没有批注</h2>
-              <p class="hint-lead">像 docx 一样, 拖选任意文字即可加批注</p>
-              <ol class="empty-hint-steps">
-                <li><span class="step-num">1</span> 在编辑器中拖选一段文字</li>
-                <li><span class="step-num">2</span> 弹出按钮点 <kbd>批注</kbd></li>
-                <li><span class="step-num">3</span> 右侧侧栏写批注, 嵌套回复, 标解决</li>
-              </ol>
-              <button id="empty-demo-btn" class="empty-hint-cta" title="加载一段示例文档, 看完整批注流程">▶ 看示例</button>
-                            <!-- v1.43.20: 最近打开的 .mentor -->
-                            <div id="empty-recent" class="empty-recent hidden">
-                              <div class="empty-recent-title">最近文件</div>
-                              <div id="empty-recent-list" class="empty-recent-list"></div>
-                            </div>
-                            <p class="empty-hint-foot">需要更多帮助? 点工具栏 <kbd>?</kbd> 看完整快捷键</p>
-            </div>
+      <!-- v1.43 / v1.43.20: 空态引导 — cold/doc/filter 由 syncCommentEmptyPresentation 分型 -->
+                  <div id="comment-empty" class="empty-hint" data-empty-mode="cold">
+                    <div class="empty-hint-icon" aria-hidden="true">
+                      <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                        <polyline points="14 2 14 8 20 8"/>
+                        <path d="M8 13h6M8 17h4" stroke="#f54e00" stroke-width="2"/>
+                      </svg>
+                    </div>
+                    <h2>还没有批注</h2>
+                    <p class="hint-lead">像 docx 一样, 拖选任意文字即可加批注</p>
+                    <ol class="empty-hint-steps">
+                      <li><span class="step-num">1</span> 在编辑器中拖选一段文字</li>
+                      <li><span class="step-num">2</span> 弹出按钮点 <kbd>批注</kbd></li>
+                      <li><span class="step-num">3</span> 右侧侧栏写批注, 嵌套回复, 标解决</li>
+                    </ol>
+                      <p class="empty-hint-foot">需要更多帮助? 点工具栏 <kbd>?</kbd> 看完整快捷键 · 最近文件在顶栏文件名 ▾ · 「看示例」也在 ? 里</p>
+                                  </div>
     </aside>
   </main>
 
@@ -206,6 +226,7 @@
     "@tiptap/extension-table-row": "https://esm.sh/@tiptap/extension-table-row@2.1.13",
     "@tiptap/extension-table-header": "https://esm.sh/@tiptap/extension-table-header@2.1.13",
     "@tiptap/extension-table-cell": "https://esm.sh/@tiptap/extension-table-cell@2.1.13",
+    "@tiptap/extension-gapcursor": "https://esm.sh/@tiptap/extension-gapcursor@2.1.13",
     "markdown-it": "https://esm.sh/markdown-it@13.0.1",
     "katex": "https://esm.sh/katex@0.16.9",
     "js-yaml": "https://esm.sh/js-yaml@4.1.0",
@@ -216,7 +237,7 @@
   }
 }
 </script>
-<script type="module" src="app.js?v=134"></script>
+<script type="module" src="app.js?v=148"></script>
 <!-- 帮助 popover (浮在 body 顶层, 位置由 JS 动态计算) -->
 <div id="help-popover" class="help-popover hidden" role="tooltip">
   <div class="help-popover-arrow"></div>
@@ -231,6 +252,8 @@
     <li><strong>保存:</strong> <kbd>Ctrl</kbd>+<kbd>S</kbd> Chrome/Edge 直接写回原位置; 其他浏览器下载到 <code>xxx.md</code> 同目录</li>
     <li><strong>跨刷新重连:</strong> 授权过的 .md handle 留在 IndexedDB; 重开应用自动恢复并继续保存</li>
   </ul>
+  <hr class="help-divider">
+  <button id="help-demo-btn" class="help-demo-btn" title="加载一段示例文档, 看完整批注流程">▶ 看示例</button>
   <p class="help-popover-footer">快捷键: <kbd>Ctrl</kbd>+<kbd>B</kbd> 加粗 · <kbd>Ctrl</kbd>+<kbd>I</kbd> 斜体 · <kbd>Ctrl</kbd>+<kbd>S</kbd> 保存</p>
   <button class="help-popover-close" data-act="close-help" aria-label="关闭">×</button>
 </div>

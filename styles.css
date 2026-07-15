@@ -106,7 +106,8 @@ code {
 /* ============ App layout ============ */
 #app {
   display: grid;
-  grid-template-rows: auto 1fr auto;
+  /* v1.43.32: toolbar | doc-tabs | main | statusbar */
+  grid-template-rows: auto auto 1fr auto;
   height: 100vh;
 }
 
@@ -262,8 +263,139 @@ code {
 [data-cmd="codeBlock"]::before { -webkit-mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><rect x='3' y='5' width='18' height='14' rx='2'/><path d='m8 10-2 2 2 2'/><path d='m16 10 2 2-2 2'/></svg>"); mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><rect x='3' y='5' width='18' height='14' rx='2'/><path d='m8 10-2 2 2 2'/><path d='m16 10 2 2-2 2'/></svg>"); }
 [data-cmd="link"]::before { -webkit-mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><path d='M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1'/><path d='M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1'/></svg>"); mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><path d='M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1'/><path d='M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1'/></svg>"); }
 [data-cmd="image"]::before { -webkit-mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><rect x='3' y='4' width='18' height='16' rx='2'/><circle cx='9' cy='10' r='1.5'/><path d='m21 16-5-5-9 9'/></svg>"); mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><rect x='3' y='4' width='18' height='16' rx='2'/><circle cx='9' cy='10' r='1.5'/><path d='m21 16-5-5-9 9'/></svg>"); }
+[data-cmd="table"]::before { -webkit-mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><rect x='3' y='4' width='18' height='16' rx='1'/><path d='M3 10h18M3 16h18M9 4v16M15 4v16'/></svg>"); mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><rect x='3' y='4' width='18' height='16' rx='1'/><path d='M3 10h18M3 16h18M9 4v16M15 4v16'/></svg>"); }
 
 #title-group { margin-left: auto; font-size: 12.5px; color: var(--text-2); display: flex; align-items: center; gap: 6px; position: relative; }
+/* v1.43.24: 顶栏文件列表（替代 current-file-name 纯文本 + 侧栏最近文件） */
+.file-list-wrap {
+  position: relative;
+  max-width: min(360px, 36vw);
+}
+.file-list-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  padding: 3px 8px 3px 10px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-2);
+  font-size: 12.5px;
+  line-height: 1.3;
+  cursor: pointer;
+}
+.file-list-trigger:hover,
+.file-list-wrap.is-open .file-list-trigger {
+  background: var(--panel-2);
+  border-color: var(--border-warm);
+  color: var(--text);
+}
+.file-list-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 280px;
+}
+.file-list-caret {
+  flex-shrink: 0;
+  font-size: 10px;
+  opacity: 0.7;
+}
+.file-list-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 80;
+  width: min(340px, 70vw);
+  max-height: min(360px, 50vh);
+  overflow: auto;
+  padding: 8px;
+  background: var(--panel);
+  border: 1px solid var(--border-warm-medium);
+  border-radius: 10px;
+  box-shadow: 0 8px 28px rgba(38, 37, 30, 0.14);
+}
+.file-list-dropdown.hidden { display: none; }
+.file-list-section-title {
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-3);
+  padding: 2px 6px 6px;
+}
+.file-list-items { display: flex; flex-direction: column; gap: 2px; }
+.file-list-row {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  border-radius: 6px;
+}
+.file-list-row.is-current .file-list-item {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.file-list-item {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  padding: 7px 8px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.file-list-item:hover { background: var(--panel-2); }
+.file-list-item-name {
+  font-size: 12.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.file-list-item-time {
+  font-size: 10.5px;
+  color: var(--text-3);
+  font-family: var(--mono, ui-monospace, monospace);
+}
+.file-list-forget {
+  flex-shrink: 0;
+  width: 28px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+}
+.file-list-forget:hover { color: #b91c1c; background: #fde2e2; }
+.file-list-empty {
+  padding: 10px 8px;
+  font-size: 12px;
+  color: var(--text-3);
+}
+.file-list-empty.hidden { display: none; }
+.file-list-open-more {
+  width: 100%;
+  margin-top: 6px;
+  padding: 8px;
+  border: 1px dashed var(--border-warm);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-2);
+  font-size: 12px;
+  cursor: pointer;
+}
+.file-list-open-more:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
 .dirty-dot { width: 6px; height: 6px; border-radius: 50%; background: transparent; }
 .dirty-dot.is-dirty { background: var(--warning); }
 
@@ -446,6 +578,36 @@ code {
 .help-popover-close:hover {
   background: var(--panel-2);
   color: var(--text);
+}
+
+.help-popover-footer {
+  margin: 10px 0 0;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-warm);
+  font-size: 11px;
+  color: var(--text-3);
+  line-height: 1.5;
+}
+.help-divider {
+  border: none;
+  border-top: 1px solid var(--border-warm);
+  margin: 10px 0;
+}
+.help-demo-btn {
+  width: 100%;
+  padding: 8px;
+  border: 1px dashed var(--accent);
+  border-radius: 8px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+}
+.help-demo-btn:hover {
+  background: var(--highlight-active);
+  border-color: var(--accent);
 }
 
 /* v1.42: 设置按钮 + popover (复刻 help-popover 风格) */
@@ -1090,8 +1252,66 @@ body.file-pane-collapsed #file-pane {
 .tiptap pre code br.ProseMirror-trailingBreak { display: none; }
 .tiptap a { color: var(--accent); text-decoration: underline; text-decoration-color: rgba(245, 78, 0, 0.3); text-underline-offset: 2px; }
 .tiptap a:hover { text-decoration-color: var(--accent); }
-.tiptap img { max-width: 100%; border-radius: 6px; }
+/* v1.43.27: 给图片上下加点边距 (原 0 → 8px), 让前后"空隙"是 ~16px 的可点击区域
+   → gapcursor 在图片前后真正可触发 (ProseMirror gap cursor 需要一段"非节点像素"才会出现)
+   注意: margin 只在 block image (ImageBlock) 上加; 老的 inline image / 用户加的 <img> 不动
+*/
+.tiptap img { max-width: 100%; border-radius: 6px; vertical-align: baseline; }
+/* ProseMirror 直接产出的 image (block atom) — 用 > p + img 和 > img + p 选前后空隙
+   注: 编辑器里 image 是 block 直接子 (跟在 <p> 后面), 所以用 .tiptap > img */
+.tiptap > img,
+.tiptap > p + img,
+.tiptap > img + p,
+.tiptap > img + h1,
+.tiptap > img + h2,
+.tiptap > img + h3,
+.tiptap > p:has(+ img),
+.tiptap > h1:has(+ img),
+.tiptap > h2:has(+ img),
+.tiptap > h3:has(+ img) {
+  /* v1.43.30: 上下 14px (原 8) — 真机点 gap 更容易; gapcursor 需要非节点像素 */
+  margin: 14px 0;
+}
 .tiptap hr { border: none; border-top: 1px solid var(--border-warm); margin: 1.5em 0; }
+/* v1.43.27: gapcursor — PM 自带插件但默认 CSS 不画光标 (要由调用方实现)
+   标准 PM gapcursor CSS:
+     - 父 div 可见但 width:0 (不让 layout 抖动, 占住一行高度即可)
+     - ::after 画一根 20px 细黑线 + 闪烁动画
+   注意: 不能 `display: none` 父 — 会让 ::after 也没法渲染
+   pointer-events:none 防止用户点空白处时被这个 widget 拦截
+   v1.43.27 followup: prosemirror-view 内联注入 `.ProseMirror-gapcursor{display:none}`,
+     必须用 `!important` 强制覆盖, 不然父被隐藏, ::after 也跟着没 */
+.ProseMirror-gapcursor {
+  position: relative !important;
+  display: inline-block !important;
+  width: 0 !important;
+  height: 1em !important;
+  vertical-align: text-bottom !important;
+  overflow: visible !important;
+  pointer-events: none !important;
+  margin: 0 !important;
+}
+.ProseMirror-gapcursor:after {
+  content: '';
+  display: block;
+  position: absolute;
+  top: -2px;
+  left: -10px;
+  width: 20px;
+  border-top: 1px solid black;
+  animation: ProseMirror-cursor-blink 1.1s steps(2, start) infinite;
+  pointer-events: none;
+}
+@keyframes ProseMirror-cursor-blink {
+  to { visibility: hidden; }
+}
+/* v1.43.27: 选中 image 的 NodeSelection 加点视觉反馈 (PM 默认是浏览器蓝选区, 但 block atom
+   经常没有 native selection 样式) — 跟 .annotation-image 的虚线区分, 这里用 1px outline */
+.ProseMirror-selectednode img,
+.tiptap img.ProseMirror-selectednode {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
 /* 上/下标 — v9: 浏览器默认 vertical-align: super (自然上浮, 不脱离 inline 流) */
 .tiptap sup, .tiptap sub { font-size: 0.75em; }
 .tiptap sup { vertical-align: super; line-height: 0; }
@@ -1106,6 +1326,33 @@ body.file-pane-collapsed #file-pane {
   transition: background 0.15s, border-color 0.15s;
   border-radius: 0;
 }
+/* v1.43.22: figure 批注 — 与文字 mark 同一套底灰虚线 */
+.tiptap img.annotation-image,
+.ProseMirror img.annotation-image {
+  outline: none !important;
+  box-shadow: none !important;
+  cursor: pointer;
+  /* 同 .annotation-mark */
+  border: none;
+  border-bottom: 1px dashed var(--text-3);
+  border-radius: 0;
+  padding: 0;
+  margin-bottom: 0;
+  box-sizing: border-box;
+  transition: border-color 0.15s, opacity 0.15s;
+}
+/* active / resolved 仍只动底线色，不改成粗线或描边 */
+.tiptap img.annotation-image.is-active,
+.ProseMirror img.annotation-image.is-active {
+  border-bottom: 1px dashed var(--text-3);
+  /* 与文字 active 一致：不靠底线变色，只保留 class 供后续扩展 */
+}
+.tiptap img.annotation-image.is-resolved,
+.ProseMirror img.annotation-image.is-resolved {
+  border-bottom: 1px dashed var(--text-3);
+  opacity: 0.85;
+}
+
 /* v8-fix: sup/sub 是 mark 的父 (selection 跨 sup 时 mark 在 sup 内), 必须重置 author-color 覆盖
    关键: .tiptap sup .annotation-mark 特异性 (0,3,0) 等于 .tiptap .annotation-mark[data-author-color="X"] (0,3,0)
    必须用更具体的 selector 或 !important 覆盖 (author-color 8 个值都要清掉) */
@@ -1242,114 +1489,6 @@ body.file-pane-collapsed #file-pane {
   font-weight: 600;
   margin-top: 1px;
 }
-.empty-hint-cta {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 16px;
-  background: var(--accent);
-  color: #fff;
-  border: none;
-  border-radius: 8px;
-  font-size: 13px;
-  font-weight: 500;
-  cursor: pointer;
-  margin-bottom: 12px;
-  font-family: inherit;
-  transition: background 0.15s, transform 0.1s;
-}
-.empty-hint-cta:hover { background: #d94400; }
-.empty-hint-cta:active { transform: scale(0.97); }
-.empty-hint-foot,
-.hint-foot {
-  font-size: 11px;
-  color: var(--text-3);
-  margin: 0;
-}
-.empty-hint-foot kbd,
-.hint-foot kbd {
-  display: inline-block;
-  padding: 1px 5px;
-  background: var(--panel-3);
-  border: 1px solid var(--border-warm-medium);
-  border-radius: 4px;
-  font-family: monospace;
-  font-size: 10px;
-  color: var(--text);
-}
-/* v1.43.18: 空态最近文件 */
-.empty-recent {
-  width: 100%;
-  margin-top: 14px;
-  text-align: left;
-  border-top: 1px solid var(--border-warm-medium);
-  padding-top: 12px;
-}
-.empty-recent-title {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--text-2);
-  margin-bottom: 8px;
-  letter-spacing: 0.02em;
-}
-.empty-recent-list {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  max-height: 180px;
-  overflow-y: auto;
-}
-.empty-recent-item {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 2px;
-  width: 100%;
-  padding: 8px 10px;
-  border: 1px solid var(--border-warm-medium);
-  border-radius: 8px;
-  background: var(--panel-2, #faf8f5);
-  cursor: pointer;
-  text-align: left;
-  font: inherit;
-  color: var(--text);
-}
-.empty-recent-item:hover {
-  border-color: #f54e00;
-  background: #fff7f2;
-}
-.empty-recent-name {
-  font-size: 12px;
-  font-weight: 500;
-  word-break: break-all;
-}
-.empty-recent-time {
-  font-size: 10px;
-  color: var(--text-3);
-}
-.empty-recent-row {
-  display: flex;
-  align-items: stretch;
-  gap: 4px;
-}
-.empty-recent-row .empty-recent-item {
-  flex: 1;
-}
-.empty-recent-forget {
-  flex: 0 0 28px;
-  border: 1px solid var(--border-warm-medium);
-  border-radius: 8px;
-  background: var(--panel-2, #faf8f5);
-  color: var(--text-3);
-  cursor: pointer;
-  font-size: 16px;
-  line-height: 1;
-}
-.empty-recent-forget:hover {
-  border-color: #cf2d56;
-  color: #cf2d56;
-  background: #fff5f7;
-}
 
 /* v1.43.18: 导出进度 */
 .export-progress {
@@ -1382,6 +1521,11 @@ body.file-pane-collapsed #file-pane {
   position: absolute;
   z-index: 100;
   transform: translateX(-50%);
+  /* v1.43.29: 容器不拦截命中, 只有 button 可点 — 防止透明盒挡拖选 */
+  pointer-events: none;
+}
+.float-btn button {
+  pointer-events: auto;
 }
 .float-btn button::before {
   content: "";
@@ -2338,6 +2482,50 @@ body.file-pane-collapsed #file-pane {
   margin: 0;
 }
 
+/* v1.43.23: 表格浮动编辑条 */
+.table-controls {
+  position: absolute;
+  z-index: 40;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px;
+  background: var(--panel);
+  border: 1px solid var(--border-warm-medium);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(38, 37, 30, 0.12);
+  max-width: min(520px, calc(100% - 24px));
+}
+.table-controls.hidden { display: none; }
+.table-controls button {
+  font-size: 12px;
+  line-height: 1.2;
+  padding: 4px 8px;
+  border: 1px solid var(--border-warm);
+  border-radius: 6px;
+  background: var(--panel-2);
+  color: var(--text);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.table-controls button:hover {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.table-controls button.table-controls-danger:hover {
+  background: #fde2e2;
+  border-color: #ef4444;
+  color: #b91c1c;
+}
+.table-controls-sep {
+  width: 1px;
+  height: 18px;
+  background: var(--border-warm);
+  margin: 0 2px;
+}
+
 /* ============ Source View (源码视图) ============ */
 /* 工具栏 toggle 按钮的 active 状态（源码模式下高亮） */
 .tb-toggle[data-mode="source"] {
@@ -2415,3 +2603,114 @@ body.file-pane-collapsed #file-pane {
   border-radius: 2px;
   box-shadow: 0 0 0 1px rgba(255, 215, 0, 0.55);
 }
+
+
+/* === v1.43.32 multi-doc tabs — 紧凑条 (VS Code 风格, ~26px) === */
+.doc-tabs {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  height: 26px;
+  min-height: 26px;
+  max-height: 26px;
+  padding: 0 8px;
+  background: transparent;
+  border-bottom: 1px solid var(--border-warm);
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+.doc-tabs::-webkit-scrollbar { display: none; }
+.doc-tabs.is-empty { /* 仅 + */ }
+.doc-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  max-height: 22px;
+  max-width: 132px;
+  padding: 0 4px 0 8px;
+  margin: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-3);
+  font-size: 11.5px;
+  font-weight: 400;
+  font-family: inherit;
+  line-height: 1;
+  cursor: pointer;
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+.doc-tab:hover {
+  background: var(--panel-2, rgba(38, 37, 30, 0.05));
+  color: var(--text-2);
+}
+.doc-tab.is-active {
+  background: var(--panel-2, rgba(38, 37, 30, 0.07));
+  color: var(--text);
+  font-weight: 500;
+  box-shadow: none;
+  border: none;
+}
+.doc-tab.is-dirty .doc-tab-label::before {
+  content: '';
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  margin-right: 4px;
+  border-radius: 50%;
+  background: var(--accent, #f54e00);
+  vertical-align: middle;
+}
+.doc-tab.is-dirty .doc-tab-label {
+  font-style: normal;
+}
+.doc-tab-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  max-width: 100px;
+}
+.doc-tab-close {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  line-height: 1;
+  border-radius: 3px;
+  color: var(--text-3);
+  font-size: 12px;
+  opacity: 0.55;
+}
+.doc-tab:hover .doc-tab-close { opacity: 0.9; }
+.doc-tab-close:hover {
+  background: rgba(185, 28, 28, 0.12);
+  color: #b91c1c;
+  opacity: 1;
+}
+.doc-tab-new {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  margin: 0 0 0 2px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-3);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+.doc-tab-new:hover {
+  background: var(--panel-2, rgba(38, 37, 30, 0.06));
+  color: var(--accent, #f54e00);
+}
+
