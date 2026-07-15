@@ -2,6 +2,46 @@
 
 按时间倒序记录已发布的变化。最新条目在上方。
 
+## v1.43.35 (2026-07-15) — 全套图标升级 (Lucide)
+
+### 用户
+"优化所有的图标，现在看着太廉价了"
+
+### 根因
+手绘 path + stroke 1.5 + 粗糙 data-URI mask → 14px 发虚、不一致。
+
+### 改动
+1. icons.js 重写：Lucide 几何、stroke **2**、24×24
+2. CSS mask 全部重新生成（percent-encode data-URI）
+3. 工具栏/format 图标 15–16px；undo/redo 去 ↶↷ 改 SVG
+4. settings / user / pencil / menu / float 同步
+
+### Cache
+- icons.js?v=2→3 · styles.css?v=103→104
+
+---
+
+## v1.43.34 (2026-07-15) — fig 前后点空隙可插光标 (几何优先)
+
+### 用户
+"光标还是无法插入fig2之前或者之后" + 要求 bsk 自测
+
+### 根因
+1. `prosemirror-gapcursor` 在 paragraph↔image 间 **永远 invalid** (closedBefore=false)
+2. v1.43.30 `tryPlaceCaretInImageGap` 要求 `posAtCoords.inside === -1` 才处理；真机点图上下 margin 时 inside 常是 paragraph/image → **直接 return false**
+3. 修代码时 shell 吃掉 `$b/$a` 曾导致 app.js 语法错误白屏 (已修)
+
+### 改动
+1. `tryPlaceCaretInImageGap` 改为 **几何优先**：图上下 48px 带内点击 → 插/聚焦空段
+2. 仅当点在有字段落内容核心区且离图 >16px 时不抢
+3. `ImageCaretNav` priority=1000；img margin 18px
+4. app.js?v=152
+
+### 验证
+- bsk: handleKeyDown ArrowRight 段末 9→12 跨过 fig
+- bsk: mousedown 空隙 → 空段 + 可 type BEFORE_FIG 在 img 前
+- `tests/v143-image-caret-nav.spec.js`
+
 ## v1.43.33 (2026-07-15) — 编辑器美学整体精修
 
 ### 用户
