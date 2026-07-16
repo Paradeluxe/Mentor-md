@@ -7721,6 +7721,20 @@ window.__mdAnnotator = {
     pending: _zipWorkerPending.size,
     stats: { ..._zipWorkerStats },
   }),
+  // v1.43.38: e2e 写盘护栏 + 强制 worker 失败路径
+  tryWriteBackMentor,
+  killZipWorkerForTest: () => {
+    try {
+      if (_zipWorker) { _zipWorker.terminate(); }
+    } catch (e) { /* ignore */ }
+    _zipWorker = null;
+    _zipWorkerReady = false;
+    for (const [, pend] of _zipWorkerPending) {
+      try { pend.reject(new Error('killed for test')); } catch (e) { /* ignore */ }
+    }
+    _zipWorkerPending.clear();
+    return { ready: _zipWorkerReady, stats: { ..._zipWorkerStats } };
+  },
   // HTML → markdown 内部 helper（暴露给 e2e 测试 + 第三方插件使用）
   htmlToMarkdown,
   // File pane 测试 API

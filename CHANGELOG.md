@@ -13,8 +13,12 @@
 3. **插图**: 工具栏图片 → 本地选文件 → `mediaFiles` 存原图 + `createDisplayObjectURL` 显示降采样 (取消选文件仍可填 URL)
 4. 暴露 `isProtectedMentorTarget` / `confirmProtectedWrite` 供 e2e
 
+### 极端测 (chaos-wave-extreme-v14338)
+- A/B/C **17/17 pass** (protect confirm/autosave/multi-tab; media zip 原图像素; offline CDN=0; 500ann key~100ms; kill worker → sync fallback)
+- e2e 暴露  + 
+
 ### Cache
-- app.bundle.js?v=1→2
+- app.bundle.js?v=2→3
 
 ---
 
