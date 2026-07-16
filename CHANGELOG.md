@@ -15,7 +15,7 @@
 
 ### 极端测 (chaos-wave-extreme-v14338)
 - A/B/C **17/17 pass** (protect confirm/autosave/multi-tab; media zip 原图像素; offline CDN=0; 500ann key~100ms; kill worker → sync fallback)
-- e2e 暴露  + 
+- e2e 暴露 tryWriteBackMentor + killZipWorkerForTest
 
 ### Cache
 - app.bundle.js?v=2→3
