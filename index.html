@@ -4,13 +4,11 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Mentor — 像 docx 一样批注 Markdown</title>
-<meta name="build" content="v1.43.35 20260715: Lucide icons stroke-2" />
-<link rel="preconnect" href="https://fonts.googleapis.com" />
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-<link rel="stylesheet" href="styles.css?v=104" />
-<!-- KaTeX 数学公式渲染 -->
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" crossorigin="anonymous" />
+<meta name="build" content="v1.43.37 20260716: offline vendor + image downsample + polish" />
+<!-- v1.43.37 offline: local fonts + KaTeX (no CDN) -->
+<link rel="stylesheet" href="vendor/fonts/local-fonts.css?v=1" />
+<link rel="stylesheet" href="styles.css?v=105" />
+<link rel="stylesheet" href="vendor/katex/katex.min.css?v=1" />
 <!-- 字体：系统无衬线 + 等宽（侧栏时间戳、文件名） -->
 <style>
   /* tokens live in styles.css — keep only critical FOUC fallbacks */
@@ -159,7 +157,7 @@
       <!-- v1.43 / v1.43.20: 空态引导 — cold/doc/filter 由 syncCommentEmptyPresentation 分型 -->
                   <div id="comment-empty" class="empty-hint" data-empty-mode="cold">
                     <div class="empty-hint-icon" aria-hidden="true">
-                      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <path d="M21 12a8 8 0 0 1-8 8H4l3-3a8 8 0 0 1 14-5z"/>
                       </svg>
                     </div>
@@ -199,35 +197,9 @@
 <!-- 临时通知 -->
 <div id="toast" class="toast hidden"></div>
 
-<!-- 依赖：esm.sh CDN -->
+<!-- v1.43.37 offline: bundled app (esbuild) + local icons; no esm.sh -->
 <script src="icons.js?v=3"></script>
-<script type="importmap">
-{
-  "imports": {
-    "@tiptap/core": "https://esm.sh/@tiptap/core@2.1.13",
-    "@tiptap/starter-kit": "https://esm.sh/@tiptap/starter-kit@2.1.13",
-    "@tiptap/extension-highlight": "https://esm.sh/@tiptap/extension-highlight@2.1.13",
-    "@tiptap/extension-link": "https://esm.sh/@tiptap/extension-link@2.1.13",
-    "@tiptap/extension-image": "https://esm.sh/@tiptap/extension-image@2.1.13",
-    "@tiptap/extension-placeholder": "https://esm.sh/@tiptap/extension-placeholder@2.1.13",
-    "@tiptap/extension-superscript": "https://esm.sh/@tiptap/extension-superscript@2.1.13",
-    "@tiptap/extension-subscript": "https://esm.sh/@tiptap/extension-subscript@2.1.13",
-    "@tiptap/extension-table": "https://esm.sh/@tiptap/extension-table@2.1.13",
-    "@tiptap/extension-table-row": "https://esm.sh/@tiptap/extension-table-row@2.1.13",
-    "@tiptap/extension-table-header": "https://esm.sh/@tiptap/extension-table-header@2.1.13",
-    "@tiptap/extension-table-cell": "https://esm.sh/@tiptap/extension-table-cell@2.1.13",
-    "@tiptap/extension-gapcursor": "https://esm.sh/@tiptap/extension-gapcursor@2.1.13",
-    "markdown-it": "https://esm.sh/markdown-it@13.0.1",
-    "katex": "https://esm.sh/katex@0.16.9",
-    "js-yaml": "https://esm.sh/js-yaml@4.1.0",
-    "turndown": "https://esm.sh/turndown@7.1.2",
-    "prosemirror-view": "https://esm.sh/prosemirror-view@1.33.7",
-    "prosemirror-state": "https://esm.sh/prosemirror-state@1.4.3",
-    "jszip": "https://esm.sh/jszip@3.10.1"
-  }
-}
-</script>
-<script type="module" src="app.js?v=152"></script>
+<script type="module" src="app.bundle.js?v=1"></script>
 <!-- 帮助 popover (浮在 body 顶层, 位置由 JS 动态计算) -->
 <div id="help-popover" class="help-popover hidden" role="tooltip">
   <div class="help-popover-arrow"></div>
@@ -236,9 +208,9 @@
     <li><strong>选区批注:</strong> 拖选任意文字 → 点 <kbd>批注</kbd> 按钮 → 侧栏建批注线程</li>
     <li><strong>嵌套回复:</strong> 在批注线程里继续回复, 像 docx 一样对话</li>
     <li><strong>解决 / 重新打开:</strong> 批注可以标记为已解决, 需要时再打开</li>
-    <li><strong>侧车存储:</strong> 批注存为 <code>xxx.md.annotations.json</code> 侧车, 源 .md 保持干净</li>
-    <li><strong>单 .mentor 包:</strong> 像 docx 一样, 选 <code>.mentor</code> 单文件 = md + 批注打包在一起 (内部仍是 <code>content.md</code> + <code>annotations.json</code>)</li>
-    <li><strong>双模式兼容:</strong> 旧 <code>.md</code> + <code>.annotations.json</code> 仍可加载; 新建/另存可选 <code>.mentor</code></li>
+    <li><strong>单 .mentor 包:</strong> 主路径 — 像 docx 一样, 一个 <code>.mentor</code> = md + 批注 + 图片 (内部 content.md + annotations.json + media/)</li>
+    <li><strong>双模式兼容:</strong> 旧 <code>.md</code> + <code>.annotations.json</code> 侧车仍可加载; 建议另存为 .mentor</li>
+    <li><strong>离线运行:</strong> v1.43.37+ 依赖已本地打包, 无网也可打开编辑</li>
     <li><strong>保存:</strong> <kbd>Ctrl</kbd>+<kbd>S</kbd> Chrome/Edge 直接写回原位置; 其他浏览器下载到 <code>xxx.md</code> 同目录</li>
     <li><strong>跨刷新重连:</strong> 授权过的 .md handle 留在 IndexedDB; 重开应用自动恢复并继续保存</li>
   </ul>

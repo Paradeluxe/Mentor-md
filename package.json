@@ -6,12 +6,36 @@
   "scripts": {
     "test": "node tests/e2e.spec.js",
     "test:report": "node tests/run-with-report.js",
-    "dev": "python3 -m http.server 8787 --bind 127.0.0.1"
+    "dev": "python3 -m http.server 8787 --bind 127.0.0.1",
+    "build": "python scripts/build-offline.py",
+    "build:bundle": "esbuild app.js --bundle --format=esm --platform=browser --outfile=app.bundle.js --alias:punycode=punycode"
   },
   "scripts_comment": "Run 'npm run test' for plain console, 'npm run test:report' for HTML report",
   "author": "",
   "license": "MIT",
   "dependencies": {
-    "playwright": "^1.61.1"
+    "@tiptap/core": "^2.1.13",
+    "@tiptap/extension-gapcursor": "^2.1.13",
+    "@tiptap/extension-highlight": "^2.1.13",
+    "@tiptap/extension-image": "^2.1.13",
+    "@tiptap/extension-link": "^2.1.13",
+    "@tiptap/extension-placeholder": "^2.1.13",
+    "@tiptap/extension-subscript": "^2.1.13",
+    "@tiptap/extension-superscript": "^2.1.13",
+    "@tiptap/extension-table": "^2.1.13",
+    "@tiptap/extension-table-cell": "^2.1.13",
+    "@tiptap/extension-table-header": "^2.1.13",
+    "@tiptap/extension-table-row": "^2.1.13",
+    "@tiptap/starter-kit": "^2.1.13",
+    "esbuild": "^0.25.0",
+    "js-yaml": "^4.1.0",
+    "jszip": "^3.10.1",
+    "katex": "^0.16.9",
+    "markdown-it": "^13.0.1",
+    "playwright": "^1.61.1",
+    "prosemirror-state": "^1.4.3",
+    "prosemirror-view": "^1.33.7",
+    "punycode": "^2.3.1",
+    "turndown": "^7.1.2"
   }
 }

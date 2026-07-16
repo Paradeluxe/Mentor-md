@@ -1,4 +1,4 @@
-# Node (将来可能加)
+# Node
 node_modules/
 npm-debug.log*
 
@@ -13,26 +13,26 @@ __pycache__/
 *.pyc
 *.pyo
 
-# 测试产物 (本地预览报告可重新生成, 不入版本)
+# 测试产物
 tests/screenshots/*.png
 tests/report.html
 tests/long-stress-result.json
 tests/soak-logs/
-
-# 开发调试临时文件
-_outline-preview.html
-tests/_outline-preview.html
-
-# 根目录 tmp/ (开发调试: serve.js, 测试 mjs, 截图)
-tmp/
-
-# 临时 probe 文件 (开发调试用, 用完删)
+test-results/
+tests/_probe_*.cjs
+tests/_probe_*.js
 tests/probe-*.spec.js
 tests/diag-*.spec.js
-
-# pack 脚本 (一次性, 打完产出 .mentor 就完成使命)
 tests/pack-*.js
 
-# Local env
+# 开发调试临时
+_outline-preview.html
+tests/_outline-preview.html
+tmp/
+
+# Local env + release output
 .env
-.env.localdist/
+.env.local
+dist/
+
+# app.bundle.js is committed for offline portable zip (rebuild: python scripts/build-offline.py)

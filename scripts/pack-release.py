@@ -23,6 +23,7 @@ ROOT = Path(__file__).resolve().parent.parent
 INCLUDE = [
     "index.html",
     "app.js",
+    "app.bundle.js",
     "styles.css",
     "icons.js",
     "mentor.cmd",
@@ -38,7 +39,14 @@ INCLUDE = [
     "workers/jszip.min.js",
     "workers/zip-worker.js",
     "scripts/register-mentor-assoc.ps1",
+    "vendor/fonts/local-fonts.css",
+    "vendor/katex/katex.min.css",
 ]
+
+INCLUDE_TREES = [
+    "vendor/katex/fonts",
+]
+
 
 # Optional if present
 OPTIONAL = [
@@ -71,6 +79,14 @@ def collect(root: Path) -> list[tuple[Path, str]]:
                 raise FileNotFoundError(f"required missing: {rel}")
             continue
         out.append((p, f"Mentor/{rel.replace(chr(92), '/')}"))
+    for tree in INCLUDE_TREES:
+        base = root / tree
+        if not base.is_dir():
+            raise FileNotFoundError(f"required tree missing: {tree}")
+        for f in base.rglob("*"):
+            if f.is_file():
+                rel = f.relative_to(root).as_posix()
+                out.append((f, f"Mentor/{rel}"))
     return out
 
 

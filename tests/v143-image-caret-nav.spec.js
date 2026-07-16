@@ -13,7 +13,7 @@ const { chromium } = require('playwright');
   };
 
   console.log('=== v1.43.30 image caret nav ===');
-  await page.goto('http://127.0.0.1:8787/index.html?v=146&cb=' + Date.now());
+  await page.goto('http://127.0.0.1:8787/index.html?v=153&cb=' + Date.now());
   await page.waitForFunction(() => window.__mdAnnotator?.State?.editor, { timeout: 15000 });
   await page.evaluate(() => {
     const m = document.querySelector('#author-modal');

@@ -2,6 +2,33 @@
 
 按时间倒序记录已发布的变化。最新条目在上方。
 
+## v1.43.37 (2026-07-16) — 离线 vendor + 大图显示降采样 + 收尾
+
+### 用户
+"行，全做吧" (审计 A/B/C/D)
+
+### 改动
+1. **离线 vendor**: `app.bundle.js` (esbuild) + `vendor/katex/*` + `vendor/fonts/local-fonts.css`；index 去掉 esm.sh / Google Fonts / jsDelivr
+2. **大图显示降采样**: `createDisplayObjectURL` — 显示边长 ≤1600px，`mediaFiles` 仍存原图写回 zip
+3. **ImageCaretNav WIP 收尾**: gap 点击几何 BAND=48 + priority 1000
+4. **图标/空态**: 残留 stroke 1.5 → 2；pending 草稿卡 badge
+5. **帮助文案**: .mentor 主路径优先；说明可离线
+6. **工具栏**: 窄屏横滑一行，不再三行撑高
+7. **gitignore**: 修好 `.env.local` / `dist/` / probe 忽略
+8. **pack-release**: 打进 bundle + vendor
+
+### 构建
+```
+python scripts/build-offline.py
+```
+
+### Cache
+- app.bundle.js?v=1 · styles.css?v=104→105 · icons.js?v=3
+
+---
+
+
+
 ## v1.43.36 (2026-07-15) — Windows 便携包 + GitHub Release
 
 ### 用户

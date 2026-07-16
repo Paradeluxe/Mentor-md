@@ -1539,6 +1539,7 @@ const ImageBlock = Image.extend({
 // 本扩展: 箭头跨图跳到对侧 textblock; 点图旁空隙插入/聚焦空段。
 const ImageCaretNav = Extension.create({
   name: 'imageCaretNav',
+  priority: 1000,
   addKeyboardShortcuts() {
     const jump = (dir, dirStr) => () => {
       const editor = this.editor;
@@ -2334,92 +2335,83 @@ function extendSelectionThroughImage(img) {
 // 必须用 clientY 相对图片中线判断 before/after。
 function tryPlaceCaretInImageGap(e) {
   if (!State.editor || !State.editor.view) return false;
+  // 点在 img 本体 → 交给 NodeSelection, 不抢
+  if (e.target && e.target.closest && e.target.closest('.ProseMirror img, .ProseMirror .ProseMirror-selectednode img')) {
+    return false;
+  }
   const view = State.editor.view;
-  let coords;
-  try {
-    coords = view.posAtCoords({ left: e.clientX, top: e.clientY });
-  } catch (err) {
-    return false;
-  }
-  // inside === -1: 点在节点之间的空隙; 也接受点在紧贴图的 margin 区
-  if (!coords) return false;
-  if (coords.inside !== -1) {
-    // 若 inside 是 image, 交给图片 mousedown (NodeSelection), 这里不抢
-    try {
-      const n = view.state.doc.nodeAt(coords.inside);
-      if (n && n.type.name === 'image') return false;
-    } catch (err) { /* ignore */ }
-    return false;
-  }
-
   const doc = view.state.doc;
-  // 找最近的 image: 先看 coords.pos 旁, 再扫 DOM 几何
-  let imgPos = -1;
+  const BAND = 48; // px: 图上下可点带 (含 margin + 段底/段顶一点)
+
+  // v1.43.34: 几何优先 — posAtCoords.inside 在空隙常落成 paragraph/image, 旧逻辑 early-return 导致点不到
+  let best = null;
+  doc.descendants((n, pos) => {
+    if (n.type.name !== 'image') return;
+    let dom = null;
+    try { dom = view.nodeDOM(pos); } catch (err) { return; }
+    const el = dom && (dom.tagName === 'IMG' ? dom : (dom.querySelector && dom.querySelector('img')));
+    if (!el || !el.getBoundingClientRect) return;
+    const r = el.getBoundingClientRect();
+    // 水平落在图宽内 (略放宽)
+    if (e.clientX < r.left - 20 || e.clientX > r.right + 20) return;
+    const distBefore = r.top - e.clientY; // >0 点在图上方
+    const distAfter = e.clientY - r.bottom; // >0 点在图下方
+    if (distBefore > 0 && distBefore <= BAND) {
+      if (!best || distBefore < best.d) best = { pos, d: distBefore, side: 'before', r };
+    } else if (distAfter > 0 && distAfter <= BAND) {
+      if (!best || distAfter < best.d) best = { pos, d: distAfter, side: 'after', r };
+    }
+  });
+  if (!best) return false;
+
+  // 若点仍在「有文字的段落内容盒」内部 (不是段底 padding/margin 区), 别抢 — 让用户正常点字
   try {
-    const $pos = doc.resolve(Math.min(Math.max(coords.pos, 0), doc.content.size));
-    if ($pos.nodeAfter && $pos.nodeAfter.type.name === 'image') imgPos = $pos.pos;
-    else if ($pos.nodeBefore && $pos.nodeBefore.type.name === 'image') imgPos = $pos.pos - $pos.nodeBefore.nodeSize;
-  } catch (err) { /* ignore */ }
-
-  if (imgPos < 0) {
-    // 几何兜底: 找垂直距离最近的 image
-    let best = null;
-    doc.descendants((n, pos) => {
-      if (n.type.name !== 'image') return;
-      let dom = null;
-      try { dom = view.nodeDOM(pos); } catch (err) { return; }
-      const el = dom && (dom.tagName === 'IMG' ? dom : (dom.querySelector && dom.querySelector('img')));
-      if (!el) return;
-      const r = el.getBoundingClientRect();
-      // 只考虑点在图左右范围内、垂直在图外 margin 带 (±24px)
-      if (e.clientX < r.left - 8 || e.clientX > r.right + 8) return;
-      const distBefore = r.top - e.clientY; // >0 点在图上方
-      const distAfter = e.clientY - r.bottom; // >0 点在图下方
-      if (distBefore >= 0 && distBefore <= 28) {
-        if (!best || distBefore < best.d) best = { pos, d: distBefore, side: 'before' };
-      } else if (distAfter >= 0 && distAfter <= 28) {
-        if (!best || distAfter < best.d) best = { pos, d: distAfter, side: 'after' };
+    const coords = view.posAtCoords({ left: e.clientX, top: e.clientY });
+    if (coords && coords.inside != null && coords.inside >= 0) {
+      const n = doc.nodeAt(coords.inside);
+      if (n && n.isTextblock && n.content.size > 0) {
+        // 该 textblock 的 DOM
+        let tbDom = null;
+        try { tbDom = view.nodeDOM(coords.inside); } catch (err) { tbDom = null; }
+        if (tbDom && tbDom.getBoundingClientRect) {
+          const tr = tbDom.getBoundingClientRect();
+          // 内容盒内部且离图 > 16px → 当正常点段落
+          const nearImg = best.d <= 16;
+          const inTextCore = e.clientY >= tr.top + 4 && e.clientY <= tr.bottom - 4;
+          if (inTextCore && !nearImg) return false;
+        }
       }
-    });
-    if (!best) return false;
-    imgPos = best.pos;
-    var sideFromGeom = best.side;
-  }
+      // inside 是 image 本体 → 不抢
+      if (n && n.type.name === 'image') return false;
+    }
+  } catch (err) { /* ignore, fall through geometric place */ }
 
+  const imgPos = best.pos;
   const node = doc.nodeAt(imgPos);
   if (!node || node.type.name !== 'image') return false;
   const imgEnd = imgPos + node.nodeSize;
-
-  // 用 Y 相对图中线判前后 (比 nodeAfter/Before 靠谱)
-  let side = typeof sideFromGeom !== 'undefined' ? sideFromGeom : null;
-  if (!side) {
-    let el = null;
-    try {
-      const dom = view.nodeDOM(imgPos);
-      el = dom && (dom.tagName === 'IMG' ? dom : (dom.querySelector && dom.querySelector('img')));
-    } catch (err) { /* ignore */ }
-    if (el) {
-      const r = el.getBoundingClientRect();
-      side = e.clientY < (r.top + r.bottom) / 2 ? 'before' : 'after';
-    } else {
-      side = 'before';
-    }
-  }
-
+  const side = best.side;
   const ed = State.editor;
+
   if (side === 'before') {
-    const $b = doc.resolve(imgPos);
-    const prev = $b.nodeBefore;
+    const resolvedBefore = doc.resolve(imgPos);
+    const prev = resolvedBefore.nodeBefore;
     if (prev && prev.type.name === 'paragraph' && prev.content.size === 0) {
+      // 已有空段 → 直接放光标
       ed.chain().focus().setTextSelection(imgPos - 1).run();
+    } else if (prev && prev.isTextblock && prev.content.size > 0) {
+      // 前一段有字: 在图前插入空段, 光标进空段 (不改前段文字)
+      ed.chain().focus().insertContentAt(imgPos, { type: 'paragraph' }).setTextSelection(imgPos + 1).run();
     } else {
       ed.chain().focus().insertContentAt(imgPos, { type: 'paragraph' }).setTextSelection(imgPos + 1).run();
     }
   } else {
-    const $a = doc.resolve(imgEnd);
-    const next = $a.nodeAfter;
+    const resolvedAfter = doc.resolve(imgEnd);
+    const next = resolvedAfter.nodeAfter;
     if (next && next.type.name === 'paragraph' && next.content.size === 0) {
       ed.chain().focus().setTextSelection(imgEnd + 1).run();
+    } else if (next && next.isTextblock && next.content.size > 0) {
+      ed.chain().focus().insertContentAt(imgEnd, { type: 'paragraph' }).setTextSelection(imgEnd + 1).run();
     } else {
       ed.chain().focus().insertContentAt(imgEnd, { type: 'paragraph' }).setTextSelection(imgEnd + 1).run();
     }
@@ -2428,6 +2420,7 @@ function tryPlaceCaretInImageGap(e) {
   queueMicrotask(() => handleSelectionChange());
   return true;
 }
+
 
 function setupImageAnnotationSelect() {
   const editorEl = $('#editor');
@@ -3179,7 +3172,7 @@ function renderCommentList() {
     const isCollapsed = thread.resolved && !State.expandedThreadIds?.[thread.threadId] || !!State.manuallyCollapsedIds?.[thread.threadId];
     // v4: 手动折叠按钮图标 — 已解决(自动折叠)/手动折叠 都显示"展开↘"; 展开时显示"收起↗"
     return `
-      <div class="comment-thread ${isActive ? 'is-active' : ''} ${thread.resolved ? 'is-resolved' : ''} ${thread.fuzzy ? 'is-fuzzy' : ''} ${thread.deleted ? 'is-deleted' : ''} ${isCollapsed ? 'is-collapsed' : ''}" data-thread="${thread.threadId}">
+      <div class="comment-thread ${isActive ? 'is-active' : ''} ${thread.resolved ? 'is-resolved' : ''} ${thread.fuzzy ? 'is-fuzzy' : ''} ${thread.deleted ? 'is-deleted' : ''} ${isCollapsed ? 'is-collapsed' : ''} ${thread.pending ? 'is-pending' : ''}" data-thread="${thread.threadId}">
         ${thread.deleted
           ? '<div class="deleted-banner">📍 原文已被删除 - <button class="link-btn" data-act="reattach" data-thread="' + thread.threadId + '">重新选择正文</button> · <button class="link-btn link-danger" data-act="delete-orphan" data-thread="' + thread.threadId + '">删除</button></div>'
           : (thread.fuzzy ? '<div class="fuzzy-banner">⚠ 位置可能偏移 - 请检查文档</div>' : '')}
@@ -3188,6 +3181,7 @@ function renderCommentList() {
         <div class="comment-quote" data-thread="${thread.threadId}" title="点击收起/展开批注">
           <span class="comment-number-badge" data-number="${number}" title="批注 #${number}">${number}</span>
           <span class="comment-quote-text">${escapeHtml((thread.text || '').slice(0, 200))}${(thread.text || '').length > 200 ? '…' : ''}</span>
+          ${thread.pending ? '<span class="comment-pending-badge" title="未提交首条评论">草稿</span>' : ''}
           <!-- v3: 解决按钮在折叠状态下显示在 header, 展开状态下显示在 form-actions 底部 -->
           <button class="comment-resolve-btn comment-resolve-btn--header ${thread.resolved ? 'is-resolved' : ''}" data-act="resolve" data-thread="${thread.threadId}" title="${thread.resolved ? '重新打开此批注' : '标记为已解决'}" aria-label="${thread.resolved ? '重新打开' : '标记为已解决'}">${thread.resolved ? '↺' : '✓'}</button>
           <button class="comment-menu-btn" data-act="toggle-menu" data-thread="${thread.threadId}" title="更多操作" aria-label="更多操作">⋯</button>
@@ -3578,6 +3572,61 @@ function positionMarkDeletePopover() {
 // F-media: 第二参数可选 mediaUrls { 'media/x.png': 'blob:http://...' }
 // 渲染前把 ![](media/x.png) 的 src 重写成 blob URL, 让浏览器能解析
 // (相对路径在 sandbox 里没 base 解析不到)
+
+// v1.43.37: 显示用降采样 — mediaFiles 仍存原图 (写回 zip), mediaUrls 用缩小后的 blob
+// 大图 (如 5k 宽 figure) 全分辨率解码会吃内存/滚动; 显示边长上限 1600px
+const DISPLAY_MAX_EDGE = 1600;
+async function createDisplayObjectURL(blob, path = '') {
+  if (!blob) return '';
+  const isImg = (blob.type && blob.type.startsWith('image/'))
+    || /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(path || '');
+  if (!isImg) return URL.createObjectURL(blob);
+  // SVG / 小图直接用原 blob
+  if (/\.svg$/i.test(path || '') || (blob.type === 'image/svg+xml')) {
+    return URL.createObjectURL(blob);
+  }
+  try {
+    if (typeof createImageBitmap !== 'function') return URL.createObjectURL(blob);
+    const bmp = await createImageBitmap(blob);
+    const maxEdge = Math.max(bmp.width, bmp.height);
+    if (!maxEdge || maxEdge <= DISPLAY_MAX_EDGE) {
+      try { bmp.close(); } catch (_) {}
+      return URL.createObjectURL(blob);
+    }
+    const scale = DISPLAY_MAX_EDGE / maxEdge;
+    const w = Math.max(1, Math.round(bmp.width * scale));
+    const h = Math.max(1, Math.round(bmp.height * scale));
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      try { bmp.close(); } catch (_) {}
+      return URL.createObjectURL(blob);
+    }
+    ctx.drawImage(bmp, 0, 0, w, h);
+    try { bmp.close(); } catch (_) {}
+    const preferJpeg = !/\.png$/i.test(path || '') && blob.type !== 'image/png';
+    const displayBlob = await new Promise((resolve) => {
+      const done = (b) => resolve(b);
+      if (preferJpeg) canvas.toBlob(done, 'image/jpeg', 0.86);
+      else canvas.toBlob((b) => b ? done(b) : canvas.toBlob(done, 'image/jpeg', 0.86), 'image/png');
+    });
+    return URL.createObjectURL(displayBlob || blob);
+  } catch (e) {
+    console.warn('[media-display] downsample fail, use original:', path, e);
+    return URL.createObjectURL(blob);
+  }
+}
+
+async function injectMediaFiles(mediaFiles) {
+  for (const [path, blob] of Object.entries(mediaFiles || {})) {
+    State.mediaFiles[path] = blob; // 原图 — 导出 zip 必须用这个
+    State.mediaUrls[path] = await createDisplayObjectURL(blob, path);
+  }
+}
+
+
 function markdownToHtml(mdText, mediaUrls) {
   let text = mdText;
   if (mediaUrls && Object.keys(mediaUrls).length > 0) {
@@ -4952,10 +5001,7 @@ async function openFromMentorHandle(fileHandle) {
   // 断开 active 与已 snapshot 的 tab, 避免 revoke/load 写回旧 tab
   State.activeTabId = null;
   revokeMediaUrls();
-  for (const [path, blob] of Object.entries(mediaFiles || {})) {
-    State.mediaUrls[path] = URL.createObjectURL(blob);
-    State.mediaFiles[path] = blob;
-  }
+  await injectMediaFiles(mediaFiles);
   console.log('[F-media v1.36 handle fix] mediaFiles count=', Object.keys(mediaFiles || {}).length, 'mediaUrls count=', Object.keys(State.mediaUrls).length);
   await loadMarkdownIntoEditor(file.name, mdText, annotations);
   State.currentFile.handle = fileHandle;  // 写回原 .mentor 位置用
@@ -5444,10 +5490,7 @@ async function openFromMentorFile(file) {
   try { snapshotActiveTab(); } catch {}
   State.activeTabId = null;
   revokeMediaUrls();
-  for (const [path, blob] of Object.entries(mediaFiles || {})) {
-    State.mediaUrls[path] = URL.createObjectURL(blob);
-    State.mediaFiles[path] = blob;
-  }
+  await injectMediaFiles(mediaFiles);
   console.log('[F-media diag] state.mediaUrls count=', Object.keys(State.mediaUrls).length);
   // 单文件模式: 没法 handle 写回, 走 download fallback
   State.saveMode = 'mentor-download';
@@ -7482,6 +7525,9 @@ window.__mdAnnotator = {
   switchToTab,
   closeTab,
   openNewTabBlank,
+  createDisplayObjectURL,
+  injectMediaFiles,
+  DISPLAY_MAX_EDGE,
   renderDocTabs,
   prepareOpenDocument,
   saveCurrent,
