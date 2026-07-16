@@ -169,7 +169,52 @@ const State = {
   // v1.43.31: 多标签 — 同时开多份文档, 测试/新开不再覆盖 dFC
   tabs: [],                 // [{ id, name, html, annotations, dirty, handle, saveMode, mediaUrls, mediaFiles, ... }]
   activeTabId: null,
+  // v1.43.38: 磁盘路径提示 (来自 ?open= 或 handle 名) + 受保护路径写盘解锁
+  diskPathHint: '',
+  protectedWriteUnlocked: {}, // { [basename]: true } session 内用户确认后可写回
 };
+
+
+// ============================================================
+// v1.43.38: 受保护研究稿写盘护栏
+// multi-tab 只护内存; 真实 dFC .mentor 曾被测/误 autosave 抹 content → stub
+// 规则: 匹配保护名/路径 → autosave 静默跳过; 手动保存须 confirm 一次/session
+// ============================================================
+const PROTECTED_MENTOR_NAME_RE = /^(DFC_Liu_Jul11_2026\.mentor)$/i;
+const PROTECTED_PATH_RE = /dfc-paper|paper-writing[\\/]+projects/i;
+
+function mentorBaseName(nameOrPath) {
+  if (!nameOrPath) return '';
+  const s = String(nameOrPath);
+  return s.split('\\').pop().split('/').pop() || s;
+}
+
+function isProtectedMentorTarget(name, pathHint) {
+  const base = mentorBaseName(name || (State.currentFile && State.currentFile.name) || '');
+  const hint = pathHint || State.diskPathHint || '';
+  if (base && PROTECTED_MENTOR_NAME_RE.test(base)) return true;
+  if (hint && PROTECTED_PATH_RE.test(hint)) return true;
+  if (base && /DFC_.*\.mentor$/i.test(base) && /dfc|paper/i.test(hint || base)) return true;
+  return false;
+}
+
+/** @returns {boolean} true = 允许写盘 */
+function confirmProtectedWrite(reason) {
+  const name = (State.currentFile && State.currentFile.name) || mentorBaseName(State.diskPathHint) || '受保护文件';
+  const base = mentorBaseName(name);
+  if (!isProtectedMentorTarget(name, State.diskPathHint)) return true;
+  if (State.protectedWriteUnlocked[base]) return true;
+  const msg =
+    '受保护的研究稿路径\n\n' +
+    name +
+    (State.diskPathHint ? '\n' + State.diskPathHint : '') +
+    '\n\n写回会覆盖磁盘上的 .mentor（曾发生 content 被抹成 stub 事故）。\n' +
+    '确认要' + (reason || '保存') + '写回原位置？\n\n' +
+    '取消 → 可改用「.mentor」另存为副本';
+  const ok = window.confirm(msg);
+  if (ok) State.protectedWriteUnlocked[base] = true;
+  return ok;
+}
 
 // ============================================================
 // 1.5 IndexedDB 持久化 File System Access handles
@@ -1416,6 +1461,15 @@ async function autosaveNow() {
   if (State.saveMode !== 'mentor-handle') return;
   if (!State.currentFile || !State.currentFile.handle) return;
   if (!State.currentFile.dirty) return;  // 没改动不写
+  // v1.43.38: 受保护路径永不自动写盘 (须用户手动确认保存)
+  if (isProtectedMentorTarget(State.currentFile.name, State.diskPathHint)) {
+    if (!autosaveNow._protectedToast) {
+      autosaveNow._protectedToast = true;
+      showToast('受保护文稿: 已禁用自动保存 — 用「保存」会再确认', 3500);
+      setStatus('自动保存已跳过', '受保护路径 ' + mentorBaseName(State.currentFile.name));
+    }
+    return;
+  }
   try {
     const html = State.editor.getHTML();
     // v1.37 fix: 用 htmlToMarkdownMedia 反查 blob URL → media/... 相对路径
@@ -5005,6 +5059,10 @@ async function openFromMentorHandle(fileHandle) {
   console.log('[F-media v1.36 handle fix] mediaFiles count=', Object.keys(mediaFiles || {}).length, 'mediaUrls count=', Object.keys(State.mediaUrls).length);
   await loadMarkdownIntoEditor(file.name, mdText, annotations);
   State.currentFile.handle = fileHandle;  // 写回原 .mentor 位置用
+  if (!State.diskPathHint) State.diskPathHint = file.name;
+  if (isProtectedMentorTarget(file.name, State.diskPathHint)) {
+    showToast('受保护文稿: 已禁用自动保存', 3000);
+  }
   // v1.37: 检测 corrupt .mentor (markdown 引 blob URLs 但 zip 无 media/), 给用户 toast
   const mediaCount = Object.keys(mediaFiles || {}).length;
   const blobUrlCount = (mdText.match(/!\[[^\]]*\]\(blob:[^)]+\)/g) || []).length;
@@ -5733,6 +5791,10 @@ async function saveCurrent() {
 // 写回 .mentor 包 (handle 模式直写, 否则 fallback 给 download 路径)
 async function tryWriteBackMentor(mdText, sidecar, mentorName) {
   if (State.saveMode === 'mentor-handle' && State.currentFile && State.currentFile.handle) {
+    // v1.43.38: 写回前确认受保护路径
+    if (!confirmProtectedWrite('保存')) {
+      return { handle: false, error: '已取消写回受保护路径 (可另存为副本)' };
+    }
     try {
       const handle = State.currentFile.handle;
       if (await handle.queryPermission({ mode: 'readwrite' }) !== 'granted') {
@@ -6914,8 +6976,37 @@ function setupToolbar() {
           break;
         }
         case 'image': {
-          const url = prompt('图片 URL:');
-          if (url) c.setImage({ src: url }).run();
+          // v1.43.38: 本地选图 + 显示降采样; 原图进 mediaFiles 供 .mentor 打包
+          // 仍支持粘贴 URL (取消文件框后 prompt)
+          const input = document.createElement('input');
+          input.type = 'file';
+          input.accept = 'image/*';
+          input.style.display = 'none';
+          document.body.appendChild(input);
+          input.addEventListener('change', async () => {
+            try {
+              const file = input.files && input.files[0];
+              input.remove();
+              if (!file) {
+                const url = prompt('图片 URL (或取消):');
+                if (url) State.editor.chain().focus().setImage({ src: url }).run();
+                return;
+              }
+              const safe = (file.name || 'image.png').replace(/[^\w.\-\u4e00-\u9fff]+/g, '_');
+              const path = 'media/' + Date.now() + '_' + safe;
+              State.mediaFiles[path] = file;
+              const url = await createDisplayObjectURL(file, path);
+              State.mediaUrls[path] = url;
+              State.editor.chain().focus().setImage({ src: url, alt: file.name || '' }).run();
+              markDirty();
+              setStatus('已插入图片', safe + (file.size > 500000 ? ' · 显示已降采样' : ''));
+            } catch (e) {
+              showToast('插图失败: ' + (e.message || e), 3000);
+            }
+          }, { once: true });
+          // 用户取消 file dialog 时部分浏览器不 fire change — 延时清理
+          setTimeout(() => { try { if (input.parentNode) input.remove(); } catch (_) {} }, 60000);
+          input.click();
           break;
         }
         case 'table': {
@@ -7500,8 +7591,14 @@ async function _handleUrlOpen() {
       await new Promise(r => setTimeout(r, 50));
     }
     if (typeof openFromMentorFile === 'function' && State.editor) {
+      State.diskPathHint = openPath;
       await openFromMentorFile(file);
-      showToast('已打开 ' + baseName, 2500);
+      if (isProtectedMentorTarget(baseName, openPath)) {
+        showToast('已打开受保护文稿 · 自动保存关闭', 3000);
+        setStatus('受保护路径', baseName + ' — 保存会确认写回');
+      } else {
+        showToast('已打开 ' + baseName, 2500);
+      }
     } else {
       console.warn('[?open] openFromMentorFile 不可用或 editor 未就绪');
       showToast('应用未就绪, 请稍后手动打开文件', 4000);
@@ -7528,6 +7625,9 @@ window.__mdAnnotator = {
   createDisplayObjectURL,
   injectMediaFiles,
   DISPLAY_MAX_EDGE,
+  isProtectedMentorTarget,
+  confirmProtectedWrite,
+  mentorBaseName,
   renderDocTabs,
   prepareOpenDocument,
   saveCurrent,

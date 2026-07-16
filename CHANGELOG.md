@@ -2,6 +2,24 @@
 
 按时间倒序记录已发布的变化。最新条目在上方。
 
+## v1.43.38 (2026-07-16) — 受保护路径写盘护栏 + 本地插图降采样
+
+### 用户
+"继续下一刀，直接做"
+
+### 改动
+1. **受保护研究稿** (`DFC_Liu_Jul11_2026.mentor` / `dfc-paper` 路径): **禁用 autosave 写回**; 手动保存须 `confirm` 一次/session
+2. `?open=` 写入 `State.diskPathHint`; 打开受保护稿时 toast 提示
+3. **插图**: 工具栏图片 → 本地选文件 → `mediaFiles` 存原图 + `createDisplayObjectURL` 显示降采样 (取消选文件仍可填 URL)
+4. 暴露 `isProtectedMentorTarget` / `confirmProtectedWrite` 供 e2e
+
+### Cache
+- app.bundle.js?v=1→2
+
+---
+
+
+
 ## v1.43.37 (2026-07-16) — 离线 vendor + 大图显示降采样 + 收尾
 
 ### 用户

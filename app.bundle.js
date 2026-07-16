@@ -54580,8 +54580,37 @@ var State2 = {
   // v1.43.31: 多标签 — 同时开多份文档, 测试/新开不再覆盖 dFC
   tabs: [],
   // [{ id, name, html, annotations, dirty, handle, saveMode, mediaUrls, mediaFiles, ... }]
-  activeTabId: null
+  activeTabId: null,
+  // v1.43.38: 磁盘路径提示 (来自 ?open= 或 handle 名) + 受保护路径写盘解锁
+  diskPathHint: "",
+  protectedWriteUnlocked: {}
+  // { [basename]: true } session 内用户确认后可写回
 };
+var PROTECTED_MENTOR_NAME_RE = /^(DFC_Liu_Jul11_2026\.mentor)$/i;
+var PROTECTED_PATH_RE = /dfc-paper|paper-writing[\\/]+projects/i;
+function mentorBaseName(nameOrPath) {
+  if (!nameOrPath) return "";
+  const s = String(nameOrPath);
+  return s.split("\\").pop().split("/").pop() || s;
+}
+function isProtectedMentorTarget(name, pathHint) {
+  const base2 = mentorBaseName(name || State2.currentFile && State2.currentFile.name || "");
+  const hint = pathHint || State2.diskPathHint || "";
+  if (base2 && PROTECTED_MENTOR_NAME_RE.test(base2)) return true;
+  if (hint && PROTECTED_PATH_RE.test(hint)) return true;
+  if (base2 && /DFC_.*\.mentor$/i.test(base2) && /dfc|paper/i.test(hint || base2)) return true;
+  return false;
+}
+function confirmProtectedWrite(reason) {
+  const name = State2.currentFile && State2.currentFile.name || mentorBaseName(State2.diskPathHint) || "\u53D7\u4FDD\u62A4\u6587\u4EF6";
+  const base2 = mentorBaseName(name);
+  if (!isProtectedMentorTarget(name, State2.diskPathHint)) return true;
+  if (State2.protectedWriteUnlocked[base2]) return true;
+  const msg = "\u53D7\u4FDD\u62A4\u7684\u7814\u7A76\u7A3F\u8DEF\u5F84\n\n" + name + (State2.diskPathHint ? "\n" + State2.diskPathHint : "") + "\n\n\u5199\u56DE\u4F1A\u8986\u76D6\u78C1\u76D8\u4E0A\u7684 .mentor\uFF08\u66FE\u53D1\u751F content \u88AB\u62B9\u6210 stub \u4E8B\u6545\uFF09\u3002\n\u786E\u8BA4\u8981" + (reason || "\u4FDD\u5B58") + "\u5199\u56DE\u539F\u4F4D\u7F6E\uFF1F\n\n\u53D6\u6D88 \u2192 \u53EF\u6539\u7528\u300C.mentor\u300D\u53E6\u5B58\u4E3A\u526F\u672C";
+  const ok = window.confirm(msg);
+  if (ok) State2.protectedWriteUnlocked[base2] = true;
+  return ok;
+}
 var HandleStore = {
   DB_NAME: "Mentor-handles",
   DB_VERSION: 2,
@@ -55673,6 +55702,14 @@ async function autosaveNow() {
   if (State2.saveMode !== "mentor-handle") return;
   if (!State2.currentFile || !State2.currentFile.handle) return;
   if (!State2.currentFile.dirty) return;
+  if (isProtectedMentorTarget(State2.currentFile.name, State2.diskPathHint)) {
+    if (!autosaveNow._protectedToast) {
+      autosaveNow._protectedToast = true;
+      showToast("\u53D7\u4FDD\u62A4\u6587\u7A3F: \u5DF2\u7981\u7528\u81EA\u52A8\u4FDD\u5B58 \u2014 \u7528\u300C\u4FDD\u5B58\u300D\u4F1A\u518D\u786E\u8BA4", 3500);
+      setStatus("\u81EA\u52A8\u4FDD\u5B58\u5DF2\u8DF3\u8FC7", "\u53D7\u4FDD\u62A4\u8DEF\u5F84 " + mentorBaseName(State2.currentFile.name));
+    }
+    return;
+  }
   try {
     const html = State2.editor.getHTML();
     const mdText = htmlToMarkdownMedia(html);
@@ -58667,6 +58704,10 @@ async function openFromMentorHandle(fileHandle) {
   console.log("[F-media v1.36 handle fix] mediaFiles count=", Object.keys(mediaFiles || {}).length, "mediaUrls count=", Object.keys(State2.mediaUrls).length);
   await loadMarkdownIntoEditor(file.name, mdText, annotations);
   State2.currentFile.handle = fileHandle;
+  if (!State2.diskPathHint) State2.diskPathHint = file.name;
+  if (isProtectedMentorTarget(file.name, State2.diskPathHint)) {
+    showToast("\u53D7\u4FDD\u62A4\u6587\u7A3F: \u5DF2\u7981\u7528\u81EA\u52A8\u4FDD\u5B58", 3e3);
+  }
   const mediaCount = Object.keys(mediaFiles || {}).length;
   const blobUrlCount = (mdText.match(/!\[[^\]]*\]\(blob:[^)]+\)/g) || []).length;
   if (mediaCount === 0 && blobUrlCount > 0) {
@@ -59244,6 +59285,9 @@ async function saveCurrent() {
 }
 async function tryWriteBackMentor(mdText, sidecar, mentorName) {
   if (State2.saveMode === "mentor-handle" && State2.currentFile && State2.currentFile.handle) {
+    if (!confirmProtectedWrite("\u4FDD\u5B58")) {
+      return { handle: false, error: "\u5DF2\u53D6\u6D88\u5199\u56DE\u53D7\u4FDD\u62A4\u8DEF\u5F84 (\u53EF\u53E6\u5B58\u4E3A\u526F\u672C)" };
+    }
     try {
       const handle = State2.currentFile.handle;
       if (await handle.queryPermission({ mode: "readwrite" }) !== "granted") {
@@ -60279,8 +60323,39 @@ function setupToolbar() {
           break;
         }
         case "image": {
-          const url = prompt("\u56FE\u7247 URL:");
-          if (url) c.setImage({ src: url }).run();
+          const input = document.createElement("input");
+          input.type = "file";
+          input.accept = "image/*";
+          input.style.display = "none";
+          document.body.appendChild(input);
+          input.addEventListener("change", async () => {
+            try {
+              const file = input.files && input.files[0];
+              input.remove();
+              if (!file) {
+                const url2 = prompt("\u56FE\u7247 URL (\u6216\u53D6\u6D88):");
+                if (url2) State2.editor.chain().focus().setImage({ src: url2 }).run();
+                return;
+              }
+              const safe = (file.name || "image.png").replace(/[^\w.\-\u4e00-\u9fff]+/g, "_");
+              const path2 = "media/" + Date.now() + "_" + safe;
+              State2.mediaFiles[path2] = file;
+              const url = await createDisplayObjectURL(file, path2);
+              State2.mediaUrls[path2] = url;
+              State2.editor.chain().focus().setImage({ src: url, alt: file.name || "" }).run();
+              markDirty();
+              setStatus("\u5DF2\u63D2\u5165\u56FE\u7247", safe + (file.size > 5e5 ? " \xB7 \u663E\u793A\u5DF2\u964D\u91C7\u6837" : ""));
+            } catch (e) {
+              showToast("\u63D2\u56FE\u5931\u8D25: " + (e.message || e), 3e3);
+            }
+          }, { once: true });
+          setTimeout(() => {
+            try {
+              if (input.parentNode) input.remove();
+            } catch (_) {
+            }
+          }, 6e4);
+          input.click();
           break;
         }
         case "table": {
@@ -60820,8 +60895,14 @@ async function _handleUrlOpen() {
       await new Promise((r2) => setTimeout(r2, 50));
     }
     if (typeof openFromMentorFile === "function" && State2.editor) {
+      State2.diskPathHint = openPath;
       await openFromMentorFile(file);
-      showToast("\u5DF2\u6253\u5F00 " + baseName, 2500);
+      if (isProtectedMentorTarget(baseName, openPath)) {
+        showToast("\u5DF2\u6253\u5F00\u53D7\u4FDD\u62A4\u6587\u7A3F \xB7 \u81EA\u52A8\u4FDD\u5B58\u5173\u95ED", 3e3);
+        setStatus("\u53D7\u4FDD\u62A4\u8DEF\u5F84", baseName + " \u2014 \u4FDD\u5B58\u4F1A\u786E\u8BA4\u5199\u56DE");
+      } else {
+        showToast("\u5DF2\u6253\u5F00 " + baseName, 2500);
+      }
     } else {
       console.warn("[?open] openFromMentorFile \u4E0D\u53EF\u7528\u6216 editor \u672A\u5C31\u7EEA");
       showToast("\u5E94\u7528\u672A\u5C31\u7EEA, \u8BF7\u7A0D\u540E\u624B\u52A8\u6253\u5F00\u6587\u4EF6", 4e3);
@@ -60845,6 +60926,9 @@ window.__mdAnnotator = {
   createDisplayObjectURL,
   injectMediaFiles,
   DISPLAY_MAX_EDGE,
+  isProtectedMentorTarget,
+  confirmProtectedWrite,
+  mentorBaseName,
   renderDocTabs,
   prepareOpenDocument,
   saveCurrent,
