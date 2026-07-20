@@ -19859,8 +19859,8 @@ var CommandManager = class {
     return this.customState || this.editor.state;
   }
   get commands() {
-    const { rawCommands, editor, state } = this;
-    const { view } = editor;
+    const { rawCommands, editor: editor2, state } = this;
+    const { view } = editor2;
     const { tr: tr2 } = state;
     const props = this.buildProps(tr2);
     return Object.fromEntries(Object.entries(rawCommands).map(([name, command3]) => {
@@ -19881,8 +19881,8 @@ var CommandManager = class {
     return () => this.createCan();
   }
   createChain(startTr, shouldDispatch = true) {
-    const { rawCommands, editor, state } = this;
-    const { view } = editor;
+    const { rawCommands, editor: editor2, state } = this;
+    const { view } = editor2;
     const callbacks = [];
     const hasStartTransaction = !!startTr;
     const tr2 = startTr || state.tr;
@@ -19920,11 +19920,11 @@ var CommandManager = class {
     };
   }
   buildProps(tr2, shouldDispatch = true) {
-    const { rawCommands, editor, state } = this;
-    const { view } = editor;
+    const { rawCommands, editor: editor2, state } = this;
+    const { view } = editor2;
     const props = {
       tr: tr2,
-      editor,
+      editor: editor2,
       view,
       state: createChainableState({
         state,
@@ -20175,7 +20175,7 @@ function cleanUpSchemaItem(data) {
     })
   );
 }
-function getSchemaByResolvedExtensions(extensions2, editor) {
+function getSchemaByResolvedExtensions(extensions2, editor2) {
   var _a;
   const allAttributes = getAttributesFromExtensions(extensions2);
   const { nodeExtensions, markExtensions } = splitExtensions(extensions2);
@@ -20186,7 +20186,7 @@ function getSchemaByResolvedExtensions(extensions2, editor) {
       name: extension.name,
       options: extension.options,
       storage: extension.storage,
-      editor
+      editor: editor2
     };
     const extraNodeFields = extensions2.reduce((fields, e) => {
       const extendNodeSchema = getExtensionField(e, "extendNodeSchema", context);
@@ -20235,7 +20235,7 @@ function getSchemaByResolvedExtensions(extensions2, editor) {
       name: extension.name,
       options: extension.options,
       storage: extension.storage,
-      editor
+      editor: editor2
     };
     const extraMarkFields = extensions2.reduce((fields, e) => {
       const extendMarkSchema = getExtensionField(e, "extendMarkSchema", context);
@@ -20333,8 +20333,8 @@ var inputRuleMatcherHandler = (text2, find2) => {
 };
 function run$1(config) {
   var _a;
-  const { editor, from: from2, to, text: text2, rules: rules2, plugin } = config;
-  const { view } = editor;
+  const { editor: editor2, from: from2, to, text: text2, rules: rules2, plugin } = config;
+  const { view } = editor2;
   if (view.composing) {
     return false;
   }
@@ -20365,7 +20365,7 @@ function run$1(config) {
       to
     };
     const { commands: commands3, chain, can } = new CommandManager({
-      editor,
+      editor: editor2,
       state
     });
     const handler = rule.handler({
@@ -20391,7 +20391,7 @@ function run$1(config) {
   return matched;
 }
 function inputRulesPlugin(props) {
-  const { editor, rules: rules2 } = props;
+  const { editor: editor2, rules: rules2 } = props;
   const plugin = new Plugin({
     state: {
       init() {
@@ -20408,7 +20408,7 @@ function inputRulesPlugin(props) {
     props: {
       handleTextInput(view, from2, to, text2) {
         return run$1({
-          editor,
+          editor: editor2,
           from: from2,
           to,
           text: text2,
@@ -20422,7 +20422,7 @@ function inputRulesPlugin(props) {
             const { $cursor } = view.state.selection;
             if ($cursor) {
               run$1({
-                editor,
+                editor: editor2,
                 from: $cursor.pos,
                 to: $cursor.pos,
                 text: "",
@@ -20443,7 +20443,7 @@ function inputRulesPlugin(props) {
         const { $cursor } = view.state.selection;
         if ($cursor) {
           return run$1({
-            editor,
+            editor: editor2,
             from: $cursor.pos,
             to: $cursor.pos,
             text: "\n",
@@ -20491,9 +20491,9 @@ var pasteRuleMatcherHandler = (text2, find2) => {
   });
 };
 function run(config) {
-  const { editor, state, from: from2, to, rule, pasteEvent, dropEvent } = config;
+  const { editor: editor2, state, from: from2, to, rule, pasteEvent, dropEvent } = config;
   const { commands: commands3, chain, can } = new CommandManager({
-    editor,
+    editor: editor2,
     state
   });
   const handlers4 = [];
@@ -20532,7 +20532,7 @@ function run(config) {
   return success;
 }
 function pasteRulesPlugin(props) {
-  const { editor, rules: rules2 } = props;
+  const { editor: editor2, rules: rules2 } = props;
   let dragSourceElement = null;
   let isPastedFromProseMirror = false;
   let isDroppedFromProseMirror = false;
@@ -20587,7 +20587,7 @@ function pasteRulesPlugin(props) {
           transaction: tr2
         });
         const handler = run({
-          editor,
+          editor: editor2,
           state: chainableState,
           from: Math.max(from2 - 1, 0),
           to: to.b - 1,
@@ -20611,11 +20611,11 @@ function findDuplicates(items) {
   return [...new Set(filtered)];
 }
 var ExtensionManager = class _ExtensionManager {
-  constructor(extensions2, editor) {
+  constructor(extensions2, editor2) {
     this.splittableMarks = [];
-    this.editor = editor;
+    this.editor = editor2;
     this.extensions = _ExtensionManager.resolve(extensions2);
-    this.schema = getSchemaByResolvedExtensions(this.extensions, editor);
+    this.schema = getSchemaByResolvedExtensions(this.extensions, editor2);
     this.extensions.forEach((extension) => {
       var _a;
       this.editor.extensionStorage[extension.name] = extension.storage;
@@ -20722,7 +20722,7 @@ var ExtensionManager = class _ExtensionManager {
     }, {});
   }
   get plugins() {
-    const { editor } = this;
+    const { editor: editor2 } = this;
     const extensions2 = _ExtensionManager.sort([...this.extensions].reverse());
     const inputRules = [];
     const pasteRules = [];
@@ -20731,29 +20731,29 @@ var ExtensionManager = class _ExtensionManager {
         name: extension.name,
         options: extension.options,
         storage: extension.storage,
-        editor,
+        editor: editor2,
         type: getSchemaTypeByName(extension.name, this.schema)
       };
       const plugins = [];
       const addKeyboardShortcuts = getExtensionField(extension, "addKeyboardShortcuts", context);
       let defaultBindings = {};
       if (extension.type === "mark" && extension.config.exitable) {
-        defaultBindings.ArrowRight = () => Mark2.handleExit({ editor, mark: extension });
+        defaultBindings.ArrowRight = () => Mark2.handleExit({ editor: editor2, mark: extension });
       }
       if (addKeyboardShortcuts) {
         const bindings = Object.fromEntries(Object.entries(addKeyboardShortcuts()).map(([shortcut, method]) => {
-          return [shortcut, () => method({ editor })];
+          return [shortcut, () => method({ editor: editor2 })];
         }));
         defaultBindings = { ...defaultBindings, ...bindings };
       }
       const keyMapPlugin = keymap(defaultBindings);
       plugins.push(keyMapPlugin);
       const addInputRules = getExtensionField(extension, "addInputRules", context);
-      if (isExtensionRulesEnabled(extension, editor.options.enableInputRules) && addInputRules) {
+      if (isExtensionRulesEnabled(extension, editor2.options.enableInputRules) && addInputRules) {
         inputRules.push(...addInputRules());
       }
       const addPasteRules = getExtensionField(extension, "addPasteRules", context);
-      if (isExtensionRulesEnabled(extension, editor.options.enablePasteRules) && addPasteRules) {
+      if (isExtensionRulesEnabled(extension, editor2.options.enablePasteRules) && addPasteRules) {
         pasteRules.push(...addPasteRules());
       }
       const addProseMirrorPlugins = getExtensionField(extension, "addProseMirrorPlugins", context);
@@ -20765,11 +20765,11 @@ var ExtensionManager = class _ExtensionManager {
     }).flat();
     return [
       inputRulesPlugin({
-        editor,
+        editor: editor2,
         rules: inputRules
       }),
       ...pasteRulesPlugin({
-        editor,
+        editor: editor2,
         rules: pasteRules
       }),
       ...allPlugins
@@ -20779,7 +20779,7 @@ var ExtensionManager = class _ExtensionManager {
     return getAttributesFromExtensions(this.extensions);
   }
   get nodeViews() {
-    const { editor } = this;
+    const { editor: editor2 } = this;
     const { nodeExtensions } = splitExtensions(this.extensions);
     return Object.fromEntries(nodeExtensions.filter((extension) => !!getExtensionField(extension, "addNodeView")).map((extension) => {
       const extensionAttributes = this.attributes.filter((attribute) => attribute.type === extension.name);
@@ -20787,7 +20787,7 @@ var ExtensionManager = class _ExtensionManager {
         name: extension.name,
         options: extension.options,
         storage: extension.storage,
-        editor,
+        editor: editor2,
         type: getNodeType(extension.name, this.schema)
       };
       const addNodeView = getExtensionField(extension, "addNodeView", context);
@@ -20797,7 +20797,7 @@ var ExtensionManager = class _ExtensionManager {
       const nodeview = (node, view, getPos, decorations) => {
         const HTMLAttributes = getRenderedAttributes(node, extensionAttributes);
         return addNodeView()({
-          editor,
+          editor: editor2,
           node,
           getPos,
           decorations,
@@ -20937,8 +20937,8 @@ var ClipboardTextSerializer = Extension.create({
         key: new PluginKey("clipboardTextSerializer"),
         props: {
           clipboardTextSerializer: () => {
-            const { editor } = this;
-            const { state, schema } = editor;
+            const { editor: editor2 } = this;
+            const { state, schema } = editor2;
             const { doc: doc5, selection } = state;
             const { ranges } = selection;
             const from2 = Math.min(...ranges.map((range2) => range2.$from.pos));
@@ -20954,10 +20954,10 @@ var ClipboardTextSerializer = Extension.create({
     ];
   }
 });
-var blur = () => ({ editor, view }) => {
+var blur = () => ({ editor: editor2, view }) => {
   requestAnimationFrame(() => {
     var _a;
-    if (!editor.isDestroyed) {
+    if (!editor2.isDestroyed) {
       view.dom.blur();
       (_a = window === null || window === void 0 ? void 0 : window.getSelection()) === null || _a === void 0 ? void 0 : _a.removeAllRanges();
     }
@@ -21003,8 +21003,8 @@ var command = (fn) => (props) => {
 var createParagraphNear2 = () => ({ state, dispatch }) => {
   return createParagraphNear(state, dispatch);
 };
-var cut = (originRange, targetPos) => ({ editor, tr: tr2 }) => {
-  const { state } = editor;
+var cut = (originRange, targetPos) => ({ editor: editor2, tr: tr2 }) => {
+  const { state } = editor2;
   const contentSlice = state.doc.slice(originRange.from, originRange.to);
   tr2.deleteRange(originRange.from, originRange.to);
   const newPos = tr2.mapping.map(targetPos);
@@ -21186,7 +21186,7 @@ function isiOS() {
     "iPod"
   ].includes(navigator.platform) || navigator.userAgent.includes("Mac") && "ontouchend" in document;
 }
-var focus = (position = null, options = {}) => ({ editor, view, tr: tr2, dispatch }) => {
+var focus = (position = null, options = {}) => ({ editor: editor2, view, tr: tr2, dispatch }) => {
   options = {
     scrollIntoView: true,
     ...options
@@ -21196,10 +21196,10 @@ var focus = (position = null, options = {}) => ({ editor, view, tr: tr2, dispatc
       view.dom.focus();
     }
     requestAnimationFrame(() => {
-      if (!editor.isDestroyed) {
+      if (!editor2.isDestroyed) {
         view.focus();
         if (options === null || options === void 0 ? void 0 : options.scrollIntoView) {
-          editor.commands.scrollIntoView();
+          editor2.commands.scrollIntoView();
         }
       }
     });
@@ -21207,12 +21207,12 @@ var focus = (position = null, options = {}) => ({ editor, view, tr: tr2, dispatc
   if (view.hasFocus() && position === null || position === false) {
     return true;
   }
-  if (dispatch && position === null && !isTextSelection(editor.state.selection)) {
+  if (dispatch && position === null && !isTextSelection(editor2.state.selection)) {
     delayedFocus();
     return true;
   }
-  const selection = resolveFocusPosition(tr2.doc, position) || editor.state.selection;
-  const isSameSelection = editor.state.selection.eq(selection);
+  const selection = resolveFocusPosition(tr2.doc, position) || editor2.state.selection;
+  const isSameSelection = editor2.state.selection.eq(selection);
   if (dispatch) {
     if (!isSameSelection) {
       tr2.setSelection(selection);
@@ -21278,14 +21278,14 @@ function selectionToInsertionEnd2(tr2, startLen, bias) {
 var isFragment = (nodeOrFragment) => {
   return nodeOrFragment.toString().startsWith("<");
 };
-var insertContentAt = (position, value, options) => ({ tr: tr2, dispatch, editor }) => {
+var insertContentAt = (position, value, options) => ({ tr: tr2, dispatch, editor: editor2 }) => {
   if (dispatch) {
     options = {
       parseOptions: {},
       updateSelection: true,
       ...options
     };
-    const content = createNodeFromContent(value, editor.schema, {
+    const content = createNodeFromContent(value, editor2.schema, {
       parseOptions: {
         preserveWhitespace: "full",
         ...options.parseOptions
@@ -21417,7 +21417,7 @@ function normalizeKeyName2(name) {
   }
   return result;
 }
-var keyboardShortcut = (name) => ({ editor, view, tr: tr2, dispatch }) => {
+var keyboardShortcut = (name) => ({ editor: editor2, view, tr: tr2, dispatch }) => {
   const keys3 = normalizeKeyName2(name).split(/-(?!$)/);
   const key = keys3.find((item) => !["Alt", "Ctrl", "Meta", "Shift"].includes(item));
   const event = new KeyboardEvent("keydown", {
@@ -21429,7 +21429,7 @@ var keyboardShortcut = (name) => ({ editor, view, tr: tr2, dispatch }) => {
     bubbles: true,
     cancelable: true
   });
-  const capturedTransaction = editor.captureTransaction(() => {
+  const capturedTransaction = editor2.captureTransaction(() => {
     view.someProp("handleKeyDown", (f) => f(view, event));
   });
   capturedTransaction === null || capturedTransaction === void 0 ? void 0 : capturedTransaction.steps.forEach((step) => {
@@ -21566,9 +21566,9 @@ var selectTextblockStart2 = () => ({ state, dispatch }) => {
 function createDocument(content, schema, parseOptions = {}) {
   return createNodeFromContent(content, schema, { slice: false, parseOptions });
 }
-var setContent = (content, emitUpdate = false, parseOptions = {}) => ({ tr: tr2, editor, dispatch }) => {
+var setContent = (content, emitUpdate = false, parseOptions = {}) => ({ tr: tr2, editor: editor2, dispatch }) => {
   const { doc: doc5 } = tr2;
-  const document2 = createDocument(content, editor.schema, parseOptions);
+  const document2 = createDocument(content, editor2.schema, parseOptions);
   if (dispatch) {
     tr2.replaceWith(0, doc5.content.size, document2).setMeta("preventUpdate", !emitUpdate);
   }
@@ -21967,10 +21967,10 @@ function ensureMarks(state, splittableMarks) {
     state.tr.ensureMarks(filteredMarks);
   }
 }
-var splitBlock2 = ({ keepMarks = true } = {}) => ({ tr: tr2, state, dispatch, editor }) => {
+var splitBlock2 = ({ keepMarks = true } = {}) => ({ tr: tr2, state, dispatch, editor: editor2 }) => {
   const { selection, doc: doc5 } = tr2;
   const { $from, $to } = selection;
-  const extensionAttributes = editor.extensionManager.attributes;
+  const extensionAttributes = editor2.extensionManager.attributes;
   const newAttributes = getSplittedAttributes(extensionAttributes, $from.node().type.name, $from.node().attrs);
   if (selection instanceof NodeSelection && selection.node.isBlock) {
     if (!$from.parentOffset || !canSplit(doc5, $from.pos)) {
@@ -21978,7 +21978,7 @@ var splitBlock2 = ({ keepMarks = true } = {}) => ({ tr: tr2, state, dispatch, ed
     }
     if (dispatch) {
       if (keepMarks) {
-        ensureMarks(state, editor.extensionManager.splittableMarks);
+        ensureMarks(state, editor2.extensionManager.splittableMarks);
       }
       tr2.split($from.pos).scrollIntoView();
     }
@@ -22020,13 +22020,13 @@ var splitBlock2 = ({ keepMarks = true } = {}) => ({ tr: tr2, state, dispatch, ed
       }
     }
     if (keepMarks) {
-      ensureMarks(state, editor.extensionManager.splittableMarks);
+      ensureMarks(state, editor2.extensionManager.splittableMarks);
     }
     tr2.scrollIntoView();
   }
   return true;
 };
-var splitListItem = (typeOrName) => ({ tr: tr2, state, dispatch, editor }) => {
+var splitListItem = (typeOrName) => ({ tr: tr2, state, dispatch, editor: editor2 }) => {
   var _a;
   const type = getNodeType(typeOrName, state.schema);
   const { $from, $to } = state.selection;
@@ -22038,7 +22038,7 @@ var splitListItem = (typeOrName) => ({ tr: tr2, state, dispatch, editor }) => {
   if (grandParent.type !== type) {
     return false;
   }
-  const extensionAttributes = editor.extensionManager.attributes;
+  const extensionAttributes = editor2.extensionManager.attributes;
   if ($from.parent.content.size === 0 && $from.node(-1).childCount === $from.indexAfter(-1)) {
     if ($from.depth === 2 || $from.node(-3).type !== type || $from.index(-2) !== $from.node(-2).childCount - 1) {
       return false;
@@ -22084,7 +22084,7 @@ var splitListItem = (typeOrName) => ({ tr: tr2, state, dispatch, editor }) => {
   }
   if (dispatch) {
     const { selection, storedMarks } = state;
-    const { splittableMarks } = editor.extensionManager;
+    const { splittableMarks } = editor2.extensionManager;
     const marks = storedMarks || selection.$to.parentOffset && selection.$from.marks();
     tr2.split($from.pos, 2, types).scrollIntoView();
     if (!marks || !dispatch) {
@@ -22129,8 +22129,8 @@ var joinListForwards = (tr2, listType) => {
   tr2.join(after);
   return true;
 };
-var toggleList = (listTypeOrName, itemTypeOrName, keepMarks, attributes = {}) => ({ editor, tr: tr2, state, dispatch, chain, commands: commands3, can }) => {
-  const { extensions: extensions2, splittableMarks } = editor.extensionManager;
+var toggleList = (listTypeOrName, itemTypeOrName, keepMarks, attributes = {}) => ({ editor: editor2, tr: tr2, state, dispatch, chain, commands: commands3, can }) => {
+  const { extensions: extensions2, splittableMarks } = editor2.extensionManager;
   const listType = getNodeType(listTypeOrName, state.schema);
   const itemType = getNodeType(itemTypeOrName, state.schema);
   const { selection, storedMarks } = state;
@@ -22392,21 +22392,21 @@ var Editable = Extension.create({
 var FocusEvents = Extension.create({
   name: "focusEvents",
   addProseMirrorPlugins() {
-    const { editor } = this;
+    const { editor: editor2 } = this;
     return [
       new Plugin({
         key: new PluginKey("focusEvents"),
         props: {
           handleDOMEvents: {
             focus: (view, event) => {
-              editor.isFocused = true;
-              const transaction = editor.state.tr.setMeta("focus", { event }).setMeta("addToHistory", false);
+              editor2.isFocused = true;
+              const transaction = editor2.state.tr.setMeta("focus", { event }).setMeta("addToHistory", false);
               view.dispatch(transaction);
               return false;
             },
             blur: (view, event) => {
-              editor.isFocused = false;
-              const transaction = editor.state.tr.setMeta("blur", { event }).setMeta("addToHistory", false);
+              editor2.isFocused = false;
+              const transaction = editor2.state.tr.setMeta("blur", { event }).setMeta("addToHistory", false);
               view.dispatch(transaction);
               return false;
             }
@@ -23100,9 +23100,9 @@ var Mark2 = class _Mark {
     }));
     return extension;
   }
-  static handleExit({ editor, mark }) {
-    const { tr: tr2 } = editor.state;
-    const currentPos = editor.state.selection.$from;
+  static handleExit({ editor: editor2, mark }) {
+    const { tr: tr2 } = editor2.state;
+    const currentPos = editor2.state.selection.$from;
     const isAtEnd = currentPos.pos === currentPos.end();
     if (isAtEnd) {
       const currentMarks = currentPos.marks();
@@ -23115,7 +23115,7 @@ var Mark2 = class _Mark {
         tr2.removeStoredMark(removeMark2);
       }
       tr2.insertText(" ", currentPos.pos);
-      editor.view.dispatch(tr2);
+      editor2.view.dispatch(tr2);
       return true;
     }
     return false;
@@ -23261,8 +23261,8 @@ var CommandManager2 = class {
     return this.customState || this.editor.state;
   }
   get commands() {
-    const { rawCommands, editor, state } = this;
-    const { view } = editor;
+    const { rawCommands, editor: editor2, state } = this;
+    const { view } = editor2;
     const { tr: tr2 } = state;
     const props = this.buildProps(tr2);
     return Object.fromEntries(Object.entries(rawCommands).map(([name, command3]) => {
@@ -23283,8 +23283,8 @@ var CommandManager2 = class {
     return () => this.createCan();
   }
   createChain(startTr, shouldDispatch = true) {
-    const { rawCommands, editor, state } = this;
-    const { view } = editor;
+    const { rawCommands, editor: editor2, state } = this;
+    const { view } = editor2;
     const callbacks = [];
     const hasStartTransaction = !!startTr;
     const tr2 = startTr || state.tr;
@@ -23322,11 +23322,11 @@ var CommandManager2 = class {
     };
   }
   buildProps(tr2, shouldDispatch = true) {
-    const { rawCommands, editor, state } = this;
-    const { view } = editor;
+    const { rawCommands, editor: editor2, state } = this;
+    const { view } = editor2;
     const props = {
       tr: tr2,
-      editor,
+      editor: editor2,
       view,
       state: createChainableState2({
         state,
@@ -23513,9 +23513,9 @@ var Mark3 = class _Mark {
     }));
     return extension;
   }
-  static handleExit({ editor, mark }) {
-    const { tr: tr2 } = editor.state;
-    const currentPos = editor.state.selection.$from;
+  static handleExit({ editor: editor2, mark }) {
+    const { tr: tr2 } = editor2.state;
+    const currentPos = editor2.state.selection.$from;
     const isAtEnd = currentPos.pos === currentPos.end();
     if (isAtEnd) {
       const currentMarks = currentPos.marks();
@@ -23528,7 +23528,7 @@ var Mark3 = class _Mark {
         tr2.removeStoredMark(removeMark2);
       }
       tr2.insertText(" ", currentPos.pos);
-      editor.view.dispatch(tr2);
+      editor2.view.dispatch(tr2);
       return true;
     }
     return false;
@@ -23645,8 +23645,8 @@ var ClipboardTextSerializer2 = Extension2.create({
         key: new PluginKey("clipboardTextSerializer"),
         props: {
           clipboardTextSerializer: () => {
-            const { editor } = this;
-            const { state, schema } = editor;
+            const { editor: editor2 } = this;
+            const { state, schema } = editor2;
             const { doc: doc5, selection } = state;
             const { ranges } = selection;
             const from2 = Math.min(...ranges.map((range2) => range2.$from.pos));
@@ -23663,10 +23663,10 @@ var ClipboardTextSerializer2 = Extension2.create({
     ];
   }
 });
-var blur2 = () => ({ editor, view }) => {
+var blur2 = () => ({ editor: editor2, view }) => {
   requestAnimationFrame(() => {
     var _a;
-    if (!editor.isDestroyed) {
+    if (!editor2.isDestroyed) {
       view.dom.blur();
       (_a = window === null || window === void 0 ? void 0 : window.getSelection()) === null || _a === void 0 ? void 0 : _a.removeAllRanges();
     }
@@ -23712,8 +23712,8 @@ var command2 = (fn) => (props) => {
 var createParagraphNear3 = () => ({ state, dispatch }) => {
   return createParagraphNear(state, dispatch);
 };
-var cut2 = (originRange, targetPos) => ({ editor, tr: tr2 }) => {
-  const { state } = editor;
+var cut2 = (originRange, targetPos) => ({ editor: editor2, tr: tr2 }) => {
+  const { state } = editor2;
   const contentSlice = state.doc.slice(originRange.from, originRange.to);
   tr2.deleteRange(originRange.from, originRange.to);
   const newPos = tr2.mapping.map(targetPos);
@@ -23906,7 +23906,7 @@ function isiOS2() {
 function isSafari() {
   return typeof navigator !== "undefined" ? /^((?!chrome|android).)*safari/i.test(navigator.userAgent) : false;
 }
-var focus2 = (position = null, options = {}) => ({ editor, view, tr: tr2, dispatch }) => {
+var focus2 = (position = null, options = {}) => ({ editor: editor2, view, tr: tr2, dispatch }) => {
   options = {
     scrollIntoView: true,
     ...options
@@ -23916,7 +23916,7 @@ var focus2 = (position = null, options = {}) => ({ editor, view, tr: tr2, dispat
       view.dom.focus();
     }
     requestAnimationFrame(() => {
-      if (!editor.isDestroyed) {
+      if (!editor2.isDestroyed) {
         view.focus();
         if (isSafari() && !isiOS2() && !isAndroid()) {
           view.dom.focus({ preventScroll: true });
@@ -23927,12 +23927,12 @@ var focus2 = (position = null, options = {}) => ({ editor, view, tr: tr2, dispat
   if (view.hasFocus() && position === null || position === false) {
     return true;
   }
-  if (dispatch && position === null && !isTextSelection2(editor.state.selection)) {
+  if (dispatch && position === null && !isTextSelection2(editor2.state.selection)) {
     delayedFocus();
     return true;
   }
-  const selection = resolveFocusPosition2(tr2.doc, position) || editor.state.selection;
-  const isSameSelection = editor.state.selection.eq(selection);
+  const selection = resolveFocusPosition2(tr2.doc, position) || editor2.state.selection;
+  const isSameSelection = editor2.state.selection.eq(selection);
   if (dispatch) {
     if (!isSameSelection) {
       tr2.setSelection(selection);
@@ -24061,11 +24061,11 @@ function selectionToInsertionEnd3(tr2, startLen, bias) {
 var isFragment2 = (nodeOrFragment) => {
   return !("type" in nodeOrFragment);
 };
-var insertContentAt2 = (position, value, options) => ({ tr: tr2, dispatch, editor }) => {
+var insertContentAt2 = (position, value, options) => ({ tr: tr2, dispatch, editor: editor2 }) => {
   var _a;
   if (dispatch) {
     options = {
-      parseOptions: editor.options.parseOptions,
+      parseOptions: editor2.options.parseOptions,
       updateSelection: true,
       applyInputRules: false,
       applyPasteRules: false,
@@ -24073,12 +24073,12 @@ var insertContentAt2 = (position, value, options) => ({ tr: tr2, dispatch, edito
     };
     let content;
     const emitContentError = (error) => {
-      editor.emit("contentError", {
-        editor,
+      editor2.emit("contentError", {
+        editor: editor2,
         error,
         disableCollaboration: () => {
-          if (editor.storage.collaboration) {
-            editor.storage.collaboration.isDisabled = true;
+          if (editor2.storage.collaboration) {
+            editor2.storage.collaboration.isDisabled = true;
           }
         }
       });
@@ -24087,9 +24087,9 @@ var insertContentAt2 = (position, value, options) => ({ tr: tr2, dispatch, edito
       preserveWhitespace: "full",
       ...options.parseOptions
     };
-    if (!options.errorOnInvalidContent && !editor.options.enableContentCheck && editor.options.emitContentError) {
+    if (!options.errorOnInvalidContent && !editor2.options.enableContentCheck && editor2.options.emitContentError) {
       try {
-        createNodeFromContent2(value, editor.schema, {
+        createNodeFromContent2(value, editor2.schema, {
           parseOptions,
           errorOnInvalidContent: true
         });
@@ -24098,9 +24098,9 @@ var insertContentAt2 = (position, value, options) => ({ tr: tr2, dispatch, edito
       }
     }
     try {
-      content = createNodeFromContent2(value, editor.schema, {
+      content = createNodeFromContent2(value, editor2.schema, {
         parseOptions,
-        errorOnInvalidContent: (_a = options.errorOnInvalidContent) !== null && _a !== void 0 ? _a : editor.options.enableContentCheck
+        errorOnInvalidContent: (_a = options.errorOnInvalidContent) !== null && _a !== void 0 ? _a : editor2.options.enableContentCheck
       });
     } catch (e) {
       emitContentError(e);
@@ -24252,7 +24252,7 @@ function normalizeKeyName3(name) {
   }
   return result;
 }
-var keyboardShortcut2 = (name) => ({ editor, view, tr: tr2, dispatch }) => {
+var keyboardShortcut2 = (name) => ({ editor: editor2, view, tr: tr2, dispatch }) => {
   const keys3 = normalizeKeyName3(name).split(/-(?!$)/);
   const key = keys3.find((item) => !["Alt", "Ctrl", "Meta", "Shift"].includes(item));
   const event = new KeyboardEvent("keydown", {
@@ -24264,7 +24264,7 @@ var keyboardShortcut2 = (name) => ({ editor, view, tr: tr2, dispatch }) => {
     bubbles: true,
     cancelable: true
   });
-  const capturedTransaction = editor.captureTransaction(() => {
+  const capturedTransaction = editor2.captureTransaction(() => {
     view.someProp("handleKeyDown", (f) => f(view, event));
   });
   capturedTransaction === null || capturedTransaction === void 0 ? void 0 : capturedTransaction.steps.forEach((step) => {
@@ -24406,12 +24406,12 @@ function createDocument2(content, schema, parseOptions = {}, options = {}) {
     errorOnInvalidContent: options.errorOnInvalidContent
   });
 }
-var setContent2 = (content, emitUpdate = false, parseOptions = {}, options = {}) => ({ editor, tr: tr2, dispatch, commands: commands3 }) => {
+var setContent2 = (content, emitUpdate = false, parseOptions = {}, options = {}) => ({ editor: editor2, tr: tr2, dispatch, commands: commands3 }) => {
   var _a, _b;
   const { doc: doc5 } = tr2;
   if (parseOptions.preserveWhitespace !== "full") {
-    const document2 = createDocument2(content, editor.schema, parseOptions, {
-      errorOnInvalidContent: (_a = options.errorOnInvalidContent) !== null && _a !== void 0 ? _a : editor.options.enableContentCheck
+    const document2 = createDocument2(content, editor2.schema, parseOptions, {
+      errorOnInvalidContent: (_a = options.errorOnInvalidContent) !== null && _a !== void 0 ? _a : editor2.options.enableContentCheck
     });
     if (dispatch) {
       tr2.replaceWith(0, doc5.content.size, document2).setMeta("preventUpdate", !emitUpdate);
@@ -24423,7 +24423,7 @@ var setContent2 = (content, emitUpdate = false, parseOptions = {}, options = {})
   }
   return commands3.insertContentAt({ from: 0, to: doc5.content.size }, content, {
     parseOptions,
-    errorOnInvalidContent: (_b = options.errorOnInvalidContent) !== null && _b !== void 0 ? _b : editor.options.enableContentCheck
+    errorOnInvalidContent: (_b = options.errorOnInvalidContent) !== null && _b !== void 0 ? _b : editor2.options.enableContentCheck
   });
 };
 function getMarkAttributes2(state, typeOrName) {
@@ -24734,10 +24734,10 @@ function ensureMarks2(state, splittableMarks) {
     state.tr.ensureMarks(filteredMarks);
   }
 }
-var splitBlock3 = ({ keepMarks = true } = {}) => ({ tr: tr2, state, dispatch, editor }) => {
+var splitBlock3 = ({ keepMarks = true } = {}) => ({ tr: tr2, state, dispatch, editor: editor2 }) => {
   const { selection, doc: doc5 } = tr2;
   const { $from, $to } = selection;
-  const extensionAttributes = editor.extensionManager.attributes;
+  const extensionAttributes = editor2.extensionManager.attributes;
   const newAttributes = getSplittedAttributes2(extensionAttributes, $from.node().type.name, $from.node().attrs);
   if (selection instanceof NodeSelection && selection.node.isBlock) {
     if (!$from.parentOffset || !canSplit(doc5, $from.pos)) {
@@ -24745,7 +24745,7 @@ var splitBlock3 = ({ keepMarks = true } = {}) => ({ tr: tr2, state, dispatch, ed
     }
     if (dispatch) {
       if (keepMarks) {
-        ensureMarks2(state, editor.extensionManager.splittableMarks);
+        ensureMarks2(state, editor2.extensionManager.splittableMarks);
       }
       tr2.split($from.pos).scrollIntoView();
     }
@@ -24787,13 +24787,13 @@ var splitBlock3 = ({ keepMarks = true } = {}) => ({ tr: tr2, state, dispatch, ed
       }
     }
     if (keepMarks) {
-      ensureMarks2(state, editor.extensionManager.splittableMarks);
+      ensureMarks2(state, editor2.extensionManager.splittableMarks);
     }
     tr2.scrollIntoView();
   }
   return can;
 };
-var splitListItem2 = (typeOrName, overrideAttrs = {}) => ({ tr: tr2, state, dispatch, editor }) => {
+var splitListItem2 = (typeOrName, overrideAttrs = {}) => ({ tr: tr2, state, dispatch, editor: editor2 }) => {
   var _a;
   const type = getNodeType2(typeOrName, state.schema);
   const { $from, $to } = state.selection;
@@ -24805,7 +24805,7 @@ var splitListItem2 = (typeOrName, overrideAttrs = {}) => ({ tr: tr2, state, disp
   if (grandParent.type !== type) {
     return false;
   }
-  const extensionAttributes = editor.extensionManager.attributes;
+  const extensionAttributes = editor2.extensionManager.attributes;
   if ($from.parent.content.size === 0 && $from.node(-1).childCount === $from.indexAfter(-1)) {
     if ($from.depth === 2 || $from.node(-3).type !== type || $from.index(-2) !== $from.node(-2).childCount - 1) {
       return false;
@@ -24860,7 +24860,7 @@ var splitListItem2 = (typeOrName, overrideAttrs = {}) => ({ tr: tr2, state, disp
   }
   if (dispatch) {
     const { selection, storedMarks } = state;
-    const { splittableMarks } = editor.extensionManager;
+    const { splittableMarks } = editor2.extensionManager;
     const marks = storedMarks || selection.$to.parentOffset && selection.$from.marks();
     tr2.split($from.pos, 2, types).scrollIntoView();
     if (!marks || !dispatch) {
@@ -24905,8 +24905,8 @@ var joinListForwards2 = (tr2, listType) => {
   tr2.join(after);
   return true;
 };
-var toggleList2 = (listTypeOrName, itemTypeOrName, keepMarks, attributes = {}) => ({ editor, tr: tr2, state, dispatch, chain, commands: commands3, can }) => {
-  const { extensions: extensions2, splittableMarks } = editor.extensionManager;
+var toggleList2 = (listTypeOrName, itemTypeOrName, keepMarks, attributes = {}) => ({ editor: editor2, tr: tr2, state, dispatch, chain, commands: commands3, can }) => {
+  const { extensions: extensions2, splittableMarks } = editor2.extensionManager;
   const listType = getNodeType2(listTypeOrName, state.schema);
   const itemType = getNodeType2(itemTypeOrName, state.schema);
   const { selection, storedMarks } = state;
@@ -25236,21 +25236,21 @@ var focusEventsPluginKey = new PluginKey("focusEvents");
 var FocusEvents2 = Extension2.create({
   name: "focusEvents",
   addProseMirrorPlugins() {
-    const { editor } = this;
+    const { editor: editor2 } = this;
     return [
       new Plugin({
         key: focusEventsPluginKey,
         props: {
           handleDOMEvents: {
             focus: (view, event) => {
-              editor.isFocused = true;
-              const transaction = editor.state.tr.setMeta("focus", { event }).setMeta("addToHistory", false);
+              editor2.isFocused = true;
+              const transaction = editor2.state.tr.setMeta("focus", { event }).setMeta("addToHistory", false);
               view.dispatch(transaction);
               return false;
             },
             blur: (view, event) => {
-              editor.isFocused = false;
-              const transaction = editor.state.tr.setMeta("blur", { event }).setMeta("addToHistory", false);
+              editor2.isFocused = false;
+              const transaction = editor2.state.tr.setMeta("blur", { event }).setMeta("addToHistory", false);
               view.dispatch(transaction);
               return false;
             }
@@ -25964,11 +25964,11 @@ var CodeBlock = Node3.create({
         return false;
       },
       // exit node on triple enter
-      Enter: ({ editor }) => {
+      Enter: ({ editor: editor2 }) => {
         if (!this.options.exitOnTripleEnter) {
           return false;
         }
-        const { state } = editor;
+        const { state } = editor2;
         const { selection } = state;
         const { $from, empty: empty4 } = selection;
         if (!empty4 || $from.parent.type !== this.type) {
@@ -25979,17 +25979,17 @@ var CodeBlock = Node3.create({
         if (!isAtEnd || !endsWithDoubleNewline) {
           return false;
         }
-        return editor.chain().command(({ tr: tr2 }) => {
+        return editor2.chain().command(({ tr: tr2 }) => {
           tr2.delete($from.pos - 2, $from.pos);
           return true;
         }).exitCode().run();
       },
       // exit node on arrow down
-      ArrowDown: ({ editor }) => {
+      ArrowDown: ({ editor: editor2 }) => {
         if (!this.options.exitOnArrowDown) {
           return false;
         }
-        const { state } = editor;
+        const { state } = editor2;
         const { selection, doc: doc5 } = state;
         const { $from, empty: empty4 } = selection;
         if (!empty4 || $from.parent.type !== this.type) {
@@ -26005,12 +26005,12 @@ var CodeBlock = Node3.create({
         }
         const nodeAfter = doc5.nodeAt(after);
         if (nodeAfter) {
-          return editor.commands.command(({ tr: tr2 }) => {
+          return editor2.commands.command(({ tr: tr2 }) => {
             tr2.setSelection(Selection.near(doc5.resolve(after)));
             return true;
           });
         }
-        return editor.commands.exitCode();
+        return editor2.commands.exitCode();
       }
     };
   },
@@ -28519,7 +28519,7 @@ var HardBreak = Node3.create({
   },
   addCommands() {
     return {
-      setHardBreak: () => ({ commands: commands3, chain, state, editor }) => {
+      setHardBreak: () => ({ commands: commands3, chain, state, editor: editor2 }) => {
         return commands3.first([
           () => commands3.exitCode(),
           () => commands3.command(() => {
@@ -28528,7 +28528,7 @@ var HardBreak = Node3.create({
               return false;
             }
             const { keepMarks } = this.options;
-            const { splittableMarks } = editor.extensionManager;
+            const { splittableMarks } = editor2.extensionManager;
             const marks = storedMarks || selection.$to.parentOffset && selection.$from.marks();
             return chain().insertContent({ type: this.name }).command(({ tr: tr2, dispatch }) => {
               if (dispatch && marks && keepMarks) {
@@ -38977,8 +38977,8 @@ function createTable(schema, rowsCount, colsCount, withHeaderRow, cellContent) {
 function isCellSelection(value) {
   return value instanceof CellSelection;
 }
-var deleteTableWhenAllCellsSelected = ({ editor }) => {
-  const { selection } = editor.state;
+var deleteTableWhenAllCellsSelected = ({ editor: editor2 }) => {
+  const { selection } = editor2.state;
   if (!isCellSelection(selection)) {
     return false;
   }
@@ -38998,7 +38998,7 @@ var deleteTableWhenAllCellsSelected = ({ editor }) => {
   if (!allCellsSelected) {
     return false;
   }
-  editor.commands.deleteTable();
+  editor2.commands.deleteTable();
   return true;
 };
 var Table = Node2.create({
@@ -39028,8 +39028,8 @@ var Table = Node2.create({
   },
   addCommands() {
     return {
-      insertTable: ({ rows = 3, cols = 3, withHeaderRow = true } = {}) => ({ tr: tr2, dispatch, editor }) => {
-        const node = createTable(editor.schema, rows, cols, withHeaderRow);
+      insertTable: ({ rows = 3, cols = 3, withHeaderRow = true } = {}) => ({ tr: tr2, dispatch, editor: editor2 }) => {
+        const node = createTable(editor2.schema, rows, cols, withHeaderRow);
         if (dispatch) {
           const offset = tr2.selection.anchor + 1;
           tr2.replaceSelectionWith(node).scrollIntoView().setSelection(TextSelection.near(tr2.doc.resolve(offset)));
@@ -54530,6 +54530,11 @@ var State2 = {
   // 显示名, 可改
   // v2-resolve-btn: 默认 filter "all" — 用户解决批注后, 卡片仍可见才能点 "重新打开" 入口
   filterOpen: true,
+  commentListLimit: 60,
+  // v1.43.46: 侧栏分窗首屏条数
+  commentListWindowStart: 0,
+  // v1.43.50: 滑动窗口起点
+  commentListShowAll: false,
   filterResolved: true,
   // F18: reply 草稿持久 (Word 行为: 切文档再切回草稿保留)
   // key = threadId, value = textarea 内容
@@ -55218,7 +55223,7 @@ var AnnotationBubblePlugin = new Plugin({
           if (!threadId || seenThreads.has(threadId)) return;
           seenThreads.add(threadId);
           try {
-            decorations.push(Decoration2.widget(pos, () => {
+            decorations.push(Decoration.widget(pos, () => {
               const el = document.createElement("span");
               el.className = "annotation-bubble";
               return el;
@@ -55230,7 +55235,7 @@ var AnnotationBubblePlugin = new Plugin({
       } catch (err) {
         console.warn("[AnnotationBubble] descendants \u5931\u8D25:", err);
       }
-      return DecorationSet2.create(doc5, decorations);
+      return DecorationSet.create(doc5, decorations);
     }
   }
 });
@@ -55267,6 +55272,42 @@ function imageAnchorLabel(anc) {
   if (ti) return ti;
   return "[\u56FE\u7247]";
 }
+function applyImageSrcChange(attrs) {
+  const ed = State2.editor;
+  if (!ed || !attrs || !attrs.src) return false;
+  const sel = ed.state.selection;
+  const replacing = isImageNodeSelection(sel);
+  const pos = replacing ? sel.from : null;
+  const ok = ed.chain().focus().setImage(attrs).run();
+  if (replacing && typeof pos === "number") {
+    const doc5 = ed.state.doc;
+    for (const ann of State2.annotations || []) {
+      if (!ann || !Array.isArray(ann.imageAnchors)) continue;
+      const hit = ann.imageAnchors.some((a) => a && a.from === pos);
+      if (!hit) continue;
+      resyncImageAnchors(ann, doc5);
+      if (ann.deleted || ann.invalid || ann.fuzzy) {
+        ann.deleted = false;
+        ann.invalid = false;
+        ann.fuzzy = false;
+        ann.invalidReason = void 0;
+      }
+      if ((!ann.ranges || !ann.ranges.length) && ann.imageAnchors && ann.imageAnchors.length === 1) {
+        const lab = imageAnchorLabel(ann.imageAnchors[0]);
+        if (lab) ann.text = lab;
+      }
+    }
+    try {
+      refreshAnnotationImageDecos();
+    } catch (e) {
+    }
+    try {
+      renderCommentList();
+    } catch (e) {
+    }
+  }
+  return ok;
+}
 function isImageNodeSelection(sel) {
   if (!sel) return false;
   if (sel.node && sel.node.type && sel.node.type.name === "image") return true;
@@ -55279,16 +55320,16 @@ function isImageNodeSelection(sel) {
   }
   return false;
 }
-function positionFloatCommentAt(editor, from2, sel) {
+function positionFloatCommentAt(editor2, from2, sel) {
   const btn = $("#float-comment-btn");
   const editorPane = $("#editor-pane");
-  if (!btn || !editorPane || !editor) return false;
+  if (!btn || !editorPane || !editor2) return false;
   try {
     let leftV = null, topV = null;
     if (isImageNodeSelection(sel) || sel && sel.node && sel.node.type.name === "image") {
       let dom = null;
       try {
-        dom = editor.view.nodeDOM(sel.from != null ? sel.from : from2);
+        dom = editor2.view.nodeDOM(sel.from != null ? sel.from : from2);
       } catch (e) {
         dom = null;
       }
@@ -55301,7 +55342,7 @@ function positionFloatCommentAt(editor, from2, sel) {
       }
     }
     if (leftV == null) {
-      const start = editor.view.coordsAtPos(from2);
+      const start = editor2.view.coordsAtPos(from2);
       const paneRect = editorPane.getBoundingClientRect();
       topV = start.top - paneRect.top + editorPane.scrollTop - 32;
       leftV = start.left - paneRect.left + editorPane.scrollLeft;
@@ -55505,14 +55546,140 @@ function markDirty() {
     scheduleIdbCacheWrite();
   }
 }
-function _validateMarksAfterEdit(editor) {
-  if (!State2.annotations || State2.annotations.length === 0) return;
-  const markType = editor.schema.marks.annotation;
+function resyncImageAnchors(ann, doc5) {
+  if (!ann || !doc5 || !Array.isArray(ann.imageAnchors) || ann.imageAnchors.length === 0) {
+    return { resolved: 0, changed: false };
+  }
+  let changed = false;
+  const out = [];
+  const usedPos = /* @__PURE__ */ new Set();
+  const pushLive = (node, pos) => {
+    if (!node || node.type.name !== "image" || usedPos.has(pos)) return false;
+    usedPos.add(pos);
+    out.push({
+      from: pos,
+      to: pos + node.nodeSize,
+      src: node.attrs.src || "",
+      alt: node.attrs.alt || "",
+      title: node.attrs.title || ""
+    });
+    return true;
+  };
+  for (const anc of ann.imageAnchors) {
+    if (!anc) {
+      changed = true;
+      continue;
+    }
+    let hit = false;
+    if (typeof anc.from === "number") {
+      try {
+        const n = doc5.nodeAt(anc.from);
+        if (n && n.type.name === "image") {
+          const prev = anc;
+          pushLive(n, anc.from);
+          const cur = out[out.length - 1];
+          if (!prev || prev.src !== cur.src || prev.alt !== cur.alt || prev.title !== cur.title || prev.from !== cur.from || prev.to !== cur.to) changed = true;
+          hit = true;
+        }
+      } catch (e) {
+      }
+    }
+    if (!hit && anc.src) {
+      let foundPos = -1;
+      const want = anc.src;
+      const wantPath = mediaPathForSrc(want);
+      const wantBlob = State2.mediaUrls && wantPath && State2.mediaUrls[wantPath] || (want.startsWith("blob:") ? want : "");
+      const wantBase = (wantPath || want).split("/").pop();
+      doc5.descendants((n, pos) => {
+        if (foundPos >= 0) return false;
+        if (n.type.name !== "image" || usedPos.has(pos)) return;
+        const s = n.attrs.src || "";
+        const sPath = mediaPathForSrc(s);
+        const sBase = (sPath || s).split("/").pop();
+        const eq = s === want || s === wantBlob || sPath === wantPath || wantPath && sPath === wantPath || wantBase && sBase === wantBase && wantBase.includes(".");
+        if (eq) {
+          foundPos = pos;
+          return false;
+        }
+      });
+      if (foundPos >= 0) {
+        const n = doc5.nodeAt(foundPos);
+        pushLive(n, foundPos);
+        if (foundPos !== anc.from) changed = true;
+        hit = true;
+      }
+    }
+    if (!hit && ann.range && typeof ann.range.from === "number" && typeof ann.range.to === "number") {
+      const lo = Math.min(ann.range.from, ann.range.to);
+      const hi = Math.max(ann.range.from, ann.range.to);
+      try {
+        doc5.nodesBetween(lo, hi, (n, pos) => {
+          if (hit) return false;
+          if (n.type.name === "image" && !usedPos.has(pos)) {
+            pushLive(n, pos);
+            changed = true;
+            hit = true;
+            return false;
+          }
+        });
+      } catch (e) {
+      }
+    }
+    if (!hit) changed = true;
+  }
+  if (out.length === 0 && ann.range && typeof ann.range.from === "number") {
+    const recovered = collectImageAnchors(doc5, ann.range.from, ann.range.to);
+    if (recovered.length) {
+      out.push(...recovered);
+      changed = true;
+    }
+  }
+  if (changed || out.length !== ann.imageAnchors.length) {
+    ann.imageAnchors = out;
+    changed = true;
+  } else {
+    for (let i = 0; i < out.length; i++) {
+      const a = ann.imageAnchors[i], b = out[i];
+      if (!a || a.from !== b.from || a.to !== b.to || a.src !== b.src || a.alt !== b.alt) {
+        ann.imageAnchors = out;
+        changed = true;
+        break;
+      }
+    }
+  }
+  if (out.length) {
+    const from2 = Math.min(...out.map((a) => a.from));
+    const to = Math.max(...out.map((a) => a.to));
+    if (!ann.range || ann.range.from !== from2 || ann.range.to !== to) {
+      const pureImage = !ann.ranges || !ann.ranges.length;
+      if (pureImage) {
+        ann.range = { from: from2, to };
+        changed = true;
+      } else if (ann.range) {
+        const nf = Math.min(ann.range.from, from2);
+        const nt = Math.max(ann.range.to, to);
+        if (nf !== ann.range.from || nt !== ann.range.to) {
+          ann.range = { from: nf, to: nt };
+          changed = true;
+        }
+      }
+    }
+  }
+  return { resolved: out.length, changed };
+}
+function _validateMarksAfterEdit(editor2, opts) {
+  if (!State2.annotations || State2.annotations.length === 0) return false;
+  if (State2._suspendAnnValidate) return false;
+  const phase = opts && opts.phase || "full";
+  const markType = editor2.schema.marks.annotation;
+  const doc5 = editor2.state.doc;
+  let hasAnyImageAnn = false;
   const threadFound = /* @__PURE__ */ new Set();
   const threadCurrentText = /* @__PURE__ */ new Map();
   const threadMarkRange = /* @__PURE__ */ new Map();
   const textCount = /* @__PURE__ */ new Map();
-  editor.state.doc.descendants((node, pos) => {
+  const occupiedRanges = [];
+  doc5.descendants((node, pos) => {
     if (!node.isText) return;
     const text2 = node.text;
     if (text2) textCount.set(text2, (textCount.get(text2) || 0) + 1);
@@ -55532,13 +55699,81 @@ function _validateMarksAfterEdit(editor) {
       }
     }
   });
+  for (const [tid, r] of threadMarkRange) occupiedRanges.push({ from: r.from, to: r.to, tid });
+  let joinedCache = null;
+  const getJoined = () => {
+    if (joinedCache === null) {
+      try {
+        joinedCache = doc5.textBetween(0, doc5.content.size, " ");
+      } catch (e) {
+        joinedCache = "";
+      }
+    }
+    return joinedCache;
+  };
+  const rangeOverlaps = (a, b) => a.from < b.to && b.from < a.to;
+  const isOccupiedByOther = (from2, to, selfTid) => {
+    for (const o of occupiedRanges) {
+      if (o.tid === selfTid) continue;
+      if (rangeOverlaps({ from: from2, to }, o)) return true;
+    }
+    return false;
+  };
   let changed = false;
+  let uiChanged = false;
+  const uiTouched = /* @__PURE__ */ new Set();
+  const touchUi = (ann) => {
+    uiChanged = true;
+    if (ann && ann.threadId) uiTouched.add(ann.threadId);
+  };
+  const pendingRemarks = [];
   for (const ann of State2.annotations) {
     if (!ann || typeof ann !== "object" || !ann.threadId) continue;
+    const hasImg = Array.isArray(ann.imageAnchors) && ann.imageAnchors.length > 0;
+    if (hasImg) hasAnyImageAnn = true;
+    let imgSync = { resolved: 0, changed: false };
+    if (hasImg) {
+      imgSync = resyncImageAnchors(ann, doc5);
+      if (imgSync.changed) changed = true;
+    }
+    const treatAsImageAnn = hasImg && !threadFound.has(ann.threadId) && (!ann.ranges || ann.ranges.length === 0);
+    if (treatAsImageAnn) {
+      if (imgSync.resolved > 0 && ann.imageAnchors && ann.imageAnchors.length > 0) {
+        if (ann.imageAnchors.length === 1) {
+          const lab = imageAnchorLabel(ann.imageAnchors[0]);
+          if (!ann.text || ann.text === "[\u56FE\u7247]" || ann.deleted || ann.invalid) {
+            if (lab && ann.text !== lab) {
+              ann.text = lab;
+              changed = true;
+            }
+          }
+        }
+        if (ann.deleted || ann.invalid || ann.fuzzy) {
+          ann.deleted = false;
+          ann.fuzzy = false;
+          ann.invalid = false;
+          ann.invalidReason = void 0;
+          changed = true;
+          touchUi(ann);
+        }
+        continue;
+      }
+      if (!ann.deleted) {
+        ann.deleted = true;
+        ann.fuzzy = false;
+        ann.invalid = true;
+        ann.invalidReason = ann.invalidReason || "image-deleted";
+        changed = true;
+        touchUi(ann);
+      }
+      continue;
+    }
     if (threadFound.has(ann.threadId)) {
       const live = threadMarkRange.get(ann.threadId);
+      let rangeMoved = false;
       if (live && (!ann.range || ann.range.from !== live.from || ann.range.to !== live.to)) {
         ann.range = { from: live.from, to: live.to };
+        rangeMoved = true;
         changed = true;
       }
       const currentText = threadCurrentText.get(ann.threadId) || "";
@@ -55547,34 +55782,69 @@ function _validateMarksAfterEdit(editor) {
         if (ann.deleted) {
           ann.deleted = false;
           changed = true;
+          touchUi(ann);
         }
         if (ann.fuzzy || ann.invalid) {
           ann.fuzzy = false;
           ann.invalid = false;
           ann.invalidReason = void 0;
           changed = true;
+          touchUi(ann);
+        }
+        if (rangeMoved && live) {
+          try {
+            const ctx = computeContextAt(doc5, live.from, live.to);
+            if (ctx.prefix !== (ann.prefix || "") || ctx.suffix !== (ann.suffix || "")) {
+              ann.prefix = ctx.prefix;
+              ann.suffix = ctx.suffix;
+              changed = true;
+            }
+          } catch (e) {
+          }
         }
       } else {
         if (ann.text !== currentText) {
           ann.text = currentText;
           changed = true;
+          touchUi(ann);
+        }
+        if (live) {
+          try {
+            const ctx = computeContextAt(doc5, live.from, live.to);
+            ann.prefix = ctx.prefix;
+            ann.suffix = ctx.suffix;
+          } catch (e) {
+          }
         }
         if (!ann.fuzzy) {
           ann.fuzzy = true;
           ann.deleted = false;
           ann.invalidReason = "text-edited";
           changed = true;
+          touchUi(ann);
         }
         if (ann.invalid) {
           ann.invalid = false;
           changed = true;
+          touchUi(ann);
         }
       }
       continue;
     }
     let textFound = false;
     if (ann.text) {
-      textFound = (textCount.get(ann.text) || 0) > 0;
+      if ((textCount.get(ann.text) || 0) > 0) textFound = true;
+      else {
+        for (const [nodeText, cnt] of textCount) {
+          if (cnt > 0 && nodeText && nodeText.includes(ann.text)) {
+            textFound = true;
+            break;
+          }
+        }
+      }
+      if (!textFound) {
+        if (getJoined().includes(ann.text)) textFound = true;
+      }
     }
     if (!textFound) {
       if (!ann.deleted) {
@@ -55583,21 +55853,290 @@ function _validateMarksAfterEdit(editor) {
         ann.invalid = true;
         ann.invalidReason = ann.invalidReason || "text-deleted";
         changed = true;
+        touchUi(ann);
       }
     } else {
-      if (!ann.fuzzy || !ann.invalid) {
+      if (phase === "light") {
+        if (!ann.fuzzy || !ann.invalid || ann.deleted) {
+          ann.deleted = false;
+          ann.fuzzy = true;
+          ann.invalid = true;
+          ann.invalidReason = ann.invalidReason || "mark-missing";
+          changed = true;
+          touchUi(ann);
+        }
+        continue;
+      }
+      let rePos = null;
+      try {
+        rePos = findAnnotationRange(doc5, ann);
+      } catch (e) {
+        rePos = null;
+      }
+      if (rePos && typeof rePos.from === "number" && typeof rePos.to === "number" && rePos.from < rePos.to && !isOccupiedByOther(rePos.from, rePos.to, ann.threadId)) {
+        pendingRemarks.push({
+          threadId: ann.threadId,
+          from: rePos.from,
+          to: rePos.to,
+          resolved: !!ann.resolved,
+          fuzzy: !!rePos.fuzzy
+        });
+        occupiedRanges.push({ from: rePos.from, to: rePos.to, tid: ann.threadId });
+        if (!ann.range || ann.range.from !== rePos.from || ann.range.to !== rePos.to) {
+          ann.range = { from: rePos.from, to: rePos.to };
+          changed = true;
+        }
+        try {
+          const ctx = computeContextAt(doc5, rePos.from, rePos.to);
+          ann.prefix = ctx.prefix;
+          ann.suffix = ctx.suffix;
+        } catch (e) {
+        }
+        const wantFuzzy = !!rePos.fuzzy;
+        if (ann.deleted) {
+          ann.deleted = false;
+          changed = true;
+        }
+        if (ann.invalid !== wantFuzzy) {
+          ann.invalid = wantFuzzy;
+          changed = true;
+        }
+        if (ann.fuzzy !== wantFuzzy) {
+          ann.fuzzy = wantFuzzy;
+          changed = true;
+        }
+        if (wantFuzzy) ann.invalidReason = ann.invalidReason || "mark-reattached-fuzzy";
+        else ann.invalidReason = void 0;
+        changed = true;
+        touchUi(ann);
+      } else if (!ann.fuzzy || !ann.invalid) {
         ann.deleted = false;
         ann.fuzzy = true;
         ann.invalid = true;
-        ann.invalidReason = ann.invalidReason || "mark-missing";
+        ann.invalidReason = ann.invalidReason || (rePos ? "mark-collision" : "mark-missing");
         changed = true;
+        touchUi(ann);
       }
     }
   }
-  return changed;
+  if (pendingRemarks.length) {
+    uiChanged = true;
+    for (const r of pendingRemarks) if (r && r.threadId) uiTouched.add(r.threadId);
+    try {
+      let tr2 = editor2.state.tr;
+      let any = false;
+      for (const r of pendingRemarks) {
+        if (r.from < 0 || r.to > editor2.state.doc.content.size || r.from >= r.to) continue;
+        tr2 = tr2.addMark(r.from, r.to, markType.create({
+          threadId: r.threadId,
+          resolved: !!r.resolved,
+          authorColor: authorColorIndex(r.threadId)
+        }));
+        any = true;
+      }
+      if (any) {
+        tr2.setMeta("addToHistory", false);
+        tr2.setMeta("__activeMarkSync", true);
+        editor2.view.dispatch(tr2);
+        changed = true;
+      }
+    } catch (e) {
+      console.warn("[_validateMarksAfterEdit] re-mark", e);
+    }
+  }
+  if (hasAnyImageAnn || phase === "full") {
+    try {
+      refreshAnnotationImageDecos();
+    } catch (e) {
+    }
+  }
+  _validateMarksAfterEdit._lastChanged = changed;
+  _validateMarksAfterEdit._lastUiChanged = uiChanged;
+  _validateMarksAfterEdit._lastUiTouchedIds = uiTouched;
+  return uiChanged;
+}
+var _validateFullTimer = null;
+var VALIDATE_FULL_DEBOUNCE_MS = 48;
+function scheduleValidateMarks(editor2, opts) {
+  const o = opts && typeof opts === "object" ? opts : {};
+  const immediate = !!o.immediate;
+  const forceFull = o.phase === "full" || !!o.force || immediate;
+  if (!editor2) editor2 = State2.editor;
+  if (!editor2) return false;
+  if (immediate || forceFull) {
+    if (_validateFullTimer) {
+      clearTimeout(_validateFullTimer);
+      _validateFullTimer = null;
+    }
+    const ch = _validateMarksAfterEdit(editor2, { phase: "full" });
+    if (ch && o.render !== false) {
+      try {
+        scheduleCommentListUi({ immediate: true });
+      } catch (e) {
+      }
+    }
+    return ch;
+  }
+  let lightChanged = false;
+  try {
+    lightChanged = !!_validateMarksAfterEdit(editor2, { phase: "light" });
+  } catch (e) {
+    console.warn("[scheduleValidateMarks] light", e);
+  }
+  if (lightChanged && o.render !== false) {
+    try {
+      scheduleCommentListUi();
+    } catch (e) {
+    }
+  }
+  if (_validateFullTimer) return lightChanged;
+  _validateFullTimer = setTimeout(() => {
+    _validateFullTimer = null;
+    const ed = State2.editor;
+    if (!ed || State2._suspendAnnValidate) return;
+    try {
+      const ch = _validateMarksAfterEdit(ed, { phase: "full" });
+      if (ch) scheduleCommentListUi({ immediate: true });
+    } catch (e) {
+      console.warn("[scheduleValidateMarks] full", e);
+    }
+  }, VALIDATE_FULL_DEBOUNCE_MS);
+  return lightChanged;
+}
+var _commentListUiTimer = null;
+var COMMENT_LIST_UI_DEBOUNCE_MS = 24;
+function scheduleCommentListUi(opts) {
+  const o = opts && typeof opts === "object" ? opts : {};
+  if (o.immediate) {
+    if (_commentListUiTimer) {
+      clearTimeout(_commentListUiTimer);
+      _commentListUiTimer = null;
+    }
+    return flushCommentListUi();
+  }
+  if (_commentListUiTimer) return false;
+  _commentListUiTimer = setTimeout(() => {
+    _commentListUiTimer = null;
+    flushCommentListUi();
+  }, COMMENT_LIST_UI_DEBOUNCE_MS);
+  return false;
+}
+function flushCommentListUi() {
+  const ids = _validateMarksAfterEdit._lastUiTouchedIds;
+  if (ids && ids.size > 0 && ids.size <= 12) {
+    let allOk = true;
+    for (const tid of ids) {
+      const ann = (State2.annotations || []).find((a) => a && a.threadId === tid);
+      if (!ann || !patchCommentCard(ann)) {
+        allOk = false;
+        break;
+      }
+    }
+    if (allOk) {
+      try {
+        updateCommentCounts();
+      } catch (e) {
+      }
+      return false;
+    }
+  }
+  renderCommentList();
+  return true;
+}
+function patchCommentCard(ann) {
+  if (!ann || !ann.threadId) return false;
+  const list = document.getElementById("comment-list");
+  if (!list) return false;
+  const el = list.querySelector(`.comment-thread[data-thread="${ann.threadId}"]`);
+  if (!el) return false;
+  el.classList.toggle("is-fuzzy", !!ann.fuzzy && !ann.deleted);
+  el.classList.toggle("is-deleted", !!ann.deleted);
+  el.classList.toggle("is-resolved", !!ann.resolved);
+  el.classList.toggle("is-pending", !!ann.pending);
+  el.classList.toggle("is-active", State2.activeThreadId === ann.threadId);
+  const qt = el.querySelector(".comment-quote-text");
+  if (qt) {
+    const tx = String(ann.text || "");
+    qt.textContent = tx.slice(0, 200) + (tx.length > 200 ? "\u2026" : "");
+  }
+  let banner = el.querySelector(".deleted-banner, .fuzzy-banner");
+  const wantDeleted = !!ann.deleted;
+  const wantFuzzy = !wantDeleted && !!ann.fuzzy;
+  if (wantDeleted) {
+    if (!banner || !banner.classList.contains("deleted-banner")) {
+      if (banner) banner.remove();
+      const div = document.createElement("div");
+      div.className = "deleted-banner";
+      div.innerHTML = '\u{1F4CD} \u539F\u6587\u5DF2\u88AB\u5220\u9664 - <button class="link-btn" data-act="reattach" data-thread="' + ann.threadId + '">\u91CD\u65B0\u9009\u62E9\u6B63\u6587</button> \xB7 <button class="link-btn link-danger" data-act="delete-orphan" data-thread="' + ann.threadId + '">\u5220\u9664</button>';
+      el.insertBefore(div, el.firstChild);
+    }
+  } else if (wantFuzzy) {
+    if (!banner || !banner.classList.contains("fuzzy-banner")) {
+      if (banner) banner.remove();
+      const div = document.createElement("div");
+      div.className = "fuzzy-banner";
+      div.textContent = "\u26A0 \u4F4D\u7F6E\u53EF\u80FD\u504F\u79FB - \u8BF7\u68C0\u67E5\u6587\u6863";
+      el.insertBefore(div, el.firstChild);
+    }
+  } else if (banner) {
+    banner.remove();
+  }
+  return true;
 }
 var _idbCacheWriteTimer = null;
 var _idbCacheWriting = false;
+function mediaPathForSrc(src) {
+  if (!src || typeof src !== "string") return "";
+  if (src.startsWith("media/")) return src;
+  if (State2.mediaUrls) {
+    for (const [path2, blobUrl] of Object.entries(State2.mediaUrls)) {
+      if (blobUrl === src) return path2;
+    }
+  }
+  return src;
+}
+function serializeImageAnchors(anchors) {
+  if (!Array.isArray(anchors) || !anchors.length) return void 0;
+  return anchors.map((a) => {
+    if (!a || typeof a !== "object") return null;
+    const out = {
+      from: a.from,
+      to: a.to,
+      src: mediaPathForSrc(a.src || ""),
+      alt: a.alt || "",
+      title: a.title || ""
+    };
+    return out;
+  }).filter(Boolean);
+}
+function serializeAnnotationThread(t) {
+  if (!t || typeof t !== "object" || !t.threadId) return null;
+  const o = {
+    threadId: t.threadId,
+    text: t.text,
+    prefix: t.prefix || "",
+    suffix: t.suffix || "",
+    resolved: !!t.resolved,
+    createdAt: t.createdAt,
+    comments: Array.isArray(t.comments) ? t.comments : []
+  };
+  if (t.range && typeof t.range.from === "number" && typeof t.range.to === "number") {
+    o.range = { from: t.range.from, to: t.range.to };
+  }
+  if (Array.isArray(t.ranges) && t.ranges.length) {
+    o.ranges = t.ranges.map((r) => ({ from: r.from, to: r.to }));
+  }
+  const ia = serializeImageAnchors(t.imageAnchors);
+  if (ia && ia.length) o.imageAnchors = ia;
+  if (t.deleted) o.deleted = true;
+  if (t.invalid) o.invalid = true;
+  if (t.invalidReason) o.invalidReason = t.invalidReason;
+  if (t.fuzzy) o.fuzzy = true;
+  return o;
+}
+function buildAnnotationsSidecar() {
+  return State2.annotations.filter((x) => x && typeof x === "object" && x.threadId).map(serializeAnnotationThread).filter(Boolean);
+}
 function scheduleIdbCacheWrite() {
   if (_idbCacheWriteTimer) clearTimeout(_idbCacheWriteTimer);
   if (State2.currentFile) {
@@ -55606,15 +56145,7 @@ function scheduleIdbCacheWrite() {
       document: State2.currentFile.name,
       updatedAt: (/* @__PURE__ */ new Date()).toISOString(),
       author: { id: State2.authorId, name: State2.author },
-      annotations: State2.annotations.filter((t) => t && typeof t === "object" && t.threadId).map((t) => ({
-        threadId: t.threadId,
-        text: t.text,
-        prefix: t.prefix || "",
-        suffix: t.suffix || "",
-        resolved: t.resolved || false,
-        createdAt: t.createdAt,
-        comments: t.comments
-      }))
+      annotations: buildAnnotationsSidecar()
     };
     State2.idbCache[State2.currentFile.name] = { sidecar: curSidecar, updatedAt: Date.now() };
   }
@@ -55629,15 +56160,7 @@ function scheduleIdbCacheWrite() {
         document: State2.currentFile.name,
         updatedAt: (/* @__PURE__ */ new Date()).toISOString(),
         author: { id: State2.authorId, name: State2.author },
-        annotations: State2.annotations.filter((t) => t && typeof t === "object" && t.threadId).map((t) => ({
-          threadId: t.threadId,
-          text: t.text,
-          prefix: t.prefix || "",
-          suffix: t.suffix || "",
-          resolved: t.resolved || false,
-          createdAt: t.createdAt,
-          comments: t.comments
-        }))
+        annotations: buildAnnotationsSidecar()
       };
       await AnnotationStore.put(State2.currentFile.name, sidecar);
       State2.idbCache[State2.currentFile.name] = { sidecar, updatedAt: Date.now() };
@@ -55718,15 +56241,7 @@ async function autosaveNow() {
       document: State2.currentFile.name,
       updatedAt: nowISO(),
       author: { id: State2.authorId, name: State2.author },
-      annotations: State2.annotations.filter((t) => t && typeof t === "object" && t.threadId).map((t) => ({
-        threadId: t.threadId,
-        text: t.text,
-        prefix: t.prefix || "",
-        suffix: t.suffix || "",
-        resolved: t.resolved,
-        createdAt: t.createdAt,
-        comments: t.comments
-      }))
+      annotations: buildAnnotationsSidecar()
     };
     const blob = await buildMentorZipBlob(mdText, sidecar, State2.mediaFiles);
     const handle = State2.currentFile.handle;
@@ -55813,8 +56328,8 @@ var ImageCaretNav = Extension.create({
   priority: 1e3,
   addKeyboardShortcuts() {
     const jump = (dir, dirStr) => () => {
-      const editor = this.editor;
-      const { state, view } = editor;
+      const editor2 = this.editor;
+      const { state, view } = editor2;
       const sel = state.selection;
       const doc5 = state.doc;
       if (sel.node && sel.node.type.name === "image") {
@@ -55823,15 +56338,15 @@ var ImageCaretNav = Extension.create({
         if (dir > 0) {
           const $a = doc5.resolve(imgEnd);
           if ($a.nodeAfter && $a.nodeAfter.isTextblock) {
-            return editor.commands.setTextSelection(imgEnd + 1);
+            return editor2.commands.setTextSelection(imgEnd + 1);
           }
-          return editor.chain().insertContentAt(imgEnd, { type: "paragraph" }).setTextSelection(imgEnd + 1).run();
+          return editor2.chain().insertContentAt(imgEnd, { type: "paragraph" }).setTextSelection(imgEnd + 1).run();
         }
         const $b2 = doc5.resolve(imgPos2);
         if ($b2.nodeBefore && $b2.nodeBefore.isTextblock) {
-          return editor.commands.setTextSelection(imgPos2 - 1);
+          return editor2.commands.setTextSelection(imgPos2 - 1);
         }
-        return editor.chain().insertContentAt(imgPos2, { type: "paragraph" }).setTextSelection(imgPos2 + 1).run();
+        return editor2.chain().insertContentAt(imgPos2, { type: "paragraph" }).setTextSelection(imgPos2 + 1).run();
       }
       if (!sel.empty) return false;
       if (!view.endOfTextblock(dirStr)) return false;
@@ -55848,9 +56363,9 @@ var ImageCaretNav = Extension.create({
         const imgEnd = after + node.nodeSize;
         const $a = doc5.resolve(imgEnd);
         if ($a.nodeAfter && $a.nodeAfter.isTextblock) {
-          return editor.commands.setTextSelection(imgEnd + 1);
+          return editor2.commands.setTextSelection(imgEnd + 1);
         }
-        return editor.chain().insertContentAt(imgEnd, { type: "paragraph" }).setTextSelection(imgEnd + 1).run();
+        return editor2.chain().insertContentAt(imgEnd, { type: "paragraph" }).setTextSelection(imgEnd + 1).run();
       }
       let before;
       try {
@@ -55865,9 +56380,9 @@ var ImageCaretNav = Extension.create({
       const imgPos = before - prev.nodeSize;
       const $i = doc5.resolve(imgPos);
       if ($i.nodeBefore && $i.nodeBefore.isTextblock) {
-        return editor.commands.setTextSelection(imgPos - 1);
+        return editor2.commands.setTextSelection(imgPos - 1);
       }
-      return editor.chain().insertContentAt(imgPos, { type: "paragraph" }).setTextSelection(imgPos + 1).run();
+      return editor2.chain().insertContentAt(imgPos, { type: "paragraph" }).setTextSelection(imgPos + 1).run();
     };
     return {
       ArrowRight: jump(1, "right"),
@@ -55919,7 +56434,7 @@ function initEditor() {
       KatexBlock
     ],
     content: "",
-    onUpdate: ({ editor, transaction }) => {
+    onUpdate: ({ editor: editor2, transaction }) => {
       if (transaction?.getMeta("__activeMarkSync") || transaction?.getMeta("__tableDragSelect")) {
         return;
       }
@@ -55928,19 +56443,34 @@ function initEditor() {
       }
       markDirty();
       scheduleAutosaveDebounce();
-      const annChanged = _validateMarksAfterEdit(editor);
-      if (annChanged) {
-        renderCommentList();
+      if (transaction?.docChanged) {
+        scheduleValidateMarks(editor2, { render: true });
       }
       scheduleRenderOutline();
     },
-    onSelectionUpdate: ({ editor }) => {
+    onSelectionUpdate: ({ editor: editor2 }) => {
       handleSelectionChange();
       updateTableControls();
     }
   });
   setupTableDragCapture(editorEl);
   setupKatexDblClick(editorEl);
+  try {
+    const _setContentOrig = editor.commands.setContent.bind(editor.commands);
+    editor.commands.setContent = (content, emitUpdate, parseOptions) => {
+      const r = _setContentOrig(content, emitUpdate, parseOptions);
+      try {
+        if (State2._suspendAnnValidate) return r;
+        if (State2.annotations && State2.annotations.length) {
+          scheduleValidateMarks(editor, { immediate: true, phase: "full" });
+        }
+      } catch (e) {
+      }
+      return r;
+    };
+  } catch (e) {
+    console.warn("[setContent wrap]", e);
+  }
 }
 function setupTableDragCapture(editorEl) {
   if (!editorEl) return;
@@ -56137,29 +56667,32 @@ function applyKatexEdit(pmNode, pos, newTex) {
   }
 }
 function handleSelectionChange() {
-  const editor = State2.editor;
-  if (!editor) return;
-  const { from: from2, to, empty: empty4 } = editor.state.selection;
+  const editor2 = State2.editor;
+  if (!editor2) return;
+  const { from: from2, to, empty: empty4 } = editor2.state.selection;
   const btn = $("#float-comment-btn");
-  const markType = editor.schema.marks.annotation;
+  const markType = editor2.schema.marks.annotation;
   let activeMarkThreadId = null;
   if (empty4) {
-    const $pos = editor.state.doc.resolve(from2);
+    const $pos = editor2.state.doc.resolve(from2);
     const mark = $pos.marks().find((m) => m.type === markType);
     if (mark) activeMarkThreadId = mark.attrs.threadId;
   } else {
-    const $from2 = editor.state.doc.resolve(from2);
-    const $to2 = editor.state.doc.resolve(to);
+    const $from2 = editor2.state.doc.resolve(from2);
+    const $to2 = editor2.state.doc.resolve(to);
     const m1 = $from2.marks().find((m) => m.type === markType);
     const m2 = $to2.marks().find((m) => m.type === markType);
     activeMarkThreadId = m1 && m1.attrs.threadId || m2 && m2.attrs.threadId;
   }
   if (activeMarkThreadId) {
-    if (State2.activeThreadId !== activeMarkThreadId) {
-      State2.activeThreadId = activeMarkThreadId;
-    }
+    const switched = State2.activeThreadId !== activeMarkThreadId;
+    State2.activeThreadId = activeMarkThreadId;
     highlightActiveMark();
-    renderCommentList();
+    if (switched) {
+      if (!setActiveCommentCard(activeMarkThreadId)) {
+        renderCommentList();
+      }
+    }
   }
   const popover = $("#mark-delete-popover");
   if (popover) {
@@ -56172,20 +56705,23 @@ function handleSelectionChange() {
   const sel0 = State2.editor.state.selection;
   if (isImageNodeSelection(sel0)) {
     try {
-      const imgNode = sel0.node || editor.state.doc.nodeAt(sel0.from);
+      const imgNode = sel0.node || editor2.state.doc.nodeAt(sel0.from);
       const src = imgNode?.attrs?.src || "";
       const hit = (State2.annotations || []).find(
         (a) => a && !a.invalid && Array.isArray(a.imageAnchors) && a.imageAnchors.some((x) => x && (x.from === sel0.from || src && x.src === src))
       );
       if (hit) {
-        if (State2.activeThreadId !== hit.threadId) State2.activeThreadId = hit.threadId;
+        const switched = State2.activeThreadId !== hit.threadId;
+        State2.activeThreadId = hit.threadId;
         highlightActiveMark();
-        renderCommentList();
+        if (switched) {
+          if (!setActiveCommentCard(hit.threadId)) renderCommentList();
+        }
         refreshAnnotationImageDecos();
       }
     } catch (e) {
     }
-    positionFloatCommentAt(editor, from2, sel0);
+    positionFloatCommentAt(editor2, from2, sel0);
     return;
   }
   if (empty4 || from2 === to) {
@@ -56199,7 +56735,7 @@ function handleSelectionChange() {
   const isCellSel = sel.forEachCell && sel.$anchorCell && sel.$headCell;
   if (isCellSel) {
     try {
-      const start = editor.view.coordsAtPos(sel.from);
+      const start = editor2.view.coordsAtPos(sel.from);
       const editorPane = $("#editor-pane");
       const paneRect = editorPane.getBoundingClientRect();
       const top = start.top - paneRect.top + editorPane.scrollTop - 32;
@@ -56212,8 +56748,8 @@ function handleSelectionChange() {
     }
     return;
   }
-  const $from = editor.state.doc.resolve(from2);
-  const $to = editor.state.doc.resolve(to);
+  const $from = editor2.state.doc.resolve(from2);
+  const $to = editor2.state.doc.resolve(to);
   if ($from.parent !== $to.parent) {
     let fromCell = null;
     let fromCellDepth = -1;
@@ -56242,20 +56778,20 @@ function handleSelectionChange() {
         }
       }
       try {
-        editor.chain().setTextSelection({ from: newFrom, to: newTo }).run();
+        editor2.chain().setTextSelection({ from: newFrom, to: newTo }).run();
         setStatus("\u63D0\u793A", "\u6279\u6CE8\u5DF2\u81EA\u52A8\u843D\u5230\u8D77\u59CB\u5355\u5143\u683C");
       } catch (e) {
         btn.classList.add("hidden");
         return;
       }
-    } else if ($from.parent.type.name === "paragraph" && $to.parent.type.name === "paragraph" || $from.parent.type.name === "heading" && $to.parent.type.name === "heading" || $from.parent.type.name === "heading" && $to.parent.type.name === "paragraph" || $from.parent.type.name === "paragraph" && $to.parent.type.name === "heading" || $from.parent.isTextblock && $to.parent.isTextblock || collectImageAnchors(editor.state.doc, from2, to).length > 0) {
+    } else if ($from.parent.type.name === "paragraph" && $to.parent.type.name === "paragraph" || $from.parent.type.name === "heading" && $to.parent.type.name === "heading" || $from.parent.type.name === "heading" && $to.parent.type.name === "paragraph" || $from.parent.type.name === "paragraph" && $to.parent.type.name === "heading" || $from.parent.isTextblock && $to.parent.isTextblock || collectImageAnchors(editor2.state.doc, from2, to).length > 0) {
     } else {
       btn.classList.add("hidden");
       setStatus("\u63D0\u793A", "\u6279\u6CE8\u6682\u4E0D\u652F\u6301\u8DE8\u5757\u9009\u533A, \u8BF7\u9009\u6BB5\u843D\u5185\u3001\u8DE8\u6BB5\u6587\u5B57\u6216\u56FE\u7247");
       return;
     }
   }
-  positionFloatCommentAt(editor, from2, sel);
+  positionFloatCommentAt(editor2, from2, sel);
 }
 function setupPaneResizer() {
   const main2 = $("#main");
@@ -56316,6 +56852,12 @@ function setupPaneResizer() {
   });
 }
 function setupFloatCommentButton() {
+  const floatWrap = $("#float-comment-btn");
+  if (floatWrap) {
+    floatWrap.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+    });
+  }
   $("#float-comment-btn button").addEventListener("click", () => {
     const sel = State2.editor.state.selection;
     if (sel.empty && (!sel.$anchor || !sel.$head)) return;
@@ -56691,8 +57233,7 @@ function createAnnotationThread(from2, to, text2, opts = null) {
     return null;
   }
   const threadId = uuid();
-  const docText = State2.editor.state.doc.textBetween(0, State2.editor.state.doc.content.size, " ");
-  const { prefix, suffix } = computeContext(text2, docText);
+  const { prefix, suffix } = computeContextAt(State2.editor.state.doc, from2, to);
   const thread = {
     threadId,
     range: { from: from2, to },
@@ -56763,8 +57304,7 @@ function handleCreateMultiCellAnnotation(cellSel) {
   const text2 = totalText.trim() || "(\u7A7A)";
   const threadId = uuid();
   const commentId = uuid();
-  const docText = State2.editor.state.doc.textBetween(0, State2.editor.state.doc.content.size, " ");
-  const { prefix, suffix } = computeContext(ranges[0].from === cellSel.from ? text2 : text2, docText);
+  const { prefix, suffix } = computeContextAt(State2.editor.state.doc, ranges[0].from, ranges[0].to);
   const thread = {
     threadId,
     range: ranges[0],
@@ -56874,8 +57414,7 @@ function handleCreateMultiParagraphAnnotation(from2, to) {
   }
   const threadId = uuid();
   const commentId = uuid();
-  const docText = ed.state.doc.textBetween(0, ed.state.doc.content.size, " ");
-  const { prefix, suffix } = computeContext(text2, docText);
+  const { prefix, suffix } = computeContextAt(ed.state.doc, ranges[0].from, ranges[0].to);
   const thread = {
     threadId,
     range: ranges[0],
@@ -56949,10 +57488,10 @@ function toggleResolved(threadId) {
     thread.resolvedBy = State2.authorId || State2.author || "";
   } else {
   }
-  const editor = State2.editor;
-  const tr2 = editor.state.tr;
-  const markType = editor.schema.marks.annotation;
-  editor.state.doc.descendants((node, pos) => {
+  const editor2 = State2.editor;
+  const tr2 = editor2.state.tr;
+  const markType = editor2.schema.marks.annotation;
+  editor2.state.doc.descendants((node, pos) => {
     node.marks.forEach((m) => {
       if (m.type === markType && m.attrs.threadId === threadId) {
         tr2.removeMark(pos, pos + node.nodeSize, markType);
@@ -56960,7 +57499,7 @@ function toggleResolved(threadId) {
       }
     });
   });
-  editor.view.dispatch(tr2);
+  editor2.view.dispatch(tr2);
   markDirty();
   renderCommentList();
   emitAI("threadChange", { threadId, change: "resolved", resolved: thread.resolved });
@@ -57042,10 +57581,14 @@ function applyReattach() {
   thread.deleted = false;
   thread.invalid = false;
   thread.invalidReason = void 0;
-  const docText = ed.state.doc.textContent;
-  const pStart = Math.max(0, sel.from - 20);
-  thread.prefix = docText.slice(pStart, sel.from);
-  thread.suffix = docText.slice(sel.to, Math.min(docText.length, sel.to + 20));
+  try {
+    const ctx = computeContextAt(ed.state.doc, sel.from, sel.to);
+    thread.prefix = ctx.prefix;
+    thread.suffix = ctx.suffix;
+  } catch (e) {
+    thread.prefix = "";
+    thread.suffix = "";
+  }
   State2.reattachTarget = null;
   document.querySelectorAll(".comment-thread.awaiting-reattach").forEach((c) => c.classList.remove("awaiting-reattach"));
   setStatus("\u5DF2\u91CD\u65B0\u9009\u62E9\u6B63\u6587", `\u7EBF\u7A0B ${tid.slice(0, 8)} \xB7 "${newText.slice(0, 20)}${newText.length > 20 ? "\u2026" : ""}"`);
@@ -57059,11 +57602,11 @@ function deleteThread(threadId) {
   const thread = State2.annotations.find((t) => t && typeof t === "object" && t.threadId === threadId);
   if (!thread) return;
   pushHistory();
-  const editor = State2.editor;
-  const tr2 = editor.state.tr;
-  const markType = editor.schema.marks.annotation;
-  const oldSel = { from: editor.state.selection.from, to: editor.state.selection.to };
-  editor.state.doc.descendants((node, pos) => {
+  const editor2 = State2.editor;
+  const tr2 = editor2.state.tr;
+  const markType = editor2.schema.marks.annotation;
+  const oldSel = { from: editor2.state.selection.from, to: editor2.state.selection.to };
+  editor2.state.doc.descendants((node, pos) => {
     node.marks.forEach((m) => {
       if (m.type === markType && m.attrs.threadId === threadId) {
         tr2.removeMark(pos, pos + node.nodeSize, markType);
@@ -57072,7 +57615,7 @@ function deleteThread(threadId) {
   });
   tr2.setMeta("addToHistory", false);
   tr2.setMeta("__activeMarkSync", true);
-  editor.view.dispatch(tr2);
+  editor2.view.dispatch(tr2);
   State2.annotations = State2.annotations.filter((t) => t.threadId !== threadId);
   if (State2.activeThreadId === threadId) State2.activeThreadId = null;
   markDirty();
@@ -57080,30 +57623,82 @@ function deleteThread(threadId) {
   updateDocMeta();
   positionMarkDeletePopover();
   try {
-    const size = editor.state.doc.content.size;
-    editor.commands.setTextSelection(0);
-    editor.commands.setTextSelection(size);
-    editor.commands.setTextSelection({ from: oldSel.from, to: oldSel.to });
+    const size = editor2.state.doc.content.size;
+    editor2.commands.setTextSelection(0);
+    editor2.commands.setTextSelection(size);
+    editor2.commands.setTextSelection({ from: oldSel.from, to: oldSel.to });
   } catch (e) {
   }
   emitAI("threadChange", { threadId, change: "delete" });
   refreshAnnotationImageDecos();
+}
+function ensureCommentCardVisible(threadId) {
+  if (!threadId) return false;
+  const list = document.getElementById("comment-list");
+  if (list && list.querySelector(`.comment-thread[data-thread="${threadId}"]`)) return true;
+  if (State2.commentListShowAll) return false;
+  const filtered = (State2.annotations || []).filter((th) => {
+    if (!th || typeof th !== "object" || !th.threadId) return false;
+    if (State2.filterOpen && !State2.filterResolved && th.resolved) return false;
+    if (State2.filterResolved && !State2.filterOpen && !th.resolved) return false;
+    return true;
+  });
+  filtered.sort((a, b) => {
+    if (a.range == null && b.range == null) return 0;
+    if (a.range == null) return 1;
+    if (b.range == null) return -1;
+    if (typeof a.range.from !== "number" || typeof b.range.from !== "number") return 0;
+    return a.range.from - b.range.from;
+  });
+  const idx = filtered.findIndex((th) => th.threadId === threadId);
+  if (idx < 0) return false;
+  const need = idx + 1;
+  const cur = Math.max(20, State2.commentListLimit || 60);
+  if (need > cur) {
+    State2.commentListLimit = Math.min(filtered.length, Math.max(need + 10, cur + 60));
+  }
+  if ((State2.commentListLimit || 0) < need) State2.commentListShowAll = true;
+  renderCommentList();
+  return !!document.querySelector(`#comment-list .comment-thread[data-thread="${threadId}"]`);
+}
+function setActiveCommentCard(threadId) {
+  const list = document.getElementById("comment-list");
+  if (!list) return false;
+  let found2 = null;
+  let cards = list.querySelectorAll(".comment-thread");
+  if (threadId && !list.querySelector(`.comment-thread[data-thread="${threadId}"]`)) {
+    if (ensureCommentCardVisible(threadId)) {
+      cards = list.querySelectorAll(".comment-thread");
+    }
+  }
+  if (!cards.length) return false;
+  cards.forEach((el) => {
+    const on = !!(threadId && el.dataset.thread === threadId);
+    el.classList.toggle("is-active", on);
+    if (on) found2 = el;
+  });
+  if (found2) {
+    try {
+      const lr = list.getBoundingClientRect();
+      const cr = found2.getBoundingClientRect();
+      if (cr.top < lr.top + 4 || cr.bottom > lr.bottom - 4) {
+        found2.scrollIntoView({ block: "nearest", behavior: "smooth" });
+      }
+    } catch (e) {
+    }
+    return true;
+  }
+  return false;
 }
 function renderCommentList() {
   const list = $("#comment-list");
   const empty4 = $("#comment-empty");
   queueMicrotask(() => refreshAnnotationImageDecos());
   const SOFT_LIMIT = (State2.maxAnnotations || 0) === 0 ? Infinity : (State2.maxAnnotations || 0) * 2;
-  if (State2.annotations.length > SOFT_LIMIT) {
-    list.innerHTML = "";
-    empty4.classList.add("hidden");
-    const warn2 = document.createElement("div");
-    warn2.className = "comment-overflow-warn";
-    warn2.innerHTML = `<div class="warn-title">\u6279\u6CE8\u6570\u91CF\u8FC7\u591A (${State2.annotations.length})</div><div class="warn-hint">\u4E3A\u4FDD\u8BC1\u6027\u80FD, \u6682\u4E0D\u6E32\u67D3\u5168\u90E8\u6279\u6CE8. \u8C03\u9AD8 \u2699 \u4E0A\u9650 \u6216 \u6E05\u7406\u5197\u4F59\u6279\u6CE8.</div>`;
-    list.appendChild(warn2);
-    updateCommentCounts();
-    syncFilterTabsFromCheckboxes();
-    return;
+  const overSoft = State2.annotations.length > SOFT_LIMIT;
+  let _softBannerHtml = "";
+  if (overSoft) {
+    _softBannerHtml = `<div class="comment-overflow-warn comment-overflow-warn--inline"><div class="warn-title">\u6279\u6CE8\u8F83\u591A (${State2.annotations.length})</div><div class="warn-hint">\u5DF2\u5206\u7A97\u6E32\u67D3\u4EE5\u4FDD\u6D41\u7545. \u53EF\u8C03\u9AD8 \u2699 \u4E0A\u9650, \u6216\u70B9\u4E0B\u65B9\u300C\u663E\u793A\u66F4\u591A\u300D. \u5EFA\u8BAE\u6E05\u7406\u5197\u4F59\u6279\u6CE8.</div></div>`;
   }
   const filtered = State2.annotations.filter((t) => {
     if (!t || typeof t !== "object") return false;
@@ -57119,8 +57714,27 @@ function renderCommentList() {
     if (typeof a.range.from !== "number" || typeof b.range.from !== "number") return 0;
     return a.range.from - b.range.from;
   });
-  const visibleThreads = sorted.filter((t) => t && typeof t === "object" && t.threadId);
-  if (visibleThreads.length === 0) {
+  const allVisibleThreads = sorted.filter((t) => t && typeof t === "object" && t.threadId);
+  const limit = State2.commentListShowAll ? allVisibleThreads.length : Math.max(20, State2.commentListLimit || 60);
+  const hasMoreComments = allVisibleThreads.length > limit;
+  let windowStart = 0;
+  if (hasMoreComments && !State2.commentListShowAll) {
+    const act = State2.activeThreadId;
+    const maxStart = Math.max(0, allVisibleThreads.length - limit);
+    if (act) {
+      const aidx = allVisibleThreads.findIndex((th) => th.threadId === act);
+      if (aidx >= 0) {
+        windowStart = Math.max(0, Math.min(aidx - 5, maxStart));
+      }
+    } else {
+      windowStart = Math.max(0, Math.min(State2.commentListWindowStart || 0, maxStart));
+    }
+  }
+  const visibleThreads = hasMoreComments ? allVisibleThreads.slice(windowStart, windowStart + limit) : allVisibleThreads;
+  const hiddenBefore = windowStart;
+  const hiddenAfter = Math.max(0, allVisibleThreads.length - (windowStart + visibleThreads.length));
+  const hiddenCommentCount = hiddenBefore + hiddenAfter;
+  if (allVisibleThreads.length === 0) {
     list.innerHTML = "";
     empty4.classList.remove("hidden");
     syncCommentEmptyPresentation();
@@ -57164,7 +57778,7 @@ function renderCommentList() {
     const safeComments = Array.isArray(thread.comments) ? thread.comments : [];
     const replies = safeComments.slice(1);
     const isActive2 = State2.activeThreadId === thread.threadId;
-    const number = idx + 1;
+    const number = (windowStart || 0) + idx + 1;
     const isCollapsed = thread.resolved && !State2.expandedThreadIds?.[thread.threadId] || !!State2.manuallyCollapsedIds?.[thread.threadId];
     return `
       <div class="comment-thread ${isActive2 ? "is-active" : ""} ${thread.resolved ? "is-resolved" : ""} ${thread.fuzzy ? "is-fuzzy" : ""} ${thread.deleted ? "is-deleted" : ""} ${isCollapsed ? "is-collapsed" : ""} ${thread.pending ? "is-pending" : ""}" data-thread="${thread.threadId}">
@@ -57236,6 +57850,66 @@ function renderCommentList() {
       </div>
     `;
   }).join("");
+  if (_softBannerHtml) {
+    try {
+      list.insertAdjacentHTML("afterbegin", _softBannerHtml);
+    } catch (e) {
+    }
+  }
+  if (hasMoreComments || State2.commentListShowAll) {
+    const foot = document.createElement("div");
+    foot.className = "comment-list-more";
+    if (hasMoreComments) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "comment-list-more-btn";
+      btn.textContent = hiddenAfter > 0 ? `\u5411\u4E0B\u663E\u793A\u66F4\u591A (\u540E ${hiddenAfter} \xB7 \u5171\u9690 ${hiddenCommentCount})` : `\u663E\u793A\u66F4\u591A (\u8FD8\u6709 ${hiddenCommentCount} \u6761)`;
+      btn.addEventListener("click", () => {
+        State2.commentListLimit = (State2.commentListLimit || 60) + 60;
+        renderCommentList();
+      });
+      if (hiddenBefore > 0) {
+        const btnUp = document.createElement("button");
+        btnUp.type = "button";
+        btnUp.className = "comment-list-more-btn";
+        btnUp.textContent = `\u5411\u4E0A\u663E\u793A (\u524D ${hiddenBefore} \u6761)`;
+        btnUp.addEventListener("click", () => {
+          const cur = typeof State2.commentListWindowStart === "number" ? State2.commentListWindowStart : windowStart;
+          State2.commentListWindowStart = Math.max(0, cur - Math.max(20, State2.commentListLimit || 60));
+          State2.commentListLimit = (State2.commentListLimit || 60) + 30;
+          State2.activeThreadId = null;
+          renderCommentList();
+        });
+        foot.appendChild(btnUp);
+      }
+      foot.appendChild(btn);
+      const btnAll = document.createElement("button");
+      btnAll.type = "button";
+      btnAll.className = "comment-list-more-btn";
+      btnAll.textContent = `\u663E\u793A\u5168\u90E8 ${allVisibleThreads.length} \u6761`;
+      btnAll.addEventListener("click", () => {
+        State2.commentListShowAll = true;
+        renderCommentList();
+      });
+      foot.appendChild(btnAll);
+      const hint = document.createElement("p");
+      hint.className = "comment-list-more-hint";
+      hint.textContent = "\u5DF2\u6E32\u67D3 " + visibleThreads.length + " / " + allVisibleThreads.length + " \xB7 \u4E3A\u4FDD\u6301\u4FA7\u680F\u6D41\u7545\u5206\u6279\u52A0\u8F7D";
+      foot.appendChild(hint);
+    } else if (State2.commentListShowAll && allVisibleThreads.length > 60) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "comment-list-more-btn";
+      btn.textContent = "\u6536\u8D77\u4E3A\u524D 60 \u6761";
+      btn.addEventListener("click", () => {
+        State2.commentListShowAll = false;
+        State2.commentListLimit = 60;
+        renderCommentList();
+      });
+      foot.appendChild(btn);
+    }
+    list.appendChild(foot);
+  }
   list.querySelectorAll("[data-thread-input]").forEach((ta2) => {
     const tid = ta2.getAttribute("data-thread-input");
     if (State2.replyDrafts[tid] && !ta2.value) {
@@ -57347,12 +58021,18 @@ function renderCommentList() {
       if (!tid) return;
       const mark = document.querySelector(`.annotation-mark[data-thread-id="${tid}"]`);
       if (mark) mark.classList.add("is-hover");
+      document.querySelectorAll(`img.annotation-image[data-thread-id="${tid}"]`).forEach((img) => {
+        img.classList.add("is-hover");
+      });
     });
     el.addEventListener("mouseleave", () => {
       const tid = el.dataset.thread;
       if (!tid) return;
       const mark = document.querySelector(`.annotation-mark[data-thread-id="${tid}"]`);
       if (mark) mark.classList.remove("is-hover");
+      document.querySelectorAll(`img.annotation-image[data-thread-id="${tid}"]`).forEach((img) => {
+        img.classList.remove("is-hover");
+      });
     });
     el.addEventListener("click", (e) => {
       if (e.target.closest("button") || e.target.closest("textarea") || e.target.closest("details summary")) return;
@@ -57402,39 +58082,98 @@ function scrollToCommentText(tid) {
 function scrollToThread(threadId) {
   const thread = State2.annotations.find((t) => t && typeof t === "object" && t.threadId === threadId);
   if (!thread) return;
-  const editor = State2.editor;
+  const editor2 = State2.editor;
+  if (!editor2) return;
   let pos = null;
-  editor.state.doc.descendants((node, p) => {
+  editor2.state.doc.descendants((node, p) => {
     node.marks.forEach((m) => {
-      if (m.type === editor.schema.marks.annotation && m.attrs.threadId === threadId) {
+      if (m.type === editor2.schema.marks.annotation && m.attrs.threadId === threadId) {
         if (pos === null) pos = p;
       }
     });
   });
   if (pos !== null) {
-    editor.commands.focus(pos);
-    editor.commands.setTextSelection({ from: pos, to: pos + (thread.range.to - thread.range.from) });
+    const len = thread.range && typeof thread.range.from === "number" && typeof thread.range.to === "number" ? Math.max(0, thread.range.to - thread.range.from) : 0;
+    editor2.commands.focus(pos);
+    try {
+      editor2.commands.setTextSelection({ from: pos, to: pos + (len || 1) });
+    } catch (e) {
+      try {
+        editor2.commands.setTextSelection(pos);
+      } catch (e2) {
+      }
+    }
     State2.activeThreadId = threadId;
     highlightActiveMark();
-    renderCommentList();
-  } else {
-    showToast("\u6279\u6CE8\u4F4D\u7F6E\u5DF2\u5931\u6548\uFF08\u53EF\u80FD\u6587\u6863\u88AB\u4FEE\u6539\uFF09");
+    if (!setActiveCommentCard(threadId)) renderCommentList();
+    return;
   }
+  try {
+    if (Array.isArray(thread.imageAnchors) && thread.imageAnchors.length) resyncImageAnchors(thread, editor2.state.doc);
+  } catch (e) {
+  }
+  let imgPos = null;
+  if (Array.isArray(thread.imageAnchors)) {
+    for (const anc of thread.imageAnchors) {
+      if (!anc || typeof anc.from !== "number") continue;
+      try {
+        const n = editor2.state.doc.nodeAt(anc.from);
+        if (n && n.type.name === "image") {
+          imgPos = anc.from;
+          break;
+        }
+      } catch (e) {
+      }
+    }
+  }
+  if (imgPos == null && thread.range && typeof thread.range.from === "number") {
+    try {
+      const n = editor2.state.doc.nodeAt(thread.range.from);
+      if (n && n.type.name === "image") imgPos = thread.range.from;
+    } catch (e) {
+    }
+  }
+  if (imgPos != null) {
+    try {
+      editor2.chain().focus().setNodeSelection(imgPos).run();
+    } catch (e) {
+      try {
+        editor2.commands.setNodeSelection(imgPos);
+      } catch (e2) {
+      }
+    }
+    State2.activeThreadId = threadId;
+    try {
+      const dom = editor2.view.nodeDOM(imgPos);
+      const el = dom && (dom.tagName === "IMG" ? dom : dom.querySelector && dom.querySelector("img"));
+      if (el && el.scrollIntoView) el.scrollIntoView({ block: "center", behavior: "smooth" });
+    } catch (e) {
+    }
+    highlightActiveMark();
+    try {
+      refreshAnnotationImageDecos();
+    } catch (e) {
+    }
+    if (!setActiveCommentCard(threadId)) renderCommentList();
+    return;
+  }
+  showToast("\u6279\u6CE8\u4F4D\u7F6E\u5DF2\u5931\u6548\uFF08\u53EF\u80FD\u6587\u6863\u88AB\u4FEE\u6539\uFF09");
 }
 function highlightActiveMark() {
-  const editor = State2.editor;
-  if (!editor) return;
+  const editor2 = State2.editor;
+  if (!editor2) return;
   const targetTid = State2.activeThreadId;
-  const markType = editor.schema.marks.annotation;
-  const tr2 = editor.state.tr;
+  const markType = editor2.schema.marks.annotation;
+  const tr2 = editor2.state.tr;
   let changed = false;
-  editor.state.doc.descendants((node, pos) => {
+  editor2.state.doc.descendants((node, pos) => {
     if (!node.isText) return;
     node.marks.forEach((m) => {
       if (m.type !== markType) return;
       if (m.attrs.active) {
         tr2.removeMark(pos, pos + node.nodeSize, markType);
         tr2.addMark(pos, pos + node.nodeSize, markType.create({
+          ...m.attrs,
           threadId: m.attrs.threadId,
           resolved: m.attrs.resolved,
           active: false
@@ -57444,13 +58183,14 @@ function highlightActiveMark() {
     });
   });
   if (targetTid) {
-    editor.state.doc.descendants((node, pos) => {
+    editor2.state.doc.descendants((node, pos) => {
       if (!node.isText) return;
       node.marks.forEach((m) => {
         if (m.type !== markType) return;
         if (m.attrs.threadId === targetTid && !m.attrs.active) {
           tr2.removeMark(pos, pos + node.nodeSize, markType);
           tr2.addMark(pos, pos + node.nodeSize, markType.create({
+            ...m.attrs,
             threadId: m.attrs.threadId,
             resolved: m.attrs.resolved,
             active: true
@@ -57463,14 +58203,28 @@ function highlightActiveMark() {
   if (changed) {
     tr2.setMeta("addToHistory", false);
     tr2.setMeta("__activeMarkSync", true);
-    editor.view.dispatch(tr2);
+    editor2.view.dispatch(tr2);
   }
-  const editorEl = editor.view.dom;
-  editorEl.querySelectorAll(".annotation-mark").forEach((el) => el.classList.remove("is-active"));
+  const editorEl = editor2.view.dom;
+  const prevTid = highlightActiveMark._prevTid || null;
+  if (prevTid && prevTid !== targetTid) {
+    editorEl.querySelectorAll(`.annotation-mark[data-thread-id="${prevTid}"]`).forEach((el) => el.classList.remove("is-active"));
+  } else if (!prevTid) {
+    editorEl.querySelectorAll(".annotation-mark.is-active").forEach((el) => el.classList.remove("is-active"));
+  }
   if (targetTid) {
     editorEl.querySelectorAll(`.annotation-mark[data-thread-id="${targetTid}"]`).forEach((el) => el.classList.add("is-active"));
+  } else if (prevTid) {
+    editorEl.querySelectorAll(`.annotation-mark[data-thread-id="${prevTid}"]`).forEach((el) => el.classList.remove("is-active"));
   }
-  refreshAnnotationImageDecos();
+  highlightActiveMark._prevTid = targetTid || null;
+  const hasImgAnn = (State2.annotations || []).some((a) => a && Array.isArray(a.imageAnchors) && a.imageAnchors.length);
+  if (hasImgAnn) {
+    try {
+      refreshAnnotationImageDecos();
+    } catch (e) {
+    }
+  }
   positionMarkDeletePopover();
 }
 function positionMarkDeletePopover() {
@@ -57486,11 +58240,11 @@ function positionMarkDeletePopover() {
     popover.classList.add("hidden");
     return;
   }
-  const editor = State2.editor;
+  const editor2 = State2.editor;
   let pos = null;
-  editor.state.doc.descendants((node, p) => {
+  editor2.state.doc.descendants((node, p) => {
     node.marks.forEach((m) => {
-      if (m.type === editor.schema.marks.annotation && m.attrs.threadId === threadId) {
+      if (m.type === editor2.schema.marks.annotation && m.attrs.threadId === threadId) {
         if (pos === null) pos = p;
       }
     });
@@ -57500,7 +58254,7 @@ function positionMarkDeletePopover() {
     return;
   }
   try {
-    const coords = editor.view.coordsAtPos(pos);
+    const coords = editor2.view.coordsAtPos(pos);
     const editorPane = $("#editor-pane");
     const paneRect = editorPane.getBoundingClientRect();
     popover.style.left = coords.left - paneRect.left + editorPane.scrollLeft + "px";
@@ -57576,39 +58330,46 @@ function markdownToHtml(mdText, mediaUrls) {
   }
   return md.render(text2);
 }
-function revokeMediaUrls() {
+function collectKeptMediaUrls({ exceptTabId = null, includeState = true } = {}) {
   const keep = /* @__PURE__ */ new Set();
-  for (const t of State2.tabs || []) {
-    if (t && t.id !== State2.activeTabId) {
-      for (const u of Object.values(t.mediaUrls || {})) if (u) keep.add(u);
-    }
+  for (const tab of State2.tabs || []) {
+    if (!tab || exceptTabId && tab.id === exceptTabId) continue;
+    for (const u of Object.values(tab.mediaUrls || {})) if (u) keep.add(u);
   }
-  for (const url of Object.values(State2.mediaUrls || {})) {
-    if (url && !keep.has(url)) {
+  if (includeState) {
+    for (const u of Object.values(State2.mediaUrls || {})) if (u) keep.add(u);
+  }
+  return keep;
+}
+function revokeUrlSet(urls, keep) {
+  for (const url of urls) {
+    if (url && !(keep && keep.has(url))) {
       try {
         URL.revokeObjectURL(url);
       } catch (e) {
       }
     }
   }
+}
+function revokeMediaUrls() {
+  const keep = collectKeptMediaUrls({ exceptTabId: State2.activeTabId, includeState: false });
+  for (const tab of State2.tabs || []) {
+    if (!tab) continue;
+    for (const u of Object.values(tab.mediaUrls || {})) if (u) keep.add(u);
+  }
+  revokeUrlSet(Object.values(State2.mediaUrls || {}), keep);
   State2.mediaUrls = {};
   State2.mediaFiles = {};
 }
-function revokeTabMedia(tab) {
+function revokeTabMedia(tab, { dyingState = false } = {}) {
   if (!tab) return;
-  const keep = /* @__PURE__ */ new Set();
-  for (const t of State2.tabs || []) {
-    if (!t || t.id === tab.id) continue;
-    for (const u of Object.values(t.mediaUrls || {})) if (u) keep.add(u);
-  }
-  for (const u of Object.values(State2.mediaUrls || {})) if (u) keep.add(u);
-  for (const url of Object.values(tab.mediaUrls || {})) {
-    if (url && !keep.has(url)) {
-      try {
-        URL.revokeObjectURL(url);
-      } catch (e) {
-      }
-    }
+  const keep = collectKeptMediaUrls({
+    exceptTabId: tab.id,
+    includeState: !dyingState
+  });
+  revokeUrlSet(Object.values(tab.mediaUrls || {}), keep);
+  if (dyingState) {
+    revokeUrlSet(Object.values(State2.mediaUrls || {}), keep);
   }
 }
 function htmlToMarkdown(html) {
@@ -57678,24 +58439,29 @@ function setRenderMode(mode) {
     if (sourceEl) {
       const md2 = sourceEl.innerText;
       const markSnapshots = [];
-      const editor = State2.editor;
-      editor.state.doc.descendants((node, pos) => {
+      const editor2 = State2.editor;
+      editor2.state.doc.descendants((node, pos) => {
         node.marks.forEach((m) => {
-          if (m.type === editor.schema.marks.annotation) {
+          if (m.type === editor2.schema.marks.annotation) {
             markSnapshots.push({ threadId: m.attrs.threadId, resolved: m.attrs.resolved, text: node.text, from: pos });
           }
         });
       });
       const html = markdownToHtml(md2);
       savedText = State2.savedSelection?.text || null;
-      State2.editor.commands.setContent(html, false);
+      State2._suspendAnnValidate = true;
+      try {
+        State2.editor.commands.setContent(html, false);
+      } finally {
+        State2._suspendAnnValidate = false;
+      }
       if (markSnapshots.length > 0) {
-        const tr2 = editor.state.tr;
-        const markType = editor.schema.marks.annotation;
+        const tr2 = editor2.state.tr;
+        const markType = editor2.schema.marks.annotation;
         const failedThreadIds = /* @__PURE__ */ new Set();
         for (const snap of markSnapshots) {
           if (!snap.text) continue;
-          const found2 = findTextInDoc(editor.state.doc, snap.text);
+          const found2 = findTextInDoc(editor2.state.doc, snap.text);
           if (found2) {
             tr2.addMark(found2.from, found2.from + snap.text.length, markType.create({
               threadId: snap.threadId,
@@ -57709,7 +58475,7 @@ function setRenderMode(mode) {
         }
         tr2.setMeta("addToHistory", false);
         tr2.setMeta("__activeMarkSync", true);
-        editor.view.dispatch(tr2);
+        editor2.view.dispatch(tr2);
         if (failedThreadIds.size > 0) {
           for (const ann of State2.annotations) {
             if (failedThreadIds.has(ann.threadId)) {
@@ -57770,13 +58536,13 @@ function scheduleRenderOutline() {
 function renderOutline() {
   const pane = $("#outline-pane");
   if (!pane) return;
-  const editor = State2.editor;
-  if (!editor) {
+  const editor2 = State2.editor;
+  if (!editor2) {
     pane.innerHTML = '<p class="outline-empty">\u6253\u5F00\u6587\u6863\u4EE5\u67E5\u770B\u5927\u7EB2</p>';
     return;
   }
   const items = [];
-  editor.state.doc.descendants((node, pos) => {
+  editor2.state.doc.descendants((node, pos) => {
     if (node.type.name === "heading" && node.attrs.level >= 1 && node.attrs.level <= 3) {
       items.push({ level: node.attrs.level, text: node.textContent || "", pos });
     }
@@ -57794,9 +58560,9 @@ function renderOutline() {
       const pos = parseInt(el.dataset.pos, 10);
       if (Number.isNaN(pos)) return;
       try {
-        const $pos = editor.state.doc.resolve(pos + 1);
-        editor.chain().focus().setTextSelection($pos.pos).run();
-        const dom = editor.view.nodeDOM(pos);
+        const $pos = editor2.state.doc.resolve(pos + 1);
+        editor2.chain().focus().setTextSelection($pos.pos).run();
+        const dom = editor2.view.nodeDOM(pos);
         if (dom && dom.scrollIntoView) dom.scrollIntoView({ behavior: "smooth", block: "start" });
       } catch (e) {
         console.warn("\u5927\u7EB2\u8DF3\u8F6C\u5931\u8D25:", e);
@@ -57896,6 +58662,17 @@ function rebuildAnnotationMarks(markSnapshot) {
   State2.annotations.forEach((t) => {
     if (t.threadId) validThreadIds.add(t.threadId);
   });
+  const isMarklessImageAnn = (t) => {
+    if (!t || typeof t !== "object") return false;
+    if (!Array.isArray(t.imageAnchors) || t.imageAnchors.length === 0) return false;
+    if (t.skipMark) return true;
+    const lab = String(t.text || "").trim();
+    if (lab === "[\u56FE\u7247]" || lab.startsWith("[\u56FE\u7247]")) return true;
+    if (t.imageAnchors.length === 1 && t.range && t.imageAnchors[0].from === t.range.from && t.imageAnchors[0].to === t.range.to && (!Array.isArray(t.ranges) || t.ranges.length <= 1)) {
+      return true;
+    }
+    return false;
+  };
   const rebuilt = [];
   const seen = /* @__PURE__ */ new Set();
   const tryAdd = (threadId, from2, to, resolved) => {
@@ -57903,6 +58680,10 @@ function rebuildAnnotationMarks(markSnapshot) {
     if (!validThreadIds.has(threadId)) return false;
     if (from2 < 0 || to > docSize || from2 >= to) return false;
     if (seen.has(`${threadId}:${from2}-${to}`)) return false;
+    const thr = State2.annotations.find((x) => x && x.threadId === threadId);
+    if (thr && isMarklessImageAnn(thr) && (!Array.isArray(thr.ranges) || thr.ranges.length === 0)) {
+      return false;
+    }
     const attrs = { threadId, resolved: !!resolved };
     tr2 = tr2.addMark(from2, to, markType.create(attrs));
     seen.add(`${threadId}:${from2}-${to}`);
@@ -57915,16 +58696,35 @@ function rebuildAnnotationMarks(markSnapshot) {
     });
   } else {
     State2.annotations.forEach((t) => {
-      if (!t || typeof t !== "object" || !t.range) return;
-      tryAdd(t.threadId, t.range.from, t.range.to, t.resolved);
+      if (!t || typeof t !== "object") return;
+      if (isMarklessImageAnn(t) && (!Array.isArray(t.ranges) || t.ranges.length === 0)) return;
+      if (Array.isArray(t.ranges) && t.ranges.length) {
+        t.ranges.forEach((r) => tryAdd(t.threadId, r.from, r.to, t.resolved));
+      } else if (t.range) {
+        tryAdd(t.threadId, t.range.from, t.range.to, t.resolved);
+      }
     });
   }
-  if (rebuilt.length === 0 && State2.annotations.length > 0) {
-    console.warn(`[rebuildAnnotationMarks] \u6240\u6709 ${State2.annotations.length} \u4E2A thread \u90FD\u672A\u91CD\u5EFA mark (snapshot \u7A7A + range \u8D8A\u754C \u6216 thread \u5DF2\u5220)`);
+  const needMark = State2.annotations.filter((t) => t && t.threadId && !isMarklessImageAnn(t));
+  if (rebuilt.length === 0 && needMark.length > 0) {
+    console.warn(`[rebuildAnnotationMarks] \u6240\u6709 ${needMark.length} \u4E2A text thread \u90FD\u672A\u91CD\u5EFA mark (snapshot \u7A7A + range \u8D8A\u754C \u6216 thread \u5DF2\u5220)`);
   }
   tr2.setMeta("addToHistory", false);
   tr2.setMeta("__activeMarkSync", true);
   ed.view.dispatch(tr2);
+  try {
+    const doc5 = ed.state.doc;
+    for (const ann of State2.annotations) {
+      if (!ann || !Array.isArray(ann.imageAnchors) || !ann.imageAnchors.length) continue;
+      try {
+        resyncImageAnchors(ann, doc5);
+      } catch (e) {
+      }
+    }
+    refreshAnnotationImageDecos();
+  } catch (e) {
+    console.warn("[rebuildAnnotationMarks] image deco", e);
+  }
   return rebuilt;
 }
 function updateHistoryButtons() {
@@ -57943,8 +58743,8 @@ function clearPmHistory() {
   const ed = State2.editor;
   if (!ed) return;
   try {
-    const EditorState2 = ed.state.constructor;
-    const next2 = EditorState2.create({
+    const EditorStateCtor = ed.state.constructor;
+    const next2 = EditorStateCtor.create({
       schema: ed.schema,
       doc: ed.state.doc,
       selection: ed.state.selection,
@@ -58015,11 +58815,17 @@ function restoreTab(tab) {
   State2.activeThreadId = tab.activeThreadId || null;
   State2.replyDrafts = Object.assign({}, tab.replyDrafts || {});
   State2.reattachTarget = null;
+  State2.annotations = [];
+  State2._suspendAnnValidate = true;
   try {
-    State2.editor.commands.setContent(tab.html || "<p></p>", false);
-  } catch (e) {
-    console.warn("[tabs] setContent fail", e);
-    State2.editor.commands.setContent("<p></p>", false);
+    try {
+      State2.editor.commands.setContent(tab.html || "<p></p>", false);
+    } catch (e) {
+      console.warn("[tabs] setContent fail", e);
+      State2.editor.commands.setContent("<p></p>", false);
+    }
+  } finally {
+    State2._suspendAnnValidate = false;
   }
   clearPmHistory();
   resetHistory();
@@ -58073,20 +58879,27 @@ function closeTab(tabId) {
   if (tab.dirty) {
     if (!confirm(`\u300C${tab.name}\u300D\u6709\u672A\u4FDD\u5B58\u4FEE\u6539\uFF0C\u786E\u5B9A\u5173\u95ED\uFF1F`)) return false;
   }
+  const wasActive = State2.activeTabId === tabId;
   State2.tabs = State2.tabs.filter((t) => t && t.id !== tabId);
-  revokeTabMedia(tab);
-  if (State2.activeTabId === tabId) {
+  revokeTabMedia(tab, { dyingState: wasActive });
+  if (wasActive) {
+    State2.mediaUrls = {};
+    State2.mediaFiles = {};
     if (State2.tabs.length > 0) {
       restoreTab(State2.tabs[State2.tabs.length - 1]);
     } else {
       State2.activeTabId = null;
       State2.currentFile = null;
       State2.annotations = [];
-      State2.mediaUrls = {};
-      State2.mediaFiles = {};
       resetHistory();
       try {
-        State2.editor.commands.setContent("", false);
+        State2.annotations = [];
+        State2._suspendAnnValidate = true;
+        try {
+          State2.editor.commands.setContent("", false);
+        } finally {
+          State2._suspendAnnValidate = false;
+        }
         clearPmHistory();
       } catch {
       }
@@ -58106,8 +58919,14 @@ function openNewTabBlank() {
   State2.activeTabId = genTabId();
   stopAutosaveTimer();
   revokeMediaUrls();
-  State2.editor.commands.setContent("<h1>\u65B0\u6587\u6863</h1><p></p>", false);
   State2.annotations = [];
+  State2.activeThreadId = null;
+  State2._suspendAnnValidate = true;
+  try {
+    State2.editor.commands.setContent("<h1>\u65B0\u6587\u6863</h1><p></p>", false);
+  } finally {
+    State2._suspendAnnValidate = false;
+  }
   resetHistory();
   clearPmHistory();
   State2.currentFile = { name: "untitled.md", content: "", annotations: null, dirty: true };
@@ -58221,12 +59040,18 @@ function loadMarkdownIntoEditor(name, content, annotationsData = null) {
     }
   }
   const html = markdownToHtml(content, State2.mediaUrls);
-  State2.editor.commands.setContent(html, false);
+  State2.annotations = [];
+  State2.activeThreadId = null;
+  State2._suspendAnnValidate = true;
+  try {
+    State2.editor.commands.setContent(html, false);
+  } finally {
+    State2._suspendAnnValidate = false;
+  }
   if (State2.renderMode === "source") {
     const md2 = htmlToMarkdown(html);
     sourceEl.innerText = md2;
   }
-  State2.annotations = [];
   resetHistory();
   clearPmHistory();
   if (annotationsData && annotationsData.annotations) {
@@ -58251,32 +59076,84 @@ function loadMarkdownIntoEditor(name, content, annotationsData = null) {
       const isDuplicate = ann.threadId && seenThreadIds.has(ann.threadId);
       if (ann.threadId) seenThreadIds.add(ann.threadId);
       const isIncomplete = !ann.threadId || !ann.text;
-      const positions = isDuplicate || isIncomplete ? null : findAnnotationRange(State2.editor.state.doc, ann);
-      if (positions) {
+      const doc5 = State2.editor.state.doc;
+      const hasImgAnchors = Array.isArray(ann.imageAnchors) && ann.imageAnchors.length > 0;
+      const pureImageLabel = !!(ann.text && (/^\[图片\]$/i.test(String(ann.text).trim()) || /^\[image\]$/i.test(String(ann.text).trim())));
+      if (!isDuplicate && !isIncomplete && hasImgAnchors) {
+        const thread = {
+          ...ann,
+          imageAnchors: ann.imageAnchors.map((a) => ({ ...a })),
+          invalid: false,
+          deleted: false,
+          fuzzy: false,
+          invalidReason: void 0
+        };
+        const sync = resyncImageAnchors(thread, doc5);
+        if (sync.resolved > 0 && thread.imageAnchors && thread.imageAnchors.length) {
+          State2.annotations.push(thread);
+          const pure = !thread.ranges || !thread.ranges.length;
+          if (!pure && thread.range && typeof thread.range.from === "number") {
+            const tr2 = State2.editor.state.tr;
+            tr2.addMark(
+              thread.range.from,
+              thread.range.to,
+              State2.editor.schema.marks.annotation.create({
+                threadId: ann.threadId,
+                resolved: ann.resolved,
+                authorColor: authorColorIndex(ann.comments?.[0]?.author?.id || ann.threadId)
+              })
+            );
+            tr2.setMeta("addToHistory", false);
+            tr2.setMeta("__activeMarkSync", true);
+            State2.editor.view.dispatch(tr2);
+          }
+          continue;
+        }
         State2.annotations.push({
+          ...thread,
+          range: null,
+          invalid: true,
+          invalidReason: "image-deleted"
+        });
+        continue;
+      }
+      const positions = isDuplicate || isIncomplete ? null : findAnnotationRange(doc5, ann);
+      if (positions) {
+        const thread = {
           ...ann,
           range: { from: positions.from, to: positions.to },
           fuzzy: !!positions.fuzzy
           // P1-A: 降级匹配时标 fuzzy
-        });
-        const tr2 = State2.editor.state.tr;
-        tr2.addMark(
-          positions.from,
-          positions.to,
-          State2.editor.schema.marks.annotation.create({
-            threadId: ann.threadId,
-            resolved: ann.resolved,
-            // P-D10: load path 用 ann 作者 authorId 算 color
-            authorColor: authorColorIndex(ann.comments?.[0]?.author?.id || ann.threadId)
-          })
-        );
-        tr2.setMeta("addToHistory", false);
-        tr2.setMeta("__activeMarkSync", true);
-        State2.editor.view.dispatch(tr2);
+        };
+        if (hasImgAnchors) {
+          thread.imageAnchors = ann.imageAnchors.map((a) => ({ ...a }));
+          resyncImageAnchors(thread, doc5);
+        }
+        State2.annotations.push(thread);
+        const skipMark = pureImageLabel || thread.imageAnchors && thread.imageAnchors.length === 1 && thread.range && thread.imageAnchors[0].from === thread.range.from && thread.imageAnchors[0].to === thread.range.to;
+        if (!skipMark) {
+          const tr2 = State2.editor.state.tr;
+          tr2.addMark(
+            positions.from,
+            positions.to,
+            State2.editor.schema.marks.annotation.create({
+              threadId: ann.threadId,
+              resolved: ann.resolved,
+              // P-D10: load path 用 ann 作者 authorId 算 color
+              authorColor: authorColorIndex(ann.comments?.[0]?.author?.id || ann.threadId)
+            })
+          );
+          tr2.setMeta("addToHistory", false);
+          tr2.setMeta("__activeMarkSync", true);
+          State2.editor.view.dispatch(tr2);
+        }
       } else {
         let reason = isDuplicate ? "duplicate-threadId" : isIncomplete ? "incomplete-data" : "text-not-found";
         if (reason === "text-not-found" && ann.text && ann.text.includes("\n")) {
           reason = "cross-block";
+        }
+        if (reason === "text-not-found" && pureImageLabel) {
+          reason = "image-anchor-missing";
         }
         State2.annotations.push({
           ...ann,
@@ -58390,11 +59267,55 @@ function findAnnotationRange(doc5, annotation) {
           fuzzy: false
         };
       }
+      if (prefix || suffix) {
+        const scored = [];
+        for (let si = 0; si < segments.length; si++) {
+          const seg = segments[si];
+          let searchFrom = 0;
+          while (searchFrom < seg.text.length) {
+            const idx = seg.text.indexOf(text2, searchFrom);
+            if (idx === -1) break;
+            const from2 = seg.pos + idx;
+            const to = from2 + text2.length;
+            let localPre = "";
+            let localSuf = "";
+            try {
+              localPre = doc5.textBetween(Math.max(0, from2 - 60), from2, " ");
+            } catch (e) {
+            }
+            try {
+              localSuf = doc5.textBetween(to, Math.min(doc5.content.size, to + 60), " ");
+            } catch (e) {
+            }
+            let score = 0;
+            if (prefix) {
+              if (localPre.endsWith(prefix)) score += 100 + prefix.length;
+              else if (prefix.length >= 2 && localPre.endsWith(prefix.slice(-Math.min(prefix.length, 12)))) score += 40;
+              else if (prefix.length >= 4 && localPre.includes(prefix.slice(-8))) score += 15;
+            }
+            if (suffix) {
+              if (localSuf.startsWith(suffix)) score += 100 + suffix.length;
+              else if (suffix.length >= 2 && localSuf.startsWith(suffix.slice(0, Math.min(suffix.length, 12)))) score += 40;
+              else if (suffix.length >= 4 && localSuf.includes(suffix.slice(0, 8))) score += 15;
+            }
+            scored.push({ from: from2, to, score });
+            searchFrom = idx + 1;
+          }
+        }
+        scored.sort((a, b) => b.score - a.score);
+        if (scored.length && scored[0].score > 0) {
+          const best = scored[0];
+          const second = scored[1];
+          const ambiguous = second && second.score === best.score;
+          return { from: best.from, to: best.to, fuzzy: ambiguous || best.score < 100 };
+        }
+      }
       if (!prefix && !suffix) {
         return {
           from: segments[first3.foundNodeIdx].pos + first3.inSegOffset,
           to: segments[first3.foundNodeIdx].pos + first3.inSegOffset + text2.length,
-          fuzzy: false
+          fuzzy: true
+          // v1.43.43: 多处无上下文必须 fuzzy（旧版 fuzzy:false 会默默咬第一处）
         };
       }
     } else {
@@ -58481,6 +59402,29 @@ function findAnnotationRange(doc5, annotation) {
 function findTextInDoc(doc5, text2) {
   if (!text2) return null;
   return findAnnotationRange(doc5, { text: text2 });
+}
+function computeContextAt(doc5, from2, to, maxLen = 40) {
+  if (!doc5 || typeof from2 !== "number" || typeof to !== "number" || from2 >= to) {
+    return { prefix: "", suffix: "" };
+  }
+  const size = doc5.content.size;
+  const preFrom = Math.max(0, from2 - maxLen);
+  const sufTo = Math.min(size, to + maxLen);
+  let prefix = "";
+  let suffix = "";
+  try {
+    prefix = doc5.textBetween(preFrom, from2, " ");
+  } catch (e) {
+    prefix = "";
+  }
+  try {
+    suffix = doc5.textBetween(to, sufTo, " ");
+  } catch (e) {
+    suffix = "";
+  }
+  if (prefix.length > maxLen) prefix = prefix.slice(-maxLen);
+  if (suffix.length > maxLen) suffix = suffix.slice(0, maxLen);
+  return { prefix, suffix };
 }
 function computeContext(text2, fullDocText, maxLen = 40) {
   if (!text2) return { prefix: "", suffix: "" };
@@ -59222,16 +60166,7 @@ async function saveCurrent() {
     document: State2.currentFile.name,
     updatedAt: nowISO(),
     author: { id: State2.authorId, name: State2.author },
-    annotations: State2.annotations.filter((t) => t && typeof t === "object" && t.threadId).map((t) => ({
-      threadId: t.threadId,
-      text: t.text,
-      // P-anchor: 保存 prefix/suffix 让重新打开时仍能定位 (P1/P2 算法依赖)
-      prefix: t.prefix || "",
-      suffix: t.suffix || "",
-      resolved: t.resolved,
-      createdAt: t.createdAt,
-      comments: t.comments
-    }))
+    annotations: buildAnnotationsSidecar()
   };
   const sidecarName = State2.currentFile.name.replace(/\.md$/i, "") + ".annotations.json";
   const sidecarText = JSON.stringify(sidecar, null, 2);
@@ -59903,7 +60838,13 @@ function loadDemoDocument() {
   if (bodyLen > 0 || hasAnn || dirty) {
     if (!confirm("\u5C06\u7528\u6F14\u793A\u6587\u6863\u66FF\u6362\u5F53\u524D\u5185\u5BB9, \u672A\u5BFC\u51FA\u7684\u4FEE\u6539\u4F1A\u4E22\u5931. \u7EE7\u7EED?")) return;
   }
-  State2.editor.commands.setContent("", false);
+  State2.annotations = [];
+  State2._suspendAnnValidate = true;
+  try {
+    State2.editor.commands.setContent("", false);
+  } finally {
+    State2._suspendAnnValidate = false;
+  }
   const DEMO_MD = `# Mentor \u6F14\u793A\u6587\u6863
 
 \u8FD9\u662F\u4E00\u6BB5\u7528\u4E8E\u6F14\u793A\u6279\u6CE8\u6D41\u7A0B\u7684\u793A\u4F8B\u6587\u5B57. \u4F60\u53EF\u4EE5\u5C1D\u8BD5\u62D6\u9009**"\u793A\u4F8B\u6587\u5B57"**\u8FD9\u51E0\u4E2A\u5B57, \u7136\u540E\u6309\u6D6E\u52A8\u6309\u94AE\u52A0\u6279\u6CE8.
@@ -59923,8 +60864,13 @@ function loadDemoDocument() {
 > \u63D0\u793A: \u5728\u8FD9\u91CC\u76F4\u63A5\u6253\u5B57\u4E5F\u53EF\u4EE5 - \u4F60\u521A\u624D\u6253\u5F00\u7684\u5C31\u662F\u4E00\u4E2A\u771F\u5B9E\u7684 .md \u6587\u4EF6, \u53EF\u4EE5\u4FDD\u5B58\u5230\u4EFB\u610F\u4F4D\u7F6E.
 `;
   const html = markdownToHtml(DEMO_MD, State2.mediaUrls);
-  State2.editor.commands.setContent(html, false);
   State2.annotations = [];
+  State2._suspendAnnValidate = true;
+  try {
+    State2.editor.commands.setContent(html, false);
+  } finally {
+    State2._suspendAnnValidate = false;
+  }
   resetHistory();
   State2.currentFile = { name: "\u6F14\u793A\u6587\u6863.md", content: DEMO_MD, annotations: null, dirty: false };
   State2.saveMode = "idle";
@@ -60169,6 +61115,42 @@ function promptAuthor(options = {}) {
     modal.addEventListener("click", backdropHandler);
   });
 }
+function setupFormatMoreMenu() {
+  const btn = document.getElementById("btn-tb-more");
+  const menu = document.getElementById("tb-more-menu");
+  if (!btn || !menu) return;
+  const close3 = () => {
+    menu.classList.add("hidden");
+    btn.setAttribute("aria-expanded", "false");
+  };
+  const toggle = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (window.matchMedia("(min-width: 1180px)").matches) {
+      close3();
+      return;
+    }
+    const open2 = menu.classList.contains("hidden");
+    if (open2) {
+      menu.classList.remove("hidden");
+      btn.setAttribute("aria-expanded", "true");
+    } else close3();
+  };
+  btn.addEventListener("click", toggle);
+  menu.addEventListener("click", (e) => {
+    if (e.target.closest("button[data-cmd]") && window.matchMedia("(max-width: 1179px)").matches) {
+      setTimeout(close3, 0);
+    }
+  });
+  document.addEventListener("mousedown", (e) => {
+    if (menu.classList.contains("hidden")) return;
+    if (e.target.closest("#tb-more-wrap")) return;
+    close3();
+  });
+  window.addEventListener("resize", () => {
+    if (window.matchMedia("(min-width: 1180px)").matches) close3();
+  });
+}
 function setupToolbar() {
   $("#btn-new").addEventListener("click", newDocument);
   $("#btn-open-files").addEventListener("click", openFiles);
@@ -60217,6 +61199,10 @@ function setupToolbar() {
         const beforeDoc = ed.state.doc;
         if (ed.commands.undo() && ed.state.doc !== beforeDoc) {
           State2.history.lastOp = ed.can().undo() ? "pm" : State2.history.past.length ? "ann" : null;
+          try {
+            scheduleValidateMarks(ed, { immediate: true, phase: "full" });
+          } catch (e) {
+          }
           return true;
         }
       } catch (e) {
@@ -60236,6 +61222,10 @@ function setupToolbar() {
         const beforeDoc = ed.state.doc;
         if (ed.commands.redo() && ed.state.doc !== beforeDoc) {
           State2.history.lastOp = "pm";
+          try {
+            scheduleValidateMarks(ed, { immediate: true, phase: "full" });
+          } catch (e) {
+          }
           return true;
         }
       } catch (e) {
@@ -60257,23 +61247,14 @@ function setupToolbar() {
       document: State2.currentFile.name,
       updatedAt: nowISO(),
       author: { id: State2.authorId, name: State2.author },
-      annotations: State2.annotations.filter((t) => t && typeof t === "object" && t.threadId).map((t) => ({
-        threadId: t.threadId,
-        text: t.text,
-        // P-anchor: 保留 prefix/suffix 让 reload 时仍能精确定位
-        prefix: t.prefix || "",
-        suffix: t.suffix || "",
-        resolved: t.resolved,
-        createdAt: t.createdAt,
-        comments: t.comments
-      }))
+      annotations: buildAnnotationsSidecar()
     };
     const blob = await buildMentorZipBlob(mdText, sidecar);
     const exportName = mentorExportName(State2.currentFile.name);
     downloadBlob(exportName, blob);
     showToast(`\u5DF2\u4E0B\u8F7D ${exportName} \u2713`);
   });
-  $$("#format-toolbar button").forEach((btn) => {
+  $$("#format-toolbar button[data-cmd]").forEach((btn) => {
     btn.addEventListener("click", () => {
       const cmd = btn.dataset.cmd;
       const c = State2.editor.chain().focus();
@@ -60334,7 +61315,9 @@ function setupToolbar() {
               input.remove();
               if (!file) {
                 const url2 = prompt("\u56FE\u7247 URL (\u6216\u53D6\u6D88):");
-                if (url2) State2.editor.chain().focus().setImage({ src: url2 }).run();
+                if (url2) {
+                  applyImageSrcChange({ src: url2 });
+                }
                 return;
               }
               const safe = (file.name || "image.png").replace(/[^\w.\-\u4e00-\u9fff]+/g, "_");
@@ -60342,7 +61325,7 @@ function setupToolbar() {
               State2.mediaFiles[path2] = file;
               const url = await createDisplayObjectURL(file, path2);
               State2.mediaUrls[path2] = url;
-              State2.editor.chain().focus().setImage({ src: url, alt: file.name || "" }).run();
+              applyImageSrcChange({ src: url, alt: file.name || "" });
               markDirty();
               setStatus("\u5DF2\u63D2\u5165\u56FE\u7247", safe + (file.size > 5e5 ? " \xB7 \u663E\u793A\u5DF2\u964D\u91C7\u6837" : ""));
             } catch (e) {
@@ -60372,6 +61355,7 @@ function setupToolbar() {
       updateToolbarState();
     });
   });
+  setupFormatMoreMenu();
   document.querySelectorAll(".filter-tab").forEach((btn) => {
     btn.addEventListener("click", () => {
       const mode = btn.dataset.filterTab;
@@ -60442,57 +61426,57 @@ function setupToolbar() {
   });
 }
 function updateToolbarState() {
-  const editor = State2.editor;
-  if (!editor) return;
+  const editor2 = State2.editor;
+  if (!editor2) return;
   $$("#format-toolbar button[data-cmd]").forEach((btn) => {
     const cmd = btn.dataset.cmd;
     let isActive2 = false;
     try {
       switch (cmd) {
         case "bold":
-          isActive2 = editor.isActive("bold");
+          isActive2 = editor2.isActive("bold");
           break;
         case "italic":
-          isActive2 = editor.isActive("italic");
+          isActive2 = editor2.isActive("italic");
           break;
         case "strike":
-          isActive2 = editor.isActive("strike");
+          isActive2 = editor2.isActive("strike");
           break;
         case "code":
-          isActive2 = editor.isActive("code");
+          isActive2 = editor2.isActive("code");
           break;
         case "superscript":
-          isActive2 = editor.isActive("superscript");
+          isActive2 = editor2.isActive("superscript");
           break;
         case "subscript":
-          isActive2 = editor.isActive("subscript");
+          isActive2 = editor2.isActive("subscript");
           break;
         case "h1":
-          isActive2 = editor.isActive("heading", { level: 1 });
+          isActive2 = editor2.isActive("heading", { level: 1 });
           break;
         case "h2":
-          isActive2 = editor.isActive("heading", { level: 2 });
+          isActive2 = editor2.isActive("heading", { level: 2 });
           break;
         case "h3":
-          isActive2 = editor.isActive("heading", { level: 3 });
+          isActive2 = editor2.isActive("heading", { level: 3 });
           break;
         case "bulletList":
-          isActive2 = editor.isActive("bulletList");
+          isActive2 = editor2.isActive("bulletList");
           break;
         case "orderedList":
-          isActive2 = editor.isActive("orderedList");
+          isActive2 = editor2.isActive("orderedList");
           break;
         case "blockquote":
-          isActive2 = editor.isActive("blockquote");
+          isActive2 = editor2.isActive("blockquote");
           break;
         case "codeBlock":
-          isActive2 = editor.isActive("codeBlock");
+          isActive2 = editor2.isActive("codeBlock");
           break;
         case "link":
-          isActive2 = editor.isActive("link");
+          isActive2 = editor2.isActive("link");
           break;
         case "table":
-          isActive2 = editor.isActive("table");
+          isActive2 = editor2.isActive("table");
           break;
       }
     } catch (e) {
@@ -60578,10 +61562,10 @@ function setupAnnotationMarkClickObserver() {
     e.stopImmediatePropagation();
     const threadId = markEl.getAttribute("data-thread-id");
     if (!threadId) return;
-    const editor = State2.editor;
-    const markType = editor.schema.marks.annotation;
+    const editor2 = State2.editor;
+    const markType = editor2.schema.marks.annotation;
     const ranges = [];
-    editor.state.doc.descendants((node, p) => {
+    editor2.state.doc.descendants((node, p) => {
       if (!node.isText) return;
       const m = node.marks.find((mm) => mm.type === markType && mm.attrs.threadId === threadId);
       if (!m) return;
@@ -60600,7 +61584,7 @@ function setupAnnotationMarkClickObserver() {
       const domRanges = [];
       for (const r of ranges) {
         try {
-          const domFrom = editor.view.nodeDOM(r.from);
+          const domFrom = editor2.view.nodeDOM(r.from);
           if (!domFrom) continue;
           const rect2 = domFrom.getBoundingClientRect();
           if (!rect2) continue;
@@ -60628,19 +61612,19 @@ function setupAnnotationMarkClickObserver() {
     if (targetPos <= range.from || targetPos >= range.to) {
       targetPos = range.from + Math.min(1, halfWidth);
     }
-    editor.commands.setTextSelection(targetPos);
+    editor2.commands.setTextSelection(targetPos);
     State2.activeThreadId = threadId;
     highlightActiveMark();
     renderCommentList();
   }, true);
 }
-function isSelectionInTable(editor) {
-  if (!editor) return false;
+function isSelectionInTable(editor2) {
+  if (!editor2) return false;
   try {
-    if (editor.isActive("table")) return true;
-    const sel = editor.state.selection;
+    if (editor2.isActive("table")) return true;
+    const sel = editor2.state.selection;
     if (sel && sel.$anchorCell) return true;
-    const $from = editor.state.doc.resolve(sel.from);
+    const $from = editor2.state.doc.resolve(sel.from);
     for (let d = $from.depth; d > 0; d--) {
       const n = $from.node(d).type.name;
       if (n === "table" || n === "tableCell" || n === "tableHeader" || n === "tableRow") return true;
@@ -60651,23 +61635,23 @@ function isSelectionInTable(editor) {
 }
 function updateTableControls() {
   const bar = document.querySelector("#table-controls");
-  const editor = State2.editor;
-  if (!bar || !editor) return;
-  if (State2.renderMode === "source" || !isSelectionInTable(editor)) {
+  const editor2 = State2.editor;
+  if (!bar || !editor2) return;
+  if (State2.renderMode === "source" || !isSelectionInTable(editor2)) {
     bar.classList.add("hidden");
     return;
   }
   try {
-    const sel = editor.state.selection;
+    const sel = editor2.state.selection;
     const pos = sel.from;
-    const coords = editor.view.coordsAtPos(pos);
+    const coords = editor2.view.coordsAtPos(pos);
     const editorPane = document.querySelector("#editor-pane");
     if (!editorPane) return;
     const paneRect = editorPane.getBoundingClientRect();
     let top = coords.top - paneRect.top + editorPane.scrollTop - 40;
     let left = coords.left - paneRect.left + editorPane.scrollLeft;
     try {
-      const domAt = editor.view.domAtPos(pos);
+      const domAt = editor2.view.domAtPos(pos);
       let el = domAt && domAt.node;
       if (el && el.nodeType === 3) el = el.parentElement;
       const tableEl = el && el.closest ? el.closest("table") : null;
@@ -60954,13 +61938,23 @@ window.__mdAnnotator = {
   checkAnnotationCap,
   setMaxAnnotations,
   findAnnotationRange,
+  computeContextAt,
+  computeContext,
+  clearPmHistory,
   mentorExportName,
   // v1.43: 演示文档 (first-time empty state CTA)
   loadDemoDocument,
   syncCommentEmptyPresentation,
   // v1.43.22 figure
   collectImageAnchors,
+  resyncImageAnchors,
+  buildAnnotationsSidecar,
+  serializeAnnotationThread,
+  mediaPathForSrc,
+  applyImageSrcChange,
   refreshAnnotationImageDecos,
+  scrollToThread,
+  scrollToCommentText,
   isImageNodeSelection,
   updateTableControls,
   runTableCommand,
@@ -60969,6 +61963,8 @@ window.__mdAnnotator = {
   openRecentFileByName,
   // F-media v1.34: 暴露 media 反查 helper 供诊断用
   revokeMediaUrls,
+  revokeTabMedia,
+  collectKeptMediaUrls,
   htmlToMarkdownMedia,
   // v1.43.7: 暴露 cross-tab diagnostic 给测试
   // 注意: app.js 是 type=module, 模块作用域不能直接被 __mdAnnotator 对象方法访问
@@ -61008,6 +62004,7 @@ window.__mdAnnotator = {
   resetHistory,
   rebuildAnnotationMarks,
   _validateMarksAfterEdit,
+  scheduleValidateMarks,
   // H-autosave: autosave helpers
   startAutosaveTimer,
   stopAutosaveTimer,
@@ -61237,8 +62234,8 @@ window.__mdAnnotator = {
   // 暴露 markdown-it 实例用于测试
   // 用于测试的 helpers
   createTestAnnotation(text2) {
-    const editor = State2.editor;
-    const doc5 = editor.state.doc;
+    const editor2 = State2.editor;
+    const doc5 = editor2.state.doc;
     const found2 = findTextInDoc(doc5, text2);
     if (!found2) return null;
     createAnnotationThread(found2.from, found2.to, text2);
@@ -61276,6 +62273,13 @@ window.__mdAnnotator = {
   getCurrentUser: () => ({ id: State2.authorId, name: State2.author }),
   // P-H2: render comment list (用于测试 + 调试)
   renderCommentList: () => renderCommentList(),
+  patchCommentCard: (a) => patchCommentCard(a),
+  scheduleCommentListUi: (o) => scheduleCommentListUi(o),
+  flushCommentListUi: () => flushCommentListUi(),
+  // v1.43.47: 只切 active 卡，不整表重渲
+  setActiveCommentCard: (tid) => setActiveCommentCard(tid),
+  ensureCommentCardVisible: (tid) => ensureCommentCardVisible(tid),
+  highlightActiveMark: () => highlightActiveMark(),
   // P-reload: 同步列出所有 IDB 缓存 (返回 Object 不返回 Promise, 方便 console.log 检查)
   listAnnotations() {
     const out = {};

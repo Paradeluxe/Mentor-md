@@ -1419,6 +1419,14 @@ body.file-pane-collapsed #file-pane {
   opacity: 0.85;
 }
 
+/* v1.43.41: 侧栏 hover 高亮纯图批注 */
+.tiptap img.annotation-image.is-hover,
+.ProseMirror img.annotation-image.is-hover {
+  outline-color: var(--accent, #c2410c);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent, #c2410c) 35%, transparent);
+}
+
+
 /* v8-fix: sup/sub 是 mark 的父 (selection 跨 sup 时 mark 在 sup 内), 必须重置 author-color 覆盖
    关键: .tiptap sup .annotation-mark 特异性 (0,3,0) 等于 .tiptap .annotation-mark[data-author-color="X"] (0,3,0)
    必须用更具体的 selector 或 !important 覆盖 (author-color 8 个值都要清掉) */
@@ -2976,4 +2984,123 @@ body.file-pane-collapsed #file-pane {
   border-radius: 4px;
   padding: 1px 6px;
   line-height: 1.4;
+}
+
+
+/* v1.43.46: format overflow "更多" + narrow file labels */
+.tb-more-wrap {
+  display: inline-flex;
+  align-items: center;
+  position: relative;
+  flex-shrink: 0;
+}
+.tb-more-btn::before {
+  /* lucide more-horizontal */
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='1'/%3E%3Ccircle cx='19' cy='12' r='1'/%3E%3Ccircle cx='5' cy='12' r='1'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='1'/%3E%3Ccircle cx='19' cy='12' r='1'/%3E%3Ccircle cx='5' cy='12' r='1'/%3E%3C/svg%3E");
+}
+/* 宽屏: 更多按钮隐藏, 菜单子项直接排进 format 行 */
+@media (min-width: 1180px) {
+  #btn-tb-more { display: none !important; }
+  #tb-more-menu,
+  #tb-more-menu.hidden {
+    display: contents;
+  }
+}
+/* 窄屏: 次要格式进下拉 */
+@media (max-width: 1179px) {
+  #btn-tb-more { display: inline-flex; }
+  #tb-more-menu.hidden { display: none !important; }
+  #tb-more-menu:not(.hidden) {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 2px;
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    left: auto;
+    z-index: 80;
+    min-width: 168px;
+    max-width: min(280px, 70vw);
+    padding: 6px;
+    background: var(--panel, #fff);
+    border: 1px solid var(--border-warm-medium, rgba(38,37,30,0.16));
+    border-radius: 8px;
+    box-shadow: 0 10px 28px rgba(38, 37, 30, 0.12);
+  }
+  #tb-more-menu .tb-sep {
+    width: 100%;
+    height: 1px;
+    margin: 4px 0;
+    background: var(--border-warm, rgba(38,37,30,0.09));
+  }
+}
+/* 更窄: 文件按钮只留图标, 减占宽 */
+@media (max-width: 960px) {
+  #btn-new > span:not(.tb-icon),
+  #btn-open-files > span:not(.tb-icon),
+  #btn-save > span:not(.tb-icon),
+  #btn-save-as > span:not(.tb-icon),
+  #btn-export-md > span:not(.tb-icon),
+  #btn-export-docx > span:not(.tb-icon),
+  #btn-toggle-render > span:not(.tb-icon) {
+    display: none;
+  }
+  #btn-new, #btn-open-files, #btn-save, #btn-save-as,
+  #btn-export-md, #btn-export-docx, #btn-toggle-render {
+    padding: 4px 6px;
+  }
+}
+/* 批注列表分窗 "显示更多" */
+.comment-list-more {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  padding: 10px 12px 14px;
+  border-top: 1px solid var(--border-warm, rgba(38,37,30,0.09));
+}
+.comment-list-more-btn {
+  appearance: none;
+  border: 1px solid var(--border-warm-medium, rgba(38,37,30,0.16));
+  background: var(--panel-2, #f7f7f4);
+  color: var(--text-2, rgba(38,37,30,0.62));
+  border-radius: 6px;
+  padding: 7px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+.comment-list-more-btn:hover {
+  background: var(--panel-3, #ebeae5);
+  color: var(--text, #26251e);
+}
+.comment-list-more-hint {
+  margin: 0;
+  font-size: 11px;
+  color: var(--text-3, rgba(38,37,30,0.42));
+  text-align: center;
+}
+
+
+/* v1.43.48: soft-limit 横幅（不再整表空白） */
+.comment-overflow-warn--inline {
+  margin: 8px 10px 4px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgba(217, 119, 6, 0.08);
+  border: 1px solid rgba(217, 119, 6, 0.28);
+  color: var(--text-2, rgba(38,37,30,0.62));
+}
+.comment-overflow-warn--inline .warn-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #b45309;
+  margin-bottom: 4px;
+}
+.comment-overflow-warn--inline .warn-hint {
+  font-size: 11.5px;
+  line-height: 1.45;
 }

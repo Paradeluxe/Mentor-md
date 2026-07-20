@@ -2,6 +2,285 @@
 
 按时间倒序记录已发布的变化。最新条目在上方。
 
+## v1.43.51 (2026-07-20) — 从 bundle 恢复 app.js（误 checkout）+ 稳定化
+
+### 用户
+"continue"
+
+### 改动
+1. **src/compute-context.js** — `computeContextAt` / `computeContext` 抽出
+2. **src/media-display.js** — `DISPLAY_MAX_EDGE` / `createDisplayObjectURL` 抽出
+3. **highlightActiveMark** DOM 只碰 prev/target thread，不扫全部 `.annotation-mark`
+4. 头注释改为 offline esbuild 路径
+
+### 测试
+- position / patch-window / tab-revoke / selection 回归
+
+### Cache
+- app.bundle.js?v=16→17
+
+---
+
+## v1.43.50 (2026-07-20) — 侧栏增量 patch + active 滑动窗口 + UI 防抖
+
+### 用户
+"继续优化"
+
+### 改动
+1. **patchCommentCard** — 引文/fuzzy/deleted banner 就地改 DOM，不 innerHTML 整表
+2. **scheduleCommentListUi / flushCommentListUi** — validate 触达 ≤12 卡走 patch；24ms 防抖
+3. **滑动窗口** — 分窗优先盖住 `activeThreadId`；全局序号；向上/向下显示更多
+
+### 测试
+- `tests/v143-comment-patch-window.spec.js`
+
+### Cache
+- app.bundle.js?v=15→16
+
+---
+
+## v1.43.49 (2026-07-20) — multi-tab blob 关页泄漏 + 发版 meta 对齐脚本
+
+### 用户
+"继续优化没做的"
+
+### 改动
+1. **revokeTabMedia({dyingState})** — 关 active/最后一页时不再把 State.mediaUrls 自我 keep → 真 revoke
+2. **closeTab** 关 active 先摘 State media 再 restore 其它 tab
+3. **scripts/bump-cache-version.sh** 识别 `app.bundle.js`；**scripts/sync-build-meta.py** 对齐 CHANGELOG 顶版 → meta build
+
+### 测试
+- `tests/v143-tab-media-revoke.spec.js`
+- multi-tabs 回归
+
+### Cache
+- app.bundle.js?v=14→15
+
+---
+
+## v1.43.48 (2026-07-20) — 未做项：SOFT 不整表空白 / 分窗外 ensure / authorColor 保留
+
+### 用户
+"继续优化没做的"
+
+### 改动
+1. **SOFT_LIMIT** 不再 `return` 整表空白 → 横幅 + 分窗继续渲
+2. **ensureCommentCardVisible** — 扩 `commentListLimit` 盖住目标 thread；`setActive`/`scrollToThread` 走此路径
+3. **highlightActiveMark** 重写 mark 时 `...m.attrs` 保留 authorColor；无图 ann 跳过 deco 全扫
+
+### 测试
+- `tests/v143-unfinished-opts.spec.js`
+
+### Cache
+- app.bundle.js?v=13→14
+- styles.css?v=107→108
+
+---
+
+## v1.43.47 (2026-07-20) — 光标移动不重渲批注表 + validate 仅 UI 变化才 render
+
+### 用户
+"继续优化"
+
+### 改动
+1. `setActiveCommentCard` — selection 切换只 toggle `.is-active` + scrollIntoView
+2. `handleSelectionChange` 同 thread 内移动零 `renderCommentList`
+3. `_validateMarksAfterEdit` 返回 **uiChanged**（fuzzy/invalid/deleted/text）；纯 range 漂移不重渲侧栏
+
+### 测试
+- `tests/v143-selection-list-perf.spec.js`
+
+### Cache
+- app.bundle.js?v=11→13
+
+---
+
+## v1.43.46 (2026-07-20) — 工具栏「更多」+ 批注列表分窗 + meta 对齐
+
+### 用户
+"继续优化"
+
+### 改动
+1. **格式栏 overflow**: 窄屏 (<1180px) strike/code/sup/sub/h3/quote/codeBlock 进「⋯ 更多」; 宽屏 `display:contents` 仍一行
+2. **文件按钮**: ≤960px 只留图标, 减横滑占宽
+3. **批注侧栏分窗**: 默认渲 60 条, 「显示更多 +60」/「显示全部」/可收起 — 防 500 卡全量 innerHTML
+4. **Help**: 补图片批注说明; meta build → v1.43.46
+
+### 测试
+- toolbar-more + comment-window
+- position / image 回归
+
+### Cache
+- app.bundle.js?v=10→11
+- styles.css?v=106→107
+
+---
+
+## v1.43.45 (2026-07-20) — validate 分层节流：light 即时 + full 48ms 防抖
+
+### 用户
+"继续" / 还有优化空间 → validate 热路径
+
+### 改动
+1. `_validateMarksAfterEdit(editor, {phase:'light'|'full'})`
+   - **light**: range/text 同步；缺 mark 只 flag；不做 `findAnnotationRange` 重挂
+   - **full**: 重挂 + image deco（setContent/undo/防抖）
+2. `scheduleValidateMarks` — 打字 onUpdate 走 light + 48ms 合并 full
+3. 无 imageAnchors 时 light 跳过 `refreshAnnotationImageDecos`
+
+### 测试
+- `tests/perf-validate-throttle.spec.js`
+- chaos-position-* 回归
+
+### Cache
+- app.bundle.js?v=9→10
+
+---
+
+## v1.43.44 (2026-07-20) — 位置链路加固：防撞重挂 / load 隔离 / context 刷新
+
+### 用户
+"继续优化"
+
+### 改动
+1. **load/tab/demo/blank setContent 前清 ann + `_suspendAnnValidate`** — 修 v1.43.43 wrap 在 load 时用旧 ann 往新 doc 误 re-mark 的污染
+2. **重挂防撞** — occupiedRanges；目标区间已被其他 thread 占用 → `mark-collision`，不抢位
+3. **编辑后刷新 prefix/suffix** — range 漂移 / partial edit / reattach 均走 `computeContextAt`
+4. **applyReattach** 禁止 `textContent`+PM pos 错切 context
+5. validate：`joined` 只算一次；空 ann 早退 `false`
+
+### 测试
+- chaos-position-extreme 15
+- chaos-position-hard 10
+- chaos-position-opt 6
+
+### Cache
+- app.bundle.js?v=8→9
+
+---
+
+## v1.43.43 (2026-07-20) — 极端测：同文多处/丢 mark 位置对齐
+
+### 用户
+"极端测试可能导致mentor出现对应不上位置的情景"
+
+### 根因
+1. `computeContext` 用 `fullDocText.indexOf(text)` — 同文多处永远取第一处前后文 → save/reload 定位失败或串位
+2. `findAnnotationRange` 多处命中时 P1 短 prefix/跨段空格易全灭；无上下文 fallback 还标 `fuzzy:false` 默默咬第一处
+3. `_validateMarksAfterEdit` 的 textFound 要求整 node === ann.text → 子串仍在却 `text-deleted`；mark 丢失不自动重挂
+4. PM undo/redo 后不强制 validate
+
+### 改动
+1. `computeContextAt(doc, from, to)` — 创建批注按真实选区取 prefix/suffix
+2. `findAnnotationRange` 多处 + 上下文打分选最佳；无上下文 fallback 强制 fuzzy
+3. validate：子串扫描 + mark 丢失时 `findAnnotationRange` 批量重挂
+4. `undoSmartDispatch`/`redoSmartDispatch` PM 路径后 `_validateMarksAfterEdit`
+
+### 测试
+- `tests/chaos-position-extreme.spec.js` 15
+- `tests/chaos-position-hard.spec.js` 10
+
+### Cache
+- app.bundle.js?v=7→8
+
+---
+
+## v1.43.42 (2026-07-20) — 保存/重建后纯图批注 deco 不丢
+
+### 用户
+"修复mentor保存和重建存在的bug"
+
+### 根因
+`rebuildAnnotationMarks` / `restoreFromSnapshot`（undo·redo·tab 后重建）只 `addMark` text annotation。
+纯图 `skipMark` 无 text mark，重建后不调 `resyncImageAnchors` + `refreshAnnotationImageDecos` → deco 丢、定位失效。
+Pass-2 还对 image atom range 误 `addMark`，并误 warn「全部 thread 未重建」。
+
+### 改动
+1. `isMarklessImageAnn` — 纯图跳过无效 addMark
+2. rebuild 末尾对全部 `imageAnchors` `resyncImageAnchors` + `refreshAnnotationImageDecos`
+3. warn 只计需要 text mark 的 thread
+4. fallback 支持 multi `ranges`
+
+### 测试
+- `tests/v143-rebuild-image-ann.spec.js`
+- 回归 persist / locate / src-ann / figure
+
+### Cache
+- app.bundle.js?v=6→7
+
+---
+
+## v1.43.41 (2026-07-20) — 选图建批注立刻丢位置
+
+### 用户
+"修复mentor：选中图片，建立批注，但是立刻丢失位置的问题"
+
+### 根因
+1. 纯图批注 `skipMark`（atom 挂不了 annotation mark）。`scrollToThread` 只扫 text mark，找不到就 toast「批注位置已失效」。建完一点侧栏卡片 body / 跳转立刻报失效。
+2. float 批注按钮无 mousedown preventDefault：真鼠标点按钮会抢走 PM 焦点，NodeSelection 塌成 empty，click 时 `from===to` 直接 return，批注建不出。
+
+### 改动
+1. `scrollToThread` — mark 失败后走 `imageAnchors`/`range` → `setNodeSelection` + scrollIntoView + refresh deco
+2. `#float-comment-btn` mousedown `preventDefault` 保 NodeSelection
+3. 侧栏 card hover 同步 `img.annotation-image.is-hover`
+
+### 测试
+- `tests/v143-image-ann-locate.spec.js`
+- 回归 figure / image-src / image-ann-persist
+
+### Cache
+- app.bundle.js?v=5→6
+- styles.css?v=105→106
+
+---
+
+## v1.43.40 (2026-07-20) — 保存/重开不丢图片批注定位
+
+### 用户
+"每次改完图刷新都会显示批注位置失效而导致无法定位"
+
+### 根因
+所有 save / autosave / IDB / export 路径用白名单序列化批注，只写 `threadId/text/prefix/suffix/resolved/createdAt/comments`，**丢掉 `imageAnchors` 与 `range`**。纯图批注 text=`[图片]` 且无 prefix/suffix；reload 走 `findAnnotationRange` → text-not-found → invalid。换图字节后刷新必现。
+
+### 改动
+1. `serializeAnnotationThread` / `buildAnnotationsSidecar` — 保留 imageAnchors（blob→media/path）、range、ranges、invalid 标志
+2. 5 处白名单 map 全部改为 `buildAnnotationsSidecar()`
+3. `loadMarkdownIntoEditor` — 有 imageAnchors 时走 resync 路径，不依赖正文搜 `[图片]`；纯图 skipMark
+4. `resyncImageAnchors` — media/path ↔ blob 双向匹配（含 basename）
+
+### 测试
+- `tests/v143-image-ann-persist.spec.js` 3/3
+- `tests/v143-image-src-ann.spec.js` 4/4
+- `tests/v143-figure-ann.spec.js` 4/4
+
+### Cache
+- app.bundle.js?v=4→5
+
+---
+
+## v1.43.39 (2026-07-20) — 换图源不丢图片批注位置
+
+### 用户
+"修复mentor改了图片源就会丢失选中图片的批注的位置的问题"
+
+### 根因
+纯图批注 `skipMark`（atom 无法挂 annotation mark）。任意 doc 事务（含 `setImage` 换 src）触发 `_validateMarksAfterEdit`：mark 不在 + `ann.text`(alt) 不在正文 textCount → `invalidReason=text-deleted` → deco/侧栏丢位。`imageAnchors.src` 也不随新 src 更新。
+
+### 改动
+1. `resyncImageAnchors(ann, doc)` — 按 from / 旧 src / range 重钉 image 节点，同步 src/alt/range
+2. `_validateMarksAfterEdit` — 纯图 ann（有 imageAnchors、无 text mark、无 multi ranges）走 image 路径；图在则清 invalid；图没了 → `image-deleted`
+3. `applyImageSrcChange` — 工具栏换图/插图；NodeSelection 换 src 后立即 resync + refresh deco
+4. validate 末尾 `refreshAnnotationImageDecos`
+
+### 测试
+- `tests/v143-image-src-ann.spec.js` 4/4
+- `tests/v143-figure-ann.spec.js` 4/4
+
+### Cache
+- app.bundle.js?v=3→4
+
+---
+
 ## v1.43.38 (2026-07-16) — 受保护路径写盘护栏 + 本地插图降采样
 
 ### 用户
