@@ -42,9 +42,11 @@ node tests/chaos-ux/runner.js --level=smoke
 
 | level | 内容 |
 |-------|------|
-| smoke | toolbar 穷举 + 锚点/正文样本 + H1/H21/H22 |
-| full | smoke +（后续）完整 A/B/C/P |
-| chaos | full +（后续）随机交织 |
+| smoke | toolbar + tabs + anchors + bodies + float + handcrafted |
+| full | 全部 matrix（settings/outline/export/keyboard/content…） |
+| chaos | full + fuzzer + multi-seed fuzzer |
+
+> CI 已关闭，**只在本地跑**。
 
 ## 覆盖原则
 
@@ -54,18 +56,18 @@ node tests/chaos-ux/runner.js --level=smoke
 
 ## Phase 进度
 
-- [x] A 骨架 + smoke 套件  
-- [x] B2 内容矩阵：04b/04c/04d/04e/04f + H21–H26  
-- [x] B surface：03-tabs / 07-export / 11-keyboard  
-- [x] A8/A10–A12 extra anchors  
-- [x] C fuzzer（`--seed` / `--steps`，挂在 `test:ux:chaos`）  
-- [ ] D CI 硬化 / 夜间 marathon  
+- [x] A 骨架 + smoke  
+- [x] B2 内容矩阵 + H21–H26  
+- [x] B surface：tabs / export / keyboard / float / settings / outline  
+- [x] A8/A10–A12 + B6/B9/B11/B13/B15/B17  
+- [x] C fuzzer + multi-seed  
+- [x] CI 关闭（本地测）  
 
 ## 当前 content 覆盖
 
-- 锚点：A1–A18（含 extra 套件）  
-- 正文：B1–B5/B7/B8/B10/B12/B14/B16…  
+- 锚点：A1–A18  
+- 正文：B1–B17 主干  
 - 上下文：C1–C8  
-- 盘格式：P1–P4/P8–P10 + invalidReason 样本  
+- 盘格式：P1–P4/P8–P10 + invalidReason  
 - 手搓：H1, H21–H26  
-- fuzzer：`node tests/chaos-ux/interleave/fuzzer.spec.js --seed=42 --steps=80`  
+- fuzzer：`--seed=42 --steps=80`；multi-seed 1/7/42/99/2026  

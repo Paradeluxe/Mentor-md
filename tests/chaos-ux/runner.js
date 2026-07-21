@@ -19,10 +19,14 @@ const CORE = [
   'matrix/04b-ann-anchors.spec.js',
   'matrix/04b-extra-anchors.spec.js',
   'matrix/04c-ann-bodies.spec.js',
+  'matrix/04c-extra-bodies.spec.js',
   'matrix/04d-ann-state-machine.spec.js',
   'matrix/04e-ann-roundtrip.spec.js',
   'matrix/04f-ann-context.spec.js',
+  'matrix/06-float-comment.spec.js',
   'matrix/07-export.spec.js',
+  'matrix/08-settings-help.spec.js',
+  'matrix/09-outline.spec.js',
   'matrix/11-keyboard.spec.js',
   'interleave/sequences-handcrafted.spec.js',
 ];
@@ -33,10 +37,11 @@ const SUITES = {
     'matrix/03-tabs.spec.js',
     'matrix/04b-ann-anchors.spec.js',
     'matrix/04c-ann-bodies.spec.js',
+    'matrix/06-float-comment.spec.js',
     'interleave/sequences-handcrafted.spec.js',
   ],
   full: CORE,
-  chaos: CORE.concat(['interleave/fuzzer.spec.js']),
+  chaos: CORE.concat(['interleave/fuzzer.spec.js', 'interleave/fuzzer-multiseed.spec.js']),
 };
 
 function runOne(rel) {

@@ -62300,6 +62300,7 @@ window.__mdAnnotator = {
   // v1.42: 暴露 cap 工具函数给测试 / 高级用户脚本
   checkAnnotationCap,
   setMaxAnnotations,
+  renderOutline,
   findAnnotationRange,
   computeContextAt,
   computeContext,
