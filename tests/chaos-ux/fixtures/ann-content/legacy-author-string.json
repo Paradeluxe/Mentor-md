@@ -1,0 +1,24 @@
+{
+  "version": "1",
+  "document": "legacy.md",
+  "updatedAt": "2026-07-08T03:00:00.000Z",
+  "author": { "id": "legacy-user", "name": "legacy" },
+  "annotations": [
+    {
+      "threadId": "legacy-thread-1",
+      "text": "UNIQUE_ALPHA",
+      "prefix": "",
+      "suffix": "",
+      "resolved": false,
+      "createdAt": "2026-07-08T03:00:00.000Z",
+      "comments": [
+        {
+          "id": "legacy-c1",
+          "author": "AI Reviewer (Claude)",
+          "body": "old string author form",
+          "createdAt": "2026-07-08T03:00:00.000Z"
+        }
+      ]
+    }
+  ]
+}

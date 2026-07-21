@@ -1,0 +1,24 @@
+{
+  "version": "1",
+  "document": "ai.md",
+  "updatedAt": "2026-07-08T03:00:00.000Z",
+  "author": { "id": "u1", "name": "tester" },
+  "annotations": [
+    {
+      "threadId": "ai-thread-1",
+      "text": "UNIQUE_ALPHA",
+      "prefix": "Hello ",
+      "suffix": " world",
+      "resolved": false,
+      "createdAt": "2026-07-08T03:00:00.000Z",
+      "comments": [
+        {
+          "id": "ai-c1",
+          "author": { "id": "u1", "name": "tester" },
+          "body": "@AI 请审阅这段文字是否清晰",
+          "createdAt": "2026-07-08T03:00:00.000Z"
+        }
+      ]
+    }
+  ]
+}

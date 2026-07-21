@@ -6,6 +6,9 @@
   "scripts": {
     "test": "node tests/e2e.spec.js",
     "test:report": "node tests/run-with-report.js",
+    "test:ux:smoke": "node tests/chaos-ux/runner.js --level=smoke",
+    "test:ux:full": "node tests/chaos-ux/runner.js --level=full",
+    "test:ux:chaos": "node tests/chaos-ux/runner.js --level=chaos",
     "dev": "python3 -m http.server 8787 --bind 127.0.0.1",
     "build": "python scripts/build-offline.py",
     "build:bundle": "esbuild app.js --bundle --format=esm --platform=browser --outfile=app.bundle.js --alias:punycode=punycode"
