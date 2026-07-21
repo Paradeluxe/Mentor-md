@@ -55531,6 +55531,7 @@ function _doUpdateDocMeta() {
 function markDirty() {
   if (State2.currentFile) {
     State2.currentFile.dirty = true;
+    State2.currentFile.dirtyGen = (State2.currentFile.dirtyGen || 0) + 1;
     $("#dirty-indicator").classList.add("is-dirty");
     $("#current-file-name").textContent = State2.currentFile.name;
     try {
@@ -56196,25 +56197,200 @@ function getAutosaveDebounceMs() {
   return AUTOSAVE_DEBOUNCE_ALLOWED.includes(v) ? v : 5e3;
 }
 var AUTOSAVE_DEBOUNCE = getAutosaveDebounceMs();
+var _saveInFlight = false;
+var _saveQueued = false;
+var _autosaveFailToastAt = 0;
+function hasWriteHandle() {
+  return !!(State2.currentFile && State2.currentFile.handle && (State2.saveMode === "mentor-handle" || State2.saveMode === "handle"));
+}
+function isMentorPackMode() {
+  const name = State2.currentFile && State2.currentFile.name || "";
+  return State2.saveMode === "mentor-handle" || State2.saveMode === "mentor-download" || /\.mentor$/i.test(name);
+}
+async function hasGrantedWrite(handle) {
+  if (!handle) return false;
+  try {
+    if (typeof handle.queryPermission === "function") {
+      return await handle.queryPermission({ mode: "readwrite" }) === "granted";
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+async function writeToHandle(handle, data) {
+  if (!handle) return { ok: false, error: "\u65E0\u6587\u4EF6\u53E5\u67C4" };
+  if (_saveInFlight) {
+    _saveQueued = true;
+    return { ok: false, skipped: true, error: "busy" };
+  }
+  _saveInFlight = true;
+  let writable = null;
+  try {
+    writable = await handle.createWritable();
+    await writable.write(data);
+    await writable.close();
+    writable = null;
+    return { ok: true };
+  } catch (e) {
+    if (writable) {
+      try {
+        await writable.abort();
+      } catch {
+      }
+    }
+    if (e && (e.name === "NotAllowedError" || e.name === "SecurityError")) {
+      return { ok: false, error: "\u6743\u9650\u88AB\u62D2" };
+    }
+    return { ok: false, error: e && e.message ? e.message : String(e) };
+  } finally {
+    _saveInFlight = false;
+    if (_saveQueued) {
+      _saveQueued = false;
+      if (State2.currentFile && State2.currentFile.dirty && hasWriteHandle()) {
+        scheduleAutosaveDebounce();
+      }
+    }
+  }
+}
+async function writeCurrentToHandle({ reason = "manual", showProgress = false } = {}) {
+  if (!State2.currentFile || !State2.currentFile.handle) {
+    return { ok: false, error: "\u65E0\u6587\u4EF6\u53E5\u67C4" };
+  }
+  if (State2.readOnlyMode) {
+    return { ok: false, error: "\u53EA\u8BFB\u6A21\u5F0F" };
+  }
+  if (isProtectedMentorTarget(State2.currentFile.name, State2.diskPathHint)) {
+    if (reason === "autosave") {
+      return { ok: false, skipped: true, error: "protected" };
+    }
+    if (!confirmProtectedWrite("\u4FDD\u5B58")) {
+      return { ok: false, error: "\u5DF2\u53D6\u6D88\u5199\u56DE\u53D7\u4FDD\u62A4\u8DEF\u5F84 (\u53EF\u53E6\u5B58\u4E3A\u526F\u672C)" };
+    }
+  }
+  const handle = State2.currentFile.handle;
+  const nameAtStart = State2.currentFile.name;
+  const genAtStart = State2.currentFile.dirtyGen || 0;
+  const saveModeAtStart = State2.saveMode;
+  if (reason === "autosave") {
+    if (!await hasGrantedWrite(handle)) {
+      return { ok: false, error: "need-permission" };
+    }
+  } else {
+    const perm = await ensureWritePermission(handle);
+    if (perm === "denied") {
+      return { ok: false, error: "\u6743\u9650\u88AB\u62D2" };
+    }
+  }
+  if (reason === "manual" && saveModeAtStart === "handle" && State2.fileMtime != null) {
+    try {
+      const currentFile = await handle.getFile();
+      if (currentFile.lastModified > State2.fileMtime) {
+        const ok = confirm(
+          `\u26A0 \u4E3B\u6587\u4EF6\u5728\u5916\u90E8\u88AB\u4FEE\u6539!
+
+\u4F60\u6700\u540E\u4E00\u6B21\u6253\u5F00/\u4FDD\u5B58: ${new Date(State2.fileMtime).toLocaleTimeString()}
+\u5F53\u524D\u6587\u4EF6 mtime: ${new Date(currentFile.lastModified).toLocaleTimeString()}
+
+\u7EE7\u7EED\u4FDD\u5B58\u4F1A\u8986\u76D6\u5916\u90E8\u4FEE\u6539\u3002
+
+\u786E\u5B9A\u8981\u8986\u76D6\u5417? (\u5EFA\u8BAE\u5148\u53D6\u6D88, \u5907\u4EFD\u5916\u90E8\u6539\u52A8, \u518D\u5408\u5E76)`
+        );
+        if (!ok) {
+          return { ok: false, error: "\u7528\u6237\u53D6\u6D88: \u68C0\u6D4B\u5230\u5916\u90E8\u4FEE\u6539" };
+        }
+      }
+    } catch (e) {
+      console.warn("[save] mtime \u68C0\u67E5\u5931\u8D25:", e);
+    }
+  }
+  let mdText = "";
+  let sidecar = null;
+  try {
+    const html = State2.editor.getHTML();
+    mdText = htmlToMarkdownMedia(html);
+    sidecar = {
+      version: "1",
+      document: nameAtStart,
+      updatedAt: nowISO(),
+      author: { id: State2.authorId, name: State2.author },
+      annotations: buildAnnotationsSidecar()
+    };
+  } catch (e) {
+    return { ok: false, error: e && e.message ? e.message : String(e) };
+  }
+  let payload;
+  try {
+    if (saveModeAtStart === "mentor-handle" || /\.mentor$/i.test(nameAtStart)) {
+      if (showProgress) showExportProgress("\u6B63\u5728\u6253\u5305 .mentor\u2026");
+      payload = await buildMentorZipBlob(mdText, sidecar, State2.mediaFiles);
+    } else {
+      payload = mdText;
+    }
+  } catch (e) {
+    if (showProgress) hideExportProgress("\u4FDD\u5B58\u5931\u8D25");
+    return { ok: false, error: e && e.message ? e.message : String(e) };
+  }
+  if (!State2.currentFile || State2.currentFile.handle !== handle || State2.currentFile.name !== nameAtStart) {
+    if (showProgress) hideExportProgress("");
+    return { ok: false, skipped: true, error: "switched" };
+  }
+  const wr = await writeToHandle(handle, payload);
+  if (!wr.ok) {
+    if (showProgress) hideExportProgress("\u4FDD\u5B58\u5931\u8D25");
+    return wr;
+  }
+  if (State2.currentFile && State2.currentFile.handle === handle) {
+    State2.currentFile.content = mdText;
+    State2.currentFile.annotations = sidecar;
+    try {
+      const newFile = await handle.getFile();
+      State2.fileMtime = newFile.lastModified;
+    } catch {
+    }
+    if ((State2.currentFile.dirtyGen || 0) === genAtStart) {
+      markClean();
+    } else {
+      _saveQueued = true;
+      if (!_saveInFlight) {
+        _saveQueued = false;
+        scheduleAutosaveDebounce();
+      }
+    }
+    try {
+      snapshotActiveTab();
+    } catch {
+    }
+  }
+  try {
+    await AnnotationStore.put(nameAtStart, sidecar);
+  } catch (e) {
+    console.warn("[save] IDB put \u5931\u8D25:", e);
+  }
+  if (showProgress) hideExportProgress("\u5DF2\u4FDD\u5B58");
+  return { ok: true };
+}
 function startAutosaveTimer() {
   stopAutosaveTimer();
-  if (State2.saveMode !== "mentor-handle") return;
-  if (!State2.currentFile || !State2.currentFile.handle) return;
+  if (!hasWriteHandle()) return;
   _autosaveTimer = setInterval(() => {
-    if (State2.currentFile && State2.currentFile.dirty) autosaveNow();
+    if (State2.currentFile && State2.currentFile.dirty) scheduleAutosaveDebounce();
   }, AUTOSAVE_INTERVAL);
-  console.log("[autosave] timer started (5s debounce + 30s safety net, handle mode)");
+  console.log("[autosave] timer started (debounce + 30s safety, handle mode)");
 }
 function stopAutosaveTimer() {
   if (_autosaveTimer) {
     clearInterval(_autosaveTimer);
     _autosaveTimer = null;
   }
+  if (scheduleAutosaveDebounce._t) {
+    clearTimeout(scheduleAutosaveDebounce._t);
+    scheduleAutosaveDebounce._t = null;
+  }
 }
 function scheduleAutosaveDebounce() {
-  if (State2.saveMode !== "mentor-handle") return;
-  if (!State2.currentFile || !State2.currentFile.handle) return;
-  if (!State2.currentFile.dirty) return;
+  if (!hasWriteHandle()) return;
+  if (!State2.currentFile || !State2.currentFile.dirty) return;
   if (scheduleAutosaveDebounce._t) clearTimeout(scheduleAutosaveDebounce._t);
   scheduleAutosaveDebounce._t = setTimeout(() => {
     scheduleAutosaveDebounce._t = null;
@@ -56222,46 +56398,34 @@ function scheduleAutosaveDebounce() {
   }, AUTOSAVE_DEBOUNCE);
 }
 async function autosaveNow() {
-  if (State2.saveMode !== "mentor-handle") return;
-  if (!State2.currentFile || !State2.currentFile.handle) return;
-  if (!State2.currentFile.dirty) return;
-  if (isProtectedMentorTarget(State2.currentFile.name, State2.diskPathHint)) {
-    if (!autosaveNow._protectedToast) {
+  if (!hasWriteHandle()) return;
+  if (!State2.currentFile || !State2.currentFile.dirty) return;
+  if (State2.readOnlyMode) return;
+  const result = await writeCurrentToHandle({ reason: "autosave", showProgress: false });
+  if (result.ok) {
+    const time = (/* @__PURE__ */ new Date()).toLocaleTimeString();
+    setStatus("\u5DF2\u81EA\u52A8\u4FDD\u5B58", time);
+    console.log(`[autosave] written at ${time}`);
+    return;
+  }
+  if (result.skipped) {
+    if (result.error === "protected" && !autosaveNow._protectedToast) {
       autosaveNow._protectedToast = true;
-      showToast("\u53D7\u4FDD\u62A4\u6587\u7A3F: \u5DF2\u7981\u7528\u81EA\u52A8\u4FDD\u5B58 \u2014 \u7528\u300C\u4FDD\u5B58\u300D\u4F1A\u518D\u786E\u8BA4", 3500);
+      showToast("\u53D7\u4FDD\u62A4\u6587\u7A3F: \u81EA\u52A8\u4FDD\u5B58\u5DF2\u5173\u95ED \u2014 \u7528\u300C\u4FDD\u5B58\u300D\u4F1A\u518D\u786E\u8BA4", 3500);
       setStatus("\u81EA\u52A8\u4FDD\u5B58\u5DF2\u8DF3\u8FC7", "\u53D7\u4FDD\u62A4\u8DEF\u5F84 " + mentorBaseName(State2.currentFile.name));
     }
     return;
   }
-  try {
-    const html = State2.editor.getHTML();
-    const mdText = htmlToMarkdownMedia(html);
-    const sidecar = {
-      version: "1",
-      document: State2.currentFile.name,
-      updatedAt: nowISO(),
-      author: { id: State2.authorId, name: State2.author },
-      annotations: buildAnnotationsSidecar()
-    };
-    const blob = await buildMentorZipBlob(mdText, sidecar, State2.mediaFiles);
-    const handle = State2.currentFile.handle;
-    await ensureWritePermission(handle);
-    const writable = await handle.createWritable();
-    await writable.write(blob);
-    await writable.close();
-    markClean();
-    const time = (/* @__PURE__ */ new Date()).toLocaleTimeString();
-    showToast(`\u5DF2\u81EA\u52A8\u4FDD\u5B58 (${time})`, 2e3);
-    console.log(`[autosave] written at ${time}`);
-  } catch (e) {
-    if (e.name === "NotAllowedError" || e.name === "SecurityError") {
-      console.warn("[autosave] \u6743\u9650\u88AB\u62D2, \u505C timer");
-      showToast("\u81EA\u52A8\u4FDD\u5B58\u5931\u8D25: \u6587\u4EF6\u6743\u9650\u88AB\u64A4\u9500, \u8BF7\u91CD\u65B0\u6253\u5F00", 3e3);
-      stopAutosaveTimer();
-    } else {
-      console.warn("[autosave] \u5199\u76D8\u5931\u8D25:", e);
+  const now = Date.now();
+  if (now - _autosaveFailToastAt > 15e3) {
+    _autosaveFailToastAt = now;
+    if (result.error === "need-permission" || result.error === "\u6743\u9650\u88AB\u62D2") {
+      showToast("\u81EA\u52A8\u4FDD\u5B58\u9700\u8981\u5199\u6743\u9650 \u2014 \u8BF7\u6309 Ctrl+S \u4E00\u6B21\u6388\u6743", 3500);
+    } else if (result.error && result.error !== "busy") {
+      showToast("\u81EA\u52A8\u4FDD\u5B58\u5931\u8D25: " + result.error, 3e3);
     }
   }
+  console.warn("[autosave] failed:", result.error);
 }
 function updateTreeDirtyDots() {
   $$(".tree-node[data-handle-name]").forEach((el) => {
@@ -58945,11 +59109,9 @@ function restoreTab(tab) {
   renderDocTabs();
   updateDocMeta({ immediate: true });
   setStatus("\u5DF2\u5207\u6362", tab.name || "");
-  if (State2.saveMode === "mentor-handle" || State2.saveMode === "handle") {
-    try {
-      startAutosaveTimer();
-    } catch {
-    }
+  try {
+    startAutosaveTimer();
+  } catch {
   }
   return true;
 }
@@ -59092,11 +59254,9 @@ async function activateOpenedDocument({
   if (handle) {
     await rememberOpenedFile(handle);
   }
-  if (saveMode === "mentor-handle" || saveMode === "handle") {
-    try {
-      startAutosaveTimer();
-    } catch {
-    }
+  try {
+    startAutosaveTimer();
+  } catch {
   }
   if (!quiet) {
     renderFilePaneCurrent();
@@ -60325,28 +60485,7 @@ async function saveCurrent() {
     await promptAuthor();
     if (!State2.author) return;
   }
-  const html = State2.editor.getHTML();
-  const mdText = htmlToMarkdownMedia(html);
-  const sidecar = {
-    version: "1",
-    document: State2.currentFile.name,
-    updatedAt: nowISO(),
-    author: { id: State2.authorId, name: State2.author },
-    annotations: buildAnnotationsSidecar()
-  };
-  const sidecarName = State2.currentFile.name.replace(/\.md$/i, "") + ".annotations.json";
-  const sidecarText = JSON.stringify(sidecar, null, 2);
-  State2.currentFile.content = mdText;
-  State2.currentFile.annotations = sidecar;
-  try {
-    console.log("[IDB] put start:", State2.currentFile.name, sidecar.annotations?.length, "anns");
-    await AnnotationStore.put(State2.currentFile.name, sidecar);
-    console.log("[IDB] put OK");
-  } catch (e) {
-    console.warn("[IDB] put \u5931\u8D25:", e);
-  }
   const finishOk = (msg, detail) => {
-    markClean();
     try {
       snapshotActiveTab();
     } catch {
@@ -60354,82 +60493,113 @@ async function saveCurrent() {
     if (msg) showToast(msg);
     if (detail != null) setStatus(detail.status || "\u5DF2\u4FDD\u5B58", detail.right || State2.currentFile.name);
   };
-  if (State2.saveMode === "mentor-handle" || State2.saveMode === "mentor-download") {
-    const result2 = await tryWriteBackMentor(mdText, sidecar, State2.currentFile.name);
-    if (result2.handle) {
-      finishOk("\u5DF2\u4FDD\u5B58\u5230\u539F\u4F4D\u7F6E \u2713 (.mentor)", { status: "\u5DF2\u4FDD\u5B58", right: State2.currentFile.name });
-    } else if (result2.error) {
-      showToast("\u4FDD\u5B58\u5931\u8D25: " + result2.error);
-      setStatus("\u4FDD\u5B58\u5931\u8D25", result2.error);
-    } else {
-      try {
-        showExportProgress("\u6B63\u5728\u6253\u5305 .mentor\u2026");
-        const blob = await buildMentorZipBlob(mdText, sidecar, State2.mediaFiles);
-        downloadBlob(State2.currentFile.name, blob);
-        hideExportProgress("\u5DF2\u4E0B\u8F7D");
-        finishOk("\u5DF2\u4E0B\u8F7D \u2713 (.mentor)", { status: "\u5DF2\u4E0B\u8F7D", right: State2.currentFile.name });
-      } catch (e) {
-        hideExportProgress("\u5BFC\u51FA\u5931\u8D25");
-        showToast("\u5BFC\u51FA\u5931\u8D25: " + (e.message || e), 4e3);
-        setStatus("\u5BFC\u51FA\u5931\u8D25", e.message || String(e));
-      }
+  if (hasWriteHandle()) {
+    const showProgress = isMentorPackMode();
+    const result = await writeCurrentToHandle({ reason: "manual", showProgress });
+    if (result.ok) {
+      finishOk(
+        isMentorPackMode() ? "\u5DF2\u4FDD\u5B58\u5230\u539F\u4F4D\u7F6E \u2713 (.mentor)" : "\u5DF2\u4FDD\u5B58\u5230\u539F\u4F4D\u7F6E \u2713",
+        { status: "\u5DF2\u4FDD\u5B58", right: State2.currentFile.name }
+      );
+      return;
+    }
+    if (result.skipped && result.error === "busy") {
+      showToast("\u6B63\u5728\u4FDD\u5B58\u2026", 1500);
+      return;
+    }
+    if (result.error) {
+      showToast("\u4FDD\u5B58\u5931\u8D25: " + result.error);
+      setStatus("\u4FDD\u5B58\u5931\u8D25", result.error);
+      return;
+    }
+  }
+  let mdText;
+  let sidecar;
+  try {
+    const html = State2.editor.getHTML();
+    mdText = htmlToMarkdownMedia(html);
+    sidecar = {
+      version: "1",
+      document: State2.currentFile.name,
+      updatedAt: nowISO(),
+      author: { id: State2.authorId, name: State2.author },
+      annotations: buildAnnotationsSidecar()
+    };
+  } catch (e) {
+    showToast("\u4FDD\u5B58\u5931\u8D25: " + (e.message || e), 4e3);
+    return;
+  }
+  State2.currentFile.content = mdText;
+  State2.currentFile.annotations = sidecar;
+  try {
+    await AnnotationStore.put(State2.currentFile.name, sidecar);
+  } catch (e) {
+    console.warn("[IDB] put \u5931\u8D25:", e);
+  }
+  if (isMentorPackMode()) {
+    try {
+      showExportProgress("\u6B63\u5728\u6253\u5305 .mentor\u2026");
+      const blob = await buildMentorZipBlob(mdText, sidecar, State2.mediaFiles);
+      const outName = /\.mentor$/i.test(State2.currentFile.name) ? State2.currentFile.name : mentorExportName(State2.currentFile.name);
+      downloadBlob(outName, blob);
+      hideExportProgress("\u5DF2\u4E0B\u8F7D");
+      markClean();
+      finishOk("\u5DF2\u4E0B\u8F7D \u2713 (.mentor)", { status: "\u5DF2\u4E0B\u8F7D", right: outName });
+    } catch (e) {
+      hideExportProgress("\u5BFC\u51FA\u5931\u8D25");
+      showToast("\u5BFC\u51FA\u5931\u8D25: " + (e.message || e), 4e3);
+      setStatus("\u5BFC\u51FA\u5931\u8D25", e.message || String(e));
     }
     return;
   }
-  const result = await tryWriteBack(mdText, sidecarText, sidecarName);
-  if (result.handle) {
-    finishOk("\u5DF2\u4FDD\u5B58\u5230\u539F\u4F4D\u7F6E \u2713", {
-      status: "\u5DF2\u4FDD\u5B58",
-      right: `${State2.currentFile.name} + ${sidecarName}`
-    });
-  } else if (result.error) {
-    showToast("\u4FDD\u5B58\u5931\u8D25: " + result.error);
-    setStatus("\u4FDD\u5B58\u5931\u8D25", result.error);
-  } else {
-    downloadFile(State2.currentFile.name, mdText);
-    downloadFile(sidecarName, sidecarText);
-    finishOk("\u5DF2\u4E0B\u8F7D \u2713 (\u6D4F\u89C8\u5668\u4E0D\u652F\u6301\u6216\u672A\u6388\u6743)", {
-      status: "\u5DF2\u4E0B\u8F7D",
-      right: `${State2.currentFile.name} + ${sidecarName}`
-    });
-  }
+  const sidecarName = State2.currentFile.name.replace(/\.md$/i, "") + ".annotations.json";
+  downloadFile(State2.currentFile.name, mdText);
+  downloadFile(sidecarName, JSON.stringify(sidecar, null, 2));
+  markClean();
+  finishOk("\u5DF2\u4E0B\u8F7D \u2713 (\u6D4F\u89C8\u5668\u4E0D\u652F\u6301\u6216\u672A\u6388\u6743)", {
+    status: "\u5DF2\u4E0B\u8F7D",
+    right: `${State2.currentFile.name} + ${sidecarName}`
+  });
 }
 async function tryWriteBackMentor(mdText, sidecar, mentorName) {
-  if (State2.saveMode === "mentor-handle" && State2.currentFile && State2.currentFile.handle) {
-    if (!confirmProtectedWrite("\u4FDD\u5B58")) {
-      return { handle: false, error: "\u5DF2\u53D6\u6D88\u5199\u56DE\u53D7\u4FDD\u62A4\u8DEF\u5F84 (\u53EF\u53E6\u5B58\u4E3A\u526F\u672C)" };
-    }
-    try {
-      const handle = State2.currentFile.handle;
-      if (await handle.queryPermission({ mode: "readwrite" }) !== "granted") {
-        await handle.requestPermission({ mode: "readwrite" });
-      }
-      showExportProgress("\u6B63\u5728\u6253\u5305 .mentor\u2026");
-      const blob = await buildMentorZipBlob(mdText, sidecar, State2.mediaFiles);
-      const writable = await handle.createWritable();
-      await writable.write(blob);
-      await writable.close();
-      hideExportProgress("\u5DF2\u4FDD\u5B58");
-      return { handle: true };
-    } catch (e) {
-      hideExportProgress("\u4FDD\u5B58\u5931\u8D25");
-      if (e.name === "NotAllowedError") return { handle: false, error: "\u6743\u9650\u88AB\u62D2" };
-      return { handle: false, error: e.message };
-    }
+  if (!(State2.saveMode === "mentor-handle" && State2.currentFile && State2.currentFile.handle)) {
+    return { handle: false };
   }
-  return { handle: false };
+  if (!confirmProtectedWrite("\u4FDD\u5B58")) {
+    return { handle: false, error: "\u5DF2\u53D6\u6D88\u5199\u56DE\u53D7\u4FDD\u62A4\u8DEF\u5F84 (\u53EF\u53E6\u5B58\u4E3A\u526F\u672C)" };
+  }
+  try {
+    const handle = State2.currentFile.handle;
+    const perm = await ensureWritePermission(handle);
+    if (perm === "denied") return { handle: false, error: "\u6743\u9650\u88AB\u62D2" };
+    showExportProgress("\u6B63\u5728\u6253\u5305 .mentor\u2026");
+    const blob = await buildMentorZipBlob(mdText, sidecar, State2.mediaFiles);
+    const wr = await writeToHandle(handle, blob);
+    if (!wr.ok) {
+      hideExportProgress("\u4FDD\u5B58\u5931\u8D25");
+      return { handle: false, error: wr.error || "\u5199\u76D8\u5931\u8D25" };
+    }
+    hideExportProgress("\u5DF2\u4FDD\u5B58");
+    return { handle: true };
+  } catch (e) {
+    hideExportProgress("\u4FDD\u5B58\u5931\u8D25");
+    if (e && e.name === "NotAllowedError") return { handle: false, error: "\u6743\u9650\u88AB\u62D2" };
+    return { handle: false, error: e && e.message ? e.message : String(e) };
+  }
 }
 async function tryWriteBack(mdText, sidecarText, sidecarName) {
-  if (State2.currentFile && State2.currentFile.handle) {
-    try {
-      await ensureWritePermission(State2.currentFile.handle);
-      if (State2.fileMtime != null) {
-        try {
-          const currentFile = await State2.currentFile.handle.getFile();
-          const currentMtime = currentFile.lastModified;
-          if (currentMtime > State2.fileMtime) {
-            const ok = confirm(
-              `\u26A0 \u4E3B\u6587\u4EF6\u5728\u5916\u90E8\u88AB\u4FEE\u6539!
+  if (!(State2.currentFile && State2.currentFile.handle)) {
+    return { handle: false };
+  }
+  try {
+    await ensureWritePermission(State2.currentFile.handle);
+    if (State2.fileMtime != null) {
+      try {
+        const currentFile = await State2.currentFile.handle.getFile();
+        const currentMtime = currentFile.lastModified;
+        if (currentMtime > State2.fileMtime) {
+          const ok = confirm(
+            `\u26A0 \u4E3B\u6587\u4EF6\u5728\u5916\u90E8\u88AB\u4FEE\u6539!
 
 \u4F60\u6700\u540E\u4E00\u6B21\u6253\u5F00/\u4FDD\u5B58: ${new Date(State2.fileMtime).toLocaleTimeString()}
 \u5F53\u524D\u6587\u4EF6 mtime: ${new Date(currentMtime).toLocaleTimeString()}
@@ -60437,30 +60607,29 @@ async function tryWriteBack(mdText, sidecarText, sidecarName) {
 \u7EE7\u7EED\u4FDD\u5B58\u4F1A\u8986\u76D6\u5916\u90E8\u4FEE\u6539\u3002
 
 \u786E\u5B9A\u8981\u8986\u76D6\u5417? (\u5EFA\u8BAE\u5148\u53D6\u6D88, \u5907\u4EFD\u5916\u90E8\u6539\u52A8, \u518D\u5408\u5E76)`
-            );
-            if (!ok) {
-              return { handle: false, error: "\u7528\u6237\u53D6\u6D88: \u68C0\u6D4B\u5230\u5916\u90E8\u4FEE\u6539" };
-            }
+          );
+          if (!ok) {
+            return { handle: false, error: "\u7528\u6237\u53D6\u6D88: \u68C0\u6D4B\u5230\u5916\u90E8\u4FEE\u6539" };
           }
-        } catch (e) {
-          console.warn("[P0-C] mtime \u68C0\u67E5\u5931\u8D25:", e);
         }
-      }
-      const writable = await State2.currentFile.handle.createWritable();
-      await writable.write(mdText);
-      await writable.close();
-      try {
-        const newFile = await State2.currentFile.handle.getFile();
-        State2.fileMtime = newFile.lastModified;
       } catch (e) {
+        console.warn("[P0-C] mtime \u68C0\u67E5\u5931\u8D25:", e);
       }
-      return { handle: true };
-    } catch (e) {
-      if (e.name === "NotAllowedError") return { handle: false, error: "\u6743\u9650\u88AB\u62D2" };
-      return { handle: false, error: e.message };
     }
+    const wr = await writeToHandle(State2.currentFile.handle, mdText);
+    if (!wr.ok) {
+      return { handle: false, error: wr.error || "\u5199\u76D8\u5931\u8D25" };
+    }
+    try {
+      const newFile = await State2.currentFile.handle.getFile();
+      State2.fileMtime = newFile.lastModified;
+    } catch {
+    }
+    return { handle: true };
+  } catch (e) {
+    if (e && e.name === "NotAllowedError") return { handle: false, error: "\u6743\u9650\u88AB\u62D2" };
+    return { handle: false, error: e && e.message ? e.message : String(e) };
   }
-  return { handle: false };
 }
 function downloadFile(name, content) {
   const blob = new Blob([content], { type: name.endsWith(".json") ? "application/json" : "text/markdown" });
@@ -62198,11 +62367,14 @@ window.__mdAnnotator = {
   rebuildAnnotationMarks,
   _validateMarksAfterEdit,
   scheduleValidateMarks,
-  // H-autosave: autosave helpers
+  // H-autosave: autosave helpers (v1.43.54 unified write path)
   startAutosaveTimer,
   stopAutosaveTimer,
   autosaveNow,
   scheduleAutosaveDebounce,
+  hasWriteHandle,
+  writeCurrentToHandle,
+  writeToHandle,
   // v1.43.14
   get AUTOSAVE_DEBOUNCE() {
     return getAutosaveDebounceMs();

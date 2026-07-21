@@ -2,6 +2,34 @@
 
 按时间倒序记录已发布的变化。最新条目在上方。
 
+## v1.43.54 (2026-07-21) — 自动保存重整（简单可靠）
+
+### 用户
+"自动保存经常说不能保存，请修复，我觉得重整逻辑，保持简单就好"
+
+### 根因
+1. 自动保存与手动保存各写一套写盘逻辑，易竞态
+2. 异步打包/写盘过程中用户继续编辑 → 结束时无脑 `markClean`，脏标记被误清
+3. 后台 autosave 调用 `requestPermission`（需用户手势）→ 常报「权限被撤销」并停掉 timer
+4. 无 single-flight，并发 `createWritable` 失败
+
+### 改动（一套路径）
+1. **`hasWriteHandle` / `writeToHandle` / `writeCurrentToHandle`** — 统一写盘
+2. **single-flight**：同时只一次写；忙则排队再 debounce 一次
+3. **`dirtyGen`**：保存开始记 gen，结束仅 gen 未变才 `markClean`；期间有编辑则保持脏并再存
+4. **autosave 只 `queryPermission`**，不弹授权；缺权限提示「Ctrl+S 一次授权」，**不永久停 timer**
+5. **成功不再 toast 刷屏**（状态栏「已自动保存」）；失败 toast 15s 节流
+6. **`saveCurrent`** 走同一写盘路径；无 handle 才下载
+
+### 测试
+- `tests/v143-autosave-simple.spec.js`
+- 既有 protected-path / open-save lifecycle 回归
+
+### Cache
+- app.bundle.js?v=110→111
+
+---
+
 ## v1.43.53 (2026-07-21) — 浮动「AI 批注」按钮（少写 @AI）
 
 ### 用户
