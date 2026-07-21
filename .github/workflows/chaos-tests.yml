@@ -1,81 +1,28 @@
+# chaos-tests — DISABLED for automatic runs
+#
+# 产品约定：自动化测试在本地跑即可，不再跟 push/PR 绑 CI（避免刷邮件、拖反馈）。
+#
+# 本地推荐：
+#   python -m http.server 8787 --bind 127.0.0.1
+#   npm run test:ux:smoke
+#   npm run test:ux:full
+#   npm run test:ux:chaos
+#   node tests/chaos-wave10.spec.js   # 等旧 wave 按需
+#
+# 若以后要重新打开 CI：把下面 `on` 改回 push + pull_request 即可。
+
 name: chaos-tests
 
+# 仅保留手动入口；默认不触发，不会发失败邮件
 on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
-  workflow_dispatch:  # 手动触发
-
-# 同 branch 新 push 取消旧 run — 减少重复邮件
-concurrency:
-  group: chaos-tests-${{ github.ref }}
-  cancel-in-progress: true
+  workflow_dispatch:
 
 jobs:
-  chaos:
+  chaos-disabled:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
-
-      - name: Install dependencies
-        run: npm ci --no-audit --no-fund || npm install --no-audit --no-fund
-
-      - name: Install Playwright Chromium
-        run: npx playwright install chromium --with-deps
-
-      - name: Start Mentor server
+      - name: Skipped — run tests locally
         run: |
-          python3 -m http.server 8787 &
-          sleep 2
-          curl -s -o /dev/null -w "server up: HTTP %{http_code}\n" http://localhost:8787/index.html
-          # 确认 workers/ 静态文件可访问 (Web Worker 需要)
-          curl -s -o /dev/null -w "worker: HTTP %{http_code}\n" http://localhost:8787/workers/zip-worker.js
-
-      - name: Run chaos tests
-        env:
-          CI: 'true'
-        run: |
-          set -e
-          run_one() {
-            local f="$1"
-            if [ ! -f "tests/$f" ]; then
-              echo "SKIP missing: tests/$f"
-              return 0
-            fi
-            echo "=== $f ==="
-            node "tests/$f"
-          }
-          run_one verify-cursor-fix.spec.js
-          run_one chaos-suite.spec.js
-          run_one chaos-wave2.spec.js
-          run_one chaos-wave3.spec.js
-          run_one chaos-wave4.spec.js
-          # a11y-keyboard.spec.js 已从仓库移除 — 不再引用
-          run_one roundtrip-real-mentor.spec.js
-          # 扩展基线 (存在则跑, 不存在则 skip)
-          run_one chaos-wave9.spec.js
-          run_one chaos-wave10.spec.js
-          run_one v143-empty-state.spec.js
-          # v1.43.54+ UX / annotation content smoke (Playwright)
-          if [ -f tests/chaos-ux/runner.js ]; then
-            echo "=== chaos-ux smoke ==="
-            node tests/chaos-ux/runner.js --level=smoke
-          fi
-
-      - name: Upload failure artifacts
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: failure-logs
-          path: |
-            /tmp/mentor-*.log
-            tmp/*.log
-          if-no-files-found: ignore
-          retention-days: 7
+          echo "chaos-tests CI is disabled."
+          echo "Run locally: npm run test:ux:smoke | test:ux:full | test:ux:chaos"
+          exit 0
