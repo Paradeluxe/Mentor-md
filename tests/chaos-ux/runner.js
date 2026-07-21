@@ -13,20 +13,30 @@ const LEVEL = (() => {
   return a ? a.split('=')[1] : 'smoke';
 })();
 
-const MATRIX = [
+const CORE = [
   'matrix/01-toolbar.spec.js',
+  'matrix/03-tabs.spec.js',
   'matrix/04b-ann-anchors.spec.js',
+  'matrix/04b-extra-anchors.spec.js',
   'matrix/04c-ann-bodies.spec.js',
   'matrix/04d-ann-state-machine.spec.js',
   'matrix/04e-ann-roundtrip.spec.js',
   'matrix/04f-ann-context.spec.js',
+  'matrix/07-export.spec.js',
+  'matrix/11-keyboard.spec.js',
   'interleave/sequences-handcrafted.spec.js',
 ];
 
 const SUITES = {
-  smoke: MATRIX,
-  full: MATRIX,
-  chaos: MATRIX,
+  smoke: [
+    'matrix/01-toolbar.spec.js',
+    'matrix/03-tabs.spec.js',
+    'matrix/04b-ann-anchors.spec.js',
+    'matrix/04c-ann-bodies.spec.js',
+    'interleave/sequences-handcrafted.spec.js',
+  ],
+  full: CORE,
+  chaos: CORE.concat(['interleave/fuzzer.spec.js']),
 };
 
 function runOne(rel) {

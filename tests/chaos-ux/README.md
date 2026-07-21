@@ -55,15 +55,17 @@ node tests/chaos-ux/runner.js --level=smoke
 ## Phase 进度
 
 - [x] A 骨架 + smoke 套件  
-- [x] B2 内容矩阵扩展：04b/04c/04d/04e/04f + H21–H26  
-- [ ] B 其余 surface（tabs/export/keyboard 全矩阵）  
-- [ ] C fuzzer  
-- [ ] D CI 硬化  
+- [x] B2 内容矩阵：04b/04c/04d/04e/04f + H21–H26  
+- [x] B surface：03-tabs / 07-export / 11-keyboard  
+- [x] A8/A10–A12 extra anchors  
+- [x] C fuzzer（`--seed` / `--steps`，挂在 `test:ux:chaos`）  
+- [ ] D CI 硬化 / 夜间 marathon  
 
-## 当前 content 覆盖（持续扩）
+## 当前 content 覆盖
 
-- 锚点：A1–A7, A9, A13–A18（样本齐全；A8/A10–A12 后续）  
-- 正文：B1/B2/B5/B7/B10/B14  
+- 锚点：A1–A18（含 extra 套件）  
+- 正文：B1–B5/B7/B8/B10/B12/B14/B16…  
 - 上下文：C1–C8  
-- 盘格式：P1–P4/P8–P10 + 多个 invalidReason  
+- 盘格式：P1–P4/P8–P10 + invalidReason 样本  
 - 手搓：H1, H21–H26  
+- fuzzer：`node tests/chaos-ux/interleave/fuzzer.spec.js --seed=42 --steps=80`  
