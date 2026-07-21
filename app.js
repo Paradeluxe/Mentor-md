@@ -2441,62 +2441,107 @@ function setupPaneResizer() {
     document.addEventListener("mouseup", onUp);
   });
 }
+/** Prefill for AI-directed notes — compatible with /fix-mentor has_ai_marker */
+var AI_MENTION_PREFIX = "@AI ";
+function bodyHasAiMarker(body) {
+  return /@AI\b/i.test(body || "");
+}
+function ensureAiMarker(body) {
+  const t = String(body || "").trim();
+  if (!t) return AI_MENTION_PREFIX.trim();
+  if (bodyHasAiMarker(t)) return t;
+  return AI_MENTION_PREFIX + t;
+}
+function seedAiDraft(threadId) {
+  if (!threadId) return;
+  State.replyDrafts[threadId] = AI_MENTION_PREFIX;
+}
+function focusThreadInput(threadId, { ai = false } = {}) {
+  setTimeout(() => {
+    const ta2 = document.querySelector(`[data-thread-input="${threadId}"]`);
+    if (!ta2) return;
+    if (ai) {
+      const v = State.replyDrafts[threadId] != null ? State.replyDrafts[threadId] : AI_MENTION_PREFIX;
+      ta2.value = v;
+      ta2.placeholder = "\u544A\u8BC9 AI \u6539\u4EC0\u4E48 / \u95EE\u4EC0\u4E48\u2026";
+      ta2.focus();
+      try {
+        const n = ta2.value.length;
+        ta2.setSelectionRange(n, n);
+      } catch {
+      }
+      const btn = document.querySelector(`[data-act="submit-reply"][data-thread="${threadId}"]`);
+      if (btn) btn.disabled = !ta2.value.trim();
+    } else {
+      ta2.focus();
+    }
+  }, 50);
+}
+/**
+ * Create annotation from current editor selection.
+ * opts.ai: seed @AI in the first comment draft (for /fix-mentor).
+ */
+function createAnnotationFromSelection({ ai = false } = {}) {
+  if (!State.editor) return null;
+  const sel = State.editor.state.selection;
+  if (sel.empty && (!sel.$anchor || !sel.$head)) return null;
+  const isCellSel = sel.constructor && (sel.constructor.name === "CellSelection" || sel.forEachCell && sel.$anchorCell && sel.$headCell);
+  if (isCellSel) {
+    return handleCreateMultiCellAnnotation(sel, { ai }) || null;
+  }
+  const { from: from2, to } = sel;
+  if (from2 === to) return null;
+  let node = sel.node;
+  if ((!node || node.type.name !== "image") && isImageNodeSelection(sel)) {
+    try {
+      node = State.editor.state.doc.nodeAt(sel.from);
+    } catch (e) {
+      node = null;
+    }
+  }
+  if (node && node.type && node.type.name === "image") {
+    const anc = {
+      from: from2,
+      to: from2 + node.nodeSize,
+      src: node.attrs.src || "",
+      alt: node.attrs.alt || "",
+      title: node.attrs.title || ""
+    };
+    return createAnnotationThread(anc.from, anc.to, imageAnchorLabel(anc), {
+      imageAnchors: [anc],
+      skipMark: true,
+      ai
+    });
+  }
+  const imageAnchors = collectImageAnchors(State.editor.state.doc, from2, to);
+  const $from = State.editor.state.doc.resolve(from2);
+  const $to = State.editor.state.doc.resolve(to);
+  if ($from.parent !== $to.parent) {
+    if ($from.parent.isTextblock && $to.parent.isTextblock || imageAnchors.length > 0) {
+      return handleCreateMultiParagraphAnnotation(from2, to, { ai }) || null;
+    }
+  }
+  const text2 = State.editor.state.doc.textBetween(from2, to, " ");
+  if ((!text2 || !text2.trim()) && imageAnchors.length) {
+    const label = imageAnchors.map(imageAnchorLabel).join(" ");
+    return createAnnotationThread(from2, to, label, { imageAnchors, skipMark: true, ai });
+  }
+  return createAnnotationThread(from2, to, text2, imageAnchors.length ? { imageAnchors, ai } : { ai });
+}
 function setupFloatCommentButton() {
   const floatWrap = $("#float-comment-btn");
   if (floatWrap) {
     floatWrap.addEventListener("mousedown", (e) => {
       e.preventDefault();
     });
+    floatWrap.addEventListener("click", (e) => {
+      const btn = e.target.closest("button[data-float-act]");
+      if (!btn || !floatWrap.contains(btn)) return;
+      const ai = btn.getAttribute("data-float-act") === "ai";
+      createAnnotationFromSelection({ ai });
+      floatWrap.classList.add("hidden");
+    });
   }
-  $("#float-comment-btn button").addEventListener("click", () => {
-    const sel = State.editor.state.selection;
-    if (sel.empty && (!sel.$anchor || !sel.$head)) return;
-    const isCellSel = sel.constructor && (sel.constructor.name === "CellSelection" || sel.forEachCell && sel.$anchorCell && sel.$headCell);
-    if (isCellSel) {
-      handleCreateMultiCellAnnotation(sel);
-      return;
-    }
-    const { from: from2, to } = sel;
-    if (from2 === to) return;
-    let node = sel.node;
-    if ((!node || node.type.name !== "image") && isImageNodeSelection(sel)) {
-      try {
-        node = State.editor.state.doc.nodeAt(sel.from);
-      } catch (e) {
-        node = null;
-      }
-    }
-    if (node && node.type && node.type.name === "image") {
-      const anc = {
-        from: from2,
-        to: from2 + node.nodeSize,
-        src: node.attrs.src || "",
-        alt: node.attrs.alt || "",
-        title: node.attrs.title || ""
-      };
-      createAnnotationThread(anc.from, anc.to, imageAnchorLabel(anc), {
-        imageAnchors: [anc],
-        skipMark: true
-      });
-      return;
-    }
-    const imageAnchors = collectImageAnchors(State.editor.state.doc, from2, to);
-    const $from = State.editor.state.doc.resolve(from2);
-    const $to = State.editor.state.doc.resolve(to);
-    if ($from.parent !== $to.parent) {
-      if ($from.parent.isTextblock && $to.parent.isTextblock || imageAnchors.length > 0) {
-        handleCreateMultiParagraphAnnotation(from2, to);
-        return;
-      }
-    }
-    const text2 = State.editor.state.doc.textBetween(from2, to, " ");
-    if ((!text2 || !text2.trim()) && imageAnchors.length) {
-      const label = imageAnchors.map(imageAnchorLabel).join(" ");
-      createAnnotationThread(from2, to, label, { imageAnchors, skipMark: true });
-      return;
-    }
-    createAnnotationThread(from2, to, text2, imageAnchors.length ? { imageAnchors } : null);
-  });
   $("#mark-delete-btn").addEventListener("click", () => {
     const threadId = State.activeThreadId;
     if (!threadId) return;
@@ -2860,17 +2905,16 @@ function createAnnotationThread(from2, to, text2, opts = null) {
   }
   refreshAnnotationImageDecos();
   State.activeThreadId = threadId;
+  if (options.ai) seedAiDraft(threadId);
   renderCommentList();
   positionMarkDeletePopover();
-  setTimeout(() => {
-    const ta2 = document.querySelector(`[data-thread-input="${threadId}"]`);
-    if (ta2) ta2.focus();
-  }, 50);
-  setStatus("\u5DF2\u521B\u5EFA\u6279\u6CE8", `\u7EBF\u7A0B ${threadId.slice(0, 8)}`);
+  focusThreadInput(threadId, { ai: !!options.ai });
+  setStatus(options.ai ? "AI \u6279\u6CE8" : "\u5DF2\u521B\u5EFA\u6279\u6CE8", options.ai ? `\u5199\u6307\u4EE4\u540E\u63D0\u4EA4 \xB7 ${threadId.slice(0, 8)}` : `\u7EBF\u7A0B ${threadId.slice(0, 8)}`);
   emitAI("threadChange", { threadId, change: "create", thread });
   return thread;
 }
-function handleCreateMultiCellAnnotation(cellSel) {
+function handleCreateMultiCellAnnotation(cellSel, opts = {}) {
+  const options = opts && typeof opts === "object" ? opts : {};
   if (!checkAnnotationCap()) return;
   const ranges = [];
   let totalText = "";
@@ -2919,13 +2963,12 @@ function handleCreateMultiCellAnnotation(cellSel) {
   applyAnnotationMarksMultiCell(threadId, ranges);
   State.editor.commands.setTextSelection(ranges[0].from);
   State.activeThreadId = threadId;
+  if (options.ai) seedAiDraft(threadId);
   renderCommentList();
-  setTimeout(() => {
-    const ta2 = document.querySelector(`[data-thread-input="${threadId}"]`);
-    if (ta2) ta2.focus();
-  }, 50);
-  setStatus("\u5DF2\u521B\u5EFA\u6279\u6CE8", `${ranges.length} \u4E2A\u5355\u5143\u683C \xB7 \u7EBF\u7A0B ${threadId.slice(0, 8)}`);
+  focusThreadInput(threadId, { ai: !!options.ai });
+  setStatus(options.ai ? "AI \u6279\u6CE8" : "\u5DF2\u521B\u5EFA\u6279\u6CE8", `${ranges.length} \u4E2A\u5355\u5143\u683C \xB7 ${threadId.slice(0, 8)}`);
   emitAI("threadChange", { threadId, change: "create", thread });
+  return thread;
 }
 function authorColorIndex(authorId) {
   if (!authorId) return 0;
@@ -2959,7 +3002,8 @@ function applyAnnotationMarksMultiCell(threadId, ranges) {
   tr2.setMeta("__activeMarkSync", true);
   State.editor.view.dispatch(tr2);
 }
-function handleCreateMultiParagraphAnnotation(from2, to) {
+function handleCreateMultiParagraphAnnotation(from2, to, opts = {}) {
+  const options = opts && typeof opts === "object" ? opts : {};
   if (!checkAnnotationCap()) return;
   if (State.annotations.some((a) => a.range && a.range.from === from2 && a.range.to === to)) {
     showToast("\u8BE5\u4F4D\u7F6E\u5DF2\u6709\u6279\u6CE8", 1800);
@@ -2996,11 +3040,11 @@ function handleCreateMultiParagraphAnnotation(from2, to) {
     }
   }
   if (ranges.length === 0 && imageAnchors.length) {
-    createAnnotationThread(imageAnchors[0].from, imageAnchors[imageAnchors.length - 1].to, text2, {
+    return createAnnotationThread(imageAnchors[0].from, imageAnchors[imageAnchors.length - 1].to, text2, {
       imageAnchors,
-      skipMark: true
+      skipMark: true,
+      ai: !!options.ai
     });
-    return;
   }
   const threadId = uuid();
   const commentId = uuid();
@@ -3037,13 +3081,12 @@ function handleCreateMultiParagraphAnnotation(from2, to) {
   refreshAnnotationImageDecos();
   ed.commands.setTextSelection(ranges[0].from);
   State.activeThreadId = threadId;
+  if (options.ai) seedAiDraft(threadId);
   renderCommentList();
-  setTimeout(() => {
-    const ta2 = document.querySelector(`[data-thread-input="${threadId}"]`);
-    if (ta2) ta2.focus();
-  }, 50);
-  setStatus(ranges.length > 1 ? "\u5DF2\u521B\u5EFA\u591A\u6BB5\u6279\u6CE8" : "\u5DF2\u521B\u5EFA\u6279\u6CE8", `${ranges.length} \u6BB5 \xB7 \u7EBF\u7A0B ${threadId.slice(0, 8)}`);
+  focusThreadInput(threadId, { ai: !!options.ai });
+  setStatus(options.ai ? "AI \u6279\u6CE8" : ranges.length > 1 ? "\u5DF2\u521B\u5EFA\u591A\u6BB5\u6279\u6CE8" : "\u5DF2\u521B\u5EFA\u6279\u6CE8", `${ranges.length} \u6BB5 \xB7 ${threadId.slice(0, 8)}`);
   emitAI("threadChange", { threadId, change: "create", thread });
+  return thread;
 }
 function addReply(threadId, body) {
   const thread = State.annotations.find((t) => t && typeof t === "object" && t.threadId === threadId);
@@ -3429,9 +3472,10 @@ function renderCommentList() {
             -->
             <div class="comment-reply-form">
               <textarea data-thread-input="${thread.threadId}" placeholder="${first3.body ? "\u56DE\u590D..." : "\u5F00\u59CB\u6279\u6CE8..."}" autocomplete="off"></textarea>
-              <!-- v3: \u89E3\u51B3\u6309\u94AE\u653E\u5230 reply \u533A\u5E95\u90E8\u4E0E\u63D0\u4EA4\u540C\u884C (docx \u98CE\u683C: \u6B21\u8981\u64CD\u4F5C\u5DE6, \u4E3B\u64CD\u4F5C\u53F3) -->
+              <!-- v3: resolve 左 · v1.43.53 @AI 前缀 · 提交右 -->
               <div class="form-actions">
                 <button class="comment-resolve-btn ${thread.resolved ? "is-resolved" : ""}" data-act="resolve" data-thread="${thread.threadId}" title="${thread.resolved ? "\u91CD\u65B0\u6253\u5F00\u6B64\u6279\u6CE8" : "\u6807\u8BB0\u4E3A\u5DF2\u89E3\u51B3"}" aria-label="${thread.resolved ? "\u91CD\u65B0\u6253\u5F00" : "\u6807\u8BB0\u4E3A\u5DF2\u89E3\u51B3"}">${thread.resolved ? "\u21BA \u91CD\u65B0\u6253\u5F00" : "\u2713 \u89E3\u51B3"}</button>
+                <button type="button" class="comment-ai-prefix-btn" data-act="prefix-ai" data-thread="${thread.threadId}" title="\u63D2\u5165 @AI\uFF08\u4FDD\u5B58 .mentor \u540E /fix-mentor \u4F1A\u5904\u7406\uFF09">@AI</button>
                 <button data-act="submit-reply" data-thread="${thread.threadId}" class="primary" disabled title="\u8F93\u5165\u5185\u5BB9\u540E\u53EF\u63D0\u4EA4 (Ctrl+Enter)">\u63D0\u4EA4</button>
               </div>
             </div>
@@ -3528,6 +3572,31 @@ function renderCommentList() {
       if (input && input.value.trim()) {
         addReply(tid, input.value);
       }
+    });
+  });
+  list.querySelectorAll('[data-act="prefix-ai"]').forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const tid = btn.dataset.thread;
+      const ta2 = list.querySelector(`[data-thread-input="${tid}"]`);
+      if (!ta2) return;
+      let v = ta2.value || "";
+      if (!bodyHasAiMarker(v)) {
+        v = AI_MENTION_PREFIX + v.replace(/^\s+/, "");
+        ta2.value = v;
+      }
+      State.replyDrafts[tid] = ta2.value;
+      ta2.placeholder = "\u544A\u8BC9 AI \u6539\u4EC0\u4E48 / \u95EE\u4EC0\u4E48\u2026";
+      ta2.focus();
+      try {
+        const n = ta2.value.length;
+        ta2.setSelectionRange(n, n);
+      } catch {
+      }
+      const sub = list.querySelector(`[data-act="submit-reply"][data-thread="${tid}"]`);
+      if (sub) sub.disabled = !ta2.value.trim();
+      btn.classList.add("is-active");
     });
   });
   list.querySelectorAll('[data-act="goto"]').forEach((btn) => {
@@ -4349,6 +4418,22 @@ function clearPmHistory() {
 function genTabId() {
   return "t_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 7);
 }
+function isPlaceholderDocName(name) {
+  if (!name) return true;
+  return /^(untitled\.md|\u672A\u547D\u540D|\u672A\u547D\u540D\.md)$/i.test(String(name).trim());
+}
+function isActivePlaceholderTab() {
+  const name = State.currentFile && State.currentFile.name;
+  if (!isPlaceholderDocName(name)) return false;
+  if ((State.annotations || []).length > 0) return false;
+  try {
+    const body = (State.editor && State.editor.state.doc.textContent || "").trim();
+    // empty, or only openNewTabBlank seed — even if marked dirty, safe to replace in place
+    return !body || body === "\u65B0\u6587\u6863";
+  } catch {
+    return true;
+  }
+}
 function snapshotActiveTab() {
   if (!State.editor) return null;
   const hasFile = !!(State.currentFile && State.currentFile.name);
@@ -4359,6 +4444,7 @@ function snapshotActiveTab() {
       return 0;
     }
   })();
+  // Completely empty editor with no file name: skip (caller may reuse activeTabId)
   if (!hasFile && bodyLen === 0 && !(State.annotations || []).length) {
     return null;
   }
@@ -4371,13 +4457,14 @@ function snapshotActiveTab() {
   } catch {
     html = "";
   }
+  const handle = State.currentFile && State.currentFile.handle ? State.currentFile.handle : null;
   const snap = {
     id,
     name,
     html,
     annotations: JSON.parse(JSON.stringify(State.annotations || [])),
     dirty: !!(State.currentFile && State.currentFile.dirty),
-    handle: State.currentFile && State.currentFile.handle ? State.currentFile.handle : null,
+    handle,
     saveMode: State.saveMode || "unknown",
     mediaUrls: Object.assign({}, State.mediaUrls || {}),
     mediaFiles: Object.assign({}, State.mediaFiles || {}),
@@ -4387,13 +4474,23 @@ function snapshotActiveTab() {
       name: State.currentFile.name,
       content: State.currentFile.content,
       dirty: !!State.currentFile.dirty,
-      handle: State.currentFile.handle || null,
+      handle,
       path: State.currentFile.path || null
     } : { name, content: "", dirty: false, handle: null }
   };
   const idx = State.tabs.findIndex((t) => t && t.id === id);
-  if (idx >= 0) State.tabs[idx] = snap;
-  else State.tabs.push(snap);
+  if (idx >= 0) {
+    const prev = State.tabs[idx];
+    State.tabs[idx] = snap;
+    // Drop blob URLs that the previous snap held and nobody else needs
+    if (prev && prev.mediaUrls) {
+      const keep = collectKeptMediaUrls({ exceptTabId: null, includeState: true });
+      for (const u of Object.values(snap.mediaUrls || {})) if (u) keep.add(u);
+      revokeUrlSet(Object.values(prev.mediaUrls || {}), keep);
+    }
+  } else {
+    State.tabs.push(snap);
+  }
   return snap;
 }
 function restoreTab(tab) {
@@ -4534,21 +4631,93 @@ function findTabByName(name) {
   if (!name) return null;
   return State.tabs.find((t) => t && t.name === name) || null;
 }
+/**
+ * Claim a tab slot before loading document content from disk/memory.
+ * Modes:
+ *  - reload-same: already the active document (same name) → keep activeTabId
+ *  - reuse-tab: same name already open in another tab → snapshot current, claim that id (content will be reloaded)
+ *  - reuse-blank: active is empty placeholder → keep id, no extra tab
+ *  - new-tab: snapshot current (if any), allocate fresh id
+ *
+ * Does NOT restore old editor content when reusing a name — caller always loads fresh bytes.
+ */
 function prepareOpenDocument(name) {
   if (name && State.currentFile && State.currentFile.name === name && State.activeTabId) {
-    return { mode: "reload-same" };
+    return { mode: "reload-same", tabId: State.activeTabId };
   }
   const existing = name ? findTabByName(name) : null;
   if (existing) {
-    if (State.activeTabId) snapshotActiveTab();
-    restoreTab(existing);
-    return { mode: "switch-existing", tab: existing };
+    if (State.activeTabId && State.activeTabId !== existing.id) {
+      snapshotActiveTab();
+    }
+    State.activeTabId = existing.id;
+    return { mode: "reuse-tab", tab: existing, tabId: existing.id };
   }
   if (State.activeTabId) {
+    if (isActivePlaceholderTab()) {
+      // Replace empty untitled in place — no orphan tab
+      return { mode: "reuse-blank", tabId: State.activeTabId };
+    }
     snapshotActiveTab();
   }
   State.activeTabId = genTabId();
-  return { mode: "new-tab" };
+  return { mode: "new-tab", tabId: State.activeTabId };
+}
+/** Persist FileSystemFileHandle + last-opened name (IDB). Safe no-op if unsupported. */
+async function rememberOpenedFile(handleOrName, handle = null) {
+  const name = typeof handleOrName === "string" ? handleOrName : handleOrName && handleOrName.name;
+  const h = handle || (handleOrName && typeof handleOrName !== "string" ? handleOrName : null);
+  if (!name) return;
+  try {
+    if (h) await HandleStore.putFile(name, h);
+    await HandleStore.putLastFile(name);
+    try {
+      refreshFileListDropdown();
+    } catch {
+    }
+  } catch (e) {
+    console.warn("[rememberOpenedFile] failed:", e);
+  }
+}
+/**
+ * Shared post-read path for .mentor / .md open:
+ * prepare tab → swap media → load editor → attach handle/saveMode → remember handle.
+ */
+async function activateOpenedDocument({
+  name,
+  content,
+  annotations = null,
+  mediaFiles = null,
+  handle = null,
+  saveMode = "unknown",
+  quiet = false
+} = {}) {
+  if (!name) throw new Error("activateOpenedDocument: name required");
+  stopAutosaveTimer();
+  prepareOpenDocument(name);
+  // Snapshot of previous tab already kept its media; clear active state media only
+  revokeMediaUrls();
+  if (mediaFiles && Object.keys(mediaFiles).length > 0) {
+    await injectMediaFiles(mediaFiles);
+  }
+  loadMarkdownIntoEditor(name, content, annotations, {
+    handle,
+    saveMode,
+    alreadyPrepared: true
+  });
+  if (handle) {
+    await rememberOpenedFile(handle);
+  }
+  if (saveMode === "mentor-handle" || saveMode === "handle") {
+    try {
+      startAutosaveTimer();
+    } catch {
+    }
+  }
+  if (!quiet) {
+    renderFilePaneCurrent();
+  }
+  return { name, saveMode };
 }
 function renderDocTabs() {
   const bar = $("#doc-tabs");
@@ -4612,11 +4781,22 @@ function renderDocTabs() {
 function setupDocTabs() {
   renderDocTabs();
 }
-function loadMarkdownIntoEditor(name, content, annotationsData = null) {
+/**
+ * Load markdown (+ optional annotations) into the editor.
+ * options:
+ *  - handle: FileSystemFileHandle for write-back
+ *  - saveMode: 'mentor-handle' | 'mentor-download' | 'handle' | 'download' | ...
+ *  - alreadyPrepared: skip prepareOpenDocument (caller already claimed a tab + media)
+ */
+function loadMarkdownIntoEditor(name, content, annotationsData = null, options = {}) {
+  const opts = options && typeof options === "object" ? options : {};
+  const fileHandle = opts.handle || null;
+  const saveModeOpt = opts.saveMode != null ? opts.saveMode : null;
+  const alreadyPrepared = !!opts.alreadyPrepared;
   $("#status-right").textContent = "\u52A0\u8F7D\u4E2D...";
-  stopAutosaveTimer();
-  const prep = prepareOpenDocument(name);
-  if (prep.mode === "switch-existing") {
+  if (!alreadyPrepared) {
+    stopAutosaveTimer();
+    prepareOpenDocument(name);
   }
   $("#current-file-name").textContent = name;
   const sourceEl = $("#source-view");
@@ -4759,8 +4939,12 @@ function loadMarkdownIntoEditor(name, content, annotationsData = null) {
     name,
     content,
     annotations: annotationsData,
-    dirty: false
+    dirty: false,
+    handle: fileHandle || null
   };
+  if (saveModeOpt != null) {
+    State.saveMode = saveModeOpt;
+  }
   markClean();
   $("#current-file-name").textContent = name;
   try {
@@ -4778,8 +4962,11 @@ function loadMarkdownIntoEditor(name, content, annotationsData = null) {
       State.fileMtime = f.lastModified;
     }).catch(() => {
     });
+  } else {
+    State.fileMtime = null;
   }
   if (!State.activeTabId) State.activeTabId = genTabId();
+  // Snapshot AFTER handle/saveMode are on State so tab switch keeps write-back
   snapshotActiveTab();
   renderDocTabs();
 }
@@ -5059,6 +5246,54 @@ var FS_API = {
     return "";
   }
 };
+function _isMentorName(name) {
+  return /\.mentor$/i.test(name || "");
+}
+function _isMdName(name) {
+  return /\.md(markdown)?$/i.test(name || "");
+}
+function _findSidecarHandle(handles, mdHandle) {
+  if (!mdHandle || !handles) return null;
+  const base = mdHandle.name.replace(/\.md(markdown)?$/i, "").toLowerCase();
+  return handles.find(
+    (h) => /\.annotations\.json$/i.test(h.name) && h.name.replace(/\.annotations\.json$/i, "").toLowerCase() === base
+  ) || null;
+}
+/** Open one or many FileSystemFileHandles as tabs; last one stays active. */
+async function openMultipleHandles(handles) {
+  if (!handles || handles.length === 0) return;
+  const mentors = handles.filter((h) => _isMentorName(h.name));
+  const mds = handles.filter((h) => _isMdName(h.name));
+  // Prefer .mentor packages; else .md; else first pick
+  const targets = mentors.length ? mentors : mds.length ? mds : [handles[0]];
+  const multi = targets.length > 1;
+  let opened = 0;
+  let lastName = "";
+  for (const h of targets) {
+    try {
+      if (_isMentorName(h.name)) {
+        await openFromMentorHandle(h, { quiet: multi });
+      } else {
+        await openFromHandle(h, _findSidecarHandle(handles, h), { quiet: multi });
+      }
+      opened++;
+      lastName = h.name;
+    } catch (e) {
+      console.error("[openMultipleHandles] failed:", h.name, e);
+      showToast(`\u6253\u5F00\u5931\u8D25 ${h.name}: ${e.message || e}`, 4e3);
+    }
+  }
+  renderFilePaneCurrent();
+  updateDocMeta({ immediate: true });
+  if (opened === 0) {
+    setStatus("\u6253\u5F00\u5931\u8D25", "");
+    return;
+  }
+  if (opened > 1) {
+    setStatus(`\u5DF2\u6253\u5F00 ${opened} \u4E2A\u6587\u6863`, lastName);
+    showToast(`\u5DF2\u6253\u5F00 ${opened} \u4E2A\u6807\u7B7E`, 2500);
+  }
+}
 async function openFiles() {
   if (FS_API.supported) {
     try {
@@ -5074,53 +5309,7 @@ async function openFiles() {
         excludeAcceptAllOption: false
       });
       if (handles.length === 0) return;
-      const mentorHandle = handles.find((h) => /\.mentor$/i.test(h.name));
-      if (mentorHandle) {
-        State.saveMode = "mentor-handle";
-        await openFromMentorHandle(mentorHandle);
-        try {
-          await HandleStore.putFile(mentorHandle.name, mentorHandle);
-        } catch (e) {
-          console.warn("putFile failed:", e);
-        }
-        try {
-          await HandleStore.putLastFile(mentorHandle.name);
-          try {
-            refreshFileListDropdown();
-          } catch {
-          }
-        } catch (e) {
-          console.warn("putLastFile failed:", e);
-        }
-        renderFilePaneCurrent();
-        setStatus("\u5DF2\u52A0\u8F7D .mentor \u5305", `${mentorHandle.name} (Ctrl+S \u76F4\u63A5\u5199\u56DE\u539F\u4F4D\u7F6E)`);
-        updateDocMeta();
-        return;
-      }
-      const mdHandle = handles.find((h) => /\.md(markdown)?$/i.test(h.name)) || handles[0];
-      const sidecarHandle = handles.find(
-        (h) => /\.annotations\.json$/i.test(h.name) && h.name.replace(/\.annotations\.json$/i, "").toLowerCase() === mdHandle.name.replace(/\.md(markdown)?$/i, "").toLowerCase()
-      );
-      await openFromHandle(mdHandle, sidecarHandle);
-      State.saveMode = "handle";
-      try {
-        await HandleStore.putFile(mdHandle.name, mdHandle);
-      } catch (e) {
-        console.warn("putFile failed:", e);
-      }
-      try {
-        await HandleStore.putLastFile(mdHandle.name);
-        try {
-          refreshFileListDropdown();
-        } catch {
-        }
-      } catch (e) {
-        console.warn("putLastFile failed:", e);
-      }
-      renderFilePaneCurrent();
-      const statusMsg = sidecarHandle ? `${mdHandle.name} + \u6279\u6CE8\u5DF2\u52A0\u8F7D` : `${mdHandle.name} (Ctrl+S \u76F4\u63A5\u4FDD\u5B58\u5230\u539F\u4F4D\u7F6E)`;
-      setStatus("\u5DF2\u52A0\u8F7D \xB7 " + statusMsg, "");
-      updateDocMeta();
+      await openMultipleHandles(handles);
       return;
     } catch (e) {
       if (e.name === "AbortError") return;
@@ -5135,21 +5324,33 @@ async function openFilesLegacy() {
   input.multiple = true;
   input.accept = ".mentor";
   input.onchange = async () => {
-    const files = Array.from(input.files);
+    const files = Array.from(input.files || []);
     if (files.length === 0) return;
-    let mentorFile = files.find((f) => /\.mentor$/i.test(f.name));
-    if (!mentorFile) {
-      for (const f of files) {
-        if (await isMentorZip(f)) {
-          mentorFile = f;
-          break;
+    // Collect .mentor (by extension or zip sniff)
+    const mentors = [];
+    for (const f of files) {
+      if (_isMentorName(f.name) || await isMentorZip(f)) mentors.push(f);
+    }
+    if (mentors.length > 0) {
+      const multi = mentors.length > 1;
+      let opened = 0;
+      for (const f of mentors) {
+        try {
+          await openFromMentorFile(f, { quiet: multi });
+          opened++;
+        } catch (e) {
+          console.error("[openFilesLegacy] mentor failed:", f.name, e);
+          showToast(`\u6253\u5F00\u5931\u8D25 ${f.name}: ${e.message || e}`, 4e3);
         }
       }
-    }
-    if (mentorFile) {
-      await openFromMentorFile(mentorFile);
+      renderFilePaneCurrent();
+      if (opened > 1) {
+        setStatus(`\u5DF2\u6253\u5F00 ${opened} \u4E2A\u6587\u6863`, mentors[mentors.length - 1].name);
+        showToast(`\u5DF2\u6253\u5F00 ${opened} \u4E2A\u6807\u7B7E`, 2500);
+      }
       return;
     }
+    // Fallback: first non-mentor file as download-mode md
     const file = files[0];
     const content = await file.text();
     let annotations = await tryLoadSidecar(file.name, file);
@@ -5164,9 +5365,13 @@ async function openFilesLegacy() {
         console.warn("AnnotationStore.get \u5931\u8D25:", e);
       }
     }
-    State.saveMode = "download";
-    renderFilePaneCurrent();
-    await loadMarkdownIntoEditor(file.name, content, annotations);
+    await activateOpenedDocument({
+      name: file.name,
+      content,
+      annotations,
+      handle: null,
+      saveMode: "download"
+    });
     setStatus("\u5DF2\u52A0\u8F7D", `${file.name} (Ctrl+S \u4E0B\u8F7D\u4FDD\u5B58)`);
   };
   input.click();
@@ -5187,11 +5392,11 @@ async function ensureWritePermission(fileHandle) {
     return "unknown";
   }
 }
-async function openFromHandle(fileHandle, sidecarHandle = null) {
+async function openFromHandle(fileHandle, sidecarHandle = null, options = {}) {
+  const quiet = !!(options && options.quiet);
   await ensureWritePermission(fileHandle);
   const file = await fileHandle.getFile();
   const content = await file.text();
-  const sidecarName = file.name.replace(/\.md$/i, "") + ".annotations.json";
   let annotations = null;
   if (sidecarHandle) {
     try {
@@ -5212,33 +5417,34 @@ async function openFromHandle(fileHandle, sidecarHandle = null) {
       console.warn("AnnotationStore.get \u5931\u8D25:", e);
     }
   }
-  await loadMarkdownIntoEditor(file.name, content, annotations);
-  State.currentFile.handle = fileHandle;
-  try {
-    await HandleStore.putFile(file.name, fileHandle);
-    await HandleStore.putLastFile(file.name);
-    try {
-      refreshFileListDropdown();
-    } catch {
-    }
-  } catch (e) {
-    console.warn("handle persist failed:", e);
+  await activateOpenedDocument({
+    name: file.name,
+    content,
+    annotations,
+    handle: fileHandle,
+    saveMode: "handle",
+    quiet
+  });
+  if (!quiet) {
+    const statusMsg = sidecarHandle ? `${file.name} + \u6279\u6CE8\u5DF2\u52A0\u8F7D` : `${file.name} (Ctrl+S \u76F4\u63A5\u4FDD\u5B58\u5230\u539F\u4F4D\u7F6E)`;
+    setStatus("\u5DF2\u52A0\u8F7D \xB7 " + statusMsg, "");
   }
 }
-async function openFromMentorHandle(fileHandle) {
+async function openFromMentorHandle(fileHandle, options = {}) {
+  const quiet = !!(options && options.quiet);
   await ensureWritePermission(fileHandle);
   const file = await fileHandle.getFile();
   const { mdText, annotations, mediaFiles } = await readMentorZip(file);
-  try {
-    snapshotActiveTab();
-  } catch {
-  }
-  State.activeTabId = null;
-  revokeMediaUrls();
-  await injectMediaFiles(mediaFiles);
-  console.log("[F-media v1.36 handle fix] mediaFiles count=", Object.keys(mediaFiles || {}).length, "mediaUrls count=", Object.keys(State.mediaUrls).length);
-  await loadMarkdownIntoEditor(file.name, mdText, annotations);
-  State.currentFile.handle = fileHandle;
+  console.log("[openFromMentorHandle] mediaFiles=", Object.keys(mediaFiles || {}).length);
+  await activateOpenedDocument({
+    name: file.name,
+    content: mdText,
+    annotations,
+    mediaFiles,
+    handle: fileHandle,
+    saveMode: "mentor-handle",
+    quiet
+  });
   if (!State.diskPathHint) State.diskPathHint = file.name;
   if (isProtectedMentorTarget(file.name, State.diskPathHint)) {
     showToast("\u53D7\u4FDD\u62A4\u6587\u7A3F: \u5DF2\u7981\u7528\u81EA\u52A8\u4FDD\u5B58", 3e3);
@@ -5248,14 +5454,9 @@ async function openFromMentorHandle(fileHandle) {
   if (mediaCount === 0 && blobUrlCount > 0) {
     showToast(`\u26A0 .mentor \u635F\u574F: ${blobUrlCount} \u5F20\u56FE\u5F15\u7528\u5931\u6548 (zip \u65E0 media/). \u7528 Pandoc \u91CD\u65B0 generate \u6587\u6863`, 8e3);
     setStatus("\u56FE\u5168\u90E8\u5931\u6548", `${blobUrlCount} \u5F20\u56FE\u5F15\u7528 blob: URL \u5931\u6548 \u2014 \u8FD9\u4EFD .mentor \u6CA1\u6709 media/ \u5B50\u76EE\u5F55`);
+  } else if (!quiet) {
+    setStatus("\u5DF2\u52A0\u8F7D .mentor \u5305", `${file.name} (Ctrl+S \u76F4\u63A5\u5199\u56DE\u539F\u4F4D\u7F6E)`);
   }
-  try {
-    await HandleStore.putFile(file.name, fileHandle);
-    await HandleStore.putLastFile(file.name);
-  } catch (e) {
-    console.warn("mentor handle persist failed:", e);
-  }
-  startAutosaveTimer();
 }
 function fileTypeIcon(name) {
   if (/\.(md|markdown)$/i.test(name)) return { glyph: window.MentorIcons.fileMd, cls: "icon-md" };
@@ -5611,30 +5812,32 @@ async function readMentorZip(file) {
   }
   return { mdText, annotations, mediaFiles, _diag: { blobUrlCount, mediaKeysCount } };
 }
-async function openFromMentorFile(file) {
-  console.log("[F-media diag] openFromMentorFile start, file=", file?.name, "size=", file?.size);
+async function openFromMentorFile(file, options = {}) {
+  const quiet = !!(options && options.quiet);
+  console.log("[openFromMentorFile] start, file=", file?.name, "size=", file?.size);
   const { mdText, annotations, mediaFiles } = await readMentorZip(file);
-  console.log("[F-media diag] readMentorZip done, mediaFiles keys=", Object.keys(mediaFiles || {}));
-  try {
-    snapshotActiveTab();
-  } catch {
-  }
-  State.activeTabId = null;
-  revokeMediaUrls();
-  await injectMediaFiles(mediaFiles);
-  console.log("[F-media diag] state.mediaUrls count=", Object.keys(State.mediaUrls).length);
-  State.saveMode = "mentor-download";
+  console.log("[openFromMentorFile] mediaFiles keys=", Object.keys(mediaFiles || {}));
   const displayName = file.name;
-  await loadMarkdownIntoEditor(displayName, mdText, annotations);
+  await activateOpenedDocument({
+    name: displayName,
+    content: mdText,
+    annotations,
+    mediaFiles,
+    handle: null,
+    saveMode: "mentor-download",
+    quiet
+  });
   const mediaCount = Object.keys(mediaFiles || {}).length;
   const blobUrlCount = (mdText.match(/!\[[^\]]*\]\(blob:[^)]+\)/g) || []).length;
   if (mediaCount === 0 && blobUrlCount > 0) {
     showToast(`\u26A0 .mentor \u635F\u574F: ${blobUrlCount} \u5F20\u56FE\u5F15\u7528\u5931\u6548 (zip \u65E0 media/). \u7528 Pandoc \u91CD\u65B0 generate \u6587\u6863`, 8e3);
     setStatus("\u56FE\u5168\u90E8\u5931\u6548", `${blobUrlCount} \u5F20\u56FE\u5F15\u7528 blob: URL \u5931\u6548 \u2014 \u8FD9\u4EFD .mentor \u6CA1\u6709 media/ \u5B50\u76EE\u5F55`);
-  } else if (mediaCount > 0) {
-    setStatus("\u5DF2\u52A0\u8F7D .mentor \u5305", `${displayName} \xB7 ${mediaCount} \u5F20\u56FE\u7247 \u2713`);
-  } else {
-    setStatus("\u5DF2\u52A0\u8F7D .mentor \u5305", `${displayName} (Ctrl+S \u4E0B\u8F7D .mentor \u526F\u672C)`);
+  } else if (!quiet) {
+    if (mediaCount > 0) {
+      setStatus("\u5DF2\u52A0\u8F7D .mentor \u5305", `${displayName} \xB7 ${mediaCount} \u5F20\u56FE\u7247 \u2713`);
+    } else {
+      setStatus("\u5DF2\u52A0\u8F7D .mentor \u5305", `${displayName} (Ctrl+S \u4E0B\u8F7D .mentor \u526F\u672C)`);
+    }
   }
   updateDocMeta();
   return { displayName, mdText, annotations };
@@ -5761,9 +5964,9 @@ async function saveCurrent() {
   };
   const sidecarName = State.currentFile.name.replace(/\.md$/i, "") + ".annotations.json";
   const sidecarText = JSON.stringify(sidecar, null, 2);
+  // Keep content snapshot for switch-tab / crash; dirty cleared only after write succeeds
   State.currentFile.content = mdText;
   State.currentFile.annotations = sidecar;
-  markClean();
   try {
     console.log("[IDB] put start:", State.currentFile.name, sidecar.annotations?.length, "anns");
     await AnnotationStore.put(State.currentFile.name, sidecar);
@@ -5771,11 +5974,19 @@ async function saveCurrent() {
   } catch (e) {
     console.warn("[IDB] put \u5931\u8D25:", e);
   }
+  const finishOk = (msg, detail) => {
+    markClean();
+    try {
+      snapshotActiveTab();
+    } catch {
+    }
+    if (msg) showToast(msg);
+    if (detail != null) setStatus(detail.status || "\u5DF2\u4FDD\u5B58", detail.right || State.currentFile.name);
+  };
   if (State.saveMode === "mentor-handle" || State.saveMode === "mentor-download") {
     const result2 = await tryWriteBackMentor(mdText, sidecar, State.currentFile.name);
     if (result2.handle) {
-      showToast("\u5DF2\u4FDD\u5B58\u5230\u539F\u4F4D\u7F6E \u2713 (.mentor)");
-      setStatus("\u5DF2\u4FDD\u5B58", State.currentFile.name);
+      finishOk("\u5DF2\u4FDD\u5B58\u5230\u539F\u4F4D\u7F6E \u2713 (.mentor)", { status: "\u5DF2\u4FDD\u5B58", right: State.currentFile.name });
     } else if (result2.error) {
       showToast("\u4FDD\u5B58\u5931\u8D25: " + result2.error);
       setStatus("\u4FDD\u5B58\u5931\u8D25", result2.error);
@@ -5785,8 +5996,7 @@ async function saveCurrent() {
         const blob = await buildMentorZipBlob(mdText, sidecar, State.mediaFiles);
         downloadBlob(State.currentFile.name, blob);
         hideExportProgress("\u5DF2\u4E0B\u8F7D");
-        showToast("\u5DF2\u4E0B\u8F7D \u2713 (.mentor)");
-        setStatus("\u5DF2\u4E0B\u8F7D", State.currentFile.name);
+        finishOk("\u5DF2\u4E0B\u8F7D \u2713 (.mentor)", { status: "\u5DF2\u4E0B\u8F7D", right: State.currentFile.name });
       } catch (e) {
         hideExportProgress("\u5BFC\u51FA\u5931\u8D25");
         showToast("\u5BFC\u51FA\u5931\u8D25: " + (e.message || e), 4e3);
@@ -5797,16 +6007,20 @@ async function saveCurrent() {
   }
   const result = await tryWriteBack(mdText, sidecarText, sidecarName);
   if (result.handle) {
-    showToast("\u5DF2\u4FDD\u5B58\u5230\u539F\u4F4D\u7F6E \u2713");
-    setStatus("\u5DF2\u4FDD\u5B58", `${State.currentFile.name} + ${sidecarName}`);
+    finishOk("\u5DF2\u4FDD\u5B58\u5230\u539F\u4F4D\u7F6E \u2713", {
+      status: "\u5DF2\u4FDD\u5B58",
+      right: `${State.currentFile.name} + ${sidecarName}`
+    });
   } else if (result.error) {
     showToast("\u4FDD\u5B58\u5931\u8D25: " + result.error);
     setStatus("\u4FDD\u5B58\u5931\u8D25", result.error);
   } else {
     downloadFile(State.currentFile.name, mdText);
     downloadFile(sidecarName, sidecarText);
-    showToast("\u5DF2\u4E0B\u8F7D \u2713 (\u6D4F\u89C8\u5668\u4E0D\u652F\u6301\u6216\u672A\u6388\u6743)");
-    setStatus("\u5DF2\u4E0B\u8F7D", `${State.currentFile.name} + ${sidecarName}`);
+    finishOk("\u5DF2\u4E0B\u8F7D \u2713 (\u6D4F\u89C8\u5668\u4E0D\u652F\u6301\u6216\u672A\u6388\u6743)", {
+      status: "\u5DF2\u4E0B\u8F7D",
+      right: `${State.currentFile.name} + ${sidecarName}`
+    });
   }
 }
 async function tryWriteBackMentor(mdText, sidecar, mentorName) {
@@ -6260,22 +6474,21 @@ async function openRecentFileByName(name) {
         return false;
       }
     }
-    const isMentor = /\.mentor$/i.test(name);
-    if (isMentor && typeof openFromMentorHandle === "function") {
+    if (_isMentorName(name)) {
       await openFromMentorHandle(handle);
-    } else if (typeof openFromHandle === "function") {
+    } else if (_isMdName(name)) {
       await openFromHandle(handle);
-    } else if (isMentor && typeof openFromMentorHandle === "function") {
-      await openFromMentorHandle(handle);
     } else {
-      if (typeof openFromMentorHandle === "function") await openFromMentorHandle(handle);
-      else {
-        showToast("\u65E0\u6CD5\u6253\u5F00\u6B64\u6587\u4EF6\u7C7B\u578B", 2e3);
-        return false;
+      // Unknown extension: try mentor first (zip), else md path
+      try {
+        await openFromMentorHandle(handle);
+      } catch (e) {
+        await openFromHandle(handle);
       }
     }
     closeFileListDropdown();
     refreshFileListDropdown();
+    renderFilePaneCurrent();
     return true;
   } catch (err) {
     console.warn("[file-list] open failed", err);
@@ -7010,8 +7223,22 @@ function setupToolbar() {
         setStatus("\u63D0\u793A", "\u8BF7\u5148\u9009\u4E2D\u6587\u672C, \u518D\u6309 Ctrl+Alt+M \u52A0\u6279\u6CE8");
         return;
       }
-      const btn = document.querySelector("#float-comment-btn button");
-      if (btn) btn.click();
+      // Shift+M → AI 批注；M → 普通批注
+      createAnnotationFromSelection({ ai: !!e.shiftKey });
+      const fb = $("#float-comment-btn");
+      if (fb) fb.classList.add("hidden");
+      return;
+    }
+    if ((e.ctrlKey || e.metaKey) && e.altKey && (e.key === "i" || e.key === "I")) {
+      e.preventDefault();
+      const sel = State.editor.state.selection;
+      if (sel.empty) {
+        setStatus("\u63D0\u793A", "\u8BF7\u5148\u9009\u4E2D\u6587\u672C, \u518D\u6309 Ctrl+Alt+I \u52A0 AI \u6279\u6CE8");
+        return;
+      }
+      createAnnotationFromSelection({ ai: true });
+      const fb = $("#float-comment-btn");
+      if (fb) fb.classList.add("hidden");
       return;
     }
   });
@@ -7442,7 +7669,6 @@ async function tryReconnect() {
     } else {
       console.log("[tryReconnect] write \u6743\u9650\u5DF2 granted, autosave \u542F\u7528");
     }
-    State.saveMode = "mentor-handle";
     await openFromMentorHandle(handle);
     renderFilePaneCurrent();
     setStatus(`\u5DF2\u91CD\u8FDE ${last.fileName}`, "Ctrl+S \u76F4\u63A5\u4FDD\u5B58\u5230\u539F\u4F4D\u7F6E");
@@ -7493,7 +7719,11 @@ window.__mdAnnotator = {
   HandleStore,
   loadMarkdownIntoEditor,
   newDocument,
-  // v1.43.31 multi-tab
+  createAnnotationFromSelection,
+  createAnnotationThread,
+  bodyHasAiMarker,
+  ensureAiMarker,
+  // v1.43.31 multi-tab · v1.43.52 open/save lifecycle
   snapshotActiveTab,
   switchToTab,
   closeTab,
@@ -7506,6 +7736,9 @@ window.__mdAnnotator = {
   mentorBaseName,
   renderDocTabs,
   prepareOpenDocument,
+  activateOpenedDocument,
+  rememberOpenedFile,
+  openMultipleHandles,
   saveCurrent,
   tryWriteBack,
   tryReconnect,

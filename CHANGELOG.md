@@ -2,6 +2,59 @@
 
 按时间倒序记录已发布的变化。最新条目在上方。
 
+## v1.43.53 (2026-07-21) — 浮动「AI 批注」按钮（少写 @AI）
+
+### 用户
+"能不能把 @AI 的逻辑改成，往批注按钮旁边放另外一个特定的 AI 批注按钮"
+
+### 改动
+1. 选区浮动条：`批注` | `AI` 并排
+2. 点 **AI** → 建线程并预填 `@AI `，光标落在指令后（兼容 `/fix-mentor`）
+3. 侧栏回复区增加 **@AI** 芯片，已有批注上也可一键前缀
+4. 快捷键：`Ctrl+Alt+I`（或 `Ctrl+Alt+Shift+M`）= AI 批注；`Ctrl+Alt+M` 仍为普通批注
+
+### 测试
+- 选区后两按钮可见；AI 路径 draft 以 `@AI ` 开头
+
+### Cache
+- app.bundle.js / styles.css cache-bust
+
+---
+
+## v1.43.52 (2026-07-21) — 多文件开启/保存生命周期整理
+
+### 用户
+"优化一下 mentor md 的多文件开启保存的逻辑，现在很乱"
+
+### 问题
+1. `openFiles` 勾了 `multiple: true` 却只 `find` 第一个 .mentor/.md
+2. `openFromMentorHandle/File` 与 `loadMarkdownIntoEditor`/`prepareOpenDocument` 双重 snapshot，还把 `activeTabId=null` 打乱标签
+3. `load` 结束才 snapshot，此时 **handle 尚未挂上** → 切 tab 回来丢写回句柄
+4. `prepareOpenDocument` 的 `switch-existing` 空分支：先 restore 再整页覆盖
+5. `saveCurrent` 写盘前就 `markClean`，失败仍显示已保存
+6. `openRecentFileByName` 死分支堆叠
+
+### 改动
+1. **`activateOpenedDocument`** — 统一 prepare tab → media 切换 → load → handle/saveMode → remember
+2. **`prepareOpenDocument`** — `reload-same` / `reuse-tab` / `reuse-blank` / `new-tab`；重开同名不建重复标签；空 untitled 就地替换
+3. **`loadMarkdownIntoEditor(name, content, anns, { handle, saveMode, alreadyPrepared })`** — handle 进 `currentFile` 再 snapshot
+4. **`openMultipleHandles`** — 多选 .mentor（或 .md）逐个进标签，最后一个保持激活
+5. **`openFiles` / `openFilesLegacy`** — 走 multi 循环；post-open 样板（putFile/status）收敛
+6. **`saveCurrent`** — 仅写盘/下载成功后 `markClean` + 再 snapshot
+7. **`rememberOpenedFile`** + 清理 `openRecentFileByName`
+
+### API
+`activateOpenedDocument` / `rememberOpenedFile` / `openMultipleHandles`
+
+### 测试
+- `tests/v143-multi-tabs.spec.js`
+- `tests/v143-tab-media-revoke.spec.js`（若 server 在）
+
+### Cache
+- app.bundle.js?v=18→19
+
+---
+
 ## v1.43.51 (2026-07-20) — 从 bundle 恢复 app.js（误 checkout）+ 稳定化
 
 ### 用户
