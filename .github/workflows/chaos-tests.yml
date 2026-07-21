@@ -63,6 +63,11 @@ jobs:
           run_one chaos-wave9.spec.js
           run_one chaos-wave10.spec.js
           run_one v143-empty-state.spec.js
+          # v1.43.54+ UX / annotation content smoke (Playwright)
+          if [ -f tests/chaos-ux/runner.js ]; then
+            echo "=== chaos-ux smoke ==="
+            node tests/chaos-ux/runner.js --level=smoke
+          fi
 
       - name: Upload failure artifacts
         if: failure()

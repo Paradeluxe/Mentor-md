@@ -1377,7 +1377,11 @@ function _validateMarksAfterEdit(editor2, opts) {
           changed = true;
           touchUi(ann);
         }
-        if (ann.fuzzy || ann.invalid) {
+        // Sticky: partial mark edits auto-sync ann.text to the new mark
+        // content, so a later light→full validate would see textMatches and
+        // wrongly clear fuzzy. Keep text-edited until reattach / resolve UX.
+        const stickyEdited = ann.invalidReason === "text-edited";
+        if ((ann.fuzzy || ann.invalid) && !stickyEdited) {
           ann.fuzzy = false;
           ann.invalid = false;
           ann.invalidReason = void 0;
@@ -1409,7 +1413,7 @@ function _validateMarksAfterEdit(editor2, opts) {
           } catch (e) {
           }
         }
-        if (!ann.fuzzy) {
+        if (!ann.fuzzy || ann.invalidReason !== "text-edited") {
           ann.fuzzy = true;
           ann.deleted = false;
           ann.invalidReason = "text-edited";

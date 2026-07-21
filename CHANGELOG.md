@@ -2,6 +2,22 @@
 
 按时间倒序记录已发布的变化。最新条目在上方。
 
+## v1.43.55 (2026-07-21) — partial edit 保持 fuzzy（修 CI chaos-wave10）
+
+### 问题
+GitHub Actions `chaos-tests` 在 `W10_05_delete_mark_inner_char` 失败：  
+mark 内删一字后 `ann.text` 被同步成新串，紧接着 light→full 二次 validate 见 `textMatches` 误清 `fuzzy`。
+
+### 改动
+- `_validateMarksAfterEdit`：`invalidReason === 'text-edited'` 时 sticky fuzzy，不因 auto-sync 后的 text match 清掉
+- CI：`chaos-tests` 附带 `chaos-ux` smoke
+
+### 测试
+- `tests/chaos-wave10.spec.js` W10_05
+- `npm run test:ux:smoke`
+
+---
+
 ## v1.43.54 (2026-07-21) — 自动保存重整（简单可靠）
 
 ### 用户
