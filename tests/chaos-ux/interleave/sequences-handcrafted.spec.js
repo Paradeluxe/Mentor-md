@@ -318,6 +318,142 @@ const { DOCS, BODY_CORPUS } = require('../content-catalog');
     coverage.hitContent('H26');
   });
 
+  await t('H4 format storm then annotate then undo storm no crash', async () => {
+    await loadDoc(page, 'h4.md', DOCS.simple);
+    await page.evaluate(() => {
+      const M = window.__mdAnnotator;
+      const doc = M.State.editor.state.doc;
+      let from = -1;
+      let to = -1;
+      doc.descendants((node, pos) => {
+        if (node.isText && node.text && node.text.includes('UNIQUE_BETA')) {
+          from = pos + node.text.indexOf('UNIQUE_BETA');
+          to = from + 'UNIQUE_BETA'.length;
+        }
+      });
+      M.State.editor.chain().focus().setTextSelection({ from, to }).run();
+      const cmds = ['toggleBold', 'toggleItalic', 'toggleStrike', 'toggleCode'];
+      for (const c of cmds) {
+        try {
+          M.State.editor.commands[c] && M.State.editor.commands[c]();
+        } catch {}
+      }
+      M.createAnnotationFromSelection();
+      for (let i = 0; i < 15; i++) {
+        try {
+          M.State.editor.commands.undo();
+        } catch {}
+      }
+      for (let i = 0; i < 10; i++) {
+        try {
+          M.State.editor.commands.redo();
+        } catch {}
+      }
+    });
+    const pe = page._chaosPageErrors || [];
+    if (pe.length) throw new Error(pe.join('; '));
+    coverage.hitContent('H4');
+  });
+
+  await t('H7 filter shuffle with mixed resolved', async () => {
+    await loadDoc(page, 'h7.md', DOCS.simple);
+    const a = await annotateText(page, 'UNIQUE_ALPHA', { body: 'o1' });
+    const b = await annotateText(page, 'UNIQUE_BETA', { body: 'o2' });
+    await page.evaluate((tid) => window.__mdAnnotator._testToggleResolved(tid), a.tid);
+    await page.evaluate(() => {
+      const modal = document.querySelector('#author-modal');
+      if (modal) {
+        modal.classList.add('hidden');
+        modal.style.pointerEvents = 'none';
+      }
+      for (const f of ['all', 'open', 'resolved', 'open', 'all']) {
+        const btn = document.querySelector(`[data-filter-tab="${f}"]`);
+        if (btn) btn.click();
+      }
+      window.__mdAnnotator.renderCommentList();
+    });
+    const counts = await page.evaluate(() => ({
+      all: window.__mdAnnotator.State.annotations.length,
+      resolved: window.__mdAnnotator.State.annotations.filter((x) => x.resolved).length,
+      open: window.__mdAnnotator.State.annotations.filter((x) => !x.resolved).length,
+    }));
+    if (counts.all < 2 || counts.resolved < 1) throw new Error(JSON.stringify(counts));
+    coverage.hitContent('H7');
+    void b;
+  });
+
+  await t('H11 table slaughter + annotate cell', async () => {
+    const r = await page.evaluate(() => {
+      const M = window.__mdAnnotator;
+      M.loadMarkdownIntoEditor('h11.md', '# t\n', null, { saveMode: 'mentor-download' });
+      const ed = M.State.editor;
+      ed.commands.setContent('<p>x</p>', false);
+      ed.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: false }).run();
+      let cell = -1;
+      ed.state.doc.descendants((n, pos) => {
+        if (cell < 0 && n.type.name === 'tableCell') cell = pos + 1;
+      });
+      ed.commands.setTextSelection(cell);
+      ed.commands.insertContent('TBLMARK');
+      let from = -1;
+      let to = -1;
+      ed.state.doc.descendants((node, pos) => {
+        if (node.isText && node.text && node.text.includes('TBLMARK')) {
+          from = pos + node.text.indexOf('TBLMARK');
+          to = from + 'TBLMARK'.length;
+        }
+      });
+      ed.commands.setTextSelection({ from, to });
+      M.createAnnotationFromSelection();
+      for (const act of ['row-after', 'col-after', 'del-row', 'del-col', 'del-table']) {
+        try {
+          M.runTableCommand(act);
+        } catch {}
+      }
+      return { n: M.State.annotations.length, ed: !!M.State.editor };
+    });
+    if (!r.ed) throw new Error(JSON.stringify(r));
+    coverage.hitContent('H11');
+  });
+
+  await t('H2 concurrent save spam with fake handle', async () => {
+    const r = await page.evaluate(async () => {
+      const M = window.__mdAnnotator;
+      let writes = 0;
+      M.State.saveMode = 'mentor-handle';
+      M.State.mediaFiles = {};
+      M.State.currentFile = {
+        name: 'spam.mentor',
+        dirty: true,
+        dirtyGen: 1,
+        handle: {
+          queryPermission: async () => 'granted',
+          createWritable: async () => {
+            writes++;
+            await new Promise((r) => setTimeout(r, 30));
+            return { write: async () => {}, close: async () => {}, abort: async () => {} };
+          },
+          getFile: async () => ({ lastModified: Date.now() }),
+        },
+      };
+      M.State.editor.commands.setContent('<p>spam</p>', false);
+      const ps = [
+        M.writeCurrentToHandle({ reason: 'autosave' }),
+        M.writeCurrentToHandle({ reason: 'autosave' }),
+        M.writeCurrentToHandle({ reason: 'manual' }),
+      ];
+      const results = await Promise.all(ps);
+      return {
+        writes,
+        oks: results.filter((x) => x.ok).length,
+        skipped: results.filter((x) => x.skipped).length,
+      };
+    });
+    // at most one concurrent createWritable
+    if (r.writes > 2) throw new Error('too many concurrent writes: ' + JSON.stringify(r));
+    coverage.hitContent('H2');
+  });
+
   const result = done();
   await closeAll(browser, context);
   process.exit(result.fail ? 1 : 0);

@@ -24,10 +24,13 @@ const CORE = [
   'matrix/04e-ann-roundtrip.spec.js',
   'matrix/04f-ann-context.spec.js',
   'matrix/06-float-comment.spec.js',
+  'matrix/06-save-autosave.spec.js',
   'matrix/07-export.spec.js',
   'matrix/08-settings-help.spec.js',
   'matrix/09-outline.spec.js',
+  'matrix/10-table-controls.spec.js',
   'matrix/11-keyboard.spec.js',
+  'matrix/12-source-mode.spec.js',
   'interleave/sequences-handcrafted.spec.js',
 ];
 
@@ -38,6 +41,7 @@ const SUITES = {
     'matrix/04b-ann-anchors.spec.js',
     'matrix/04c-ann-bodies.spec.js',
     'matrix/06-float-comment.spec.js',
+    'matrix/06-save-autosave.spec.js',
     'interleave/sequences-handcrafted.spec.js',
   ],
   full: CORE,

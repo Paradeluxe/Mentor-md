@@ -58,8 +58,9 @@ node tests/chaos-ux/runner.js --level=smoke
 
 - [x] A 骨架 + smoke  
 - [x] B2 内容矩阵 + H21–H26  
-- [x] B surface：tabs / export / keyboard / float / settings / outline  
+- [x] B surface：tabs / export / keyboard / float / settings / outline / table / source / save  
 - [x] A8/A10–A12 + B6/B9/B11/B13/B15/B17  
+- [x] 手搓 H2/H4/H7/H11 + H1/H21–H26  
 - [x] C fuzzer + multi-seed  
 - [x] CI 关闭（本地测）  
 
