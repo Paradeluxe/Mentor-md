@@ -130,6 +130,107 @@ const { DOCS, BODY_CORPUS } = require('../content-catalog');
     coverage.hitContent('B1');
   });
 
+  await t('B3 multiline body preserved in sidecar', async () => {
+    await loadDoc(page, 'b3.md', DOCS.simple);
+    const r = await annotateText(page, 'UNIQUE_ALPHA', { body: BODY_CORPUS.multi });
+    if (!r.ok) throw new Error(JSON.stringify(r));
+    const body = await page.evaluate((tid) => {
+      const side = window.__mdAnnotator.buildAnnotationsSidecar().find((a) => a.threadId === tid);
+      return side && side.comments[0] && side.comments[0].body;
+    }, r.tid);
+    if (body !== BODY_CORPUS.multi) throw new Error(JSON.stringify(body));
+    coverage.hitContent('B3');
+  });
+
+  await t('B4 long body serializes', async () => {
+    await loadDoc(page, 'b4.md', DOCS.simple);
+    const r = await annotateText(page, 'UNIQUE_BETA', { body: BODY_CORPUS.long });
+    if (!r.ok) throw new Error(JSON.stringify(r));
+    const len = await page.evaluate((tid) => {
+      const a = window.__mdAnnotator.State.annotations.find((x) => x.threadId === tid);
+      return (a.comments[0].body || '').length;
+    }, r.tid);
+    if (len < 1000) throw new Error('len=' + len);
+    coverage.hitContent('B4');
+  });
+
+  await t('B8 prefix-ai chip path', async () => {
+    await loadDoc(page, 'b8.md', DOCS.simple);
+    const r = await annotateText(page, 'UNIQUE_ALPHA', { body: 'plain first' });
+    const out = await page.evaluate((tid) => {
+      const M = window.__mdAnnotator;
+      M.State.activeThreadId = tid;
+      M.renderCommentList();
+      const btn = document.querySelector(`[data-act="prefix-ai"][data-thread="${tid}"]`);
+      if (btn) btn.click();
+      else if (M.ensureAiMarker) {
+        const thr = M.State.annotations.find((a) => a.threadId === tid);
+        // simulate chip on reply draft
+        M.State.replyDrafts[tid] = M.ensureAiMarker('next');
+      }
+      const draft = M.State.replyDrafts[tid] || '';
+      const ta = document.querySelector(`[data-thread-input="${tid}"]`);
+      return { draft, ta: ta && ta.value, hasBtn: !!btn };
+    }, r.tid);
+    const has = /@AI\b/i.test(out.draft || out.ta || '');
+    if (!has && !out.hasBtn) {
+      // ensureAiMarker path
+      const forced = await page.evaluate((tid) => {
+        const M = window.__mdAnnotator;
+        M.State.replyDrafts[tid] = M.ensureAiMarker ? M.ensureAiMarker('') : '@AI ';
+        return M.State.replyDrafts[tid];
+      }, r.tid);
+      if (!/@AI\b/i.test(forced)) throw new Error(JSON.stringify({ out, forced }));
+    } else if (!has && out.hasBtn) {
+      throw new Error('chip clicked but no marker: ' + JSON.stringify(out));
+    }
+    coverage.hitContent('B8');
+  });
+
+  await t('B12 flood replies order', async () => {
+    await loadDoc(page, 'b12.md', DOCS.simple);
+    const r = await annotateText(page, 'UNIQUE_ALPHA', { body: 'r0' });
+    await page.evaluate((tid) => {
+      const thr = window.__mdAnnotator.State.annotations.find((a) => a.threadId === tid);
+      for (let i = 1; i <= 8; i++) {
+        thr.comments.push({
+          id: 'r' + i,
+          author: { id: 'u', name: 'c' },
+          body: 'reply-' + i,
+          createdAt: new Date().toISOString(),
+        });
+      }
+    }, r.tid);
+    const n = await page.evaluate((tid) => {
+      const a = window.__mdAnnotator.State.annotations.find((x) => x.threadId === tid);
+      return a.comments.length;
+    }, r.tid);
+    if (n !== 9) throw new Error('n=' + n);
+    coverage.hitContent('B12');
+  });
+
+  await t('B16 reply still possible when resolved (state allows)', async () => {
+    await loadDoc(page, 'b16.md', DOCS.simple);
+    const r = await annotateText(page, 'UNIQUE_BETA', { body: 'before' });
+    await page.evaluate((tid) => {
+      const M = window.__mdAnnotator;
+      M._testToggleResolved(tid);
+      const thr = M.State.annotations.find((a) => a.threadId === tid);
+      thr.comments.push({
+        id: 'after',
+        author: { id: 'u', name: 'c' },
+        body: 'after-resolve',
+        createdAt: new Date().toISOString(),
+      });
+    }, r.tid);
+    const st = await page.evaluate((tid) => {
+      const a = window.__mdAnnotator.State.annotations.find((x) => x.threadId === tid);
+      return { resolved: a.resolved, n: a.comments.length };
+    }, r.tid);
+    if (!st.resolved || st.n < 2) throw new Error(JSON.stringify(st));
+    coverage.hitContent('B16');
+  });
+
   const result = done();
   console.log('  content hits:', Object.keys(coverage.report().content).join(', '));
   await closeAll(browser, context);

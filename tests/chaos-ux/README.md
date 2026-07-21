@@ -55,7 +55,15 @@ node tests/chaos-ux/runner.js --level=smoke
 ## Phase 进度
 
 - [x] A 骨架 + smoke 套件  
-- [ ] B 全 surface  
-- [ ] B2 全 content catalog  
+- [x] B2 内容矩阵扩展：04b/04c/04d/04e/04f + H21–H26  
+- [ ] B 其余 surface（tabs/export/keyboard 全矩阵）  
 - [ ] C fuzzer  
 - [ ] D CI 硬化  
+
+## 当前 content 覆盖（持续扩）
+
+- 锚点：A1–A7, A9, A13–A18（样本齐全；A8/A10–A12 后续）  
+- 正文：B1/B2/B5/B7/B10/B14  
+- 上下文：C1–C8  
+- 盘格式：P1–P4/P8–P10 + 多个 invalidReason  
+- 手搓：H1, H21–H26  

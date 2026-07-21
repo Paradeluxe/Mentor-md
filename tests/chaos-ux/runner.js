@@ -13,26 +13,20 @@ const LEVEL = (() => {
   return a ? a.split('=')[1] : 'smoke';
 })();
 
+const MATRIX = [
+  'matrix/01-toolbar.spec.js',
+  'matrix/04b-ann-anchors.spec.js',
+  'matrix/04c-ann-bodies.spec.js',
+  'matrix/04d-ann-state-machine.spec.js',
+  'matrix/04e-ann-roundtrip.spec.js',
+  'matrix/04f-ann-context.spec.js',
+  'interleave/sequences-handcrafted.spec.js',
+];
+
 const SUITES = {
-  smoke: [
-    'matrix/01-toolbar.spec.js',
-    'matrix/04b-ann-anchors.spec.js',
-    'matrix/04c-ann-bodies.spec.js',
-    'interleave/sequences-handcrafted.spec.js',
-  ],
-  full: [
-    'matrix/01-toolbar.spec.js',
-    'matrix/04b-ann-anchors.spec.js',
-    'matrix/04c-ann-bodies.spec.js',
-    'interleave/sequences-handcrafted.spec.js',
-    // future: more matrix + fuzzer
-  ],
-  chaos: [
-    'matrix/01-toolbar.spec.js',
-    'matrix/04b-ann-anchors.spec.js',
-    'matrix/04c-ann-bodies.spec.js',
-    'interleave/sequences-handcrafted.spec.js',
-  ],
+  smoke: MATRIX,
+  full: MATRIX,
+  chaos: MATRIX,
 };
 
 function runOne(rel) {

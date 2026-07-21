@@ -59,19 +59,38 @@ async function boot(page, { dismissAuthor = true } = {}) {
   await page.waitForFunction(() => window.__mdAnnotator?.State?.editor, { timeout: 20000 });
   if (dismissAuthor) {
     await page.evaluate(() => {
-      const m = document.querySelector('#author-modal');
-      if (m) m.classList.add('hidden');
       try {
         localStorage.setItem('Mentor:author', 'chaos-tester');
-        if (window.__mdAnnotator?.State) {
-          window.__mdAnnotator.State.author = 'chaos-tester';
-          window.__mdAnnotator.State.authorId =
-            window.__mdAnnotator.State.authorId || 'chaos-author-id';
-        }
+        localStorage.setItem('Mentor:authorId', 'chaos-author-id');
       } catch {}
+      if (window.__mdAnnotator?.State) {
+        window.__mdAnnotator.State.author = 'chaos-tester';
+        window.__mdAnnotator.State.authorId =
+          window.__mdAnnotator.State.authorId || 'chaos-author-id';
+      }
+      const m = document.querySelector('#author-modal');
+      if (m) {
+        m.classList.add('hidden');
+        m.style.display = 'none';
+        m.style.pointerEvents = 'none';
+      }
+      // kill any late-opening first-time modal
+      const chip = document.querySelector('#author-chip-name');
+      if (chip && (!chip.textContent || chip.textContent === '未设置')) {
+        chip.textContent = 'chaos-tester';
+      }
     });
   }
   await page.waitForTimeout(100);
+  // re-hide in case boot timer reopened modal
+  await page.evaluate(() => {
+    const m = document.querySelector('#author-modal');
+    if (m) {
+      m.classList.add('hidden');
+      m.style.display = 'none';
+      m.style.pointerEvents = 'none';
+    }
+  });
 }
 
 async function closeAll(browser, context) {
