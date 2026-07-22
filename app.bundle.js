@@ -55456,9 +55456,22 @@ function nowISO() {
   return (/* @__PURE__ */ new Date()).toISOString();
 }
 function formatTime(iso) {
+  if (!iso) return "";
   const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return String(iso);
   const pad2 = (n) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+  const full = `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+  const diffSec = Math.round((Date.now() - d.getTime()) / 1e3);
+  if (diffSec < -60) return full;
+  if (diffSec < 45) return "\u521A\u521A";
+  if (diffSec < 3600) return `${Math.max(1, Math.floor(diffSec / 60))} \u5206\u949F\u524D`;
+  if (diffSec < 86400) return `${Math.floor(diffSec / 3600)} \u5C0F\u65F6\u524D`;
+  if (diffSec < 86400 * 7) return `${Math.floor(diffSec / 86400)} \u5929\u524D`;
+  const now = /* @__PURE__ */ new Date();
+  if (d.getFullYear() === now.getFullYear()) {
+    return `${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+  }
+  return full;
 }
 function updateCommentCounts() {
   const safeAnn = State2.annotations.filter((a) => a && typeof a === "object");
@@ -57016,28 +57029,46 @@ function setupPaneResizer() {
     document.addEventListener("mouseup", onUp);
   });
 }
-var AI_MENTION_PREFIX = "@AI ";
+var MENTION_TYPES = {
+  ai: { prefix: "@AI ", label: "AI", title: "AI \u6279\u6CE8: \u63D2\u5165 @AI\uFF0C\u4FDD\u5B58\u540E\u7528 /fix-mentor \u5904\u7406", shortcut: "Ctrl+Alt+I" },
+  review: { prefix: "@REVIEW ", label: "REVIEW", title: "\u5BA1\u9605\u6279\u6CE8: \u63D2\u5165 @REVIEW\uFF0C\u4F9B\u4EBA/AI \u5BA1\u9605\u6807\u6CE8", shortcut: "Ctrl+Alt+R" }
+};
+function getMarkerType(body) {
+  const t = body || "";
+  for (const [type, cfg] of Object.entries(MENTION_TYPES)) {
+    if (new RegExp(cfg.prefix.trim() + "\\b", "i").test(t)) return type;
+  }
+  return null;
+}
+function ensureMarker(body, type) {
+  const cfg = MENTION_TYPES[type];
+  if (!cfg) return body || "";
+  const t = String(body || "").trim();
+  if (!t) return cfg.prefix.trim();
+  if (getMarkerType(t) === type) return t;
+  return cfg.prefix + t;
+}
+function seedDraft(threadId, type) {
+  if (!threadId) return;
+  const cfg = MENTION_TYPES[type] || MENTION_TYPES.ai;
+  State2.replyDrafts[threadId] = cfg.prefix;
+}
+var AI_MENTION_PREFIX = MENTION_TYPES.ai.prefix;
 function bodyHasAiMarker(body) {
-  return /@AI\b/i.test(body || "");
+  return getMarkerType(body) === "ai";
 }
 function ensureAiMarker(body) {
-  const t = String(body || "").trim();
-  if (!t) return AI_MENTION_PREFIX.trim();
-  if (bodyHasAiMarker(t)) return t;
-  return AI_MENTION_PREFIX + t;
+  return ensureMarker(body, "ai");
 }
-function seedAiDraft(threadId) {
-  if (!threadId) return;
-  State2.replyDrafts[threadId] = AI_MENTION_PREFIX;
-}
-function focusThreadInput(threadId, { ai = false } = {}) {
+function focusThreadInput(threadId, { type = null } = {}) {
   setTimeout(() => {
     const ta2 = document.querySelector(`[data-thread-input="${threadId}"]`);
     if (!ta2) return;
-    if (ai) {
-      const v = State2.replyDrafts[threadId] != null ? State2.replyDrafts[threadId] : AI_MENTION_PREFIX;
+    if (type && MENTION_TYPES[type]) {
+      const cfg = MENTION_TYPES[type];
+      const v = State2.replyDrafts[threadId] != null ? State2.replyDrafts[threadId] : cfg.prefix;
       ta2.value = v;
-      ta2.placeholder = "\u544A\u8BC9 AI \u6539\u4EC0\u4E48 / \u95EE\u4EC0\u4E48\u2026";
+      ta2.placeholder = type === "ai" ? "\u544A\u8BC9 AI \u6539\u4EC0\u4E48 / \u95EE\u4EC0\u4E48\u2026" : "\u8F93\u5165\u5BA1\u9605\u610F\u89C1\u2026";
       ta2.focus();
       try {
         const n = ta2.value.length;
@@ -57051,13 +57082,13 @@ function focusThreadInput(threadId, { ai = false } = {}) {
     }
   }, 50);
 }
-function createAnnotationFromSelection({ ai = false } = {}) {
+function createAnnotationFromSelection({ type = null } = {}) {
   if (!State2.editor) return null;
   const sel = State2.editor.state.selection;
   if (sel.empty && (!sel.$anchor || !sel.$head)) return null;
   const isCellSel = sel.constructor && (sel.constructor.name === "CellSelection" || sel.forEachCell && sel.$anchorCell && sel.$headCell);
   if (isCellSel) {
-    return handleCreateMultiCellAnnotation(sel, { ai }) || null;
+    return handleCreateMultiCellAnnotation(sel, { type }) || null;
   }
   const { from: from2, to } = sel;
   if (from2 === to) return null;
@@ -57080,7 +57111,7 @@ function createAnnotationFromSelection({ ai = false } = {}) {
     return createAnnotationThread(anc.from, anc.to, imageAnchorLabel(anc), {
       imageAnchors: [anc],
       skipMark: true,
-      ai
+      type
     });
   }
   const imageAnchors = collectImageAnchors(State2.editor.state.doc, from2, to);
@@ -57088,7 +57119,7 @@ function createAnnotationFromSelection({ ai = false } = {}) {
   const $to = State2.editor.state.doc.resolve(to);
   if ($from.parent !== $to.parent) {
     if ($from.parent.isTextblock && $to.parent.isTextblock || imageAnchors.length > 0) {
-      return handleCreateMultiParagraphAnnotation(from2, to, { ai }) || null;
+      return handleCreateMultiParagraphAnnotation(from2, to, { type }) || null;
     }
   }
   const text2 = State2.editor.state.doc.textBetween(from2, to, " ");
@@ -57096,7 +57127,7 @@ function createAnnotationFromSelection({ ai = false } = {}) {
     const label = imageAnchors.map(imageAnchorLabel).join(" ");
     return createAnnotationThread(from2, to, label, { imageAnchors, skipMark: true, ai });
   }
-  return createAnnotationThread(from2, to, text2, imageAnchors.length ? { imageAnchors, ai } : { ai });
+  return createAnnotationThread(from2, to, text2, imageAnchors.length ? { imageAnchors, ai } : { type });
 }
 function setupFloatCommentButton() {
   const floatWrap = $("#float-comment-btn");
@@ -57107,8 +57138,9 @@ function setupFloatCommentButton() {
     floatWrap.addEventListener("click", (e) => {
       const btn = e.target.closest("button[data-float-act]");
       if (!btn || !floatWrap.contains(btn)) return;
-      const ai = btn.getAttribute("data-float-act") === "ai";
-      createAnnotationFromSelection({ ai });
+      const actType = btn.getAttribute("data-float-act");
+      const annotationType = actType === "comment" ? null : actType;
+      createAnnotationFromSelection({ type: annotationType });
       floatWrap.classList.add("hidden");
     });
   }
@@ -57475,11 +57507,11 @@ function createAnnotationThread(from2, to, text2, opts = null) {
   }
   refreshAnnotationImageDecos();
   State2.activeThreadId = threadId;
-  if (options.ai) seedAiDraft(threadId);
+  if (options.type) seedDraft(threadId, options.type);
   renderCommentList();
   positionMarkDeletePopover();
-  focusThreadInput(threadId, { ai: !!options.ai });
-  setStatus(options.ai ? "AI \u6279\u6CE8" : "\u5DF2\u521B\u5EFA\u6279\u6CE8", options.ai ? `\u5199\u6307\u4EE4\u540E\u63D0\u4EA4 \xB7 ${threadId.slice(0, 8)}` : `\u7EBF\u7A0B ${threadId.slice(0, 8)}`);
+  focusThreadInput(threadId, { type: options.type });
+  setStatus(options.type === "ai" ? "AI \u6279\u6CE8" : "\u5DF2\u521B\u5EFA\u6279\u6CE8", options.type ? `\u5199\u6307\u4EE4\u540E\u63D0\u4EA4 \xB7 ${threadId.slice(0, 8)}` : `\u7EBF\u7A0B ${threadId.slice(0, 8)}`);
   emitAI("threadChange", { threadId, change: "create", thread });
   return thread;
 }
@@ -57533,10 +57565,10 @@ function handleCreateMultiCellAnnotation(cellSel, opts = {}) {
   applyAnnotationMarksMultiCell(threadId, ranges);
   State2.editor.commands.setTextSelection(ranges[0].from);
   State2.activeThreadId = threadId;
-  if (options.ai) seedAiDraft(threadId);
+  if (options.type) seedDraft(threadId, options.type);
   renderCommentList();
-  focusThreadInput(threadId, { ai: !!options.ai });
-  setStatus(options.ai ? "AI \u6279\u6CE8" : "\u5DF2\u521B\u5EFA\u6279\u6CE8", `${ranges.length} \u4E2A\u5355\u5143\u683C \xB7 ${threadId.slice(0, 8)}`);
+  focusThreadInput(threadId, { type: options.type });
+  setStatus(options.type === "ai" ? "AI \u6279\u6CE8" : "\u5DF2\u521B\u5EFA\u6279\u6CE8", `${ranges.length} \u4E2A\u5355\u5143\u683C \xB7 ${threadId.slice(0, 8)}`);
   emitAI("threadChange", { threadId, change: "create", thread });
   return thread;
 }
@@ -57613,7 +57645,7 @@ function handleCreateMultiParagraphAnnotation(from2, to, opts = {}) {
     return createAnnotationThread(imageAnchors[0].from, imageAnchors[imageAnchors.length - 1].to, text2, {
       imageAnchors,
       skipMark: true,
-      ai: !!options.ai
+      type: options.type
     });
   }
   const threadId = uuid();
@@ -57651,10 +57683,10 @@ function handleCreateMultiParagraphAnnotation(from2, to, opts = {}) {
   refreshAnnotationImageDecos();
   ed.commands.setTextSelection(ranges[0].from);
   State2.activeThreadId = threadId;
-  if (options.ai) seedAiDraft(threadId);
+  if (options.type) seedDraft(threadId, options.type);
   renderCommentList();
-  focusThreadInput(threadId, { ai: !!options.ai });
-  setStatus(options.ai ? "AI \u6279\u6CE8" : ranges.length > 1 ? "\u5DF2\u521B\u5EFA\u591A\u6BB5\u6279\u6CE8" : "\u5DF2\u521B\u5EFA\u6279\u6CE8", `${ranges.length} \u6BB5 \xB7 ${threadId.slice(0, 8)}`);
+  focusThreadInput(threadId, { type: options.type });
+  setStatus(options.type === "ai" ? "AI \u6279\u6CE8" : ranges.length > 1 ? "\u5DF2\u521B\u5EFA\u591A\u6BB5\u6279\u6CE8" : "\u5DF2\u521B\u5EFA\u6279\u6CE8", `${ranges.length} \u6BB5 \xB7 ${threadId.slice(0, 8)}`);
   emitAI("threadChange", { threadId, change: "create", thread });
   return thread;
 }
@@ -58045,7 +58077,8 @@ function renderCommentList() {
               <!-- v3: resolve \u5DE6 \xB7 v1.43.53 @AI \u524D\u7F00 \xB7 \u63D0\u4EA4\u53F3 -->
               <div class="form-actions">
                 <button class="comment-resolve-btn ${thread.resolved ? "is-resolved" : ""}" data-act="resolve" data-thread="${thread.threadId}" title="${thread.resolved ? "\u91CD\u65B0\u6253\u5F00\u6B64\u6279\u6CE8" : "\u6807\u8BB0\u4E3A\u5DF2\u89E3\u51B3"}" aria-label="${thread.resolved ? "\u91CD\u65B0\u6253\u5F00" : "\u6807\u8BB0\u4E3A\u5DF2\u89E3\u51B3"}">${thread.resolved ? "\u21BA \u91CD\u65B0\u6253\u5F00" : "\u2713 \u89E3\u51B3"}</button>
-                <button type="button" class="comment-ai-prefix-btn" data-act="prefix-ai" data-thread="${thread.threadId}" title="\u63D2\u5165 @AI\uFF08\u4FDD\u5B58 .mentor \u540E /fix-mentor \u4F1A\u5904\u7406\uFF09">@AI</button>
+                <button type="button" class="comment-ai-prefix-btn" data-act="prefix-ai" data-thread="${thread.threadId}" title="\u63D2\u5165 @AI\uFF08\u4FDD\u5B58 .mentor \u540E /fix-mentor \u4F1A\u5904\u7406\uFF09" aria-label="AI">AI</button>
+                <button type="button" class="comment-review-prefix-btn" data-act="prefix-review" data-thread="${thread.threadId}" title="\u63D2\u5165 @REVIEW\uFF08\u4EBA\u5DE5/\u4EBA\u5DE5\u667A\u80FD\u5BA1\u9605\u6807\u6CE8\uFF09" aria-label="REVIEW">REVIEW</button>
                 <button data-act="submit-reply" data-thread="${thread.threadId}" class="primary" disabled title="\u8F93\u5165\u5185\u5BB9\u540E\u53EF\u63D0\u4EA4 (Ctrl+Enter)">\u63D0\u4EA4</button>
               </div>
             </div>
@@ -58144,20 +58177,22 @@ function renderCommentList() {
       }
     });
   });
-  list.querySelectorAll('[data-act="prefix-ai"]').forEach((btn) => {
+  list.querySelectorAll('[data-act="prefix-ai"], [data-act="prefix-review"]').forEach((btn) => {
     btn.addEventListener("click", (e) => {
       e.preventDefault();
       e.stopPropagation();
       const tid = btn.dataset.thread;
       const ta2 = list.querySelector(`[data-thread-input="${tid}"]`);
       if (!ta2) return;
+      const markerType = btn.dataset.act === "prefix-ai" ? "ai" : "review";
+      const cfg = MENTION_TYPES[markerType] || MENTION_TYPES.ai;
       let v = ta2.value || "";
-      if (!bodyHasAiMarker(v)) {
-        v = AI_MENTION_PREFIX + v.replace(/^\s+/, "");
+      if (getMarkerType(v) !== markerType) {
+        v = cfg.prefix + v.replace(/^\s+/, "");
         ta2.value = v;
       }
       State2.replyDrafts[tid] = ta2.value;
-      ta2.placeholder = "\u544A\u8BC9 AI \u6539\u4EC0\u4E48 / \u95EE\u4EC0\u4E48\u2026";
+      ta2.placeholder = markerType === "ai" ? "\u544A\u8BC9 AI \u6539\u4EC0\u4E48 / \u95EE\u4EC0\u4E48\u2026" : "\u8F93\u5165\u5BA1\u9605\u610F\u89C1\u2026";
       ta2.focus();
       try {
         const n = ta2.value.length;
@@ -60348,6 +60383,24 @@ async function readMentorZip(file) {
 async function openFromMentorFile(file, options = {}) {
   const quiet = !!(options && options.quiet);
   console.log("[openFromMentorFile] start, file=", file?.name, "size=", file?.size);
+  if (file?.name) {
+    try {
+      const stored = await HandleStore.getFile(file.name);
+      if (stored && typeof stored.queryPermission === "function") {
+        let perm = "prompt";
+        try {
+          perm = await stored.queryPermission({ mode: "readwrite" });
+        } catch {
+        }
+        if (perm === "granted") {
+          console.log("[openFromMentorFile] reusing granted handle for in-place save:", file.name);
+          return await openFromMentorHandle(stored, options);
+        }
+      }
+    } catch (e) {
+      console.warn("[openFromMentorFile] handle reuse check failed:", e);
+    }
+  }
   const { mdText, annotations, mediaFiles } = await readMentorZip(file);
   console.log("[openFromMentorFile] mediaFiles keys=", Object.keys(mediaFiles || {}));
   const displayName = file.name;
@@ -61053,19 +61106,51 @@ function closeFileListDropdown() {
   if (dd) dd.classList.add("hidden");
   if (wrap2) wrap2.classList.remove("is-open");
   if (trigger) trigger.setAttribute("aria-expanded", "false");
+  if (typeof window !== "undefined") {
+    window.removeEventListener("resize", positionFileListDropdown);
+    window.removeEventListener("scroll", positionFileListDropdown, true);
+  }
+}
+function positionFileListDropdown() {
+  const dd = document.querySelector("#file-list-dropdown");
+  const trigger = document.querySelector("#file-list-trigger");
+  if (!dd || !trigger || dd.classList.contains("hidden")) return;
+  const r = trigger.getBoundingClientRect();
+  const width = Math.min(340, Math.max(220, window.innerWidth * 0.7));
+  let left = r.right - width;
+  if (left < 8) left = 8;
+  if (left + width > window.innerWidth - 8) {
+    left = Math.max(8, window.innerWidth - 8 - width);
+  }
+  let top = r.bottom + 4;
+  const maxH = Math.min(360, window.innerHeight * 0.5);
+  if (top + Math.min(maxH, 160) > window.innerHeight - 8) {
+    top = Math.max(8, r.top - 4 - Math.min(maxH, dd.offsetHeight || 200));
+  }
+  dd.style.top = `${Math.round(top)}px`;
+  dd.style.left = `${Math.round(left)}px`;
+  dd.style.width = `${Math.round(width)}px`;
+  dd.style.right = "auto";
+}
+function openFileListDropdown() {
+  const dd = document.querySelector("#file-list-dropdown");
+  if (!dd) return;
+  const show = () => {
+    dd.classList.remove("hidden");
+    document.querySelector("#file-list-wrap")?.classList.add("is-open");
+    document.querySelector("#file-list-trigger")?.setAttribute("aria-expanded", "true");
+    positionFileListDropdown();
+    requestAnimationFrame(() => positionFileListDropdown());
+    window.addEventListener("resize", positionFileListDropdown);
+    window.addEventListener("scroll", positionFileListDropdown, true);
+  };
+  Promise.resolve(refreshFileListDropdown()).then(show, show);
 }
 function toggleFileListDropdown() {
   const dd = document.querySelector("#file-list-dropdown");
   if (!dd) return;
-  if (dd.classList.contains("hidden")) {
-    refreshFileListDropdown().then(() => {
-      dd.classList.remove("hidden");
-      document.querySelector("#file-list-wrap")?.classList.add("is-open");
-      document.querySelector("#file-list-trigger")?.setAttribute("aria-expanded", "true");
-    });
-  } else {
-    closeFileListDropdown();
-  }
+  if (dd.classList.contains("hidden")) openFileListDropdown();
+  else closeFileListDropdown();
 }
 async function refreshFileListDropdown() {
   const list = document.querySelector("#file-list-items");
@@ -61763,7 +61848,7 @@ function setupToolbar() {
         setStatus("\u63D0\u793A", "\u8BF7\u5148\u9009\u4E2D\u6587\u672C, \u518D\u6309 Ctrl+Alt+M \u52A0\u6279\u6CE8");
         return;
       }
-      createAnnotationFromSelection({ ai: !!e.shiftKey });
+      createAnnotationFromSelection({ type: e.shiftKey ? "ai" : null });
       const fb = $("#float-comment-btn");
       if (fb) fb.classList.add("hidden");
       return;
@@ -61775,7 +61860,19 @@ function setupToolbar() {
         setStatus("\u63D0\u793A", "\u8BF7\u5148\u9009\u4E2D\u6587\u672C, \u518D\u6309 Ctrl+Alt+I \u52A0 AI \u6279\u6CE8");
         return;
       }
-      createAnnotationFromSelection({ ai: true });
+      createAnnotationFromSelection({ type: "ai" });
+      const fb = $("#float-comment-btn");
+      if (fb) fb.classList.add("hidden");
+      return;
+    }
+    if ((e.ctrlKey || e.metaKey) && e.altKey && (e.key === "r" || e.key === "R")) {
+      e.preventDefault();
+      const sel = State2.editor.state.selection;
+      if (sel.empty) {
+        setStatus("\u63D0\u793A", "\u8BF7\u5148\u9009\u4E2D\u6587\u672C, \u518D\u6309 Ctrl+Alt+R \u52A0 REVIEW \u6279\u6CE8");
+        return;
+      }
+      createAnnotationFromSelection({ type: "review" });
       const fb = $("#float-comment-btn");
       if (fb) fb.classList.add("hidden");
       return;
@@ -62165,7 +62262,12 @@ async function boot() {
   if (isFirstTime) {
     setTimeout(() => promptAuthor({ firstTime: true }), 400);
   }
-  await tryReconnect();
+  const _urlParams = new URLSearchParams(location.search);
+  if (_urlParams.has("open")) {
+    console.log("[boot] ?open= present, skipping tryReconnect (handled by _handleUrlOpen)");
+  } else {
+    await tryReconnect();
+  }
 }
 async function tryReconnect() {
   try {
@@ -62220,6 +62322,11 @@ async function _handleUrlOpen() {
   const params = new URLSearchParams(location.search);
   const openPath = params.get("open");
   if (!openPath) return;
+  const baseName = openPath.split("\\").pop().split("/").pop() || "open.mentor";
+  if (State2.currentFile && State2.currentFile.name === baseName && hasWriteHandle()) {
+    console.log("[?open] already loaded with write handle via reconnect; skipping");
+    return;
+  }
   try {
     const url = location.origin + "/open?path=" + encodeURIComponent(openPath);
     const r = await fetch(url);
@@ -62229,7 +62336,6 @@ async function _handleUrlOpen() {
       return;
     }
     const blob = await r.blob();
-    const baseName = openPath.split("\\").pop().split("/").pop() || "open.mentor";
     const file = new File([blob], baseName, { type: "application/zip" });
     for (let i = 0; i < 100 && !(State2.editor && typeof openFromMentorFile === "function"); i++) {
       await new Promise((r2) => setTimeout(r2, 50));

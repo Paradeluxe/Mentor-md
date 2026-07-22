@@ -1,6 +1,6 @@
 {
   "name": "mentor",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "description": "Mentor - WYSIWYG Markdown editor with docx-style annotations",
   "scripts": {

@@ -4,10 +4,10 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Mentor — 像 docx 一样批注 Markdown</title>
-<meta name="build" content="v1.43.55 cache-bust v=112" />
+<meta name="build" content="v1.43.59 cache-bust v=117" />
 <!-- v1.43.37 offline: local fonts + KaTeX (no CDN) -->
 <link rel="stylesheet" href="vendor/fonts/local-fonts.css?v=1" />
-<link rel="stylesheet" href="styles.css?v=112" />
+<link rel="stylesheet" href="styles.css?v=117" />
 <link rel="stylesheet" href="vendor/katex/katex.min.css?v=1" />
 <!-- 字体：系统无衬线 + 等宽（侧栏时间戳、文件名） -->
 <style>
@@ -126,10 +126,17 @@
     <!-- 中：编辑器 -->
     <section id="editor-pane">
       <div id="editor"></div>
-      <!-- 浮动批注按钮，选中文本后出现：批注 | AI（预填 @AI，配合 /fix-mentor） -->
-      <div id="float-comment-btn" class="float-btn hidden" role="toolbar" aria-label="批注操作">
-              <button type="button" data-float-act="comment" aria-label="批注" title="添加批注"></button>
-              <button type="button" data-float-act="ai" class="float-ai-btn" aria-label="AI 批注" title="AI 批注：自动加 @AI，保存后用 /fix-mentor 处理"></button>
+      <!-- 浮动条：选中文本后出现 — 批注 | AI 机器人（独立按钮，预填 @AI 供 /fix-mentor） -->
+      <div id="float-comment-btn" class="float-btn hidden" role="toolbar" aria-label="批注与 AI">
+              <button type="button" data-float-act="comment" class="float-comment-act" aria-label="添加批注" title="添加批注 (Ctrl+Alt+M)">
+                <span class="float-btn-label">批注</span>
+              </button>
+              <button type="button" data-float-act="ai" class="float-ai-btn" aria-label="AI 批注" title="AI 批注：插入 @AI，保存后用 /fix-mentor 处理 (Ctrl+Alt+I)">
+                <span class="float-btn-label">AI</span>
+              </button>
+              <button type="button" data-float-act="review" class="float-review-btn" aria-label="REVIEW 批注" title="审阅批注：插入 @REVIEW，供人/AI 审阅标注 (Ctrl+Alt+R)">
+                <span class="float-btn-label">REVIEW</span>
+              </button>
             </div>
             <!-- v1.43.23: 表格内浮动工具条 — 增删行列 -->
             <div id="table-controls" class="table-controls hidden" role="toolbar" aria-label="表格编辑">
@@ -207,7 +214,7 @@
 
 <!-- v1.43.37 offline: bundled app (esbuild) + local icons; no esm.sh -->
 <script src="icons.js?v=3"></script>
-<script type="module" src="app.bundle.js?v=112"></script>
+<script type="module" src="app.bundle.js?v=120"></script>
 <!-- 帮助 popover (浮在 body 顶层, 位置由 JS 动态计算) -->
 <div id="help-popover" class="help-popover hidden" role="tooltip">
   <div class="help-popover-arrow"></div>

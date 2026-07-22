@@ -47,7 +47,10 @@
 cd Mentor
 python3 -m http.server 8787
 # 浏览器打开 http://127.0.0.1:8787
+# 注意：与 psyclaw-webui 的 8876 端口冲突（8787 专用于 Mentor）
 ```
+
+**快速验证**：运行 `scripts/verify-chaos.sh` 检查 Chaos 测试状态。
 
 然后：
 

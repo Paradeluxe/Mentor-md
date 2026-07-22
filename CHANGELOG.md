@@ -2,6 +2,65 @@
 
 按时间倒序记录已发布的变化。最新条目在上方。
 
+## v1.44.0 (2026-07-22) — 优化：README 端口冲突提醒 + Chaos 测试确认通过
+
+- README.md 新增端口冲突提醒（8787 vs psyclaw-webui 8876）
+- 确认所有主要 chaos/UX 测试已通过并固化
+- 项目版本同步更新
+
+---
+
+## v1.43.59 (2026-07-21) — 修复顶栏文件名下拉被裁切
+
+### 问题
+点击右上角文件名看不到最近文件列表。
+
+### 原因
+`#toolbar` 使用 `overflow-y: hidden`（窄屏横滑），absolute 定位的下拉被完全裁掉。
+
+### 改动
+- 文件列表改为 `position: fixed`，打开时按 trigger 位置对齐
+- resize / scroll 时重定位
+
+### Cache
+- styles.css / app.bundle.js `?v=117`
+
+---
+
+## v1.43.58 (2026-07-21) — 批注卡片大厂风格重做
+
+### 用户
+完全不满意当前批注卡片样式，希望参照大厂（Google Docs / Notion / Linear）优化。
+
+### 改动
+1. **卡片外壳**：白底浮卡、10px 圆角、软多层阴影；悬停微抬升
+2. **激活态**：橙色 soft ring + 浅暖底（不再粗左边框叠线）
+3. **引用行**：暖浅渐变底 + 弯引号 `“` + 序号 pill（active 橙色 / resolved 绿色）
+4. **正文区**：26px avatar 软 ring、作者字重、相对时间（「刚刚 / N 分钟前…」）
+5. **回复链**：左 rail 缩进层次，去掉重边框
+6. **输入区**：圆角 textarea + focus 橙环；**提交** 实心 accent 主按钮；解决/AI 次按钮
+7. **列表**：卡片间距 gap 10px，侧栏更透气
+
+### Cache
+- styles.css / app.bundle.js `?v=116`
+
+---
+
+## v1.43.57 (2026-07-21) — AI 独立按钮 + 小机器人 icon
+
+### 用户
+希望 @AI 是**独立于批注**的按钮，并用小机器人图标。
+
+### 改动
+1. 选区浮动条：两个独立 pill — **批注**（气泡）| **AI**（Lucide bot 机器人）
+2. 侧栏回复芯片：机器人 icon +「AI」文案（仍插入 `@AI `）
+3. `icons.js` 增加 `bot` 资源
+
+### Cache
+- styles.css / app.bundle.js `?v=115`
+
+---
+
 ## v1.43.55 (2026-07-21) — partial edit 保持 fuzzy（修 CI chaos-wave10）
 
 ### 问题

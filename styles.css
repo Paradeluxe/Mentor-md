@@ -312,11 +312,12 @@ code {
   font-size: 10px;
   opacity: 0.7;
 }
+/* fixed：避免被 #toolbar 的 overflow-y:hidden 裁切（v1.43.59） */
 .file-list-dropdown {
-  position: absolute;
-  top: calc(100% + 4px);
-  right: 0;
-  z-index: 80;
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 300;
   width: min(340px, 70vw);
   max-height: min(360px, 50vh);
   overflow: auto;
@@ -324,9 +325,12 @@ code {
   background: var(--panel);
   border: 1px solid var(--border-warm-medium);
   border-radius: 10px;
-  box-shadow: 0 8px 28px rgba(38, 37, 30, 0.14);
+  box-shadow:
+    0 0 0 1px rgba(38, 37, 30, 0.04),
+    0 12px 32px rgba(38, 37, 30, 0.14),
+    0 4px 10px rgba(38, 37, 30, 0.06);
 }
-.file-list-dropdown.hidden { display: none; }
+.file-list-dropdown.hidden { display: none !important; }
 .file-list-section-title {
   font-size: 10px;
   letter-spacing: 0.06em;
@@ -1734,72 +1738,85 @@ body.file-pane-collapsed #file-pane {
   accent-color: var(--accent);
   margin: 0;
 }
-#comment-list { flex: 1; overflow-y: auto; padding: 10px 10px 14px; }
+#comment-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 12px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: linear-gradient(180deg, rgba(242, 241, 237, 0.35) 0%, transparent 48px);
+}
 
 /* v1.40 chaos S33 fix: 大数组 annotations 时显示的警告 */
 .comment-overflow-warn {
-  padding: 16px 18px;
+  padding: 14px 16px;
   background: #fff8e1;
   border-left: 3px solid #f59e0b;
-  border-radius: 6px;
-  margin: 12px 0;
+  border-radius: var(--radius-lg);
+  margin: 0 0 2px;
   color: #78350f;
+  box-shadow: var(--shadow-card);
 }
-.comment-overflow-warn .warn-title { font-weight: 600; margin-bottom: 6px; font-size: 14px; }
+.comment-overflow-warn .warn-title { font-weight: 600; margin-bottom: 6px; font-size: 13px; }
 .comment-overflow-warn .warn-hint { font-size: 12px; line-height: 1.5; opacity: 0.85; }
 
-/* === Comment thread card (DESIGN.md: 暖黄左 border, 6px 圆角, shadow-as-border) === */
+/* ============================================================
+   Comment thread card — v1.43.58
+   参照 Google Docs / Notion / Linear 评论卡:
+   · 白底浮卡 + 软阴影 + 10px 圆角
+   · 引用行: 弯引号 + 序号 pill + 2 行 clamp
+   · 激活: 橙色 ring + 轻微抬升 (非粗左边框)
+   · 已解决: 淡绿 + 弱化, 保留可读
+   ============================================================ */
 .comment-thread {
   background: var(--panel);
   position: relative;
-  border-left: 3px solid transparent;
-  border-top: 1px solid var(--border-warm);
-  border-bottom: 1px solid var(--border-warm);
-  border-right: 1px solid var(--border-warm);
-  border-radius: var(--radius-md);
-  margin: 0 0 8px 0;
+  border: 1px solid var(--border-warm);
+  border-radius: var(--radius-lg);
+  margin: 0;
   padding: 0;
+  /* visible: ⋯ 菜单浮层不能被裁切; 圆角由子块分别贴合 */
   overflow: visible;
-  transition: border-left-color 0.12s ease, box-shadow 0.12s ease;
   cursor: pointer;
-  box-shadow: var(--shadow-card);
-}
-/* 序号 badge: 放 quote 行内左侧, 跟 quote 文字一起 flex, 不再 absolute 跟 ⋯ 抢位置 */
-.comment-number-badge {
-  flex: 0 0 auto;
-  min-width: 18px;
-  height: 18px;
-  padding: 0 5px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 10px;
-  font-weight: 600;
-  color: var(--text-2);  /* v22: 跟 quote-text 颜色完全一致 (避免 "1" 和 quote 两种颜色错觉) */
-  background: transparent;
-  border-radius: 9px;
-  user-select: none;
-  font-feature-settings: "tnum" 1;
-  letter-spacing: 0.02em;
-  align-self: center;
+  box-shadow:
+    0 1px 2px rgba(38, 37, 30, 0.04),
+    0 4px 12px rgba(38, 37, 30, 0.03);
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease,
+    transform 0.15s ease,
+    background 0.15s ease;
+  isolation: isolate;
 }
 .comment-thread:hover {
-  border-left-color: var(--highlight);
+  border-color: var(--border-warm-medium);
+  box-shadow:
+    0 2px 4px rgba(38, 37, 30, 0.05),
+    0 8px 20px rgba(38, 37, 30, 0.06);
 }
-/* K14 fix: card hover 高亮 doc 中对应的 mark (Word 行为) */
+/* K14: card hover 高亮 doc 中对应的 mark (Word 行为) */
 .tiptap .annotation-mark.is-hover { background: #fde68a; }
+
+/* Active — Docs/Linear: soft orange ring + lift, borderColor 含 accent 供 e2e */
 .comment-thread.is-active {
-  border-left-color: var(--accent);
-  /* v20: 不再用 box-shadow 包整个卡片 — 改成只描左边的边线, 避免 active 状态下"四边橙色" */
-  box-shadow: 0 0 0 0 transparent, inset 3px 0 0 0 var(--accent);
+  border-color: rgba(245, 78, 0, 0.55);
+  box-shadow:
+    0 0 0 1px rgba(245, 78, 0, 0.28),
+    0 4px 14px rgba(245, 78, 0, 0.1),
+    0 2px 6px rgba(38, 37, 30, 0.05);
+  background: #fffefc;
 }
-/* v20: 已解决 + active: 优先级已解决 > active (稳定状态) */
+/* 已解决 + active: 绿 ring 优先 */
 .comment-thread.is-resolved.is-active {
-  border-left-color: var(--success);
-  box-shadow: 0 0 0 0 transparent, inset 3px 0 0 0 var(--success);
+  border-color: rgba(31, 138, 101, 0.5);
+  box-shadow:
+    0 0 0 1px rgba(31, 138, 101, 0.22),
+    0 4px 14px rgba(31, 138, 101, 0.08),
+    0 2px 6px rgba(38, 37, 30, 0.04);
+  background: #fafefc;
 }
-/* v19: 已解决 mark - 绿色标识 (替代默认橙色/灰色, 视觉上一眼看出已解决)
-   替代 line-through, 改用绿色淡化 + 绿色下划线 */
+/* 已解决 mark — 绿色虚线标识 */
 .tiptap .annotation-mark.is-resolved {
   background: rgba(31, 138, 101, 0.08);
   border-bottom: 1px dashed var(--success);
@@ -1809,62 +1826,85 @@ body.file-pane-collapsed #file-pane {
   background: rgba(31, 138, 101, 0.15);
   opacity: 0.95;
 }
-/* v19: 已解决卡片左边框 + 整体淡绿, 替代灰色 + line-through */
+/* 已解决卡片 — 弱化但不画删除线 */
 .comment-thread.is-resolved {
-  background: rgba(31, 138, 101, 0.03);
-  border-left-color: var(--success);
-  opacity: 0.85;
+  background: #fafcfb;
+  border-color: rgba(31, 138, 101, 0.18);
+  opacity: 0.9;
 }
-.comment-thread.is-resolved:hover { opacity: 1; }
-/* v19: 已解决卡内文字淡化 (不再用 line-through, 保留可读性) */
+.comment-thread.is-resolved:hover {
+  opacity: 1;
+  border-color: rgba(31, 138, 101, 0.32);
+}
 .comment-thread.is-resolved .comment-body,
 .comment-thread.is-resolved .comment-quote-text {
   color: var(--text-2);
 }
 .comment-thread.is-fuzzy {
-  border-left-color: var(--warning);
+  border-color: rgba(217, 119, 6, 0.35);
+  box-shadow:
+    0 0 0 1px rgba(217, 119, 6, 0.12),
+    0 2px 8px rgba(217, 119, 6, 0.06);
 }
 
-/* v1.32: active/resolved 状态下 quote 不再画左边框
-   外层 (.comment-thread) 已经有 3px 同色边 (active=橙, resolved=绿),
-   quote 再画 2px = 视觉 "一粗一细两条同色边" 双线错觉 (v1.31 教训).
-   直接 border-left: transparent 让 3px 外层独占, 用 inset box-shadow 保留
-   quote 跟下面的层次过渡. 不再叠同色. */
-.comment-thread.is-resolved .comment-quote,
-.comment-thread.is-active .comment-quote {
-  border-left-color: transparent;
+/* 序号 pill — Linear 风格小圆角数字 */
+.comment-number-badge {
+  flex: 0 0 auto;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10.5px;
+  font-weight: 650;
+  color: var(--text-2);
+  background: rgba(38, 37, 30, 0.06);
+  border-radius: var(--radius-pill);
+  user-select: none;
+  font-feature-settings: "tnum" 1;
+  letter-spacing: 0.01em;
+  align-self: flex-start;
+  margin-top: 1px;
+  line-height: 1;
+}
+.comment-thread.is-active .comment-number-badge {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+.comment-thread.is-resolved .comment-number-badge {
+  color: var(--success);
+  background: rgba(31, 138, 101, 0.1);
 }
 
-/* Thread banner (fuzzy only — pinned 已在 v2 移除) */
+/* Banners */
 .comment-thread .fuzzy-banner {
-  padding: 5px 12px;
+  padding: 7px 14px;
   font-size: var(--font-xs, 11px);
   font-weight: 500;
-  letter-spacing: 0.02px;
+  letter-spacing: 0.01em;
+  border-bottom: 1px solid rgba(217, 119, 6, 0.12);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(217, 119, 6, 0.07);
+  color: var(--warning);
+}
+.comment-thread.is-deleted {
+  border-color: rgba(38, 37, 30, 0.14);
+  opacity: 0.88;
+}
+.comment-thread .deleted-banner {
+  padding: 8px 14px;
+  font-size: var(--font-xs, 11px);
+  font-weight: 500;
+  letter-spacing: 0.01em;
   border-bottom: 1px solid var(--border-warm);
   display: flex;
   align-items: center;
   gap: 6px;
-  background: rgba(217, 119, 6, 0.08);
-  color: var(--warning);
-}
-
-/* v1.42.6: deleted banner — ann text 整个没了, 用户可 reattach 或删 ann */
-.comment-thread.is-deleted {
-  border-left-color: var(--text-2, #888);
-  opacity: 0.85;
-}
-.comment-thread .deleted-banner {
-  padding: 6px 12px;
-  font-size: var(--font-xs, 11px);
-  font-weight: 500;
-  letter-spacing: 0.02px;
-  border-bottom: 1px solid var(--border);
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  background: var(--panel-2, #f5f5f5);
-  color: var(--text-2, #555);
+  background: var(--panel-2);
+  color: var(--text-2);
   flex-wrap: wrap;
 }
 .comment-thread .deleted-banner .link-btn {
@@ -1873,56 +1913,69 @@ body.file-pane-collapsed #file-pane {
   padding: 0;
   margin: 0;
   font: inherit;
-  color: var(--accent, #2563eb);
+  color: var(--accent);
   cursor: pointer;
   text-decoration: underline;
   text-underline-offset: 2px;
 }
 .comment-thread .deleted-banner .link-btn:hover {
-  color: var(--accent-soft, #1e40af);
+  color: var(--accent-hover);
 }
 .comment-thread .deleted-banner .link-btn.link-danger {
-  color: var(--danger, #b91c1c);
+  color: var(--danger);
 }
 .comment-thread .deleted-banner .link-btn.link-danger:hover {
-  color: var(--danger-soft, #991b1b);
+  color: #a61f45;
 }
 
-/* v1.42.6: reattach 等待选择状态 */
+/* reattach 等待选择 */
 .comment-thread.awaiting-reattach {
-  border-left-color: var(--accent, #2563eb);
-  outline: 2px dashed var(--accent, #2563eb);
-  outline-offset: -2px;
+  border-color: var(--accent);
+  outline: 2px dashed rgba(245, 78, 0, 0.45);
+  outline-offset: 2px;
   animation: awaiting-pulse 1.5s ease-in-out infinite;
 }
 @keyframes awaiting-pulse {
-  0%, 100% { outline-opacity: 0.4; }
-  50% { outline-opacity: 1; }
+  0%, 100% { outline-color: rgba(245, 78, 0, 0.25); }
+  50% { outline-color: rgba(245, 78, 0, 0.7); }
 }
 
-/* Quote (批注引用条) — 极简文档式: 浅灰底 + 左侧细边, 边色跟卡片状态走 (active=橙, resolved=绿, 默认=warn-medium)
-   不再硬编码 accent, 避免跟外层卡片 active/resolved 状态冲突出现 "两种左边框颜色" */
+/* Quote 引用条 — Google Docs: 暖浅底 + 弯引号 + 2 行截断 */
 .comment-quote {
   display: flex;
   align-items: flex-start;
   gap: 8px;
-  padding: 8px 12px 8px 14px;
-  background: var(--panel-2);  /* 极浅灰, 不抢视觉 */
-  border-left: 2px solid var(--border-warm-medium);  /* 默认: 中性, 不跟外层 accent 抢 */
+  padding: 10px 12px 10px 12px;
+  background: linear-gradient(180deg, #faf9f6 0%, #f6f5f1 100%);
   border-bottom: 1px solid var(--border-warm);
+  border-radius: calc(var(--radius-lg) - 1px) calc(var(--radius-lg) - 1px) 0 0;
   position: relative;
-  transition: border-left-color 0.12s;
   cursor: pointer;
-  transition: background 0.12s;
+  transition: background 0.12s ease;
 }
-.comment-quote:hover { background: var(--panel-3); }
+/* 折叠态: quote 贴合卡片底圆角 */
+.comment-thread.is-collapsed .comment-quote {
+  border-bottom: none;
+  border-radius: calc(var(--radius-lg) - 1px);
+}
+.comment-quote:hover {
+  background: linear-gradient(180deg, #f5f4f0 0%, #f0efe9 100%);
+}
+.comment-thread.is-active .comment-quote {
+  background: linear-gradient(180deg, #fff8f3 0%, #fff3eb 100%);
+  border-bottom-color: rgba(245, 78, 0, 0.1);
+}
+.comment-thread.is-resolved .comment-quote {
+  background: linear-gradient(180deg, #f6faf8 0%, #f1f7f4 100%);
+  border-bottom-color: rgba(31, 138, 101, 0.1);
+}
 .comment-quote-text {
   flex: 1;
   min-width: 0;
-  font-size: 12px;
+  font-size: 12.5px;
   color: var(--text-2);
-  line-height: 1.5;
-  letter-spacing: 0.01px;
+  line-height: 1.45;
+  letter-spacing: 0.005em;
   font-style: normal;
   word-wrap: break-word;
   overflow-wrap: break-word;
@@ -1932,12 +1985,27 @@ body.file-pane-collapsed #file-pane {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* 弯引号 U-bracket — 用户偏好的文档引用感 */
+.comment-quote-text::before {
+  content: "\201C";
+  color: var(--accent);
+  font-size: 15px;
+  font-weight: 600;
+  font-family: Georgia, "Times New Roman", serif;
+  line-height: 1;
+  margin-right: 3px;
+  vertical-align: -1px;
+  opacity: 0.85;
+}
+.comment-thread.is-resolved .comment-quote-text::before {
+  color: var(--success);
+}
 
-/* P-card: ⋯ 菜单按钮 (右上角, hover 才显) */
+/* ⋯ 菜单按钮 — hover / active 显 */
 .comment-menu-btn {
   flex: 0 0 auto;
-  width: 22px;
-  height: 22px;
+  width: 26px;
+  height: 26px;
   border: none;
   background: transparent;
   color: var(--text-3);
@@ -1945,11 +2013,11 @@ body.file-pane-collapsed #file-pane {
   line-height: 1;
   font-weight: 600;
   cursor: pointer;
-  border-radius: 4px;
+  border-radius: 6px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  margin: -2px 0 0 0;
+  margin: -2px -4px 0 0;
   opacity: 0;
   transition: opacity 0.12s, background 0.12s, color 0.12s;
   flex-shrink: 0;
@@ -1959,40 +2027,42 @@ body.file-pane-collapsed #file-pane {
 .comment-menu-btn:focus-visible {
   opacity: 1;
 }
-/* 已激活的卡片: 始终显示 ⋯ 按钮 (用户正在操作这张) */
 .comment-thread.is-active .comment-menu-btn {
   opacity: 1;
 }
 .comment-menu-btn:hover {
-  background: var(--panel-3);
+  background: rgba(38, 37, 30, 0.06);
   color: var(--text);
 }
 
 /* v3: 解决按钮样式移到了 form-actions 内的 .comment-resolve-btn 规则块 (docx 风格 outline 次要按钮) */
 
-/* P-card: ⋯ 弹窗菜单 (绝对定位, 浮在卡片右上角) */
+/* ⋯ 弹窗菜单 — elevated popover */
 .comment-menu {
   position: absolute;
-  top: 36px;
-  right: 8px;
+  top: 40px;
+  right: 10px;
   z-index: 50;
-  min-width: 180px;
+  min-width: 188px;
   background: var(--panel);
-  border-radius: 6px;
-  box-shadow: 0 0 0 1px var(--border-warm-medium), 0 8px 24px rgba(0, 0, 0, 0.12), 0 2px 6px rgba(0, 0, 0, 0.06);
-  padding: 4px;
+  border-radius: var(--radius-lg);
+  box-shadow:
+    0 0 0 1px var(--border-warm-medium),
+    0 12px 32px rgba(38, 37, 30, 0.12),
+    0 4px 10px rgba(38, 37, 30, 0.06);
+  padding: 5px;
   display: flex;
   flex-direction: column;
   gap: 1px;
-  font-size: 12.5px;
+  font-size: 13px;
 }
 .comment-menu.hidden { display: none !important; }
 .comment-menu button {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 9px;
   width: 100%;
-  padding: 7px 10px;
+  padding: 8px 10px;
   border: none;
   background: transparent;
   color: var(--text);
@@ -2000,7 +2070,7 @@ body.file-pane-collapsed #file-pane {
   font-size: 12.5px;
   text-align: left;
   cursor: pointer;
-  border-radius: 4px;
+  border-radius: 6px;
   transition: background 0.1s;
   line-height: 1.3;
 }
@@ -2016,7 +2086,7 @@ body.file-pane-collapsed #file-pane {
 .comment-menu .menu-sep {
   height: 1px;
   background: var(--border-warm);
-  margin: 3px 4px;
+  margin: 4px 6px;
 }
 
 /* v6: 菜单 SVG 图标 (不用 emoji) — 放大到 16px 让描边更清晰 */
@@ -2075,39 +2145,31 @@ body.file-pane-collapsed #file-pane {
 // 原因: 之前徽章太大 + 跟 quote-text 同行 + 跟 ↺ 按钮挤在一起, 用户感觉"挡标题"
 .comment-resolved-badge { display: none !important; }
 
-/* v14: Comment item (主批注) - docx/GitHub 风格
-   参考: GitHub primer + CSS-Tricks "Styling Comment Threads" 2020
-   - avatar 圆形 28px (适中, 不过大)
-   - padding 14-16px (宽松但不松散)
-   - 不画大背景, 靠 border + 留白区分
-   - body 跟 avatar 左对齐 (padding-left = avatar width + gap)
-   - 行距 1.5 (紧凑可读) */
+/* 主批注体 — Notion/Linear: 宽松留白, avatar 左对齐 */
 .comment-item {
-  padding: 14px 16px;
-  letter-spacing: 0.01px;
+  padding: 12px 14px 4px;
+  letter-spacing: 0.005em;
 }
 .comment-item + .comment-item {
   border-top: 1px solid var(--border-warm);
 }
 
-/* v16: Meta (avatar + name + time) — 间距统一
-   - 用 padding-top 4px + padding-bottom 0 让 avatar 和文字垂直居中
-   - margin-bottom 4px (主批注和 reply 一致)
-   - 不再用 min-height (让自然高度, 避免和 reply 视觉差距) */
+/* Meta: avatar + name · time */
 .comment-meta {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-bottom: 4px;
+  margin-bottom: 6px;
+  min-height: 26px;
 }
-/* Avatar — 28px 圆形, docx 风格 (适中, 不像 18 太小不像 40 太大) */
+/* Avatar — 26px, soft ring */
 .comment-avatar {
-  width: 28px;
-  height: 28px;
+  width: 26px;
+  height: 26px;
   border-radius: 50%;
-  color: var(--panel);
+  color: #fff;
   font-size: 11px;
-  font-weight: 600;
+  font-weight: 650;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -2115,15 +2177,17 @@ body.file-pane-collapsed #file-pane {
   letter-spacing: 0;
   line-height: 1;
   user-select: none;
-  box-shadow: 0 0 0 1px rgba(38, 37, 30, 0.08);
+  box-shadow:
+    0 0 0 1.5px rgba(255, 255, 255, 0.9),
+    0 1px 2px rgba(38, 37, 30, 0.12);
 }
 .comment-author {
-  font-weight: 600;
+  font-weight: 650;
   color: var(--text);
   font-size: 13px;
-  letter-spacing: 0.01px;
+  letter-spacing: -0.01em;
   line-height: 1.2;
-  max-width: 150px;
+  max-width: 140px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2135,58 +2199,51 @@ body.file-pane-collapsed #file-pane {
   font-feature-settings: "tnum" 1;
   letter-spacing: 0;
   white-space: nowrap;
+  font-weight: 450;
 }
-/* Body — 缩进到 avatar 右边 (28 + 8 gap = 36), 行距 1.5 */
+/* Body — 缩进到 avatar 右 (26 + 8 = 34) */
 .comment-body {
   color: var(--text);
   white-space: pre-wrap;
   word-wrap: break-word;
   font-size: 13px;
-  line-height: 1.5;
-  padding-left: 36px;
+  line-height: 1.55;
+  padding-left: 34px;
   letter-spacing: 0.005em;
 }
 
-/* v15: Reply - docx 风格对齐: 左边界跟主批注 avatar 左对齐 (而不是缩进到中间)
-   - reply 跟主批注垂直对齐 (看上去是 thread 的延续)
-   - 左边框 2px 作为层次指示器 (CSS-Tricks 推荐)
-   - reply 之间靠 border-top 1px 细线分隔
-   - 无背景色, 靠 padding 区分 */
+/* Reply — 左 rail 层次, 无重边框 */
 .comment-reply {
-  padding: 10px 14px 10px 14px;
-  margin: 0 0 0 0;
-  border-left: 2px solid var(--border-warm-medium);
+  padding: 10px 0 8px 12px;
+  margin: 4px 0 0 34px;
+  border-left: 2px solid rgba(38, 37, 30, 0.08);
   position: relative;
-  /* v1.32: 删 hover 变橙 - 卡片整体 hover (line 1270 --highlight) 已足够,
-     reply 单独再变橙会跟外层卡 quote 内层默认灰色冲突出现 "3 种颜色" 错觉 */
+  background: transparent;
 }
 .comment-reply + .comment-reply {
   margin-top: 0;
-  border-top: 1px solid var(--border-warm);
+  border-top: none;
+  padding-top: 8px;
 }
-/* Reply 内的 avatar 22px (层级缩放) */
 .comment-reply .comment-avatar {
   width: 22px;
   height: 22px;
   font-size: 9.5px;
 }
-/* Reply author 字号略小 */
 .comment-reply .comment-author { font-size: 12.5px; }
 .comment-reply .comment-author::before {
   content: "回复 ";
   font-size: 10.5px;
   color: var(--text-3);
   font-weight: 400;
-  font-style: italic;
+  font-style: normal;
 }
-/* Reply body — 缩进 22 + 8 = 30, 跟主批注 body 对齐 */
 .comment-reply .comment-body {
   padding-left: 30px;
   font-size: 12.5px;
   line-height: 1.5;
 }
-/* v16: Reply meta 间距与主批注统一 */
-.comment-reply .comment-meta { margin-bottom: 4px; gap: 6px; }
+.comment-reply .comment-meta { margin-bottom: 4px; gap: 6px; min-height: 22px; }
 
 /* Reply-toggle details — "↳ 回复" expander */
 .comment-thread .reply-toggle {
@@ -2215,87 +2272,85 @@ body.file-pane-collapsed #file-pane {
   font-size: 13px;
 }
 
-/* Reply form: textarea + submit inline */
-/* v13: reply-form 跟上方 reply 区域清晰分隔 — 上下留白 + 顶部 1px 分隔线 */
+/* Reply form — Docs 风格输入区 */
 .comment-reply-form {
-  margin: 14px 14px 12px;
-  padding: 12px 0 0;
+  margin: 8px 14px 12px;
+  padding: 10px 0 0;
   border-top: 1px solid var(--border-warm);
 }
 .comment-reply-form textarea {
   width: 100%;
-  min-height: 48px;
-  /* v4: 允许垂直拖拽调整高度 (docx 风格) — 用户写长批注可拉大 */
+  min-height: 52px;
   resize: vertical;
-  padding: 7px 10px;
+  padding: 9px 11px;
   border: none;
-  border-radius: var(--rounded-sm, 4px);
+  border-radius: 8px;
   background: var(--panel-2);
   color: var(--text);
   font: inherit;
-  font-size: 12px;
-  line-height: 1.55;
+  font-size: 13px;
+  line-height: 1.5;
   outline: none;
-  transition: box-shadow 0.12s;
+  transition: box-shadow 0.12s, background 0.12s;
   box-sizing: border-box;
   display: block;
-  box-shadow: 0 0 0 1px var(--border-warm);
+  box-shadow: inset 0 0 0 1px var(--border-warm);
 }
-/* v4: resize 拖拽手柄样式 (Webkit 默认是右下角小三角) */
 .comment-reply-form textarea::-webkit-resizer {
   background: transparent;
 }
 .comment-reply-form textarea::placeholder { color: var(--text-3); }
 .comment-reply-form textarea:focus {
-  background: var(--panel);
-  box-shadow: 0 0 0 1px var(--accent);
+  background: #fff;
+  box-shadow:
+    inset 0 0 0 1px rgba(245, 78, 0, 0.45),
+    0 0 0 3px var(--accent-soft);
 }
 .comment-reply-form .form-actions {
   display: flex;
   align-items: center;
-  gap: 4px;
-  margin-top: 4px;
+  gap: 6px;
+  margin-top: 8px;
 }
-/* resolve 靠左；@AI + 提交靠右 */
+/* resolve 左；AI + 提交 右 */
 .comment-reply-form .form-actions .comment-resolve-btn {
   margin-right: auto;
 }
 .comment-reply-form .form-actions button {
-  font-size: 11.5px;
-  font-weight: 500;
-  padding: 4px 12px;
-  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 550;
+  padding: 5px 11px;
+  border-radius: 6px;
   background: transparent;
   color: var(--text-2);
   border: 1px solid transparent;
   cursor: pointer;
-  transition: color 0.12s, background 0.12s, border-color 0.12s;
+  transition: color 0.12s, background 0.12s, border-color 0.12s, box-shadow 0.12s;
+  line-height: 1.3;
 }
 .comment-reply-form .form-actions button:hover {
   color: var(--text);
   background: var(--panel-2);
 }
-/* v3: 解决按钮 — docx 风格 outline 次要按钮 */
-/* 默认: form-actions 内显示; header 内隐藏 */
-.comment-reply-form .comment-resolve-btn { display: inline-flex; }
+.comment-reply-form .comment-resolve-btn { display: inline-flex; align-items: center; gap: 4px; }
 .comment-quote .comment-resolve-btn--header { display: none; }
-/* 折叠状态: form-actions 内隐藏 (按钮 + textarea 都被 body-wrap 隐藏); header 内显示 */
 .comment-thread.is-collapsed .comment-reply-form .comment-resolve-btn { display: none; }
-/* v1.32: 折叠态藏 header 解决按钮 — 折叠时只保留 quote (没有 +-按钮了, v1.31 删) */
 .comment-thread.is-collapsed .comment-quote .comment-resolve-btn--header { display: none; }
 .comment-reply-form .form-actions .comment-resolve-btn {
   font-weight: 500;
   color: var(--text-2);
   border: 1px solid var(--border-warm-medium);
+  border-radius: 6px;
+  padding: 5px 10px;
 }
 .comment-reply-form .form-actions .comment-resolve-btn:hover {
   color: var(--success);
-  background: rgba(31, 138, 101, 0.08);
-  border-color: var(--success);
+  background: rgba(31, 138, 101, 0.07);
+  border-color: rgba(31, 138, 101, 0.45);
 }
 .comment-reply-form .form-actions .comment-resolve-btn.is-resolved {
   color: var(--success);
-  border-color: var(--success);
+  border-color: rgba(31, 138, 101, 0.4);
   background: rgba(31, 138, 101, 0.06);
 }
 .comment-reply-form .form-actions .comment-resolve-btn.is-resolved:hover {
@@ -2303,15 +2358,11 @@ body.file-pane-collapsed #file-pane {
   color: #fff;
   border-color: var(--success);
 }
-/* v1.32: 删除 .comment-collapse-btn 主样式块 (docx 风格 22×22 + hover background + .is-collapsed 颜色)
-   +-折叠按钮 DOM/handler 已删 (用户表态'不必要'), CSS 一并清理不再用.
-   v1.30 纪律: 不要保留 dead CSS, 跟 dead element 一齐删.
-*/
-/* (v1.31 折叠按钮 docx 风格 CSS 块删除) */
+/* header 内解决按钮 (折叠态备用, 当前隐藏) */
 .comment-quote .comment-resolve-btn--header {
   flex: 0 0 auto;
-  width: 22px;
-  height: 22px;
+  width: 26px;
+  height: 26px;
   border: 1px solid transparent;
   background: var(--success);
   color: #fff;
@@ -2319,13 +2370,13 @@ body.file-pane-collapsed #file-pane {
   line-height: 1;
   font-weight: 700;
   cursor: pointer;
-  border-radius: 4px;
+  border-radius: 6px;
   align-items: center;
   justify-content: center;
   margin: -2px 0 0 2px;
   flex-shrink: 0;
   user-select: none;
-  box-shadow: 0 1px 2px rgba(31, 138, 101, 0.3);
+  box-shadow: 0 1px 2px rgba(31, 138, 101, 0.25);
 }
 .comment-quote .comment-resolve-btn--header:hover {
   background: #fff;
@@ -2343,31 +2394,43 @@ body.file-pane-collapsed #file-pane {
   color: #fff;
   border-color: var(--success);
 }
+/* 主按钮: 实心 accent pill — Docs/Linear CTA */
 .comment-reply-form .form-actions button.primary {
-  color: var(--accent);
+  color: #fff;
   font-weight: 600;
-  border-color: transparent;
+  background: var(--accent);
+  border-color: var(--accent);
+  padding: 5px 14px;
+  border-radius: 6px;
+  box-shadow: 0 1px 2px rgba(245, 78, 0, 0.2);
 }
 .comment-reply-form .form-actions button.primary:hover {
-  color: var(--accent);
-  background: var(--accent-soft);
+  color: #fff;
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+  box-shadow: 0 2px 6px rgba(245, 78, 0, 0.25);
 }
 .comment-reply-form .form-actions button:disabled,
 .comment-reply-form .form-actions button.primary:disabled {
   color: var(--text-3);
   cursor: not-allowed;
-  background: transparent;
+  background: var(--panel-3);
+  border-color: transparent;
+  box-shadow: none;
+  opacity: 0.7;
 }
 .comment-reply-form .form-actions button.primary:disabled:hover {
-  background: transparent;
+  background: var(--panel-3);
   color: var(--text-3);
+  border-color: transparent;
+  box-shadow: none;
 }
 
-/* === Float comment bar: 批注 | AI (v1.43.53) === */
+/* === Float bar: 批注 | AI 机器人 (v1.43.57 — 独立双 pill + bot icon) === */
 #float-comment-btn {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
   /* keep transform from .float-btn (translateX -50%) */
 }
 #float-comment-btn button {
@@ -2375,7 +2438,7 @@ body.file-pane-collapsed #file-pane {
   color: #ffffff;
   border: none;
   border-radius: var(--radius-pill);
-  padding: 5px 12px;
+  padding: 6px 12px 6px 10px;
   font-size: 12.5px;
   font-weight: 600;
   font-family: inherit;
@@ -2387,6 +2450,30 @@ body.file-pane-collapsed #file-pane {
   align-items: center;
   gap: 5px;
   line-height: 1.2;
+  white-space: nowrap;
+}
+#float-comment-btn .float-btn-label {
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0.01px;
+}
+/* 批注：气泡 icon（覆盖通用 .float-btn button::before） */
+#float-comment-btn button.float-comment-act::before,
+#float-comment-btn button[data-float-act="comment"]::before {
+  content: "";
+  display: block;
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  background-color: currentColor;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  mask-position: center;
+  -webkit-mask-size: contain;
+  mask-size: contain;
+  -webkit-mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z'/></svg>");
+  mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z'/></svg>");
 }
 #float-comment-btn button:hover {
   background: var(--accent-hover);
@@ -2397,15 +2484,28 @@ body.file-pane-collapsed #file-pane {
   transform: scale(0.98);
   box-shadow: 0 2px 6px rgba(245, 78, 0, 0.18);
 }
-/* AI 按钮：同高度 pill，深色底 + spark 图标，与「批注」并排 */
+/* AI：独立深色 pill + 小机器人 icon（Lucide bot） */
 #float-comment-btn button.float-ai-btn {
   background: #1f2937;
   box-shadow: 0 4px 14px rgba(31, 41, 55, 0.28), 0 1px 2px rgba(38, 37, 30, 0.08);
+  padding: 6px 12px 6px 10px;
 }
 #float-comment-btn button.float-ai-btn::before {
-  /* sparkles */
-  -webkit-mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5L12 3z'/><path d='M19 14l.75 2.25L22 17l-2.25.75L19 20l-.75-2.25L16 17l2.25-.75L19 14z'/></svg>");
-  mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5L12 3z'/><path d='M19 14l.75 2.25L22 17l-2.25.75L19 20l-.75-2.25L16 17l2.25-.75L19 14z'/></svg>");
+  content: "";
+  display: block;
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  background-color: currentColor;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  mask-position: center;
+  -webkit-mask-size: contain;
+  mask-size: contain;
+  /* Lucide bot */
+  -webkit-mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M12 8V4H8'/><rect width='16' height='12' x='4' y='8' rx='2'/><path d='M2 14h2'/><path d='M20 14h2'/><path d='M15 13v2'/><path d='M9 13v2'/></svg>");
+  mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M12 8V4H8'/><rect width='16' height='12' x='4' y='8' rx='2'/><path d='M2 14h2'/><path d='M20 14h2'/><path d='M15 13v2'/><path d='M9 13v2'/></svg>");
 }
 #float-comment-btn button.float-ai-btn:hover {
   background: #111827;
@@ -2414,29 +2514,121 @@ body.file-pane-collapsed #file-pane {
 #float-comment-btn button.float-ai-btn:active {
   box-shadow: 0 2px 6px rgba(17, 24, 39, 0.22);
 }
-/* 侧栏回复区：一键插入 @AI */
+/* 侧栏回复区：机器人 + AI 芯片 */
 .comment-reply-form .form-actions .comment-ai-prefix-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   border: 1px solid var(--border-warm-medium);
-  background: var(--panel-2);
+  background: var(--panel);
   color: var(--text-2);
-  border-radius: var(--radius-sm);
-  padding: 3px 8px;
-  font-size: 11px;
+  border-radius: 6px;
+  padding: 5px 9px 5px 7px;
+  font-size: 11.5px;
   font-weight: 600;
   font-family: inherit;
   cursor: pointer;
-  letter-spacing: 0.02em;
+  letter-spacing: 0.01em;
   flex-shrink: 0;
 }
+.comment-reply-form .form-actions .comment-ai-prefix-btn::before {
+  content: "";
+  display: block;
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+  background-color: currentColor;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  mask-position: center;
+  -webkit-mask-size: contain;
+  mask-size: contain;
+  -webkit-mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M12 8V4H8'/><rect width='16' height='12' x='4' y='8' rx='2'/><path d='M2 14h2'/><path d='M20 14h2'/><path d='M15 13v2'/><path d='M9 13v2'/></svg>");
+  mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M12 8V4H8'/><rect width='16' height='12' x='4' y='8' rx='2'/><path d='M2 14h2'/><path d='M20 14h2'/><path d='M15 13v2'/><path d='M9 13v2'/></svg>");
+}
 .comment-reply-form .form-actions .comment-ai-prefix-btn:hover {
-  background: var(--panel-3);
-  color: var(--text);
-  border-color: var(--border-warm);
+  background: #1f2937;
+  color: #fff;
+  border-color: #1f2937;
 }
 .comment-reply-form .form-actions .comment-ai-prefix-btn.is-active {
-  background: rgba(31, 41, 55, 0.08);
+  background: rgba(31, 41, 55, 0.1);
   color: #1f2937;
   border-color: #1f2937;
+}
+
+/* REVIEW prefix & float buttons */
+#float-comment-btn button.float-review-btn {
+  background: #4c1d95;
+  box-shadow: 0 4px 14px rgba(76, 29, 149, 0.28), 0 1px 2px rgba(38, 37, 30, 0.08);
+  padding: 6px 12px 6px 10px;
+}
+#float-comment-btn button.float-review-btn::before {
+  content: "";
+  display: block;
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  background-color: currentColor;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  mask-position: center;
+  -webkit-mask-size: contain;
+  mask-size: contain;
+  -webkit-mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5'/><path d='M9 18h6'/><path d='M10 22h4'/></svg>");
+  mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5'/><path d='M9 18h6'/><path d='M10 22h4'/></svg>");
+}
+#float-comment-btn button.float-review-btn:hover {
+  background: #3b0764;
+  box-shadow: 0 6px 18px rgba(59, 7, 100, 0.35), 0 2px 4px rgba(38, 37, 30, 0.08);
+}
+#float-comment-btn button.float-review-btn:active {
+  box-shadow: 0 2px 6px rgba(59, 7, 100, 0.22);
+}
+
+.comment-reply-form .form-actions .comment-review-prefix-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid var(--border-warm-medium);
+  background: var(--panel);
+  color: var(--text-2);
+  border-radius: 6px;
+  padding: 5px 9px 5px 7px;
+  font-size: 11.5px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  letter-spacing: 0.01em;
+  flex-shrink: 0;
+}
+.comment-reply-form .form-actions .comment-review-prefix-btn::before {
+  content: "";
+  display: block;
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+  background-color: currentColor;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  mask-position: center;
+  -webkit-mask-size: contain;
+  mask-size: contain;
+  -webkit-mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5'/><path d='M9 18h6'/><path d='M10 22h4'/></svg>");
+  mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5'/><path d='M9 18h6'/><path d='M10 22h4'/></svg>");
+}
+.comment-reply-form .form-actions .comment-review-prefix-btn:hover {
+  background: #4c1d95;
+  color: #fff;
+  border-color: #4c1d95;
+}
+.comment-reply-form .form-actions .comment-review-prefix-btn.is-active {
+  background: rgba(76, 29, 149, 0.1);
+  color: #4c1d95;
+  border-color: #4c1d95;
 }
 
 /* ============ Status bar ============ */
@@ -3027,13 +3219,14 @@ body.file-pane-collapsed #file-pane {
 .comment-pending-badge {
   flex-shrink: 0;
   font-size: 10px;
-  font-weight: 600;
+  font-weight: 650;
   letter-spacing: 0.02em;
   color: var(--accent);
   background: var(--accent-soft);
-  border-radius: 4px;
-  padding: 1px 6px;
-  line-height: 1.4;
+  border-radius: var(--radius-pill);
+  padding: 2px 7px;
+  line-height: 1.35;
+  border: 1px solid rgba(245, 78, 0, 0.12);
 }
 
 
@@ -3108,8 +3301,8 @@ body.file-pane-collapsed #file-pane {
   flex-direction: column;
   align-items: stretch;
   gap: 6px;
-  padding: 10px 12px 14px;
-  border-top: 1px solid var(--border-warm, rgba(38,37,30,0.09));
+  padding: 4px 2px 8px;
+  margin-top: 2px;
 }
 .comment-list-more-btn {
   appearance: none;
@@ -3137,9 +3330,9 @@ body.file-pane-collapsed #file-pane {
 
 /* v1.43.48: soft-limit 横幅（不再整表空白） */
 .comment-overflow-warn--inline {
-  margin: 8px 10px 4px;
+  margin: 0 0 2px;
   padding: 10px 12px;
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   background: rgba(217, 119, 6, 0.08);
   border: 1px solid rgba(217, 119, 6, 0.28);
   color: var(--text-2, rgba(38,37,30,0.62));
