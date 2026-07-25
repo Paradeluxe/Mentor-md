@@ -29023,29 +29023,29 @@ var HistoryState = class {
   }
 };
 var DEPTH_OVERFLOW = 20;
-function applyTransaction(history2, state, tr2, options) {
+function applyTransaction(history3, state, tr2, options) {
   let historyTr = tr2.getMeta(historyKey), rebased;
   if (historyTr)
     return historyTr.historyState;
   if (tr2.getMeta(closeHistoryKey))
-    history2 = new HistoryState(history2.done, history2.undone, null, 0, -1);
+    history3 = new HistoryState(history3.done, history3.undone, null, 0, -1);
   let appended = tr2.getMeta("appendedTransaction");
   if (tr2.steps.length == 0) {
-    return history2;
+    return history3;
   } else if (appended && appended.getMeta(historyKey)) {
     if (appended.getMeta(historyKey).redo)
-      return new HistoryState(history2.done.addTransform(tr2, void 0, options, mustPreserveItems(state)), history2.undone, rangesFor(tr2.mapping.maps), history2.prevTime, history2.prevComposition);
+      return new HistoryState(history3.done.addTransform(tr2, void 0, options, mustPreserveItems(state)), history3.undone, rangesFor(tr2.mapping.maps), history3.prevTime, history3.prevComposition);
     else
-      return new HistoryState(history2.done, history2.undone.addTransform(tr2, void 0, options, mustPreserveItems(state)), null, history2.prevTime, history2.prevComposition);
+      return new HistoryState(history3.done, history3.undone.addTransform(tr2, void 0, options, mustPreserveItems(state)), null, history3.prevTime, history3.prevComposition);
   } else if (tr2.getMeta("addToHistory") !== false && !(appended && appended.getMeta("addToHistory") === false)) {
     let composition = tr2.getMeta("composition");
-    let newGroup = history2.prevTime == 0 || !appended && history2.prevComposition != composition && (history2.prevTime < (tr2.time || 0) - options.newGroupDelay || !isAdjacentTo(tr2, history2.prevRanges));
-    let prevRanges = appended ? mapRanges(history2.prevRanges, tr2.mapping) : rangesFor(tr2.mapping.maps);
-    return new HistoryState(history2.done.addTransform(tr2, newGroup ? state.selection.getBookmark() : void 0, options, mustPreserveItems(state)), Branch.empty, prevRanges, tr2.time, composition == null ? history2.prevComposition : composition);
+    let newGroup = history3.prevTime == 0 || !appended && history3.prevComposition != composition && (history3.prevTime < (tr2.time || 0) - options.newGroupDelay || !isAdjacentTo(tr2, history3.prevRanges));
+    let prevRanges = appended ? mapRanges(history3.prevRanges, tr2.mapping) : rangesFor(tr2.mapping.maps);
+    return new HistoryState(history3.done.addTransform(tr2, newGroup ? state.selection.getBookmark() : void 0, options, mustPreserveItems(state)), Branch.empty, prevRanges, tr2.time, composition == null ? history3.prevComposition : composition);
   } else if (rebased = tr2.getMeta("rebased")) {
-    return new HistoryState(history2.done.rebased(tr2, rebased), history2.undone.rebased(tr2, rebased), mapRanges(history2.prevRanges, tr2.mapping), history2.prevTime, history2.prevComposition);
+    return new HistoryState(history3.done.rebased(tr2, rebased), history3.undone.rebased(tr2, rebased), mapRanges(history3.prevRanges, tr2.mapping), history3.prevTime, history3.prevComposition);
   } else {
-    return new HistoryState(history2.done.addMaps(tr2.mapping.maps), history2.undone.addMaps(tr2.mapping.maps), mapRanges(history2.prevRanges, tr2.mapping), history2.prevTime, history2.prevComposition);
+    return new HistoryState(history3.done.addMaps(tr2.mapping.maps), history3.undone.addMaps(tr2.mapping.maps), mapRanges(history3.prevRanges, tr2.mapping), history3.prevTime, history3.prevComposition);
   }
 }
 function isAdjacentTo(transform, prevRanges) {
@@ -29078,14 +29078,14 @@ function mapRanges(ranges, mapping) {
   }
   return result;
 }
-function histTransaction(history2, state, redo3) {
+function histTransaction(history3, state, redo3) {
   let preserveItems = mustPreserveItems(state);
   let histOptions = historyKey.get(state).spec.config;
-  let pop = (redo3 ? history2.undone : history2.done).popEvent(state, preserveItems);
+  let pop = (redo3 ? history3.undone : history3.done).popEvent(state, preserveItems);
   if (!pop)
     return null;
   let selection = pop.selection.resolve(pop.transform.doc);
-  let added = (redo3 ? history2.done : history2.undone).addTransform(pop.transform, state.selection.getBookmark(), histOptions, preserveItems);
+  let added = (redo3 ? history3.done : history3.undone).addTransform(pop.transform, state.selection.getBookmark(), histOptions, preserveItems);
   let newHist = new HistoryState(redo3 ? added : pop.remaining, redo3 ? pop.remaining : added, null, 0, -1);
   return pop.transform.setSelection(selection).setMeta(historyKey, { redo: redo3, historyState: newHist });
 }
@@ -29106,7 +29106,7 @@ function mustPreserveItems(state) {
 }
 var historyKey = new PluginKey("history");
 var closeHistoryKey = new PluginKey("closeHistory");
-function history(config = {}) {
+function history2(config = {}) {
   config = {
     depth: config.depth || 100,
     newGroupDelay: config.newGroupDelay || 500
@@ -29175,7 +29175,7 @@ var History = Extension2.create({
   },
   addProseMirrorPlugins() {
     return [
-      history(this.options)
+      history2(this.options)
     ];
   },
   addKeyboardShortcuts() {
@@ -63683,54 +63683,80 @@ async function tryReconnect() {
   }
 }
 document.addEventListener("DOMContentLoaded", boot);
+function _stripOpenQueryFromUrl() {
+  try {
+    const u = new URL(location.href);
+    if (!u.searchParams.has("open") && !u.searchParams.has("token")) return;
+    u.searchParams.delete("open");
+    u.searchParams.delete("token");
+    const q = u.searchParams.toString();
+    const next2 = u.pathname + (q ? "?" + q : "") + u.hash;
+    history.replaceState(null, "", next2);
+  } catch (e) {
+    console.warn("[?open] strip url failed:", e);
+  }
+}
+async function _fetchSessionToken() {
+  try {
+    const sr = await fetch(location.origin + "/session", { cache: "no-store" });
+    if (!sr.ok) return "";
+    const sj = await sr.json();
+    return sj && sj.token ? String(sj.token) : "";
+  } catch {
+    return "";
+  }
+}
 async function _handleUrlOpen() {
   const params = new URLSearchParams(location.search);
   const openPath = params.get("open");
   if (!openPath) return;
   const baseName = openPath.split("\\").pop().split("/").pop() || "open.mentor";
   if (State2.currentFile && State2.currentFile.name === baseName && hasWriteHandle()) {
-    console.log("[?open] already loaded with write handle via reconnect; skipping");
+    console.log("[?open] already loaded with write handle via reconnect; stripping url");
+    _stripOpenQueryFromUrl();
     return;
   }
+  let opened = false;
   try {
-    let token = params.get("token") || "";
-    if (!token) {
-      try {
-        const sr = await fetch(location.origin + "/session");
-        if (sr.ok) {
-          const sj = await sr.json();
-          if (sj && sj.token) token = sj.token;
-        }
-      } catch {
-      }
-    }
+    let token = await _fetchSessionToken();
+    if (!token) token = params.get("token") || "";
     const url = location.origin + "/open?path=" + encodeURIComponent(openPath) + (token ? "&token=" + encodeURIComponent(token) : "");
-    const r = await fetch(url);
+    const r = await fetch(url, { cache: "no-store" });
     if (!r.ok) {
       console.warn("[?open] fetch failed:", r.status, r.statusText);
-      showToast("\u65E0\u6CD5\u6253\u5F00: " + openPath + " (HTTP " + r.status + ")", 4e3);
-      return;
-    }
-    const blob = await r.blob();
-    const file = new File([blob], baseName, { type: "application/zip" });
-    for (let i = 0; i < 100 && !(State2.editor && typeof openFromMentorFile === "function"); i++) {
-      await new Promise((r2) => setTimeout(r2, 50));
-    }
-    if (typeof openFromMentorFile === "function" && State2.editor) {
-      State2.diskPathHint = openPath;
-      await openFromMentorFile(file);
-      if (isProtectedMentorTarget(baseName, openPath)) {
-        showToast("\u5DF2\u6253\u5F00\u53D7\u4FDD\u62A4\u6587\u7A3F \xB7 \u81EA\u52A8\u4FDD\u5B58\u5173\u95ED", 3e3);
-        setStatus("\u53D7\u4FDD\u62A4\u8DEF\u5F84", baseName + " \u2014 \u4FDD\u5B58\u4F1A\u786E\u8BA4\u5199\u56DE");
-      } else {
-        showToast("\u5DF2\u6253\u5F00 " + baseName, 2500);
-      }
+      showToast("\u65E0\u6CD5\u4ECE\u94FE\u63A5\u6253\u5F00\u6587\u4EF6 (HTTP " + r.status + ")\uFF0C\u5C1D\u8BD5\u91CD\u8FDE\u2026", 2800);
     } else {
-      console.warn("[?open] openFromMentorFile \u4E0D\u53EF\u7528\u6216 editor \u672A\u5C31\u7EEA");
-      showToast("\u5E94\u7528\u672A\u5C31\u7EEA, \u8BF7\u7A0D\u540E\u624B\u52A8\u6253\u5F00\u6587\u4EF6", 4e3);
+      const blob = await r.blob();
+      const file = new File([blob], baseName, { type: "application/zip" });
+      for (let i = 0; i < 100 && !(State2.editor && typeof openFromMentorFile === "function"); i++) {
+        await new Promise((r2) => setTimeout(r2, 50));
+      }
+      if (typeof openFromMentorFile === "function" && State2.editor) {
+        State2.diskPathHint = openPath;
+        await openFromMentorFile(file);
+        opened = true;
+        if (isProtectedMentorTarget(baseName, openPath)) {
+          showToast("\u5DF2\u6253\u5F00\u53D7\u4FDD\u62A4\u6587\u7A3F \xB7 \u81EA\u52A8\u4FDD\u5B58\u5173\u95ED", 3e3);
+          setStatus("\u53D7\u4FDD\u62A4\u8DEF\u5F84", baseName + " \u2014 \u4FDD\u5B58\u4F1A\u786E\u8BA4\u5199\u56DE");
+        } else {
+          showToast("\u5DF2\u6253\u5F00 " + baseName, 2500);
+        }
+      } else {
+        console.warn("[?open] openFromMentorFile \u4E0D\u53EF\u7528\u6216 editor \u672A\u5C31\u7EEA");
+        showToast("\u5E94\u7528\u672A\u5C31\u7EEA, \u8BF7\u7A0D\u540E\u624B\u52A8\u6253\u5F00\u6587\u4EF6", 4e3);
+      }
     }
   } catch (e) {
     console.warn("[?open] error:", e);
+  } finally {
+    _stripOpenQueryFromUrl();
+  }
+  if (!opened) {
+    try {
+      await tryReconnect();
+    } catch (e) {
+      console.warn("[?open] fallback tryReconnect failed:", e);
+    }
   }
 }
 document.addEventListener("DOMContentLoaded", () => setTimeout(_handleUrlOpen, 100));

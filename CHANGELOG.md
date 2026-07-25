@@ -2,6 +2,14 @@
 
 按时间倒序记录已发布的变化。最新条目在上方。
 
+## v1.44.2 (2026-07-25) — fix refresh 无法打开
+
+- Root cause: `?open=` + stale token / empty allowlist survived F5, toast 无法打开 every refresh
+- Server: valid session token may open any existing local `.mentor` (not only pre-allowlisted path)
+- Client: prefer live `/session` token; strip `open`/`token` from URL after attempt; fallback tryReconnect
+- cache-bust `?v=137`
+- test: `tests/e2e-url-open-strip.spec.js`
+
 ## v1.44.1 (2026-07-25) — 调整模式收敛：人类调整 / AI调整
 
 ### 改动

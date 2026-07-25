@@ -8825,54 +8825,82 @@ async function tryReconnect() {
   }
 }
 document.addEventListener("DOMContentLoaded", boot);
+function _stripOpenQueryFromUrl() {
+  try {
+    const u = new URL(location.href);
+    if (!u.searchParams.has("open") && !u.searchParams.has("token")) return;
+    u.searchParams.delete("open");
+    u.searchParams.delete("token");
+    const q = u.searchParams.toString();
+    const next = u.pathname + (q ? "?" + q : "") + u.hash;
+    history.replaceState(null, "", next);
+  } catch (e) {
+    console.warn("[?open] strip url failed:", e);
+  }
+}
+async function _fetchSessionToken() {
+  try {
+    const sr = await fetch(location.origin + "/session", { cache: "no-store" });
+    if (!sr.ok) return "";
+    const sj = await sr.json();
+    return sj && sj.token ? String(sj.token) : "";
+  } catch {
+    return "";
+  }
+}
 async function _handleUrlOpen() {
   const params = new URLSearchParams(location.search);
   const openPath = params.get("open");
   if (!openPath) return;
   const baseName = openPath.split("\\").pop().split("/").pop() || "open.mentor";
   if (State.currentFile && State.currentFile.name === baseName && hasWriteHandle()) {
-    console.log("[?open] already loaded with write handle via reconnect; skipping");
+    console.log("[?open] already loaded with write handle via reconnect; stripping url");
+    _stripOpenQueryFromUrl();
     return;
   }
+  let opened = false;
   try {
-    let token = params.get("token") || "";
-    if (!token) {
-      try {
-        const sr = await fetch(location.origin + "/session");
-        if (sr.ok) {
-          const sj = await sr.json();
-          if (sj && sj.token) token = sj.token;
-        }
-      } catch {
-      }
-    }
+    // Prefer live /session token — URL token dies every server restart.
+    let token = await _fetchSessionToken();
+    if (!token) token = params.get("token") || "";
     const url = location.origin + "/open?path=" + encodeURIComponent(openPath) + (token ? "&token=" + encodeURIComponent(token) : "");
-    const r = await fetch(url);
+    const r = await fetch(url, { cache: "no-store" });
     if (!r.ok) {
       console.warn("[?open] fetch failed:", r.status, r.statusText);
-      showToast("\u65E0\u6CD5\u6253\u5F00: " + openPath + " (HTTP " + r.status + ")", 4e3);
-      return;
-    }
-    const blob = await r.blob();
-    const file = new File([blob], baseName, { type: "application/zip" });
-    for (let i = 0; i < 100 && !(State.editor && typeof openFromMentorFile === "function"); i++) {
-      await new Promise((r2) => setTimeout(r2, 50));
-    }
-    if (typeof openFromMentorFile === "function" && State.editor) {
-      State.diskPathHint = openPath;
-      await openFromMentorFile(file);
-      if (isProtectedMentorTarget(baseName, openPath)) {
-        showToast("\u5DF2\u6253\u5F00\u53D7\u4FDD\u62A4\u6587\u7A3F \xB7 \u81EA\u52A8\u4FDD\u5B58\u5173\u95ED", 3e3);
-        setStatus("\u53D7\u4FDD\u62A4\u8DEF\u5F84", baseName + " \u2014 \u4FDD\u5B58\u4F1A\u786E\u8BA4\u5199\u56DE");
-      } else {
-        showToast("\u5DF2\u6253\u5F00 " + baseName, 2500);
-      }
+      showToast("\u65E0\u6CD5\u4ECE\u94FE\u63A5\u6253\u5F00\u6587\u4EF6 (HTTP " + r.status + ")\uFF0C\u5C1D\u8BD5\u91CD\u8FDE\u2026", 2800);
     } else {
-      console.warn("[?open] openFromMentorFile \u4E0D\u53EF\u7528\u6216 editor \u672A\u5C31\u7EEA");
-      showToast("\u5E94\u7528\u672A\u5C31\u7EEA, \u8BF7\u7A0D\u540E\u624B\u52A8\u6253\u5F00\u6587\u4EF6", 4e3);
+      const blob = await r.blob();
+      const file = new File([blob], baseName, { type: "application/zip" });
+      for (let i = 0; i < 100 && !(State.editor && typeof openFromMentorFile === "function"); i++) {
+        await new Promise((r2) => setTimeout(r2, 50));
+      }
+      if (typeof openFromMentorFile === "function" && State.editor) {
+        State.diskPathHint = openPath;
+        await openFromMentorFile(file);
+        opened = true;
+        if (isProtectedMentorTarget(baseName, openPath)) {
+          showToast("\u5DF2\u6253\u5F00\u53D7\u4FDD\u62A4\u6587\u7A3F \xB7 \u81EA\u52A8\u4FDD\u5B58\u5173\u95ED", 3e3);
+          setStatus("\u53D7\u4FDD\u62A4\u8DEF\u5F84", baseName + " \u2014 \u4FDD\u5B58\u4F1A\u786E\u8BA4\u5199\u56DE");
+        } else {
+          showToast("\u5DF2\u6253\u5F00 " + baseName, 2500);
+        }
+      } else {
+        console.warn("[?open] openFromMentorFile \u4E0D\u53EF\u7528\u6216 editor \u672A\u5C31\u7EEA");
+        showToast("\u5E94\u7528\u672A\u5C31\u7EEA, \u8BF7\u7A0D\u540E\u624B\u52A8\u6253\u5F00\u6587\u4EF6", 4e3);
+      }
     }
   } catch (e) {
     console.warn("[?open] error:", e);
+  } finally {
+    // Critical: strip ?open= so F5 does not loop the same failing deep-link.
+    _stripOpenQueryFromUrl();
+  }
+  if (!opened) {
+    try {
+      await tryReconnect();
+    } catch (e) {
+      console.warn("[?open] fallback tryReconnect failed:", e);
+    }
   }
 }
 document.addEventListener("DOMContentLoaded", () => setTimeout(_handleUrlOpen, 100));
