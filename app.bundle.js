@@ -58988,10 +58988,9 @@ function renderCommentList() {
         <div class="comment-quote" data-thread="${safeThreadId}" title="\u70B9\u51FB\u6536\u8D77/\u5C55\u5F00\u6279\u6CE8">
           <span class="comment-number-badge" data-number="${number}" title="\u6279\u6CE8 #${number}">${number}</span>
           <span class="comment-quote-text">${escapeHtml((thread.text || "").slice(0, 200))}${(thread.text || "").length > 200 ? "\u2026" : ""}</span>
-          ${threadType === "ai" ? '<span class="comment-type-badge is-ai" title="AI\u8C03\u6574">AI</span>' : threadType === "review" ? '<span class="comment-type-badge is-review" title="\u5386\u53F2\u5BA1\u9605">\u5BA1\u9605</span>' : '<span class="comment-type-badge is-human" title="\u4EBA\u7C7B\u8C03\u6574">\u4EBA\u7C7B</span>'}
+          ${threadType === "ai" ? '<span class="comment-type-badge is-ai" title="AI\u8C03\u6574">AI</span>' : threadType === "review" ? '<span class="comment-type-badge is-review" title="\u5386\u53F2\u5BA1\u9605">\u5BA1\u9605</span>' : ""}
           ${thread.pending ? '<span class="comment-pending-badge" title="\u672A\u63D0\u4EA4\u9996\u6761\u8BC4\u8BBA">\u8349\u7A3F</span>' : ""}
-          <!-- v3: \u89E3\u51B3\u6309\u94AE\u5728\u6298\u53E0\u72B6\u6001\u4E0B\u663E\u793A\u5728 header, \u5C55\u5F00\u72B6\u6001\u4E0B\u663E\u793A\u5728 form-actions \u5E95\u90E8 -->
-          <button class="comment-resolve-btn comment-resolve-btn--header ${thread.resolved ? "is-resolved" : ""}" data-act="resolve" data-thread="${safeThreadId}" title="${thread.resolved ? "\u91CD\u65B0\u6253\u5F00\u6B64\u6279\u6CE8" : "\u6807\u8BB0\u4E3A\u5DF2\u89E3\u51B3"}" aria-label="${thread.resolved ? "\u91CD\u65B0\u6253\u5F00" : "\u6807\u8BB0\u4E3A\u5DF2\u89E3\u51B3"}">${thread.resolved ? "\u21BA" : "\u2713"}</button>
+
           <button class="comment-menu-btn" data-act="toggle-menu" data-thread="${safeThreadId}" title="\u66F4\u591A\u64CD\u4F5C" aria-label="\u66F4\u591A\u64CD\u4F5C">\u22EF</button>
         </div>
         <!-- \u22EF \u5F39\u7A97\u83DC\u5355 (\u9ED8\u8BA4 hidden) \u2014 v6: SVG icons, \u4E0D\u7528 emoji -->
@@ -59042,7 +59041,7 @@ function renderCommentList() {
               <textarea data-thread-input="${safeThreadId}" placeholder="${escapeHtml(markerPlaceholder(threadType, !!first3.body))}" autocomplete="off"></textarea>
               <!-- Mode locked at create (float). No in-card type switch. -->
               <div class="form-actions">
-                <button class="comment-resolve-btn ${thread.resolved ? "is-resolved" : ""}" data-act="resolve" data-thread="${safeThreadId}" title="${thread.resolved ? "\u91CD\u65B0\u6253\u5F00\u6B64\u6279\u6CE8" : "\u6807\u8BB0\u4E3A\u5DF2\u89E3\u51B3"}" aria-label="${thread.resolved ? "\u91CD\u65B0\u6253\u5F00" : "\u6807\u8BB0\u4E3A\u5DF2\u89E3\u51B3"}">${thread.resolved ? "\u21BA \u91CD\u65B0\u6253\u5F00" : "\u2713 \u89E3\u51B3"}</button>
+                <button class="comment-resolve-btn ${thread.resolved ? "is-resolved" : ""}" data-act="resolve" data-thread="${safeThreadId}" title="${thread.resolved ? "\u91CD\u65B0\u6253\u5F00\u6B64\u6279\u6CE8" : "\u6807\u8BB0\u4E3A\u5DF2\u89E3\u51B3"}" aria-label="${thread.resolved ? "\u91CD\u65B0\u6253\u5F00" : "\u6807\u8BB0\u4E3A\u5DF2\u89E3\u51B3"}">${thread.resolved ? "\u91CD\u5F00" : "\u89E3\u51B3"}</button>
                 <button data-act="submit-reply" data-thread="${safeThreadId}" class="primary" disabled title="\u8F93\u5165\u5185\u5BB9\u540E\u53EF\u63D0\u4EA4 (Ctrl+Enter)">\u63D0\u4EA4</button>
               </div>
             </div>

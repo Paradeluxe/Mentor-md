@@ -164,6 +164,7 @@ const { chromium } = require('playwright');
       M.renderCommentList();
       const cardH = document.querySelector(`[data-thread="${tidH}"]`);
       const humanBadge = !!cardH && !!cardH.querySelector('.comment-type-badge.is-human');
+      const noHumanBadge = !humanBadge; // default human = no badge (AI/review only)
       const noSwitcherH = !cardH || !cardH.querySelector('.comment-type-switch, [data-act="set-type"]');
 
       // create AI on second phrase
@@ -199,7 +200,7 @@ const { chromium } = require('playwright');
 
       return {
         aiCreateType: thrA.threadType,
-        humanBadge,
+        noHumanBadge,
         aiBadge,
         noSwitcherH,
         noSwitcherA,
@@ -218,7 +219,7 @@ const { chromium } = require('playwright');
     if (
       r.aiCreateType !== 'ai' ||
       !r.aiStillAi ||
-      !r.humanBadge ||
+      !r.noHumanBadge ||
       !r.aiBadge ||
       !r.noSwitcherH ||
       !r.noSwitcherA ||
