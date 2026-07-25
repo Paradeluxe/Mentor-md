@@ -4,10 +4,10 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Mentor — 像 docx 一样批注 Markdown</title>
-<meta name="build" content="v1.44.5 cache-bust v=140" />
+<meta name="build" content="v1.44.6 cache-bust v=141" />
 <!-- v1.43.37 offline: local fonts + KaTeX (no CDN) -->
 <link rel="stylesheet" href="vendor/fonts/local-fonts.css?v=1" />
-<link rel="stylesheet" href="styles.css?v=140" />
+<link rel="stylesheet" href="styles.css?v=141" />
 <link rel="stylesheet" href="vendor/katex/katex.min.css?v=1" />
 <!-- 字体：系统无衬线 + 等宽（侧栏时间戳、文件名） -->
 <style>
@@ -199,7 +199,7 @@
 
 <!-- v1.43.37 offline: bundled app (esbuild) + local icons; no esm.sh -->
 <script src="icons.js?v=3"></script>
-<script type="module" src="app.bundle.js?v=140"></script>
+<script type="module" src="app.bundle.js?v=141"></script>
 <!-- 帮助 popover (浮在 body 顶层, 位置由 JS 动态计算) -->
 <div id="help-popover" class="help-popover hidden" role="tooltip">
   <div class="help-popover-arrow"></div>
@@ -219,6 +219,14 @@
   <button id="help-demo-btn" class="help-demo-btn" title="加载一段示例文档, 看完整批注流程">▶ 看示例</button>
   <p class="help-popover-footer">快捷键: <kbd>Ctrl</kbd>+<kbd>B</kbd> 加粗 · <kbd>Ctrl</kbd>+<kbd>I</kbd> 斜体 · <kbd>Ctrl</kbd>+<kbd>S</kbd> 保存</p>
   <button class="help-popover-close" data-act="close-help" aria-label="关闭">×</button>
+</div>
+
+
+<!-- v1.44.6: soft update banner (hidden until check finds newer release) -->
+<div id="update-banner" class="update-banner hidden" role="status" aria-live="polite">
+  <span class="update-banner-text" id="update-banner-text">有新版本</span>
+  <a class="update-banner-link" id="update-banner-link" href="https://github.com/Paradeluxe/Mentor-md/releases/latest" target="_blank" rel="noopener">查看</a>
+  <button type="button" class="update-banner-dismiss" id="update-banner-dismiss" aria-label="关闭" title="本次关闭">×</button>
 </div>
 
 <!-- v1.42: 设置 popover (批注数量上限) -->
@@ -249,6 +257,15 @@
         </div>
         <p class="settings-current" id="settings-autosave-debounce-current"></p>
       </div>
+  <div class="settings-section settings-section-version">
+    <label class="settings-label">版本</label>
+    <p class="settings-hint" id="settings-version-current">当前 —</p>
+    <p class="settings-current" id="settings-version-status"></p>
+    <div class="settings-version-actions">
+      <button type="button" class="settings-opt" id="settings-check-update">检查更新</button>
+      <a class="settings-version-link hidden" id="settings-version-link" href="https://github.com/Paradeluxe/Mentor-md/releases/latest" target="_blank" rel="noopener">打开下载页</a>
+    </div>
+  </div>
       <button class="settings-popover-close" data-act="close-settings" aria-label="关闭">×</button>
 </div>
 </body>

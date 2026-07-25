@@ -2,6 +2,29 @@
 
 按时间倒序记录已发布的变化。最新条目在上方。
 
+## v1.44.6 (2026-07-25) — 升级检测
+
+用户: 「有没有办法给mentor加一个升级检测功能」
+
+### 行为
+- 启动 3.5s 后静默查 GitHub `Paradeluxe/Mentor-md` latest release（24h TTL）
+- 无 Release 时 fallback tags
+- 有新版本：顶栏 soft banner + 设置里「打开下载页」
+- 设置 → 版本 → **检查更新**（强制）
+- 离线/失败静默；不自动改本地文件
+- 本地版本读 `<meta name="build">`
+
+### API
+- `__mdAnnotator.checkForUpdate / getLocalMentorVersion / compareSemver`
+
+### 测试
+- `node tests/v144-update-check.spec.js`
+
+### Cache
+- bump `?v=`
+
+---
+
 ## v1.44.5 (2026-07-25) — 按钮文案大厂化
 
 用户: 「按钮的名字可否优化？大厂规范是什么？」

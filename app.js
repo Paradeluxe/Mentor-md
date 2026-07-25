@@ -8664,6 +8664,245 @@ function setupTableControls() {
   const pane = document.querySelector("#editor-pane");
   if (pane) pane.addEventListener("scroll", () => updateTableControls(), { passive: true });
 }
+
+/* ===== v1.44.6 update detection (GitHub Releases, offline-silent) ===== */
+const MENTOR_UPDATE_REPO = "Paradeluxe/Mentor-md";
+const MENTOR_UPDATE_API = `https://api.github.com/repos/${MENTOR_UPDATE_REPO}/releases/latest`;
+const MENTOR_RELEASES_URL = `https://github.com/${MENTOR_UPDATE_REPO}/releases/latest`;
+const MENTOR_UPDATE_LS = "Mentor:updateCheck";
+const MENTOR_UPDATE_TTL_MS = 24 * 60 * 60 * 1000;
+
+function getLocalMentorVersion() {
+  try {
+    const meta = document.querySelector('meta[name="build"]');
+    const content = (meta && meta.getAttribute("content")) || "";
+    const m = content.match(/v(\d+\.\d+\.\d+)/i);
+    if (m) return m[1];
+  } catch (_) {}
+  return "0.0.0";
+}
+
+function parseSemver(v) {
+  const s = String(v || "").trim().replace(/^v/i, "");
+  const m = s.match(/^(\d+)\.(\d+)\.(\d+)/);
+  if (!m) return null;
+  return [parseInt(m[1], 10), parseInt(m[2], 10), parseInt(m[3], 10)];
+}
+
+/** @returns {number} >0 if a>b, 0 equal, <0 if a<b, NaN if unparsable */
+function compareSemver(a, b) {
+  const pa = parseSemver(a);
+  const pb = parseSemver(b);
+  if (!pa || !pb) return NaN;
+  for (let i = 0; i < 3; i++) {
+    if (pa[i] !== pb[i]) return pa[i] - pb[i];
+  }
+  return 0;
+}
+
+function readUpdateCache() {
+  try {
+    const raw = localStorage.getItem(MENTOR_UPDATE_LS);
+    if (!raw) return null;
+    const o = JSON.parse(raw);
+    if (!o || typeof o !== "object") return null;
+    return o;
+  } catch (_) {
+    return null;
+  }
+}
+
+function writeUpdateCache(partial) {
+  try {
+    const prev = readUpdateCache() || {};
+    const next = { ...prev, ...partial, updatedAt: Date.now() };
+    localStorage.setItem(MENTOR_UPDATE_LS, JSON.stringify(next));
+    return next;
+  } catch (_) {
+    return null;
+  }
+}
+
+function dismissUpdateBanner() {
+  const banner = document.querySelector("#update-banner");
+  if (banner) banner.classList.add("hidden");
+  const cache = readUpdateCache() || {};
+  writeUpdateCache({ dismissedLatest: cache.latest || null, dismissedAt: Date.now() });
+}
+
+function renderUpdateUi(state) {
+  const local = state.local || getLocalMentorVersion();
+  const curEl = document.querySelector("#settings-version-current");
+  const stEl = document.querySelector("#settings-version-status");
+  const linkEl = document.querySelector("#settings-version-link");
+  const banner = document.querySelector("#update-banner");
+  const bannerText = document.querySelector("#update-banner-text");
+  const bannerLink = document.querySelector("#update-banner-link");
+  if (curEl) curEl.textContent = `当前 v${local}`;
+  if (bannerLink) bannerLink.href = state.htmlUrl || MENTOR_RELEASES_URL;
+  if (linkEl) linkEl.href = state.htmlUrl || MENTOR_RELEASES_URL;
+
+  const hasNewer = !!(state.latest && compareSemver(state.latest, local) > 0);
+  const cache = readUpdateCache() || {};
+  const dismissed = hasNewer && cache.dismissedLatest === state.latest;
+
+  if (stEl) {
+    if (state.error === "offline") stEl.textContent = "离线 — 无法检查";
+    else if (state.error === "network") stEl.textContent = "检查失败（网络）";
+    else if (state.error === "api") stEl.textContent = "检查失败（GitHub）";
+    else if (state.checking) stEl.textContent = "检查中…";
+    else if (hasNewer) stEl.textContent = `有新版本 v${state.latest}`;
+    else if (state.latest) stEl.textContent = "已是最新";
+    else stEl.textContent = "";
+  }
+  if (linkEl) linkEl.classList.toggle("hidden", !hasNewer);
+
+  if (banner && bannerText) {
+    if (hasNewer && !dismissed && state.showBanner !== false) {
+      bannerText.textContent = `Mentor v${state.latest} 可用（当前 v${local}）`;
+      banner.classList.remove("hidden");
+    } else if (!hasNewer) {
+      banner.classList.add("hidden");
+    }
+  }
+}
+
+/**
+ * Check GitHub latest release.
+ * @param {{force?: boolean, quiet?: boolean, showBanner?: boolean}} opts
+ * force: ignore 24h TTL. quiet: no toast on "already latest".
+ */
+async function checkForUpdate(opts = {}) {
+  const force = !!opts.force;
+  const quiet = opts.quiet !== false; // default quiet for auto
+  const showBanner = opts.showBanner !== false;
+  const local = getLocalMentorVersion();
+  const cache = readUpdateCache() || {};
+  const now = Date.now();
+
+  if (!force && cache.checkedAt && now - cache.checkedAt < MENTOR_UPDATE_TTL_MS && cache.latest) {
+    const state = {
+      local,
+      latest: cache.latest,
+      htmlUrl: cache.htmlUrl || MENTOR_RELEASES_URL,
+      fromCache: true,
+      showBanner,
+    };
+    renderUpdateUi(state);
+    return state;
+  }
+
+  if (typeof navigator !== "undefined" && navigator.onLine === false) {
+    const state = { local, error: "offline", showBanner: false };
+    renderUpdateUi(state);
+    return state;
+  }
+
+  renderUpdateUi({ local, checking: true, showBanner: false });
+  const btn = document.querySelector("#settings-check-update");
+  if (btn) btn.classList.add("is-busy");
+
+  try {
+    const ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
+    const timer = ctrl ? setTimeout(() => ctrl.abort(), 8000) : null;
+    const res = await fetch(MENTOR_UPDATE_API, {
+      method: "GET",
+      headers: { Accept: "application/vnd.github+json" },
+      signal: ctrl ? ctrl.signal : undefined,
+      cache: "no-store",
+    });
+    if (timer) clearTimeout(timer);
+    if (!res.ok) {
+      // No releases yet → fall back to tags
+      if (res.status === 404) {
+        const tagsRes = await fetch(
+          `https://api.github.com/repos/${MENTOR_UPDATE_REPO}/tags?per_page=5`,
+          {
+            method: "GET",
+            headers: { Accept: "application/vnd.github+json" },
+            signal: ctrl ? ctrl.signal : undefined,
+            cache: "no-store",
+          }
+        );
+        if (tagsRes.ok) {
+          const tags = await tagsRes.json();
+          const tagName = Array.isArray(tags) && tags[0] ? String(tags[0].name || "") : "";
+          const latestFromTag = (parseSemver(tagName) && tagName.replace(/^v/i, "")) || "";
+          if (latestFromTag) {
+            const htmlUrl = MENTOR_RELEASES_URL;
+            writeUpdateCache({ checkedAt: Date.now(), latest: latestFromTag, htmlUrl, tag: tagName, source: "tags" });
+            const state = { local, latest: latestFromTag, htmlUrl, tag: tagName, showBanner, source: "tags" };
+            renderUpdateUi(state);
+            const cmp = compareSemver(latestFromTag, local);
+            if (!quiet) {
+              if (cmp > 0) showToast(`有新版本 v${latestFromTag}`, 2800);
+              else if (cmp === 0) showToast("已是最新版本", 1800);
+            }
+            return state;
+          }
+        }
+      }
+      const state = { local, error: "api", status: res.status, showBanner: false };
+      renderUpdateUi(state);
+      if (!quiet) showToast("检查更新失败", 2200);
+      return state;
+    }
+    const data = await res.json();
+    const tag = String(data.tag_name || data.name || "").trim();
+    const latest = (parseSemver(tag) && tag.replace(/^v/i, "")) || "";
+    const htmlUrl = data.html_url || MENTOR_RELEASES_URL;
+    writeUpdateCache({
+      checkedAt: Date.now(),
+      latest,
+      htmlUrl,
+      tag,
+    });
+    const state = { local, latest, htmlUrl, tag, showBanner };
+    renderUpdateUi(state);
+    const cmp = compareSemver(latest, local);
+    if (!quiet) {
+      if (cmp > 0) showToast(`有新版本 v${latest}`, 2800);
+      else if (cmp === 0) showToast("已是最新版本", 1800);
+      else if (latest) showToast(`当前 v${local}（远端 v${latest}）`, 2200);
+    }
+    return state;
+  } catch (e) {
+    const state = { local, error: "network", message: String(e && e.message || e), showBanner: false };
+    renderUpdateUi(state);
+    if (!quiet) showToast("检查更新失败（网络）", 2200);
+    return state;
+  } finally {
+    if (btn) btn.classList.remove("is-busy");
+  }
+}
+
+function initUpdateUi() {
+  const local = getLocalMentorVersion();
+  renderUpdateUi({ local, latest: (readUpdateCache() || {}).latest, htmlUrl: (readUpdateCache() || {}).htmlUrl, showBanner: true });
+
+  const dismiss = document.querySelector("#update-banner-dismiss");
+  if (dismiss && !dismiss._mentorBound) {
+    dismiss._mentorBound = true;
+    dismiss.addEventListener("click", (e) => {
+      e.preventDefault();
+      dismissUpdateBanner();
+    });
+  }
+  const checkBtn = document.querySelector("#settings-check-update");
+  if (checkBtn && !checkBtn._mentorBound) {
+    checkBtn._mentorBound = true;
+    checkBtn.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      checkForUpdate({ force: true, quiet: false, showBanner: true });
+    });
+  }
+  // deferred auto-check: don't compete with boot reconnect
+  setTimeout(() => {
+    checkForUpdate({ force: false, quiet: true, showBanner: true }).catch(() => {});
+  }, 3500);
+}
+
 async function boot() {
   setTheme(getTheme(), { persist: false });
   initEditor();
@@ -8755,6 +8994,11 @@ async function boot() {
     console.log("[boot] ?open= present, skipping tryReconnect (handled by _handleUrlOpen)");
   } else {
     await tryReconnect();
+  }
+  try {
+    initUpdateUi();
+  } catch (e) {
+    console.warn("[update] init failed", e);
   }
 }
 async function tryReconnect() {
@@ -8939,6 +9183,9 @@ window.__mdAnnotator = {
   snapshotActiveTab,
   switchToTab,
   closeTab,
+  checkForUpdate,
+  getLocalMentorVersion,
+  compareSemver,
   openNewTabBlank,
   createDisplayObjectURL,
   injectMediaFiles,
