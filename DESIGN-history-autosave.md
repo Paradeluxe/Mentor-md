@@ -259,3 +259,21 @@ dirty 状态：
 5. autosave timer + handle 写盘
 6. e2e test
 7. 全量回归
+
+## 6. Draft vs external disk write (v1.44.7)
+
+三层状态：磁盘 `.mentor` zip · FileSystemFileHandle 写回 · IDB `DraftStore` 崩溃草稿。
+
+| 场景 | 裁决 |
+|---|---|
+| 用户主动打开 | `preferDraft=false` → 磁盘 |
+| tryReconnect 崩溃恢复 | `preferDraft=true` + `resolveDraftConflict` |
+| draft.updatedAt > diskMtime | 用草稿（未保存编辑） |
+| diskMtime ≥ draft.updatedAt | **用磁盘**，并 `deleteDraft` |
+| 时钟缺失且内容不同 | `confirm`，默认磁盘 |
+| writeCurrentToHandle 成功 | DraftStore/idbCache 与磁盘对齐 |
+| mtime 变且 dirty | `external-modified`：停 autosave，提示重开磁盘 |
+
+API: `__mdAnnotator.resolveDraftConflict`
+测试: `tests/v143-draft-vs-external-write.spec.js`
+

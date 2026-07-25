@@ -885,6 +885,8 @@ function uuid() {
 function escapeHtml(s) {
   return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 }
+function escapeAttr(s) { return escapeHtml(s); }
+
 function normalizeAuthor(a) {
   if (!a) return { id: "", name: "\u533F\u540D" };
   if (typeof a === "string") return { id: "", name: a || "\u533F\u540D" };
@@ -1691,6 +1693,30 @@ async function restoreDraftIfAny(documentId, name) {
     return null;
   }
 }
+/**
+ * Decide whether crash-recovery should use IDB draft or disk bytes.
+ * Disk is the cross-tool source of truth; draft only wins when clearly newer.
+ * @returns {'disk'|'draft'|'prompt'}
+ */
+function resolveDraftConflict({ diskBody, diskAnns, diskMtime, draft, forceDisk } = {}) {
+  if (forceDisk || !draft) return "disk";
+  const draftBody = typeof draft.body === "string" ? draft.body : "";
+  const draftAnns = draft.annotations || (draft.sidecar && draft.sidecar.annotations) || [];
+  const diskBodyStr = typeof diskBody === "string" ? diskBody : "";
+  const diskAnnsArr = Array.isArray(diskAnns) ? diskAnns : [];
+  const bodyDiff = draftBody.length > 0 && draftBody !== diskBodyStr;
+  const annDiff = draftAnns.length > 0 && JSON.stringify(draftAnns) !== JSON.stringify(diskAnnsArr);
+  if (!bodyDiff && !annDiff) return "disk";
+  const dAt = Number(draft.updatedAt || 0);
+  const mAt = diskMtime == null || diskMtime === "" ? null : Number(diskMtime);
+  if (mAt != null && !Number.isNaN(mAt) && dAt > 0) {
+    if (dAt > mAt) return "draft";
+    return "disk"; // disk newer or equal → external/tool win
+  }
+  return "prompt";
+}
+
+
 function mediaPathForSrc(src) {
   if (!src || typeof src !== "string") return "";
   if (src.startsWith("media/")) return src;
@@ -2035,6 +2061,31 @@ async function writeCurrentToHandle({ reason = "manual", showProgress = false } 
   } catch (e) {
     console.warn("[save] IDB put \u5931\u8D25:", e);
   }
+  // Align crash-recovery draft with what just hit disk (prevents stale draft fighting newer disk)
+  try {
+    const docId = snapshot.documentId || snapshot.name;
+    const mem = {
+      body: snapshot.mdText,
+      sidecar: snapshot.sidecar,
+      annotations: (snapshot.sidecar && snapshot.sidecar.annotations) || [],
+      updatedAt: Date.now(),
+      documentId: docId,
+      name: snapshot.name
+    };
+    if (State.idbCache) {
+      State.idbCache[docId] = mem;
+      if (snapshot.name) State.idbCache[snapshot.name] = mem;
+    }
+    await DraftStore.putDraft({
+      documentId: docId,
+      name: snapshot.name,
+      body: snapshot.mdText,
+      annotations: mem.annotations,
+      sidecar: snapshot.sidecar
+    });
+  } catch (eDraft) {
+    console.warn("[save] DraftStore sync failed:", eDraft);
+  }
   if (showProgress) hideExportProgress("\u5DF2\u4FDD\u5B58");
   return { ok: true };
 }
@@ -2083,8 +2134,14 @@ async function autosaveNow() {
       setStatus("\u81EA\u52A8\u4FDD\u5B58\u5DF2\u8DF3\u8FC7", "\u53D7\u4FDD\u62A4\u8DEF\u5F84 " + mentorBaseName(State.currentFile.name));
     } else if (result.error === "external-modified" && !autosaveNow._externalToast) {
       autosaveNow._externalToast = true;
-      showToast("\u68C0\u6D4B\u5230\u5916\u90E8\u4FEE\u6539: \u81EA\u52A8\u4FDD\u5B58\u5DF2\u6682\u505C \u2014 \u8BF7\u624B\u52A8\u4FDD\u5B58\u6216\u91CD\u65B0\u52A0\u8F7D", 5e3);
-      setStatus("\u5916\u90E8\u5DF2\u4FEE\u6539", mentorBaseName(State.currentFile && State.currentFile.name));
+      showToast(
+        "\u78C1\u76D8\u4E0A\u7684\u6587\u4EF6\u5DF2\u88AB\u5916\u90E8\u4FEE\u6539\uFF0C\u81EA\u52A8\u4FDD\u5B58\u5DF2\u6682\u505C\u3002\u8BF7\u91CD\u65B0\u6253\u5F00\u78C1\u76D8\u7248\uFF08\u52FF\u5728\u65E7\u7F13\u51B2\u4E0A Ctrl+S \u8986\u76D6\uFF09\uFF0C\u6216\u53E6\u5B58\u526F\u672C\u3002",
+        6e3
+      );
+      setStatus(
+        "\u5916\u90E8\u5DF2\u4FEE\u6539 \u00B7 \u6682\u505C autosave",
+        mentorBaseName(State.currentFile && State.currentFile.name) + " \u2014 \u91CD\u5F00\u6587\u4EF6\u7528\u78C1\u76D8"
+      );
     }
     return;
   }
@@ -5459,7 +5516,9 @@ async function activateOpenedDocument({
   quiet = false,
   // preferDraft default false: intentional open uses disk. tryReconnect passes true for crash recovery.
   preferDraft = false,
-  forceDisk = false
+  forceDisk = false,
+  // disk file lastModified (ms) when opened from handle — used to beat stale IDB drafts
+  diskMtime = null
 } = {}) {
   if (!name) throw new Error("activateOpenedDocument: name required");
   const resolvedDocumentId = await resolveDocumentId({ name, content, handle, documentId });
@@ -5470,12 +5529,13 @@ async function activateOpenedDocument({
   if (mediaFiles && Object.keys(mediaFiles).length > 0) {
     await injectMediaFiles(mediaFiles);
   }
-  // Crash recovery (preferDraft=true, e.g. tryReconnect): prefer DraftStore / idbCache over disk
+  // Crash recovery (preferDraft=true): DraftStore only if draft is newer than disk (or prompt).
+  // External tools (fix-mentor) often write the zip while a stale IDB draft still exists —
+  // disk mtime wins so AI replies / body edits are not wiped on reconnect.
   let contentOut = content;
   let annotationsOut = annotations;
   if (preferDraft && !forceDisk) {
     try {
-      // Prefer documentId match only — avoid basename collisions across files
       let draft = await restoreDraftIfAny(resolvedDocumentId, null);
       if (!draft) {
         const byName = await restoreDraftIfAny(null, name);
@@ -5484,9 +5544,7 @@ async function activateOpenedDocument({
         }
       }
       if (!draft) {
-        const cached = State.idbCache && (
-          State.idbCache[resolvedDocumentId] || null
-        );
+        const cached = State.idbCache && (State.idbCache[resolvedDocumentId] || null);
         if (cached && (typeof cached.body === "string" || cached.annotations || cached.sidecar)) {
           draft = {
             documentId: cached.documentId || resolvedDocumentId,
@@ -5505,9 +5563,29 @@ async function activateOpenedDocument({
         const diskAnns = annotations && Array.isArray(annotations.annotations)
           ? annotations.annotations
           : Array.isArray(annotations) ? annotations : [];
-        const bodyDiffers = draftBody.length > 0 && draftBody !== diskBody;
-        const annDiffers = draftAnns.length > 0 && JSON.stringify(draftAnns) !== JSON.stringify(diskAnns);
-        if (bodyDiffers || annDiffers) {
+        let decision = resolveDraftConflict({
+          diskBody,
+          diskAnns,
+          diskMtime,
+          draft,
+          forceDisk: false
+        });
+        if (decision === "prompt") {
+          // Default = disk (safer when external tools may have written). OK = disk, Cancel = draft.
+          let useDisk = true;
+          try {
+            useDisk = confirm(
+              "\u78C1\u76D8\u4E0E\u672C\u5730\u8349\u7A3F\u4E0D\u4E00\u81F4\u3002\n\n" +
+              "\u786E\u5B9A = \u4F7F\u7528\u78C1\u76D8\uFF08\u63A8\u8350\uFF1B\u5916\u90E8\u5DE5\u5177\u521A\u6539\u8FC7\u65F6\u9009\u8FD9\u4E2A\uFF09\n" +
+              "\u53D6\u6D88 = \u4F7F\u7528\u672C\u5730\u8349\u7A3F"
+            );
+          } catch (_) {
+            useDisk = true;
+          }
+          decision = useDisk ? "disk" : "draft";
+        }
+        if (decision === "draft") {
+          const bodyDiffers = draftBody.length > 0 && draftBody !== diskBody;
           if (bodyDiffers) contentOut = draftBody;
           if (draftAnns.length > 0) {
             annotationsOut = draft.sidecar && draft.sidecar.annotations
@@ -5521,11 +5599,25 @@ async function activateOpenedDocument({
                 };
           }
           console.log(
-            `[Draft] preferred unsaved draft over disk (bodyDiff=${bodyDiffers}, annDiff=${annDiffers}, updatedAt=${draft.updatedAt || 0})`
+            `[Draft] preferred unsaved draft over disk (updatedAt=${draft.updatedAt || 0}, diskMtime=${diskMtime})`
           );
           try {
             showToast("\u5DF2\u4ECE\u672C\u5730\u8349\u7A3F\u6062\u590D\u672A\u4FDD\u5B58\u4FEE\u6539", 2800);
           } catch (_) {}
+        } else {
+          console.log(
+            `[Draft] kept disk over draft (decision=disk, draftAt=${draft.updatedAt || 0}, diskMtime=${diskMtime})`
+          );
+          try {
+            const did = draft.documentId || resolvedDocumentId;
+            if (did) await DraftStore.deleteDraft(did);
+            if (State.idbCache) {
+              if (resolvedDocumentId) delete State.idbCache[resolvedDocumentId];
+              if (name) delete State.idbCache[name];
+            }
+          } catch (eDel) {
+            console.warn("[Draft] delete stale draft failed:", eDel);
+          }
         }
       }
     } catch (e) {
@@ -6303,6 +6395,7 @@ async function openFromHandle(fileHandle, sidecarHandle = null, options = {}) {
 async function openFromMentorHandle(fileHandle, options = {}) {
   const quiet = !!(options && options.quiet);
   const preferDraft = !!(options && options.preferDraft);
+  const forceDisk = !!(options && options.forceDisk);
   const documentIdOpt = options && options.documentId || null;
   await ensureWritePermission(fileHandle);
   const file = await fileHandle.getFile();
@@ -6317,7 +6410,9 @@ async function openFromMentorHandle(fileHandle, options = {}) {
     documentId: documentIdOpt,
     saveMode: "mentor-handle",
     quiet,
-    preferDraft
+    preferDraft,
+    forceDisk,
+    diskMtime: file.lastModified
   });
   if (!State.diskPathHint) State.diskPathHint = file.name;
   if (isProtectedMentorTarget(file.name, State.diskPathHint)) {
@@ -7623,10 +7718,11 @@ function setupFileListDropdown() {
     if (!e.target.closest("#file-list-wrap")) closeFileListDropdown();
   });
   document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") closeFileListDropdown();
-  });
-  refreshFileListDropdown();
-}
+      if (e.key === "Escape") closeFileListDropdown();
+    });
+    refreshFileListDropdown();
+  }
+
 function showExportProgress(label) {
   setStatus(label || "\u5BFC\u51FA\u4E2D\u2026", "\u8BF7\u7A0D\u5019");
   const bar = document.querySelector("#export-progress");
@@ -9141,6 +9237,7 @@ window.__mdAnnotator = {
   AnnotationStore,
   putAtomicDraftForCurrent,
   restoreDraftIfAny,
+  resolveDraftConflict,
   scheduleIdbCacheWrite,
   commitHistoryIfNeeded,
   pushHistory,

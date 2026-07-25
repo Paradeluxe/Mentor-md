@@ -2,6 +2,38 @@
 
 按时间倒序记录已发布的变化。最新条目在上方。
 
+## v1.44.7 (2026-07-26) — 草稿 vs 外部写盘冲突
+
+用户: fix-mentor 写盘后 Mentor 仍「从本地草稿恢复」，盖掉 AI reply。
+
+### 根因
+`preferDraft`（tryReconnect）只要 draft 与磁盘 ann/body 不同就无条件用草稿，不管磁盘是否更新。
+
+### 行为
+- 新增 `resolveDraftConflict({diskBody, diskAnns, diskMtime, draft, forceDisk})` → `disk|draft|prompt`
+- 磁盘 mtime ≥ draft.updatedAt → **用磁盘**（外部工具 / fix-mentor 胜）
+- draft 更新 → 仍恢复未保存草稿（Word 式 crash recovery）
+- 时钟缺失 → `confirm` 默认磁盘
+- 选磁盘后删除过期 IDB draft，避免下次再打
+- `openFromMentorHandle` 传入 `diskMtime: file.lastModified` + `forceDisk` 选项
+- `writeCurrentToHandle` 成功后把 DraftStore/idbCache 与磁盘对齐
+- external-modified toast 明确：重开磁盘、勿在旧缓冲 Ctrl+S
+
+### 顺手
+- 修 RIS `text.split` 行分割正则被写成真实 CR 导致 esbuild 失败
+- 去掉 refs 面板重复且损坏的 `escapeHtml`，改用全局
+
+### API
+- `__mdAnnotator.resolveDraftConflict`
+
+### 测试
+- `node tests/v143-draft-vs-external-write.spec.js`（8 pass）
+
+### Cache
+- bump `?v=`
+
+---
+
 ## v1.44.6 (2026-07-25) — 升级检测
 
 用户: 「有没有办法给mentor加一个升级检测功能」
