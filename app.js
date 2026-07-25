@@ -4017,7 +4017,7 @@ function renderCommentList() {
         <div class="comment-quote" data-thread="${safeThreadId}" title="\u70B9\u51FB\u6536\u8D77/\u5C55\u5F00\u6279\u6CE8">
           <span class="comment-number-badge" data-number="${number}" title="\u6279\u6CE8 #${number}">${number}</span>
           <span class="comment-quote-text">${escapeHtml((thread.text || "").slice(0, 200))}${(thread.text || "").length > 200 ? "\u2026" : ""}</span>
-          ${threadType === "ai" ? '<span class="comment-type-badge is-ai" title="AI调整">AI</span>' : threadType === "review" ? '<span class="comment-type-badge is-review" title="历史审阅">审阅</span>' : ""}
+          ${threadType === "ai" ? '<span class="comment-type-badge is-ai" title="AI">AI</span>' : threadType === "review" ? '<span class="comment-type-badge is-review" title="历史审阅">审阅</span>' : ""}
           ${thread.pending ? '<span class="comment-pending-badge" title="\u672A\u63D0\u4EA4\u9996\u6761\u8BC4\u8BBA">\u8349\u7A3F</span>' : ""}
 
           <button class="comment-menu-btn" data-act="toggle-menu" data-thread="${safeThreadId}" title="\u66F4\u591A\u64CD\u4F5C" aria-label="\u66F4\u591A\u64CD\u4F5C">\u22EF</button>
@@ -4071,7 +4071,7 @@ function renderCommentList() {
               <!-- Mode locked at create (float). No in-card type switch. -->
               <div class="form-actions">
                 <button class="comment-resolve-btn ${thread.resolved ? "is-resolved" : ""}" data-act="resolve" data-thread="${safeThreadId}" title="${thread.resolved ? "\u91CD\u65B0\u6253\u5F00\u6B64\u6279\u6CE8" : "\u6807\u8BB0\u4E3A\u5DF2\u89E3\u51B3"}" aria-label="${thread.resolved ? "\u91CD\u65B0\u6253\u5F00" : "\u6807\u8BB0\u4E3A\u5DF2\u89E3\u51B3"}">${thread.resolved ? "\u91CD\u5F00" : "\u89E3\u51B3"}</button>
-                <button data-act="submit-reply" data-thread="${safeThreadId}" class="primary" disabled title="\u8F93\u5165\u5185\u5BB9\u540E\u53EF\u63D0\u4EA4 (Ctrl+Enter)">\u63D0\u4EA4</button>
+                <button data-act="submit-reply" data-thread="${safeThreadId}" class="primary" disabled title="\u8F93\u5165\u540E\u53EF\u56DE\u590D (Ctrl+Enter)">\u56DE\u590D</button>
               </div>
             </div>
         </div>
@@ -8306,7 +8306,7 @@ function setupToolbar() {
         setStatus("\u63D0\u793A", "\u8BF7\u5148\u9009\u4E2D\u6587\u672C, \u518D\u6309 Ctrl+Alt+M \u4EBA\u7C7B\u8C03\u6574");
         return;
       }
-      // Shift+M → AI调整；M → 人类调整
+      // Shift+M → AI；M → 批注
       createAnnotationFromSelection({ type: e.shiftKey ? "ai" : null });
       const fb = $("#float-comment-btn");
       if (fb) fb.classList.add("hidden");

@@ -1,4 +1,4 @@
-// Two-mode float: 人类调整 | AI调整 (+ legacy REVIEW load/switch)
+// Two-mode float: 批注 | AI (+ legacy REVIEW load/switch)
 const { chromium } = require('playwright');
 
 (async () => {
@@ -18,7 +18,7 @@ const { chromium } = require('playwright');
     }
   };
 
-  console.log('=== Two-mode float: 人类调整 / AI调整 ===');
+  console.log('=== Two-mode float: 批注 / AI ===');
   await page.goto('http://127.0.0.1:8787/index.html?cb=' + Date.now());
   await page.waitForFunction(() => window.__mdAnnotator?.State?.editor, { timeout: 15000 });
   await page.evaluate(() => {
@@ -26,7 +26,7 @@ const { chromium } = require('playwright');
     if (m) m.classList.add('hidden');
   });
 
-  await t('float bar has exactly 人类调整 + AI调整', async () => {
+  await t('float bar has exactly 批注 + AI', async () => {
     const r = await page.evaluate(() => {
       const bar = document.querySelector('#float-comment-btn');
       const btns = bar ? Array.from(bar.querySelectorAll('button[data-float-act]')) : [];
@@ -40,8 +40,8 @@ const { chromium } = require('playwright');
         a: !!a,
         review: !!review,
         aiClass: !!(a && a.classList.contains('float-ai-btn')),
-        humanLabel: c ? (c.textContent || '').includes('人类调整') : false,
-        aiLabel: a ? (a.textContent || '').includes('AI调整') : false,
+        humanLabel: c ? (c.textContent || '').includes('批注') && !(c.textContent || '').includes('人类') : false,
+        aiLabel: a ? ((a.textContent || '').trim() === 'AI') : false,
       };
     });
     if (!r.bar || r.count !== 2 || !r.c || !r.a || r.review || !r.aiClass || !r.humanLabel || !r.aiLabel) {

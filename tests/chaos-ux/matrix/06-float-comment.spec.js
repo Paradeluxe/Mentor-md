@@ -1,5 +1,5 @@
 /**
- * Selection float bar: 人类调整 / AI调整 / mark-delete (S6).
+ * Selection float bar: 批注 / AI / mark-delete (S6).
  */
 const {
   launch,
@@ -16,7 +16,7 @@ const { DOCS } = require('../content-catalog');
   await boot(page);
   const { t, done } = createRunner(page, '06-float');
 
-  await t('float bar has human + AI only (no review)', async () => {
+  await t('float bar has 批注 + AI only (no review)', async () => {
     const r = await page.evaluate(() => {
       const bar = document.querySelector('#float-comment-btn');
       const btns = bar ? Array.from(bar.querySelectorAll('button[data-float-act]')) : [];

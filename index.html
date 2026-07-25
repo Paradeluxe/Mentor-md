@@ -4,10 +4,10 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Mentor — 像 docx 一样批注 Markdown</title>
-<meta name="build" content="v1.44.4 cache-bust v=139" />
+<meta name="build" content="v1.44.5 cache-bust v=140" />
 <!-- v1.43.37 offline: local fonts + KaTeX (no CDN) -->
 <link rel="stylesheet" href="vendor/fonts/local-fonts.css?v=1" />
-<link rel="stylesheet" href="styles.css?v=139" />
+<link rel="stylesheet" href="styles.css?v=140" />
 <link rel="stylesheet" href="vendor/katex/katex.min.css?v=1" />
 <!-- 字体：系统无衬线 + 等宽（侧栏时间戳、文件名） -->
 <style>
@@ -114,13 +114,13 @@
     <!-- 中：编辑器 -->
     <section id="editor-pane">
       <div id="editor"></div>
-      <!-- 浮动条：人类调整 | AI调整 -->
+      <!-- 浮动条：批注 | AI -->
       <div id="float-comment-btn" class="float-btn hidden" role="toolbar" aria-label="调整模式">
-              <button type="button" data-float-act="comment" class="float-comment-act" aria-label="人类调整" title="人类调整：人工批注/修改说明 (Ctrl+Alt+M)">
-                <span class="float-btn-label">人类调整</span>
+              <button type="button" data-float-act="comment" class="float-comment-act" aria-label="批注" title="批注：人工说明（Ctrl+Alt+M）">
+                <span class="float-btn-label">批注</span>
               </button>
-              <button type="button" data-float-act="ai" class="float-ai-btn" aria-label="AI调整" title="AI调整：插入 @AI，保存后用 /fix-mentor 处理 (Ctrl+Alt+I)">
-                <span class="float-btn-label">AI调整</span>
+              <button type="button" data-float-act="ai" class="float-ai-btn" aria-label="AI" title="AI：插入 @AI，保存后 /fix-mentor（Ctrl+Alt+I）">
+                <span class="float-btn-label">AI</span>
               </button>
             </div>
             <!-- v1.43.23: 表格内浮动工具条 — 增删行列 -->
@@ -162,11 +162,11 @@
                       </svg>
                     </div>
                     <h2>还没有批注</h2>
-                    <p class="hint-lead">拖选文字，点「人类调整」或「AI调整」</p>
+                    <p class="hint-lead">拖选文字，点「批注」或「AI」</p>
                     <ol class="empty-hint-steps">
                       <li><span class="step-num">1</span> 在编辑器中拖选一段文字</li>
-                      <li><span class="step-num">2</span> 弹出按钮点 <kbd>人类调整</kbd> 或 <kbd>AI调整</kbd></li>
-                      <li><span class="step-num">3</span> 右侧侧栏写批注, 嵌套回复, 标解决</li>
+                      <li><span class="step-num">2</span> 弹出按钮点 <kbd>批注</kbd> 或 <kbd>AI</kbd></li>
+                      <li><span class="step-num">3</span> 右侧侧栏写内容、嵌套回复、标解决</li>
                     </ol>
                       <p class="empty-hint-foot">需要更多帮助? 点工具栏 <kbd>?</kbd> 看完整快捷键 · 最近文件在顶栏文件名 ▾ · 「看示例」也在 ? 里</p>
                                   </div>
@@ -199,13 +199,13 @@
 
 <!-- v1.43.37 offline: bundled app (esbuild) + local icons; no esm.sh -->
 <script src="icons.js?v=3"></script>
-<script type="module" src="app.bundle.js?v=139"></script>
+<script type="module" src="app.bundle.js?v=140"></script>
 <!-- 帮助 popover (浮在 body 顶层, 位置由 JS 动态计算) -->
 <div id="help-popover" class="help-popover hidden" role="tooltip">
   <div class="help-popover-arrow"></div>
   <h3>Mentor 使用提示</h3>
   <ul>
-    <li><strong>选区批注:</strong> 拖选任意文字 → 点 <kbd>人类调整</kbd> / <kbd>AI调整</kbd> → 侧栏建线程</li>
+    <li><strong>选区批注:</strong> 拖选任意文字 → 点 <kbd>批注</kbd> / <kbd>AI</kbd> → 侧栏建线程</li>
     <li><strong>嵌套回复:</strong> 在批注线程里继续回复, 像 docx 一样对话</li>
     <li><strong>解决 / 重新打开:</strong> 批注可以标记为已解决, 需要时再打开</li>
     <li><strong>单 .mentor 包:</strong> 主路径 — 像 docx 一样, 一个 <code>.mentor</code> = md + 批注 + 图片 (内部 content.md + annotations.json + media/)</li>
