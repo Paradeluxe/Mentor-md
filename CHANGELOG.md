@@ -2,6 +2,26 @@
 
 按时间倒序记录已发布的变化。最新条目在上方。
 
+## v1.44.3 (2026-07-25) — 批注两模式完全分离
+
+用户原话: 「把批注两个模式完全分开，不要在同一个批注框里有两个按钮」
+
+### 改动
+1. **去掉卡内类型切换**：`.comment-type-switch` / `set-type` 双按钮删除
+2. **模式只在 float 创建时选定**：人类调整 | AI调整；卡内锁定
+3. **徽章区分模式**：人类 / AI / 历史审阅 badge（只读标识，不可切换）
+4. `applyThreadType` 仍保留为编程/测试 API，无 UI 入口
+5. form-actions 只剩 解决 + 提交
+
+### 测试
+- `tests/v143-ai-float-btn.spec.js` 断言卡内无 switcher
+- color / chaos 04c 走 API
+
+### Cache
+- styles.css / app.bundle.js `?v=138`
+
+---
+
 ## v1.44.2 (2026-07-25) — fix refresh 无法打开
 
 - Root cause: `?open=` + stale token / empty allowlist survived F5, toast 无法打开 every refresh

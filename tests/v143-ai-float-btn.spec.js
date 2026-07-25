@@ -143,10 +143,11 @@ const { chromium } = require('playwright');
     }
   });
 
-  await t('type switcher human↔AI mutual exclusive; applyThreadType review→human', async () => {
+  await t('modes locked at create: no in-card type switch; badges separate; applyThreadType API only', async () => {
     const r = await page.evaluate(() => {
       const M = window.__mdAnnotator;
-      M.loadMarkdownIntoEditor('type-switch.md', '# T\n\nSwitch type unique anchor text.\n', null);
+      M.loadMarkdownIntoEditor('type-switch.md', '# T\n\nSwitch type unique anchor text.\nHuman-only phrase here.\n', null);
+      // create human
       const doc = M.State.editor.state.doc;
       let from = -1, to = -1;
       doc.descendants((node, pos) => {
@@ -158,31 +159,50 @@ const { chromium } = require('playwright');
       });
       M.State.editor.commands.setTextSelection({ from, to });
       M.createAnnotationFromSelection({ type: null });
-      const tid = M.State.activeThreadId;
-      const thr0 = M.State.annotations.find((a) => a.threadId === tid);
-      const authorBefore = thr0 && thr0.authorColor;
+      const tidH = M.State.activeThreadId;
+      const thrH = M.State.annotations.find((a) => a.threadId === tidH);
+      M.renderCommentList();
+      const cardH = document.querySelector(`[data-thread="${tidH}"]`);
+      const humanBadge = !!cardH && !!cardH.querySelector('.comment-type-badge.is-human');
+      const noSwitcherH = !cardH || !cardH.querySelector('.comment-type-switch, [data-act="set-type"]');
 
-      M.State.replyDrafts[tid] = '@REVIEW fix the typo';
-      thr0.threadType = 'review';
-      M.applyThreadType(tid, 'ai');
-      const draftAi = M.State.replyDrafts[tid] || '';
-      // snapshot primitives immediately (same object mutates on next apply)
-      const threadTypeAi = thr0.threadType;
+      // create AI on second phrase
+      let from2 = -1, to2 = -1;
+      M.State.editor.state.doc.descendants((node, pos) => {
+        if (node.isText && node.text.includes('Human-only phrase')) {
+          const i = node.text.indexOf('Human-only phrase');
+          from2 = pos + i;
+          to2 = from2 + 'Human-only phrase'.length;
+        }
+      });
+      M.State.editor.commands.setTextSelection({ from: from2, to: to2 });
+      M.createAnnotationFromSelection({ type: 'ai' });
+      const tidA = M.State.activeThreadId;
+      const thrA = M.State.annotations.find((a) => a.threadId === tidA);
+      M.renderCommentList();
+      const cardA = document.querySelector(`[data-thread="${tidA}"]`);
+      const aiBadge = !!cardA && !!cardA.querySelector('.comment-type-badge.is-ai');
+      const noSwitcherA = !cardA || !cardA.querySelector('.comment-type-switch, [data-act="set-type"]');
+      const authorBefore = thrH.authorColor;
+
+      // API still works for tools/tests; not exposed as card buttons
+      thrH.threadType = 'review';
+      M.State.replyDrafts[tidH] = '@REVIEW fix the typo';
+      M.applyThreadType(tidH, 'ai');
+      const draftAi = M.State.replyDrafts[tidH] || '';
+      const threadTypeAi = thrH.threadType;
       const stacked = /@REVIEW/i.test(draftAi) && /@AI/i.test(draftAi);
-      const hasBadgeWhileAi = !!document.querySelector(`[data-thread="${tid}"] .comment-type-badge.is-ai`);
-
-      M.applyThreadType(tid, 'review'); // must coerce to human
-      const draftH = M.State.replyDrafts[tid] || '';
-      const threadTypeH = thr0.threadType;
-      const authorAfter = thr0.authorColor;
-      const hasBadgeAfterHuman = !!document.querySelector(`[data-thread="${tid}"] .comment-type-badge.is-ai`);
-
-      const switcher = document.querySelector(`[data-thread="${tid}"] .comment-type-switch`);
-      const opts = switcher
-        ? Array.from(switcher.querySelectorAll('[data-act="set-type"]')).map((b) => b.getAttribute('data-type'))
-        : [];
+      M.applyThreadType(tidH, 'review'); // coerce → human
+      const draftH = M.State.replyDrafts[tidH] || '';
+      const threadTypeH = thrH.threadType;
+      const authorAfter = thrH.authorColor;
 
       return {
+        aiCreateType: thrA.threadType,
+        humanBadge,
+        aiBadge,
+        noSwitcherH,
+        noSwitcherA,
         draftAi,
         draftH,
         threadTypeAi,
@@ -191,28 +211,29 @@ const { chromium } = require('playwright');
         noReviewAi: !/@REVIEW\b/i.test(draftAi),
         stacked,
         humanNoMarkers: !/@AI\b/i.test(draftH) && !/@REVIEW\b/i.test(draftH),
-        hasBadgeWhileAi,
-        hasBadgeAfterHuman,
-        opts,
         authorStable: authorBefore === authorAfter,
-        twoOpts: opts.length === 2 && opts.includes('') && opts.includes('ai') && !opts.includes('review'),
+        aiStillAi: thrA.threadType === 'ai',
       };
     });
     if (
+      r.aiCreateType !== 'ai' ||
+      !r.aiStillAi ||
+      !r.humanBadge ||
+      !r.aiBadge ||
+      !r.noSwitcherH ||
+      !r.noSwitcherA ||
       !r.hasAi ||
       !r.noReviewAi ||
       r.stacked ||
       r.threadTypeAi !== 'ai' ||
       (r.threadTypeH != null && r.threadTypeH !== '') ||
       !r.humanNoMarkers ||
-      !r.twoOpts ||
-      !r.authorStable ||
-      !r.hasBadgeWhileAi ||
-      r.hasBadgeAfterHuman
+      !r.authorStable
     ) {
       throw new Error(JSON.stringify(r));
     }
   });
+
 
   await t('legacy @REVIEW body still loads as review display', async () => {
     const r = await page.evaluate(() => {
@@ -237,12 +258,12 @@ const { chromium } = require('playwright');
         type: card && card.dataset.threadType,
         badge: !!card && !!card.querySelector('.comment-type-badge.is-review'),
         isReview: !!card && card.classList.contains('is-review'),
-        switcherHasReview: !!card && !!card.querySelector('[data-act="set-type"][data-type="review"]'),
+        hasAnyTypeSwitch: !!card && !!card.querySelector('.comment-type-switch, [data-act="set-type"]'),
         thrType: ann.threadType,
       };
     });
     if (r.err) throw new Error(r.err);
-    if (r.type !== 'review' || !r.badge || !r.isReview || r.switcherHasReview) {
+    if (r.type !== 'review' || !r.badge || !r.isReview || r.hasAnyTypeSwitch) {
       throw new Error(JSON.stringify(r));
     }
   });

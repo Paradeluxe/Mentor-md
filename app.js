@@ -2827,11 +2827,11 @@ function seedDraft(threadId, type) {
   }
 }
 /**
- * Switch thread type (human | ai only). Legacy review can only leave toward human/ai.
+ * Programmatic type change only (human | ai). No in-card UI — mode locked at float create.
  * Updates threadType, rewrite draft prefix, normalize first comment marker when present.
  */
 function applyThreadType(threadId, type) {
-  // UI only accepts ai | human(null). "review" and anything else → human.
+  // Accepts ai | human(null). "review" and anything else → human.
   const next = type === "ai" ? "ai" : null;
   const thread = State.annotations.find((t) => t && typeof t === "object" && t.threadId === threadId);
   if (!thread) return;
@@ -4017,7 +4017,7 @@ function renderCommentList() {
         <div class="comment-quote" data-thread="${safeThreadId}" title="\u70B9\u51FB\u6536\u8D77/\u5C55\u5F00\u6279\u6CE8">
           <span class="comment-number-badge" data-number="${number}" title="\u6279\u6CE8 #${number}">${number}</span>
           <span class="comment-quote-text">${escapeHtml((thread.text || "").slice(0, 200))}${(thread.text || "").length > 200 ? "\u2026" : ""}</span>
-          ${threadType === "ai" ? '<span class="comment-type-badge is-ai" title="AI\u8C03\u6574">AI</span>' : threadType === "review" ? '<span class="comment-type-badge is-review" title="\u5386\u53F2\u5BA1\u9605">\u5BA1\u9605</span>' : ""}
+          ${threadType === "ai" ? '<span class="comment-type-badge is-ai" title="AI调整">AI</span>' : threadType === "review" ? '<span class="comment-type-badge is-review" title="历史审阅">审阅</span>' : '<span class="comment-type-badge is-human" title="人类调整">人类</span>'}
           ${thread.pending ? '<span class="comment-pending-badge" title="\u672A\u63D0\u4EA4\u9996\u6761\u8BC4\u8BBA">\u8349\u7A3F</span>' : ""}
           <!-- v3: \u89E3\u51B3\u6309\u94AE\u5728\u6298\u53E0\u72B6\u6001\u4E0B\u663E\u793A\u5728 header, \u5C55\u5F00\u72B6\u6001\u4E0B\u663E\u793A\u5728 form-actions \u5E95\u90E8 -->
           <button class="comment-resolve-btn comment-resolve-btn--header ${thread.resolved ? "is-resolved" : ""}" data-act="resolve" data-thread="${safeThreadId}" title="${thread.resolved ? "\u91CD\u65B0\u6253\u5F00\u6B64\u6279\u6CE8" : "\u6807\u8BB0\u4E3A\u5DF2\u89E3\u51B3"}" aria-label="${thread.resolved ? "\u91CD\u65B0\u6253\u5F00" : "\u6807\u8BB0\u4E3A\u5DF2\u89E3\u51B3"}">${thread.resolved ? "\u21BA" : "\u2713"}</button>
@@ -4069,13 +4069,9 @@ function renderCommentList() {
             -->
             <div class="comment-reply-form">
               <textarea data-thread-input="${safeThreadId}" placeholder="${escapeHtml(markerPlaceholder(threadType, !!first3.body))}" autocomplete="off"></textarea>
-              <!-- Plan A: resolve 左 · 类型切换 · 提交右（不再常驻 AI/REVIEW 前缀按钮） -->
+              <!-- Mode locked at create (float). No in-card type switch. -->
               <div class="form-actions">
                 <button class="comment-resolve-btn ${thread.resolved ? "is-resolved" : ""}" data-act="resolve" data-thread="${safeThreadId}" title="${thread.resolved ? "\u91CD\u65B0\u6253\u5F00\u6B64\u6279\u6CE8" : "\u6807\u8BB0\u4E3A\u5DF2\u89E3\u51B3"}" aria-label="${thread.resolved ? "\u91CD\u65B0\u6253\u5F00" : "\u6807\u8BB0\u4E3A\u5DF2\u89E3\u51B3"}">${thread.resolved ? "\u21BA \u91CD\u65B0\u6253\u5F00" : "\u2713 \u89E3\u51B3"}</button>
-                <div class="comment-type-switch" role="group" aria-label="\u8C03\u6574\u6A21\u5F0F" data-thread="${safeThreadId}">
-                  <button type="button" class="comment-type-switch-btn${!threadType ? " is-selected" : ""}" data-act="set-type" data-type="" data-thread="${safeThreadId}" aria-pressed="${!threadType ? "true" : "false"}" title="\u4EBA\u7C7B\u8C03\u6574">\u4EBA\u7C7B\u8C03\u6574</button>
-                  <button type="button" class="comment-type-switch-btn${threadType === "ai" ? " is-selected" : ""}" data-act="set-type" data-type="ai" data-thread="${safeThreadId}" aria-pressed="${threadType === "ai" ? "true" : "false"}" title="AI\u8C03\u6574">AI\u8C03\u6574</button>
-                </div>
                 <button data-act="submit-reply" data-thread="${safeThreadId}" class="primary" disabled title="\u8F93\u5165\u5185\u5BB9\u540E\u53EF\u63D0\u4EA4 (Ctrl+Enter)">\u63D0\u4EA4</button>
               </div>
             </div>
@@ -4172,16 +4168,6 @@ function renderCommentList() {
       if (input && input.value.trim()) {
         addReply(tid, input.value);
       }
-    });
-  });
-  list.querySelectorAll('[data-act="set-type"]').forEach((btn) => {
-    btn.addEventListener("click", (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      const tid = btn.dataset.thread;
-      const raw = btn.getAttribute("data-type");
-      const next = raw === "ai" ? "ai" : null;
-      applyThreadType(tid, next);
     });
   });
   list.querySelectorAll('[data-act="goto"]').forEach((btn) => {

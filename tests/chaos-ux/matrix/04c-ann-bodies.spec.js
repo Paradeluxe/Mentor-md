@@ -154,36 +154,32 @@ const { DOCS, BODY_CORPUS } = require('../content-catalog');
     coverage.hitContent('B4');
   });
 
-  await t('B8 prefix-ai chip path', async () => {
+  await t('B8 applyThreadType API → AI marker', async () => {
     await loadDoc(page, 'b8.md', DOCS.simple);
     const r = await annotateText(page, 'UNIQUE_ALPHA', { body: 'plain first' });
     const out = await page.evaluate((tid) => {
       const M = window.__mdAnnotator;
       M.State.activeThreadId = tid;
       M.renderCommentList();
-      const btn = document.querySelector(`[data-act="prefix-ai"][data-thread="${tid}"]`);
-      if (btn) btn.click();
-      else if (M.ensureAiMarker) {
-        const thr = M.State.annotations.find((a) => a.threadId === tid);
-        // simulate chip on reply draft
-        M.State.replyDrafts[tid] = M.ensureAiMarker('next');
-      }
+      // Mode locked at create; use applyThreadType API (no in-card set-type)
+      if (M.applyThreadType) M.applyThreadType(tid, 'ai');
+      else if (M.ensureAiMarker) M.State.replyDrafts[tid] = M.ensureAiMarker('next');
+      const thr = M.State.annotations.find((a) => a.threadId === tid);
       const draft = M.State.replyDrafts[tid] || '';
       const ta = document.querySelector(`[data-thread-input="${tid}"]`);
-      return { draft, ta: ta && ta.value, hasBtn: !!btn };
+      const firstBody = thr && thr.comments && thr.comments[0] && thr.comments[0].body;
+      return {
+        draft,
+        ta: ta && ta.value,
+        firstBody,
+        threadType: thr && thr.threadType,
+        hasBtn: false, // in-card set-type removed
+      };
     }, r.tid);
-    const has = /@AI\b/i.test(out.draft || out.ta || '');
-    if (!has && !out.hasBtn) {
-      // ensureAiMarker path
-      const forced = await page.evaluate((tid) => {
-        const M = window.__mdAnnotator;
-        M.State.replyDrafts[tid] = M.ensureAiMarker ? M.ensureAiMarker('') : '@AI ';
-        return M.State.replyDrafts[tid];
-      }, r.tid);
-      if (!/@AI\b/i.test(forced)) throw new Error(JSON.stringify({ out, forced }));
-    } else if (!has && out.hasBtn) {
-      throw new Error('chip clicked but no marker: ' + JSON.stringify(out));
-    }
+    const has =
+      /@AI\b/i.test(out.draft || out.ta || '') ||
+      /@AI\b/i.test(out.firstBody || '');
+    if (!has && out.threadType !== 'ai') throw new Error(JSON.stringify(out));
     coverage.hitContent('B8');
   });
 

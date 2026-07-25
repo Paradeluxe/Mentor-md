@@ -2551,10 +2551,11 @@ body.comment-pane-collapsed #expand-comment-pane-btn {
 .comment-reply-form .form-actions {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 6px;
   margin-top: 8px;
 }
-/* resolve 左；AI + 提交 右 */
+/* resolve 左 · 提交 右（模式在 float 锁定，卡内无切换） */
 .comment-reply-form .form-actions .comment-resolve-btn {
   margin-right: auto;
 }
@@ -2774,64 +2775,19 @@ body.comment-pane-collapsed #expand-comment-pane-btn {
   background: var(--ai-soft);
   border-color: color-mix(in srgb, var(--ai) 18%, transparent);
 }
+.comment-type-badge.is-human {
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-color: color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
 .comment-type-badge.is-review {
   color: var(--review);
   background: var(--review-soft);
   border-color: color-mix(in srgb, var(--review) 18%, transparent);
 }
 
-/* 侧栏：人类调整 | AI调整 两段切换 */
-.comment-reply-form .form-actions .comment-type-switch {
-  position: relative;
-  flex-shrink: 0;
-  display: inline-flex;
-  align-items: stretch;
-  border: 1px solid var(--border-warm-medium);
-  border-radius: var(--radius-pill);
-  overflow: hidden;
-  background: var(--panel-2);
-  padding: 0;
-  gap: 0;
-}
-.comment-type-switch-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0;
-  border: none;
-  border-radius: 0;
-  background: transparent;
-  color: var(--text-2);
-  padding: 5px 10px;
-  font-size: 11.5px;
-  font-weight: 600;
-  font-family: inherit;
-  cursor: pointer;
-  letter-spacing: 0.01em;
-  line-height: 1.3;
-  white-space: nowrap;
-}
-.comment-type-switch-btn + .comment-type-switch-btn {
-  border-left: 1px solid var(--border-warm-medium);
-}
-.comment-type-switch-btn:hover {
-  color: var(--text);
-  background: color-mix(in srgb, var(--panel) 70%, var(--panel-2));
-}
-.comment-type-switch-btn.is-selected {
-  background: var(--accent-soft);
-  color: var(--accent);
-  font-weight: 650;
-}
-.comment-thread.is-ai .comment-type-switch-btn.is-selected {
-  background: var(--ai-soft);
-  color: var(--ai);
-}
-/* legacy review threads: badge keeps violet; switcher still human|ai */
-.comment-thread.is-review .comment-type-switch-btn.is-selected {
-  background: var(--accent-soft);
-  color: var(--accent);
-}
+/* in-card type switch removed v1.44.3 — mode locked at float create */
 
 #comment-pane .filter-tab:focus-visible,
 .mark-delete-btn:focus-visible,
@@ -2839,10 +2795,6 @@ body.comment-pane-collapsed #expand-comment-pane-btn {
 .comment-menu-btn:focus-visible,
 .comment-menu button:focus-visible,
 .comment-reply-form .form-actions button:focus-visible,
-.comment-type-switch-btn:focus-visible {
-  outline: 2px solid var(--thread-accent, var(--accent));
-  outline-offset: 2px;
-}
 #float-comment-btn button.float-ai-btn:focus-visible {
   outline-color: var(--ai);
 }
