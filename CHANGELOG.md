@@ -2,6 +2,23 @@
 
 按时间倒序记录已发布的变化。最新条目在上方。
 
+## v1.44.1 (2026-07-25) — 调整模式收敛：人类调整 / AI调整
+
+### 改动
+1. 浮动条：去掉 REVIEW；仅「人类调整」「AI调整」
+2. 卡片类型：两段切换，去掉「审阅」创建入口
+3. 快捷键：保留 Ctrl+Alt+M / I；移除 Ctrl+Alt+R
+4. 旧 `@REVIEW` 仍可读/可显示；切换时只能去人类或 AI；create 路径 `review` 强制人类
+5. **颜色**：人类=accent 橙；AI=`--ai`；float 与卡片 primary 同 token 对拍；切类型不改 authorColor；resolved 仍绿；legacy `--review` 仅旧线程
+
+### 测试
+- v143-ai-float-btn / chaos-ux 06-float / e2e-annotation-color-system 双模式色板
+
+### Cache
+- styles.css / app.bundle.js `?v=135`
+
+---
+
 ## v1.44.0 (2026-07-22) — 优化：README 端口冲突提醒 + Chaos 测试确认通过
 
 - README.md 新增端口冲突提醒（8787 vs psyclaw-webui 8876）

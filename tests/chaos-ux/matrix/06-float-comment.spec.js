@@ -1,5 +1,5 @@
 /**
- * Selection float bar: 批注 / AI / mark-delete (S6).
+ * Selection float bar: 人类调整 / AI调整 / mark-delete (S6).
  */
 const {
   launch,
@@ -16,16 +16,20 @@ const { DOCS } = require('../content-catalog');
   await boot(page);
   const { t, done } = createRunner(page, '06-float');
 
-  await t('float bar has comment + AI buttons', async () => {
+  await t('float bar has human + AI only (no review)', async () => {
     const r = await page.evaluate(() => {
       const bar = document.querySelector('#float-comment-btn');
+      const btns = bar ? Array.from(bar.querySelectorAll('button[data-float-act]')) : [];
       return {
         bar: !!bar,
         c: !!bar?.querySelector('[data-float-act="comment"]'),
         a: !!bar?.querySelector('[data-float-act="ai"]'),
+        rev: !!bar?.querySelector('[data-float-act="review"]'),
+        count: btns.length,
+        labels: btns.map((b) => (b.textContent || '').trim()),
       };
     });
-    if (!r.bar || !r.c || !r.a) throw new Error(JSON.stringify(r));
+    if (!r.bar || !r.c || !r.a || r.rev || r.count !== 2) throw new Error(JSON.stringify(r));
     coverage.hitSurface('S6.float-comment');
     coverage.hitSurface('S6.float-ai');
   });

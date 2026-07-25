@@ -7,34 +7,98 @@
 /* ============ Reset ============ */
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
-/* ---- oklab 暖色边框 (Cursor 风格) ---- */
-/* 原值: oklab(0.263084 -0.00230259 0.0124794 / 0.1) */
-/* fallback: rgba(38, 37, 30, 0.1) — 浏览器更兼容 */
+/* ---- Color system: primitives -> semantic roles -> component aliases ---- */
 :root {
-  /* Surfaces — Cursor cream + Notion/Linear hierarchy */
-  --bg: #f2f1ed;
-  --panel: #ffffff;
-  --panel-2: #f7f7f4;
-  --panel-3: #ebeae5;
-  --chrome: #fafaf8;           /* toolbar / tab bar */
-  --border: #26251e;
-  --border-warm: rgba(38, 37, 30, 0.09);
-  --border-warm-medium: rgba(38, 37, 30, 0.16);
-  --text: #26251e;
-  --text-2: rgba(38, 37, 30, 0.62);
-  --text-3: rgba(38, 37, 30, 0.42);
-  --muted: #8a8780;
-  --accent: #f54e00;
-  --accent-hover: #d94400;
-  --accent-soft: rgba(245, 78, 0, 0.08);
-  --highlight: #fef3c7;
-  --highlight-active: #fcd34d;
-  --resolved: #e5e7eb;
-  --comment-bg: #fff8e1;
-  --reply-bg: #f3f4f6;
-  --danger: #cf2d56;
-  --success: #1f8a65;
-  --warning: #d97706;
+  color-scheme: light;
+
+  /* Primitive palette. These are the only raw colors used by semantic roles. */
+  --neutral-0: #ffffff;
+  --neutral-25: #fafaf8;
+  --neutral-50: #f7f7f4;
+  --neutral-100: #ebeae5;
+  --neutral-200: #d9d7d0;
+  --neutral-500: #77746d;
+  --neutral-700: #4b4942;
+  --neutral-950: #26251e;
+  --orange-500: #f54e00;
+  --orange-700: #b93800;
+  --orange-800: #962f00;
+  --cyan-600: #0e7490;
+  --cyan-700: #155e75;
+  --violet-700: #6d28d9;
+  --violet-800: #5b21b6;
+  --green-700: #187357;
+  --amber-700: #b45309;
+  --red-700: #b4234d;
+  --yellow-100: #fef3c7;
+  --yellow-300: #fcd34d;
+
+  /* Semantic roles. Components should consume these, never raw colors. */
+  --surface-canvas: #f2f1ed;
+  --surface-chrome: var(--neutral-25);
+  --surface-panel: var(--neutral-0);
+  --surface-subtle: var(--neutral-50);
+  --surface-muted: var(--neutral-100);
+  --surface-code: #1f1d1a;
+  --text-primary: var(--neutral-950);
+  --text-secondary: rgba(38, 37, 30, 0.68);
+  --text-muted: rgba(38, 37, 30, 0.54);
+  --text-on-strong: #ffffff;
+  --avatar-text: #ffffff;
+  --border-strong: rgba(38, 37, 30, 0.24);
+  --border-default: rgba(38, 37, 30, 0.14);
+  --border-subtle: rgba(38, 37, 30, 0.09);
+  --action-primary: var(--orange-700);
+  --action-primary-hover: var(--orange-800);
+  --action-primary-soft: rgba(245, 78, 0, 0.1);
+  --focus-color: var(--orange-700);
+  --focus-soft: rgba(185, 56, 0, 0.22);
+  --status-success: var(--green-700);
+  --status-success-solid: var(--green-700);
+  --status-success-soft: rgba(24, 115, 87, 0.1);
+  --status-warning: var(--amber-700);
+  --status-warning-solid: var(--amber-700);
+  --status-warning-soft: rgba(180, 83, 9, 0.1);
+  --status-danger: var(--red-700);
+  --status-danger-solid: var(--red-700);
+  --status-danger-soft: rgba(180, 35, 77, 0.1);
+  --type-ai: var(--cyan-600);
+  --type-ai-solid: var(--cyan-600);
+  --type-ai-hover: var(--cyan-700);
+  --type-ai-soft: rgba(14, 116, 144, 0.1);
+  --type-review: var(--violet-700);
+  --type-review-solid: var(--violet-700);
+  --type-review-hover: var(--violet-800);
+  --type-review-soft: rgba(109, 40, 217, 0.1);
+  --selection: var(--yellow-300);
+  --selection-soft: var(--yellow-100);
+  --surface-comment: #fff8e1;
+  --surface-reply: #f3f4f6;
+  --surface-resolved: #f3faf6;
+  --surface-ai: #f2fafc;
+  --surface-review: #faf8ff;
+  --code-text: #f5f2eb;
+
+  /* Author identity slots. Strong color is shared by marks, bubbles and avatars. */
+  --author-0: #9a6700; --author-0-surface: #fff1cc;
+  --author-1: #a33d58; --author-1-surface: #fbe3e8;
+  --author-2: #35734b; --author-2-surface: #e4f1e7;
+  --author-3: #315f91; --author-3-surface: #e1ebf8;
+  --author-4: #79582e; --author-4-surface: #f3e8d8;
+  --author-5: #5c4788; --author-5-surface: #ece7f6;
+  --author-6: #864766; --author-6-surface: #f5e5ef;
+  --author-7: #2f686d; --author-7-surface: #deeff0;
+
+  /* Legacy aliases kept for existing component rules and saved documents. */
+  --bg: var(--surface-canvas); --panel: var(--surface-panel); --panel-2: var(--surface-subtle); --panel-3: var(--surface-muted); --chrome: var(--surface-chrome);
+  --border: var(--text-primary); --border-warm: var(--border-subtle); --border-warm-medium: var(--border-default);
+  --text: var(--text-primary); --text-2: var(--text-secondary); --text-3: var(--text-muted); --muted: var(--text-muted);
+  --accent: var(--action-primary); --accent-hover: var(--action-primary-hover); --accent-soft: var(--action-primary-soft); --accent-solid: var(--action-primary); --accent-solid-hover: var(--action-primary-hover);
+  --highlight: var(--selection-soft); --highlight-active: var(--selection);
+  --resolved: var(--status-success); --resolved-soft: var(--status-success-soft); --comment-bg: var(--surface-comment); --reply-bg: var(--surface-reply);
+  --danger: var(--status-danger); --danger-solid: var(--status-danger-solid); --success: var(--status-success); --success-solid: var(--status-success-solid); --warning: var(--status-warning); --warning-solid: var(--status-warning-solid);
+  --ai: var(--type-ai); --ai-solid: var(--type-ai-solid); --ai-hover: var(--type-ai-hover); --ai-soft: var(--type-ai-soft); --review: var(--type-review); --review-solid: var(--type-review-solid); --review-hover: var(--type-review-hover); --review-soft: var(--type-review-soft);
+  --code-bg: var(--surface-code); --code-fg: var(--code-text);
 
   /* 8px grid + radius scale (Linear/Figma) */
   --space-1: 4px;
@@ -62,7 +126,51 @@
   --font-xs: 11px;
   --font-sm: 12px;
   --font-md: 13px;
-  --focus-ring: 0 0 0 2px var(--panel), 0 0 0 4px var(--accent-soft);
+  --focus-ring: 0 0 0 2px var(--panel), 0 0 0 4px var(--focus-soft);
+}
+
+/* Explicit dark theme. System preference is opt-in through data-theme="system". */
+[data-theme="dark"] {
+  color-scheme: dark;
+}
+[data-theme="dark"] {
+  --surface-canvas: #171716; --surface-chrome: #1d1d1b; --surface-panel: #242422; --surface-subtle: #2b2b28; --surface-muted: #363630;
+  --surface-code: #111110; --text-primary: #f4f2ec; --text-secondary: rgba(244, 242, 236, 0.74); --text-muted: rgba(244, 242, 236, 0.56);
+  --border-strong: rgba(244, 242, 236, 0.28); --border-default: rgba(244, 242, 236, 0.16); --border-subtle: rgba(244, 242, 236, 0.1);
+  --action-primary: #c2410c; --action-primary-hover: #9a3412; --action-primary-soft: rgba(255, 122, 69, 0.18); --focus-color: #ff9a73; --focus-soft: rgba(255, 154, 115, 0.32); --avatar-text: #171716;
+  --accent: #ff9a73; --accent-hover: #ffb197; --accent-solid: var(--action-primary); --accent-solid-hover: var(--action-primary-hover);
+  --status-success: #72cfaa; --status-success-solid: #187357; --status-warning: #f0ad60; --status-warning-solid: #b45309; --status-danger: #f28aa7; --status-danger-solid: #b4234d;
+  --surface-comment: #332d20; --surface-reply: #2b2b2f; --surface-resolved: #1d332a; --surface-ai: #18343c; --surface-review: #2a2340;
+  --type-ai: #67c5dc; --type-ai-solid: #0e7490; --type-ai-hover: #155e75; --type-review: #c4a7ff; --type-review-solid: #6d28d9; --type-review-hover: #5b21b6;
+  --selection-soft: #55430d; --selection: #d1a925; --code-text: #f5f2eb;
+  --author-0: #f0c15a; --author-0-surface: #55430d; --author-1: #f08ca5; --author-1-surface: #4e2733; --author-2: #83d09c; --author-2-surface: #21452e;
+  --author-3: #8db8ef; --author-3-surface: #243c5c; --author-4: #ddb27a; --author-4-surface: #4a3824; --author-5: #b8a0ef; --author-5-surface: #382c57;
+  --author-6: #e69abd; --author-6-surface: #512b40; --author-7: #83d1d0; --author-7-surface: #214648;
+  /* re-bind legacy aliases so FOUC/components that use --bg/--panel follow dark surfaces */
+  --bg: var(--surface-canvas); --panel: var(--surface-panel); --panel-2: var(--surface-subtle); --panel-3: var(--surface-muted); --chrome: var(--surface-chrome);
+  --border: var(--text-primary); --border-warm: var(--border-subtle); --border-warm-medium: var(--border-default);
+  --text: var(--text-primary); --text-2: var(--text-secondary); --text-3: var(--text-muted); --muted: var(--text-muted);
+  --accent-soft: var(--action-primary-soft);
+  --highlight: var(--selection-soft); --highlight-active: var(--selection);
+  --resolved: var(--status-success); --comment-bg: var(--surface-comment); --reply-bg: var(--surface-reply);
+  --danger: var(--status-danger); --danger-solid: var(--status-danger-solid); --success: var(--status-success); --success-solid: var(--status-success-solid);
+  --warning: var(--status-warning); --warning-solid: var(--status-warning-solid);
+  --ai: var(--type-ai); --ai-solid: var(--type-ai-solid); --ai-hover: var(--type-ai-hover); --review: var(--type-review); --review-solid: var(--type-review-solid); --review-hover: var(--type-review-hover);
+  --code-bg: var(--surface-code); --code-fg: var(--code-text);
+}
+@media (prefers-color-scheme: dark) {
+  [data-theme="system"] {
+    color-scheme: dark;
+    --surface-canvas: #171716; --surface-chrome: #1d1d1b; --surface-panel: #242422; --surface-subtle: #2b2b28; --surface-muted: #363630;
+    --surface-code: #111110; --text-primary: #f4f2ec; --text-secondary: rgba(244, 242, 236, 0.74); --text-muted: rgba(244, 242, 236, 0.56);
+    --border-strong: rgba(244, 242, 236, 0.28); --border-default: rgba(244, 242, 236, 0.16); --border-subtle: rgba(244, 242, 236, 0.1);
+    --action-primary: #c2410c; --action-primary-hover: #9a3412; --action-primary-soft: rgba(255, 122, 69, 0.18); --focus-color: #ff9a73; --focus-soft: rgba(255, 154, 115, 0.32); --avatar-text: #171716;
+    --accent: #ff9a73; --accent-hover: #ffb197; --accent-solid: var(--action-primary); --accent-solid-hover: var(--action-primary-hover);
+    --status-success: #72cfaa; --status-success-solid: #187357; --status-warning: #f0ad60; --status-warning-solid: #b45309; --status-danger: #f28aa7; --status-danger-solid: #b4234d;
+    --surface-comment: #332d20; --surface-reply: #2b2b2f; --surface-resolved: #1d332a; --surface-ai: #18343c; --surface-review: #2a2340;
+    --type-ai: #67c5dc; --type-ai-solid: #0e7490; --type-ai-hover: #155e75; --type-review: #c4a7ff; --type-review-solid: #6d28d9; --type-review-hover: #5b21b6;
+    --selection-soft: #55430d; --selection: #d1a925;
+  }
 }
 
 html, body {
@@ -77,7 +185,7 @@ html, body {
   -moz-osx-font-smoothing: grayscale;
 }
 
-button { font-family: inherit; cursor: pointer; letter-spacing: 0.08px; }
+button { font-family: inherit; cursor: pointer; letter-spacing: 0.08px; color: inherit; }
 kbd {
   font-family: 'JetBrains Mono', monospace;
   background: var(--panel);
@@ -386,7 +494,7 @@ code {
   font-size: 14px;
   line-height: 1;
 }
-.file-list-forget:hover { color: #b91c1c; background: #fde2e2; }
+.file-list-forget:hover { color: var(--status-danger); background: var(--status-danger-soft); }
 .file-list-empty {
   padding: 10px 8px;
   font-size: 12px;
@@ -505,7 +613,7 @@ code {
 .help-btn.is-active {
   background: var(--accent);
   border-color: var(--accent);
-  color: var(--panel);
+  color: var(--text-on-strong);
 }
 
 /* 帮助弹窗 (position: fixed, 位置完全由 JS 算, 跟随 ? 按钮) */
@@ -680,9 +788,9 @@ code {
   color: var(--text);
 }
 .settings-btn.is-active {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: var(--panel);
+  background: var(--action-primary);
+  border-color: var(--action-primary);
+  color: var(--text-on-strong);
 }
 
 .settings-popover {
@@ -731,14 +839,14 @@ code {
   transition: background 0.12s, border-color 0.12s, color 0.12s;
   font-family: inherit;
 }
-.settings-opt:hover { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+.settings-opt:hover { background: var(--accent-soft); border-color: var(--action-primary); color: var(--accent-hover); }
 .settings-opt.is-active {
-  background: var(--accent);
-  color: #fff;
-  border-color: var(--accent);
+  background: var(--action-primary);
+  color: var(--text-on-strong);
+  border-color: var(--action-primary);
 }
 .settings-opt-warn { color: var(--danger); }
-.settings-opt-warn.is-active { background: var(--danger); border-color: var(--danger); color: #fff; }
+.settings-opt-warn.is-active { background: var(--danger-solid); border-color: var(--danger-solid); color: var(--text-on-strong); }
 .settings-current { font-size: 11px; color: var(--text-3); margin: 6px 0 0; }
 .settings-popover-close {
   position: absolute;
@@ -849,6 +957,95 @@ code {
 body.file-pane-collapsed #file-pane {
   margin-left: -260px;  /* 滑出左侧 */
   border-right: none;
+}
+/* 批注栏折叠 (Ctrl+] / 窄屏) */
+body.comment-pane-collapsed #comment-pane {
+  margin-right: -320px;
+  border-left: none;
+  pointer-events: none;
+}
+body.comment-pane-collapsed #expand-comment-pane-btn {
+  display: flex;
+}
+#expand-comment-pane-btn.expand-comment-pane {
+  left: auto;
+  right: 0;
+  border-left: 1px solid var(--border-warm);
+  border-right: none;
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+  border-top-left-radius: var(--rounded-md);
+  border-bottom-left-radius: var(--rounded-md);
+}
+.pane-toggle-bar {
+  display: none;
+  gap: 6px;
+  padding: 4px 8px;
+  align-items: center;
+  background: var(--panel-2, #f7f7f4);
+  border-bottom: 1px solid var(--border-warm, rgba(38,37,30,0.09));
+  flex-shrink: 0;
+}
+.pane-toggle-chip {
+  appearance: none;
+  border: 1px solid var(--border-warm-medium, rgba(38,37,30,0.16));
+  background: var(--panel, #fff);
+  color: var(--text-2, rgba(38,37,30,0.62));
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.pane-toggle-chip.is-active {
+  color: var(--text, #26251e);
+  border-color: var(--accent, #f54e00);
+  background: var(--accent-soft, rgba(245, 78, 0, 0.08));
+}
+/* 窄屏 / 触控：显示折叠芯片，侧栏可收起 */
+@media (max-width: 900px) {
+  .pane-toggle-bar {
+    display: flex;
+  }
+  #file-pane,
+  #comment-pane {
+    position: relative;
+    z-index: 5;
+  }
+  body.is-narrow #main {
+    --outline-pane-width: min(220px, 42vw);
+    --comment-pane-width: min(280px, 48vw);
+  }
+  .pane-resizer {
+    touch-action: none;
+    min-width: 12px;
+  }
+  .outline-item,
+  .filter-tab,
+  .comment-thread,
+  .doc-tab {
+    touch-action: manipulation;
+  }
+}
+/* Active annotation highlight via DecorationSet (not mark rewrite) */
+.annotation-active-deco {
+  background: color-mix(in srgb, var(--accent, #f54e00) 22%, transparent);
+  border-radius: 2px;
+  box-shadow: inset 0 -2px 0 color-mix(in srgb, var(--accent, #f54e00) 55%, transparent);
+}
+/* Pointer Events primary interactions */
+.pane-resizer {
+  touch-action: none;
+  cursor: ew-resize;
+}
+.outline-item[role="treeitem"]:focus-visible,
+.filter-tab:focus-visible,
+.doc-tab:focus-visible,
+.modal-btn-primary:focus-visible,
+.modal-btn-secondary:focus-visible {
+  outline: 2px solid var(--accent, #f54e00);
+  outline-offset: 2px;
 }
 
 /* 收起按钮 — 折叠窗格 header 右上角 */
@@ -1125,7 +1322,9 @@ body.file-pane-collapsed #file-pane {
   align-items: center;
   gap: 3px;
   letter-spacing: 0.04px;
+  transition: background 0.1s ease, color 0.1s ease;
   /* 去 box-shadow ring: vision 反馈 badge 像"补丁" */
+  /* 统一AI/人改/其他feature badge颜色和交互 */
 }
 .save-mode-badge .icon { width: 10px; height: 10px; color: var(--success); }
 .save-mode-badge .badge-download .icon { color: var(--warning); }
@@ -1309,8 +1508,8 @@ body.file-pane-collapsed #file-pane {
   letter-spacing: normal;
 }
 .tiptap pre {
-  background: #1f1d1a;
-  color: #f5f2eb;
+  background: var(--surface-code);
+  color: var(--code-text);
   padding: 14px 18px;
   border-radius: 8px;
   overflow-x: auto;
@@ -1320,8 +1519,8 @@ body.file-pane-collapsed #file-pane {
 }
 .tiptap pre code { background: transparent; color: inherit; padding: 0; }
 .tiptap pre code br.ProseMirror-trailingBreak { display: none; }
-.tiptap a { color: var(--accent); text-decoration: underline; text-decoration-color: rgba(245, 78, 0, 0.3); text-underline-offset: 2px; }
-.tiptap a:hover { text-decoration-color: var(--accent); }
+.tiptap a { color: var(--accent-hover); text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--accent-hover) 38%, transparent); text-underline-offset: 2px; }
+.tiptap a:hover { color: var(--accent-solid); text-decoration-color: currentColor; }
 /* v1.43.27: 给图片上下加点边距 (原 0 → 8px), 让前后"空隙"是 ~16px 的可点击区域
    → gapcursor 在图片前后真正可触发 (ProseMirror gap cursor 需要一段"非节点像素"才会出现)
    注意: margin 只在 block image (ImageBlock) 上加; 老的 inline image / 用户加的 <img> 不动
@@ -1387,118 +1586,110 @@ body.file-pane-collapsed #file-pane {
 .tiptap sup { vertical-align: super; line-height: 0; }
 .tiptap sub { vertical-align: sub; line-height: 0; }
 
-/* 批注 mark 高亮 — v9: 极弱化, 跨段视觉合并 (避免 "4 个独立标志" 错觉)
-   只保留 1px 灰色下划线 + 极浅 hover/active 反馈, 让多段 mark 看起来"贯穿"而不是"分块" */
+/* 批注 mark: 作者色负责身份，橙色负责选中，绿色负责已解决。 */
 .tiptap .annotation-mark {
-  background: transparent;
-  border-bottom: 1px dashed var(--text-3);
+  --annotation-bg: var(--author-0-surface);
+  --annotation-line: var(--author-0);
+  background: var(--annotation-bg);
+  border-bottom: 1px dashed var(--annotation-line);
   cursor: pointer;
-  transition: background 0.15s, border-color 0.15s;
+  transition: background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
   border-radius: 0;
+  position: relative;
 }
-/* v1.43.22: figure 批注 — 与文字 mark 同一套底灰虚线 */
+
 .tiptap img.annotation-image,
 .ProseMirror img.annotation-image {
-  outline: none !important;
-  box-shadow: none !important;
-  cursor: pointer;
-  /* 同 .annotation-mark */
+  --annotation-state-color: var(--accent);
   border: none;
   border-bottom: 1px dashed var(--text-3);
   border-radius: 0;
-  padding: 0;
-  margin-bottom: 0;
+  cursor: pointer;
   box-sizing: border-box;
-  transition: border-color 0.15s, opacity 0.15s;
-}
-/* active / resolved 仍只动底线色，不改成粗线或描边 */
-.tiptap img.annotation-image.is-active,
-.ProseMirror img.annotation-image.is-active {
-  border-bottom: 1px dashed var(--text-3);
-  /* 与文字 active 一致：不靠底线变色，只保留 class 供后续扩展 */
-}
-.tiptap img.annotation-image.is-resolved,
-.ProseMirror img.annotation-image.is-resolved {
-  border-bottom: 1px dashed var(--text-3);
-  opacity: 0.85;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease;
 }
 
-/* v1.43.41: 侧栏 hover 高亮纯图批注 */
-.tiptap img.annotation-image.is-hover,
-.ProseMirror img.annotation-image.is-hover {
-  outline-color: var(--accent, #c2410c);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent, #c2410c) 35%, transparent);
-}
+/* 8 个作者色均有显式映射，避免索引 0 退回透明。 */
+.tiptap .annotation-mark[data-author-color="0"] { --annotation-bg: var(--author-0-surface); --annotation-line: var(--author-0); }
+.tiptap .annotation-mark[data-author-color="1"] { --annotation-bg: var(--author-1-surface); --annotation-line: var(--author-1); }
+.tiptap .annotation-mark[data-author-color="2"] { --annotation-bg: var(--author-2-surface); --annotation-line: var(--author-2); }
+.tiptap .annotation-mark[data-author-color="3"] { --annotation-bg: var(--author-3-surface); --annotation-line: var(--author-3); }
+.tiptap .annotation-mark[data-author-color="4"] { --annotation-bg: var(--author-4-surface); --annotation-line: var(--author-4); }
+.tiptap .annotation-mark[data-author-color="5"] { --annotation-bg: var(--author-5-surface); --annotation-line: var(--author-5); }
+.tiptap .annotation-mark[data-author-color="6"] { --annotation-bg: var(--author-6-surface); --annotation-line: var(--author-6); }
+.tiptap .annotation-mark[data-author-color="7"] { --annotation-bg: var(--author-7-surface); --annotation-line: var(--author-7); }
 
-
-/* v8-fix: sup/sub 是 mark 的父 (selection 跨 sup 时 mark 在 sup 内), 必须重置 author-color 覆盖
-   关键: .tiptap sup .annotation-mark 特异性 (0,3,0) 等于 .tiptap .annotation-mark[data-author-color="X"] (0,3,0)
-   必须用更具体的 selector 或 !important 覆盖 (author-color 8 个值都要清掉) */
-.tiptap sup .annotation-mark,
-.tiptap sub .annotation-mark,
-.tiptap sup .annotation-mark[data-author-color="0"],
-.tiptap sup .annotation-mark[data-author-color="1"],
-.tiptap sup .annotation-mark[data-author-color="2"],
-.tiptap sup .annotation-mark[data-author-color="3"],
-.tiptap sup .annotation-mark[data-author-color="4"],
-.tiptap sup .annotation-mark[data-author-color="5"],
-.tiptap sup .annotation-mark[data-author-color="6"],
-.tiptap sup .annotation-mark[data-author-color="7"],
-.tiptap sub .annotation-mark[data-author-color="0"],
-.tiptap sub .annotation-mark[data-author-color="1"],
-.tiptap sub .annotation-mark[data-author-color="2"],
-.tiptap sub .annotation-mark[data-author-color="3"],
-.tiptap sub .annotation-mark[data-author-color="4"],
-.tiptap sub .annotation-mark[data-author-color="5"],
-.tiptap sub .annotation-mark[data-author-color="6"],
-.tiptap sub .annotation-mark[data-author-color="7"] {
-  border-bottom: 0 !important;
-  background: transparent !important;
-  display: inline;
-  padding: 0;
-}
-.tiptap .annotation-mark sup,
-.tiptap .annotation-mark sub {
-  border-bottom: 0;
-  background: inherit;
-}
 .tiptap .annotation-mark:hover {
-  background: var(--highlight);
+  background: color-mix(in srgb, var(--annotation-bg) 78%, #fff);
+  border-bottom-color: var(--annotation-line);
 }
 .tiptap .annotation-mark.is-active {
-  background: var(--highlight-active);
+  background: var(--annotation-bg);
+  border-bottom-color: var(--accent);
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+.tiptap .annotation-mark.is-resolved {
+  background: var(--resolved-soft);
+  border-bottom-color: var(--success);
+  box-shadow: none;
+  opacity: 0.75;
+  border-style: dashed;
 }
 
-/* P-D10: mark 颜色按 author 8 色分配 (Word docx 一致)
-   authorColor 0-7, 8 种颜色循环, 同 author 同色
-   data-author-color 0 默认暖黄, 1-7 调色板 */
-.tiptap .annotation-mark[data-author-color="1"] { background: #fde2e2; border-bottom-color: #ef4444; }  /* 粉红 */
-.tiptap .annotation-mark[data-author-color="2"] { background: #dcfce7; border-bottom-color: #22c55e; }  /* 绿 */
-.tiptap .annotation-mark[data-author-color="3"] { background: #dbeafe; border-bottom-color: #3b82f6; }  /* 蓝 */
-.tiptap .annotation-mark[data-author-color="4"] { background: #fef3c7; border-bottom-color: #d97706; }  /* 橙 */
-.tiptap .annotation-mark[data-author-color="5"] { background: #ede9fe; border-bottom-color: #7c3aed; }  /* 紫 */
-.tiptap .annotation-mark[data-author-color="6"] { background: #fce7f3; border-bottom-color: #db2777; }  /* 桃 */
-.tiptap .annotation-mark[data-author-color="7"] { background: #cffafe; border-bottom-color: #0891b2; }  /* 青 */
-.tiptap .annotation-mark[data-author-color="1"]:hover { background: #fecaca; }
-.tiptap .annotation-mark[data-author-color="2"]:hover { background: #bbf7d0; }
-.tiptap .annotation-mark[data-author-color="3"]:hover { background: #bfdbfe; }
-.tiptap .annotation-mark[data-author-color="4"]:hover { background: #fde68a; }
-.tiptap .annotation-mark[data-author-color="5"]:hover { background: #ddd6fe; }
-.tiptap .annotation-mark[data-author-color="6"]:hover { background: #fbcfe8; }
-.tiptap .annotation-mark[data-author-color="7"]:hover { background: #a5f3fc; }
-.tiptap .annotation-mark[data-author-color="1"].is-active { background: #fca5a5; }
-.tiptap .annotation-mark[data-author-color="2"].is-active { background: #86efac; }
-.tiptap .annotation-mark[data-author-color="3"].is-active { background: #93c5fd; }
-.tiptap .annotation-mark[data-author-color="4"].is-active { background: #fcd34d; }
-.tiptap .annotation-mark[data-author-color="5"].is-active { background: #c4b5fd; }
-.tiptap .annotation-mark[data-author-color="6"].is-active { background: #f9a8d4; }
-.annotation-mark:hover { background: #fde68a; }
-.tiptap .annotation-mark.is-active { background: var(--highlight-active); }
+.tiptap img.annotation-image[data-thread-type="ai"],
+.ProseMirror img.annotation-image[data-thread-type="ai"] { --annotation-state-color: var(--ai); }
+.tiptap img.annotation-image[data-thread-type="review"],
+.ProseMirror img.annotation-image[data-thread-type="review"] { --annotation-state-color: var(--review); }
+.tiptap img.annotation-image.is-active,
+.ProseMirror img.annotation-image.is-active {
+  border-bottom-color: var(--annotation-state-color);
+  outline: 2px solid color-mix(in srgb, var(--annotation-state-color) 70%, transparent);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--annotation-state-color) 14%, transparent);
+}
 
-/* v10-fix: 删除 .annotation-mark::after (每个 mark 都生成 💬 气泡) — 改用 AnnotationBubblePlugin widget
-   (plugin 内部用 seenThreads 去重, 同 threadId 只一个气泡).
-   原 CSS ::after 方式在多段共享 threadId 时会产生 N 个气泡 ("4 个独立标志" 错觉). */
-/* 旧 ::after 状态变体保留 (无副作用, 不再生效) */
+.tiptap img.annotation-image.is-resolved,
+.ProseMirror img.annotation-image.is-resolved {
+  --annotation-state-color: var(--success);
+  border-bottom: 1px dashed var(--success);
+  opacity: 0.75;
+}
+.tiptap img.annotation-image.is-resolved.is-active,
+.ProseMirror img.annotation-image.is-resolved.is-active {
+  border-bottom-color: var(--success);
+  outline-color: color-mix(in srgb, var(--success) 70%, transparent);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--success) 14%, transparent);
+}
+
+/* Figure 批注侧栏 hover 高亮 */
+.tiptap img.annotation-image.is-hover,
+.ProseMirror img.annotation-image.is-hover {
+  outline: 2px solid color-mix(in srgb, var(--annotation-state-color) 35%, transparent);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--annotation-state-color) 12%, transparent);
+}
+
+/* 每个线程仅一个 widget 气泡；颜色跟随作者，resolved 固定为绿色。 */
+.tiptap .annotation-bubble {
+  --annotation-anchor-color: var(--author-0);
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  margin: 0 3px 0 1px;
+  vertical-align: -2px;
+  background-color: var(--annotation-anchor-color);
+  -webkit-mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path fill='black' d='M20 2H4a2 2 0 0 0-2 2v18l4-4h14a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2Z'/></svg>") center / contain no-repeat;
+  mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path fill='black' d='M20 2H4a2 2 0 0 0-2 2v18l4-4h14a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2Z'/></svg>") center / contain no-repeat;
+  pointer-events: none;
+}
+.tiptap .annotation-bubble[data-author-color="1"] { --annotation-anchor-color: var(--author-1); }
+.tiptap .annotation-bubble[data-author-color="2"] { --annotation-anchor-color: var(--author-2); }
+.tiptap .annotation-bubble[data-author-color="3"] { --annotation-anchor-color: var(--author-3); }
+.tiptap .annotation-bubble[data-author-color="4"] { --annotation-anchor-color: var(--author-4); }
+.tiptap .annotation-bubble[data-author-color="5"] { --annotation-anchor-color: var(--author-5); }
+.tiptap .annotation-bubble[data-author-color="6"] { --annotation-anchor-color: var(--author-6); }
+.tiptap .annotation-bubble[data-author-color="7"] { --annotation-anchor-color: var(--author-7); }
+.tiptap .annotation-bubble.is-resolved { --annotation-anchor-color: var(--success); opacity: 0.75; }
 
 /* 空编辑器提示 */
 .empty-hint {
@@ -1573,7 +1764,7 @@ body.file-pane-collapsed #file-pane {
 /* v1.43.18: 导出进度 */
 .export-progress {
   font-size: 12px;
-  color: #f54e00;
+  color: var(--accent-hover);
   font-weight: 500;
   padding: 0 10px;
 }
@@ -1584,7 +1775,7 @@ body.file-pane-collapsed #file-pane {
   height: 8px;
   margin-right: 6px;
   border-radius: 50%;
-  background: #f54e00;
+  background: var(--accent-hover);
   animation: export-pulse 0.9s ease-in-out infinite;
   vertical-align: middle;
 }
@@ -1666,7 +1857,7 @@ body.file-pane-collapsed #file-pane {
   -webkit-mask-repeat: no-repeat;
   mask-repeat: no-repeat;
 }
-.mark-delete-btn:hover { background: var(--danger); color: var(--panel); }
+.mark-delete-btn:hover { background: var(--danger-solid); color: var(--text-on-strong); }
 
 /* ============ Comment pane (Cursor 化) ============ */
 #comment-pane {
@@ -1751,11 +1942,11 @@ body.file-pane-collapsed #file-pane {
 /* v1.40 chaos S33 fix: 大数组 annotations 时显示的警告 */
 .comment-overflow-warn {
   padding: 14px 16px;
-  background: #fff8e1;
-  border-left: 3px solid #f59e0b;
+  background: var(--status-warning-soft);
+  border-left: 3px solid var(--status-warning);
   border-radius: var(--radius-lg);
   margin: 0 0 2px;
-  color: #78350f;
+  color: var(--status-warning);
   box-shadow: var(--shadow-card);
 }
 .comment-overflow-warn .warn-title { font-weight: 600; margin-bottom: 6px; font-size: 13px; }
@@ -1766,11 +1957,19 @@ body.file-pane-collapsed #file-pane {
    参照 Google Docs / Notion / Linear 评论卡:
    · 白底浮卡 + 软阴影 + 10px 圆角
    · 引用行: 弯引号 + 序号 pill + 2 行 clamp
-   · 激活: 橙色 ring + 轻微抬升 (非粗左边框)
+   · 激活: 保持功能色的 ring + 轻微抬升
    · 已解决: 淡绿 + 弱化, 保留可读
    ============================================================ */
 .comment-thread {
-  background: var(--panel);
+  --thread-accent: var(--accent);
+  --thread-accent-hover: var(--accent-hover);
+  --thread-accent-soft: var(--accent-soft);
+  --thread-solid: var(--accent-solid);
+  --thread-solid-hover: var(--accent-solid-hover);
+  --thread-surface: var(--panel);
+  --thread-active-surface: color-mix(in srgb, var(--accent-soft) 55%, var(--panel));
+  --thread-active-quote: linear-gradient(180deg, color-mix(in srgb, var(--accent-soft) 42%, var(--panel)) 0%, var(--panel-2) 100%);
+  background: var(--thread-surface);
   position: relative;
   border: 1px solid var(--border-warm);
   border-radius: var(--radius-lg);
@@ -1795,46 +1994,49 @@ body.file-pane-collapsed #file-pane {
     0 2px 4px rgba(38, 37, 30, 0.05),
     0 8px 20px rgba(38, 37, 30, 0.06);
 }
-/* K14: card hover 高亮 doc 中对应的 mark (Word 行为) */
-.tiptap .annotation-mark.is-hover { background: #fde68a; }
+/* 卡片 hover 保留作者身份色，仅增强底线。 */
+.tiptap .annotation-mark.is-hover {
+  background: color-mix(in srgb, var(--annotation-bg) 82%, #fff);
+  box-shadow: inset 0 -2px 0 var(--annotation-line);
+}
 
-/* Active — Docs/Linear: soft orange ring + lift, borderColor 含 accent 供 e2e */
+/* Active: 使用当前线程的功能色，不覆盖 AI / REVIEW 身份。 */
 .comment-thread.is-active {
-  border-color: rgba(245, 78, 0, 0.55);
+  border-color: color-mix(in srgb, var(--thread-accent) 58%, transparent);
   box-shadow:
-    0 0 0 1px rgba(245, 78, 0, 0.28),
-    0 4px 14px rgba(245, 78, 0, 0.1),
+    0 0 0 1px color-mix(in srgb, var(--thread-accent) 28%, transparent),
+    0 4px 14px color-mix(in srgb, var(--thread-accent) 10%, transparent),
     0 2px 6px rgba(38, 37, 30, 0.05);
-  background: #fffefc;
+  background: var(--thread-active-surface);
 }
 /* 已解决 + active: 绿 ring 优先 */
 .comment-thread.is-resolved.is-active {
-  border-color: rgba(31, 138, 101, 0.5);
+  border-color: color-mix(in srgb, var(--success) 50%, transparent);
   box-shadow:
-    0 0 0 1px rgba(31, 138, 101, 0.22),
-    0 4px 14px rgba(31, 138, 101, 0.08),
+    0 0 0 1px color-mix(in srgb, var(--success) 22%, transparent),
+    0 4px 14px color-mix(in srgb, var(--success) 8%, transparent),
     0 2px 6px rgba(38, 37, 30, 0.04);
-  background: #fafefc;
+  background: var(--surface-resolved);
 }
 /* 已解决 mark — 绿色虚线标识 */
 .tiptap .annotation-mark.is-resolved {
-  background: rgba(31, 138, 101, 0.08);
+  background: color-mix(in srgb, var(--success) 8%, transparent);
   border-bottom: 1px dashed var(--success);
   opacity: 0.7;
 }
 .tiptap .annotation-mark.is-resolved:hover {
-  background: rgba(31, 138, 101, 0.15);
+  background: color-mix(in srgb, var(--success) 15%, transparent);
   opacity: 0.95;
 }
 /* 已解决卡片 — 弱化但不画删除线 */
 .comment-thread.is-resolved {
-  background: #fafcfb;
-  border-color: rgba(31, 138, 101, 0.18);
+  background: var(--surface-resolved);
+  border-color: color-mix(in srgb, var(--success) 18%, transparent);
   opacity: 0.9;
 }
 .comment-thread.is-resolved:hover {
   opacity: 1;
-  border-color: rgba(31, 138, 101, 0.32);
+  border-color: color-mix(in srgb, var(--success) 32%, transparent);
 }
 .comment-thread.is-resolved .comment-body,
 .comment-thread.is-resolved .comment-quote-text {
@@ -1845,6 +2047,35 @@ body.file-pane-collapsed #file-pane {
   box-shadow:
     0 0 0 1px rgba(217, 119, 6, 0.12),
     0 2px 8px rgba(217, 119, 6, 0.06);
+}
+
+/* 类型只定义一套色阶；active 调整强度，不切换为其他功能色。 */
+.comment-thread.is-ai {
+  --thread-accent: var(--ai);
+  --thread-accent-hover: var(--ai-hover);
+  --thread-accent-soft: var(--ai-soft);
+  --thread-solid: var(--ai-solid);
+  --thread-solid-hover: var(--ai-hover);
+  --thread-surface: var(--surface-ai);
+  --thread-active-surface: color-mix(in srgb, var(--surface-ai) 76%, var(--panel));
+  --thread-active-quote: linear-gradient(180deg, var(--surface-ai) 0%, color-mix(in srgb, var(--surface-ai) 82%, var(--panel)) 100%);
+}
+.comment-thread.is-review {
+  --thread-accent: var(--review);
+  --thread-accent-hover: var(--review-hover);
+  --thread-accent-soft: var(--review-soft);
+  --thread-solid: var(--review-solid);
+  --thread-solid-hover: var(--review-hover);
+  --thread-surface: var(--surface-review);
+  --thread-active-surface: color-mix(in srgb, var(--surface-review) 76%, var(--panel));
+  --thread-active-quote: linear-gradient(180deg, var(--surface-review) 0%, color-mix(in srgb, var(--surface-review) 82%, var(--panel)) 100%);
+}
+.comment-thread.is-resolved {
+  --thread-accent: var(--success);
+  --thread-accent-hover: var(--success);
+  --thread-accent-soft: var(--resolved-soft);
+  --thread-solid: var(--success-solid);
+  --thread-solid-hover: color-mix(in srgb, var(--success-solid) 82%, black);
 }
 
 /* 序号 pill — Linear 风格小圆角数字 */
@@ -1869,12 +2100,12 @@ body.file-pane-collapsed #file-pane {
   line-height: 1;
 }
 .comment-thread.is-active .comment-number-badge {
-  color: var(--accent);
-  background: var(--accent-soft);
+  color: var(--thread-accent);
+  background: var(--thread-accent-soft);
 }
 .comment-thread.is-resolved .comment-number-badge {
   color: var(--success);
-  background: rgba(31, 138, 101, 0.1);
+  background: var(--resolved-soft);
 }
 
 /* Banners */
@@ -1962,12 +2193,12 @@ body.file-pane-collapsed #file-pane {
   background: linear-gradient(180deg, #f5f4f0 0%, #f0efe9 100%);
 }
 .comment-thread.is-active .comment-quote {
-  background: linear-gradient(180deg, #fff8f3 0%, #fff3eb 100%);
-  border-bottom-color: rgba(245, 78, 0, 0.1);
+  background: var(--thread-active-quote);
+  border-bottom-color: color-mix(in srgb, var(--thread-accent) 12%, transparent);
 }
 .comment-thread.is-resolved .comment-quote {
   background: linear-gradient(180deg, #f6faf8 0%, #f1f7f4 100%);
-  border-bottom-color: rgba(31, 138, 101, 0.1);
+  border-bottom-color: color-mix(in srgb, var(--success) 10%, transparent);
 }
 .comment-quote-text {
   flex: 1;
@@ -1988,7 +2219,7 @@ body.file-pane-collapsed #file-pane {
 /* 弯引号 U-bracket — 用户偏好的文档引用感 */
 .comment-quote-text::before {
   content: "\201C";
-  color: var(--accent);
+  color: var(--thread-accent);
   font-size: 15px;
   font-weight: 600;
   font-family: Georgia, "Times New Roman", serif;
@@ -2077,6 +2308,9 @@ body.file-pane-collapsed #file-pane {
 .comment-menu button:hover {
   background: var(--panel-2);
 }
+.comment-menu button[data-act="resolve"] {
+  color: var(--success);
+}
 .comment-menu button.menu-danger {
   color: var(--danger);
 }
@@ -2138,11 +2372,7 @@ body.file-pane-collapsed #file-pane {
 /* v1.32: 折叠态已不显示 '点击展开' hover 文字 (commit 6d606f3)
    用户已无需 hover tooltip: quote 区域点击折叠/展开 (v1.17), 已够用 */
 
-/* P-card: 已解决徽章 (在 quote 行内, 折叠时也可见)
-   颜色用 #1f8a65 绿色 (--resolved 是灰色用于 mark/fade, 不能复用) */
-// v20: 已解决徽章删除 - 不再在 quote 行显示 "✓ 已解决" 大块标签
-// 改为: mark 绿色虚线 + 卡片绿色左边框 + ↺ 按钮 (自己表达"已解决/重新打开")
-// 原因: 之前徽章太大 + 跟 quote-text 同行 + 跟 ↺ 按钮挤在一起, 用户感觉"挡标题"
+/* 已解决状态由绿色 mark、卡片和重新打开按钮共同表达，不再显示大块徽章。 */
 .comment-resolved-badge { display: none !important; }
 
 /* 主批注体 — Notion/Linear: 宽松留白, avatar 左对齐 */
@@ -2266,7 +2496,7 @@ body.file-pane-collapsed #file-pane {
   transition: color 0.12s;
 }
 .comment-thread .reply-toggle summary::-webkit-details-marker { display: none; }
-.comment-thread .reply-toggle summary:hover { color: var(--accent); }
+.comment-thread .reply-toggle summary:hover { color: var(--thread-accent); }
 .comment-thread .reply-toggle summary::before {
   content: "↳";
   font-size: 13px;
@@ -2303,9 +2533,21 @@ body.file-pane-collapsed #file-pane {
 .comment-reply-form textarea:focus {
   background: #fff;
   box-shadow:
-    inset 0 0 0 1px rgba(245, 78, 0, 0.45),
-    0 0 0 3px var(--accent-soft);
+    inset 0 0 0 1px var(--thread-accent),
+    0 0 0 3px var(--thread-accent-soft);
 }
+
+/* 类型输入框跟随卡片功能色，active 只增加同色 focus ring。 */
+.comment-thread:is(.is-ai, .is-review) .comment-reply-form textarea {
+  border-left: 3px solid var(--thread-accent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--thread-accent) 55%, transparent);
+}
+.comment-thread:is(.is-ai, .is-review) .comment-reply-form textarea:focus {
+  box-shadow:
+    inset 0 0 0 1px var(--thread-accent),
+    0 0 0 3px var(--thread-accent-soft);
+}
+
 .comment-reply-form .form-actions {
   display: flex;
   align-items: center;
@@ -2338,23 +2580,24 @@ body.file-pane-collapsed #file-pane {
 .comment-thread.is-collapsed .comment-quote .comment-resolve-btn--header { display: none; }
 .comment-reply-form .form-actions .comment-resolve-btn {
   font-weight: 500;
-  color: var(--text-2);
-  border: 1px solid var(--border-warm-medium);
+  color: var(--success);
+  border: 1px solid color-mix(in srgb, var(--success) 42%, transparent);
   border-radius: 6px;
   padding: 5px 10px;
 }
 .comment-reply-form .form-actions .comment-resolve-btn:hover {
   color: var(--success);
-  background: rgba(31, 138, 101, 0.07);
-  border-color: rgba(31, 138, 101, 0.45);
+  background: color-mix(in srgb, var(--success) 7%, transparent);
+  border-color: color-mix(in srgb, var(--success) 45%, transparent);
 }
+
 .comment-reply-form .form-actions .comment-resolve-btn.is-resolved {
   color: var(--success);
-  border-color: rgba(31, 138, 101, 0.4);
-  background: rgba(31, 138, 101, 0.06);
+  border-color: color-mix(in srgb, var(--success) 40%, transparent);
+  background: color-mix(in srgb, var(--success) 6%, transparent);
 }
 .comment-reply-form .form-actions .comment-resolve-btn.is-resolved:hover {
-  background: var(--success);
+  background: var(--success-solid);
   color: #fff;
   border-color: var(--success);
 }
@@ -2364,7 +2607,7 @@ body.file-pane-collapsed #file-pane {
   width: 26px;
   height: 26px;
   border: 1px solid transparent;
-  background: var(--success);
+  background: var(--success-solid);
   color: #fff;
   font-size: 13px;
   line-height: 1;
@@ -2376,7 +2619,7 @@ body.file-pane-collapsed #file-pane {
   margin: -2px 0 0 2px;
   flex-shrink: 0;
   user-select: none;
-  box-shadow: 0 1px 2px rgba(31, 138, 101, 0.25);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--success) 25%, transparent);
 }
 .comment-quote .comment-resolve-btn--header:hover {
   background: #fff;
@@ -2390,25 +2633,26 @@ body.file-pane-collapsed #file-pane {
   box-shadow: none;
 }
 .comment-quote .comment-resolve-btn--header.is-resolved:hover {
-  background: var(--success);
+  background: var(--success-solid);
   color: #fff;
   border-color: var(--success);
 }
 /* 主按钮: 实心 accent pill — Docs/Linear CTA */
 .comment-reply-form .form-actions button.primary {
-  color: #fff;
+  color: var(--text-on-strong);
   font-weight: 600;
-  background: var(--accent);
-  border-color: var(--accent);
+  background: var(--thread-solid);
+  border-color: var(--thread-solid);
   padding: 5px 14px;
   border-radius: 6px;
-  box-shadow: 0 1px 2px rgba(245, 78, 0, 0.2);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--thread-solid) 24%, transparent);
 }
+
 .comment-reply-form .form-actions button.primary:hover {
   color: #fff;
-  background: var(--accent-hover);
-  border-color: var(--accent-hover);
-  box-shadow: 0 2px 6px rgba(245, 78, 0, 0.25);
+  background: var(--thread-solid-hover);
+  border-color: var(--thread-solid-hover);
+  box-shadow: 0 2px 6px color-mix(in srgb, var(--thread-solid) 28%, transparent);
 }
 .comment-reply-form .form-actions button:disabled,
 .comment-reply-form .form-actions button.primary:disabled {
@@ -2426,7 +2670,7 @@ body.file-pane-collapsed #file-pane {
   box-shadow: none;
 }
 
-/* === Float bar: 批注 | AI 机器人 (v1.43.57 — 独立双 pill + bot icon) === */
+/* === Float bar: 人类调整 | AI调整 === */
 #float-comment-btn {
   display: inline-flex;
   align-items: center;
@@ -2434,7 +2678,7 @@ body.file-pane-collapsed #file-pane {
   /* keep transform from .float-btn (translateX -50%) */
 }
 #float-comment-btn button {
-  background: var(--accent);
+  background: var(--accent-solid);
   color: #ffffff;
   border: none;
   border-radius: var(--radius-pill);
@@ -2453,7 +2697,7 @@ body.file-pane-collapsed #file-pane {
   white-space: nowrap;
 }
 #float-comment-btn .float-btn-label {
-  font-size: 12.5px;
+  font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.01px;
 }
@@ -2476,7 +2720,7 @@ body.file-pane-collapsed #file-pane {
   mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z'/></svg>");
 }
 #float-comment-btn button:hover {
-  background: var(--accent-hover);
+  background: var(--accent-solid-hover);
   transform: translateY(-1px);
   box-shadow: 0 6px 18px rgba(245, 78, 0, 0.28), 0 2px 4px rgba(38, 37, 30, 0.08);
 }
@@ -2486,8 +2730,8 @@ body.file-pane-collapsed #file-pane {
 }
 /* AI：独立深色 pill + 小机器人 icon（Lucide bot） */
 #float-comment-btn button.float-ai-btn {
-  background: #1f2937;
-  box-shadow: 0 4px 14px rgba(31, 41, 55, 0.28), 0 1px 2px rgba(38, 37, 30, 0.08);
+  background: var(--ai-solid);
+  box-shadow: 0 4px 14px color-mix(in srgb, var(--ai-solid) 28%, transparent), 0 1px 2px rgba(38, 37, 30, 0.08);
   padding: 6px 12px 6px 10px;
 }
 #float-comment-btn button.float-ai-btn::before {
@@ -2508,127 +2752,103 @@ body.file-pane-collapsed #file-pane {
   mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M12 8V4H8'/><rect width='16' height='12' x='4' y='8' rx='2'/><path d='M2 14h2'/><path d='M20 14h2'/><path d='M15 13v2'/><path d='M9 13v2'/></svg>");
 }
 #float-comment-btn button.float-ai-btn:hover {
-  background: #111827;
-  box-shadow: 0 6px 18px rgba(17, 24, 39, 0.35), 0 2px 4px rgba(38, 37, 30, 0.08);
+  background: var(--ai-hover);
+  box-shadow: 0 6px 18px color-mix(in srgb, var(--ai-hover) 35%, transparent), 0 2px 4px rgba(38, 37, 30, 0.08);
 }
 #float-comment-btn button.float-ai-btn:active {
-  box-shadow: 0 2px 6px rgba(17, 24, 39, 0.22);
+  box-shadow: 0 2px 6px color-mix(in srgb, var(--ai-hover) 24%, transparent);
 }
-/* 侧栏回复区：机器人 + AI 芯片 */
-.comment-reply-form .form-actions .comment-ai-prefix-btn {
+/* 卡片角标：AI / 审阅 */
+.comment-type-badge {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  border-radius: var(--radius-pill);
+  padding: 2px 7px;
+  line-height: 1.35;
+  border: 1px solid transparent;
+}
+.comment-type-badge.is-ai {
+  color: var(--ai);
+  background: var(--ai-soft);
+  border-color: color-mix(in srgb, var(--ai) 18%, transparent);
+}
+.comment-type-badge.is-review {
+  color: var(--review);
+  background: var(--review-soft);
+  border-color: color-mix(in srgb, var(--review) 18%, transparent);
+}
+
+/* 侧栏：人类调整 | AI调整 两段切换 */
+.comment-reply-form .form-actions .comment-type-switch {
+  position: relative;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: stretch;
+  border: 1px solid var(--border-warm-medium);
+  border-radius: var(--radius-pill);
+  overflow: hidden;
+  background: var(--panel-2);
+  padding: 0;
+  gap: 0;
+}
+.comment-type-switch-btn {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  border: 1px solid var(--border-warm-medium);
-  background: var(--panel);
+  justify-content: center;
+  gap: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
   color: var(--text-2);
-  border-radius: 6px;
-  padding: 5px 9px 5px 7px;
+  padding: 5px 10px;
   font-size: 11.5px;
   font-weight: 600;
   font-family: inherit;
   cursor: pointer;
   letter-spacing: 0.01em;
-  flex-shrink: 0;
+  line-height: 1.3;
+  white-space: nowrap;
 }
-.comment-reply-form .form-actions .comment-ai-prefix-btn::before {
-  content: "";
-  display: block;
-  width: 12px;
-  height: 12px;
-  flex-shrink: 0;
-  background-color: currentColor;
-  -webkit-mask-repeat: no-repeat;
-  mask-repeat: no-repeat;
-  -webkit-mask-position: center;
-  mask-position: center;
-  -webkit-mask-size: contain;
-  mask-size: contain;
-  -webkit-mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M12 8V4H8'/><rect width='16' height='12' x='4' y='8' rx='2'/><path d='M2 14h2'/><path d='M20 14h2'/><path d='M15 13v2'/><path d='M9 13v2'/></svg>");
-  mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M12 8V4H8'/><rect width='16' height='12' x='4' y='8' rx='2'/><path d='M2 14h2'/><path d='M20 14h2'/><path d='M15 13v2'/><path d='M9 13v2'/></svg>");
+.comment-type-switch-btn + .comment-type-switch-btn {
+  border-left: 1px solid var(--border-warm-medium);
 }
-.comment-reply-form .form-actions .comment-ai-prefix-btn:hover {
-  background: #1f2937;
-  color: #fff;
-  border-color: #1f2937;
+.comment-type-switch-btn:hover {
+  color: var(--text);
+  background: color-mix(in srgb, var(--panel) 70%, var(--panel-2));
 }
-.comment-reply-form .form-actions .comment-ai-prefix-btn.is-active {
-  background: rgba(31, 41, 55, 0.1);
-  color: #1f2937;
-  border-color: #1f2937;
+.comment-type-switch-btn.is-selected {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 650;
+}
+.comment-thread.is-ai .comment-type-switch-btn.is-selected {
+  background: var(--ai-soft);
+  color: var(--ai);
+}
+/* legacy review threads: badge keeps violet; switcher still human|ai */
+.comment-thread.is-review .comment-type-switch-btn.is-selected {
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
-/* REVIEW prefix & float buttons */
-#float-comment-btn button.float-review-btn {
-  background: #4c1d95;
-  box-shadow: 0 4px 14px rgba(76, 29, 149, 0.28), 0 1px 2px rgba(38, 37, 30, 0.08);
-  padding: 6px 12px 6px 10px;
+#comment-pane .filter-tab:focus-visible,
+.mark-delete-btn:focus-visible,
+#float-comment-btn button:focus-visible,
+.comment-menu-btn:focus-visible,
+.comment-menu button:focus-visible,
+.comment-reply-form .form-actions button:focus-visible,
+.comment-type-switch-btn:focus-visible {
+  outline: 2px solid var(--thread-accent, var(--accent));
+  outline-offset: 2px;
 }
-#float-comment-btn button.float-review-btn::before {
-  content: "";
-  display: block;
-  width: 14px;
-  height: 14px;
-  flex-shrink: 0;
-  background-color: currentColor;
-  -webkit-mask-repeat: no-repeat;
-  mask-repeat: no-repeat;
-  -webkit-mask-position: center;
-  mask-position: center;
-  -webkit-mask-size: contain;
-  mask-size: contain;
-  -webkit-mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5'/><path d='M9 18h6'/><path d='M10 22h4'/></svg>");
-  mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5'/><path d='M9 18h6'/><path d='M10 22h4'/></svg>");
+#float-comment-btn button.float-ai-btn:focus-visible {
+  outline-color: var(--ai);
 }
-#float-comment-btn button.float-review-btn:hover {
-  background: #3b0764;
-  box-shadow: 0 6px 18px rgba(59, 7, 100, 0.35), 0 2px 4px rgba(38, 37, 30, 0.08);
-}
-#float-comment-btn button.float-review-btn:active {
-  box-shadow: 0 2px 6px rgba(59, 7, 100, 0.22);
-}
-
-.comment-reply-form .form-actions .comment-review-prefix-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  border: 1px solid var(--border-warm-medium);
-  background: var(--panel);
-  color: var(--text-2);
-  border-radius: 6px;
-  padding: 5px 9px 5px 7px;
-  font-size: 11.5px;
-  font-weight: 600;
-  font-family: inherit;
-  cursor: pointer;
-  letter-spacing: 0.01em;
-  flex-shrink: 0;
-}
-.comment-reply-form .form-actions .comment-review-prefix-btn::before {
-  content: "";
-  display: block;
-  width: 12px;
-  height: 12px;
-  flex-shrink: 0;
-  background-color: currentColor;
-  -webkit-mask-repeat: no-repeat;
-  mask-repeat: no-repeat;
-  -webkit-mask-position: center;
-  mask-position: center;
-  -webkit-mask-size: contain;
-  mask-size: contain;
-  -webkit-mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5'/><path d='M9 18h6'/><path d='M10 22h4'/></svg>");
-  mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5'/><path d='M9 18h6'/><path d='M10 22h4'/></svg>");
-}
-.comment-reply-form .form-actions .comment-review-prefix-btn:hover {
-  background: #4c1d95;
-  color: #fff;
-  border-color: #4c1d95;
-}
-.comment-reply-form .form-actions .comment-review-prefix-btn.is-active {
-  background: rgba(76, 29, 149, 0.1);
-  color: #4c1d95;
-  border-color: #4c1d95;
+.mark-delete-btn:focus-visible,
+.comment-menu button.menu-danger:focus-visible {
+  outline-color: var(--danger);
 }
 
 /* ============ Status bar ============ */
@@ -2845,9 +3065,9 @@ body.file-pane-collapsed #file-pane {
   color: var(--accent);
 }
 .table-controls button.table-controls-danger:hover {
-  background: #fde2e2;
-  border-color: #ef4444;
-  color: #b91c1c;
+  background: var(--status-danger-soft);
+  border-color: var(--status-danger);
+  color: var(--status-danger);
 }
 .table-controls-sep {
   width: 1px;
@@ -3030,8 +3250,8 @@ body.file-pane-collapsed #file-pane {
 }
 .doc-tab:hover .doc-tab-close { opacity: 0.9; }
 .doc-tab-close:hover {
-  background: rgba(185, 28, 28, 0.12);
-  color: #b91c1c;
+  background: var(--status-danger-soft);
+  color: var(--status-danger);
   opacity: 1;
 }
 .doc-tab-new {
@@ -3247,7 +3467,7 @@ body.file-pane-collapsed #file-pane {
   #btn-tb-more { display: none !important; }
   #tb-more-menu,
   #tb-more-menu.hidden {
-    display: contents;
+    display: contents !important;
   }
 }
 /* 窄屏: 次要格式进下拉 */
@@ -3346,4 +3566,92 @@ body.file-pane-collapsed #file-pane {
 .comment-overflow-warn--inline .warn-hint {
   font-size: 11.5px;
   line-height: 1.45;
+}
+
+/* ============ Color-system hardening ============ */
+.comment-avatar {
+  --avatar-color: var(--author-0);
+  color: var(--avatar-text);
+  background: var(--avatar-color);
+  box-shadow: 0 0 0 1.5px var(--panel), 0 1px 2px var(--border-warm-medium);
+}
+.comment-avatar[data-author-color="0"] { --avatar-color: var(--author-0); }
+.comment-avatar[data-author-color="1"] { --avatar-color: var(--author-1); }
+.comment-avatar[data-author-color="2"] { --avatar-color: var(--author-2); }
+.comment-avatar[data-author-color="3"] { --avatar-color: var(--author-3); }
+.comment-avatar[data-author-color="4"] { --avatar-color: var(--author-4); }
+.comment-avatar[data-author-color="5"] { --avatar-color: var(--author-5); }
+.comment-avatar[data-author-color="6"] { --avatar-color: var(--author-6); }
+.comment-avatar[data-author-color="7"] { --avatar-color: var(--author-7); }
+
+.comment-reply-form textarea:focus,
+.comment-quote .comment-resolve-btn--header:hover {
+  background: var(--panel);
+}
+.comment-reply-form .form-actions .comment-resolve-btn.is-resolved:hover,
+.comment-quote .comment-resolve-btn--header,
+.comment-quote .comment-resolve-btn--header.is-resolved:hover,
+.comment-reply-form .form-actions button.primary,
+.comment-reply-form .form-actions button.primary:hover,
+#float-comment-btn button {
+  color: var(--text-on-strong);
+}
+
+:where(button, input, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--focus-color);
+  outline-offset: 2px;
+}
+/* ProseMirror has tabindex=0 — the rule above painted a full-doc orange ring on
+   focus, which looks exactly like "entire body selected". Keep caret/selection only. */
+.ProseMirror:focus,
+.ProseMirror:focus-visible,
+.tiptap:focus,
+.tiptap:focus-visible,
+#editor [contenteditable="true"]:focus,
+#editor [contenteditable="true"]:focus-visible {
+  outline: none;
+  outline-offset: 0;
+}
+
+[data-theme="dark"] code,
+[data-theme="dark"] .tiptap code {
+  background: var(--panel-3);
+}
+[data-theme="dark"] #comment-list {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--panel-3) 42%, transparent) 0%, transparent 48px);
+}
+[data-theme="dark"] #comment-pane .filters .filter-tab:hover,
+[data-theme="dark"] .doc-tab:hover {
+  background: var(--panel-2);
+}
+[data-theme="dark"] .comment-quote {
+  background: linear-gradient(180deg, var(--panel-2) 0%, var(--panel-3) 100%);
+}
+[data-theme="dark"] .comment-thread.is-resolved .comment-quote {
+  background: var(--surface-resolved);
+}
+
+@media (prefers-color-scheme: dark) {
+  [data-theme="system"] code,
+  [data-theme="system"] .tiptap code { background: var(--panel-3); }
+  [data-theme="system"] #comment-list { background: linear-gradient(180deg, color-mix(in srgb, var(--panel-3) 42%, transparent) 0%, transparent 48px); }
+  [data-theme="system"] #comment-pane .filters .filter-tab:hover,
+  [data-theme="system"] .doc-tab:hover { background: var(--panel-2); }
+  [data-theme="system"] .comment-quote { background: linear-gradient(180deg, var(--panel-2) 0%, var(--panel-3) 100%); }
+  [data-theme="system"] .comment-thread.is-resolved .comment-quote { background: var(--surface-resolved); }
+}
+
+@media (forced-colors: active) {
+  .annotation-mark,
+  .annotation-bubble,
+  .annotation-image,
+  .comment-thread,
+  .comment-pending-badge {
+    forced-color-adjust: auto;
+  }
+  .annotation-mark { border-bottom: 2px dashed LinkText; }
+  .annotation-mark.is-active { outline: 2px solid Highlight; }
+  .annotation-mark.is-resolved { border-bottom-style: double; }
+  .comment-thread.is-active { outline: 2px solid Highlight; }
+  .comment-thread.is-resolved { border-style: double; }
 }
