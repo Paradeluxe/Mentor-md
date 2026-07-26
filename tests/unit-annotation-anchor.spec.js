@@ -84,6 +84,31 @@ const t = async (name, fn) => {
     assert.equal(r.range, null);
   });
 
+  await t('resolveAnchor weak includes+stale position stays ambiguous', async () => {
+    const doc = 'ABCDEFGH xxx tok q\nABCDEFGH yyy tok r\nnothing here';
+    const r = mod.resolveAnchor(doc, {
+      text: 'tok',
+      prefix: 'ZZZZABCDEFGH',
+      suffix: '',
+      position: { from: 56, to: 59 }
+    });
+    assert.equal(r.status, 'ambiguous');
+    assert.equal(r.range, null);
+  });
+
+  await t('resolveAnchor strong prefix still attaches among duplicates', async () => {
+    const doc = 'LEFT_A TOKEN RIGHT_A\nLEFT_B TOKEN RIGHT_B';
+    const r = mod.resolveAnchor(doc, {
+      text: 'TOKEN',
+      prefix: 'LEFT_B ',
+      suffix: ' RIGHT_B'
+    });
+    assert.equal(r.status, 'attached');
+    assert.ok(r.range);
+    assert.equal(doc.slice(r.range.from, r.range.to), 'TOKEN');
+    assert.ok(doc.slice(Math.max(0, r.range.from - 7), r.range.from).includes('LEFT_B'));
+  });
+
   await t('mapAnchorRange insert before', async () => {
     // Fake mapping: shift everything after pos 0 by +5
     const mapping = {

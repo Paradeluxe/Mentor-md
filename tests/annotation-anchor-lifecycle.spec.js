@@ -441,6 +441,26 @@ const { chromium } = require('playwright');
     if (!inner || inner.invalid || !result.marks.some((m) => m.threadId === 'inner')) throw new Error('partial overlap recovery blocked: ' + JSON.stringify(result));
   });
 
+  await t('weak fuzzy context does not attach a duplicate to the wrong occurrence', async () => {
+    const result = await page.evaluate(() => {
+      const M = window.__mdAnnotator;
+      M.openNewTabBlank();
+      M.State._suspendAnnValidate = true;
+      try { M.State.editor.commands.setContent('<p>ABCDEFGH xxx tok q</p><p>ABCDEFGH yyy tok r</p><p>nothing here</p>', false); }
+      finally { M.State._suspendAnnValidate = false; }
+      const found = M.findAnnotationRange(M.State.editor.state.doc, {
+        text: 'tok',
+        prefix: 'ZZZZABCDEFGH',
+        suffix: '',
+        range: { from: 56, to: 59 },
+      });
+      return found;
+    });
+    if (!result || !result.ambiguous || typeof result.from === 'number') {
+      throw new Error('weak 8-char context silently attached: ' + JSON.stringify(result));
+    }
+  });
+
   await t('live edits keep legacy range and anchor evidence synchronized', async () => {
     await setup('<p>AAA TOKEN ZZZ</p>');
     const made = await createNth('TOKEN', 0);

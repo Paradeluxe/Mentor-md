@@ -55817,7 +55817,13 @@ function resolveAnchor(doc5, anchor, options = {}) {
   }
   const scored = candidates.map((c) => {
     const s = scoreCandidate(doc5, c, norm);
-    return { ...c, score: s.score, exactQuote: s.exactQuote };
+    return {
+      ...c,
+      score: s.score,
+      exactQuote: s.exactQuote,
+      prefixScore: s.prefixScore,
+      suffixScore: s.suffixScore
+    };
   }).sort((a, b) => b.score - a.score || a.from - b.from);
   if (scored.length === 1 && scored[0].exactQuote) {
     const best2 = scored[0];
@@ -55831,6 +55837,8 @@ function resolveAnchor(doc5, anchor, options = {}) {
   }
   const best = scored[0];
   const second = scored[1];
+  const contextStrength = (c) => c && (c.prefixScore || 0) + (c.suffixScore || 0) || 0;
+  const STRONG_CONTEXT = 40;
   if (second && second.score === best.score) {
     return { status: "ambiguous", range: null, score: best.score, candidates: scored };
   }
@@ -55838,16 +55846,8 @@ function resolveAnchor(doc5, anchor, options = {}) {
     return { status: "ambiguous", range: null, score: best.score, candidates: scored };
   }
   if (scored.length > 1) {
-    const hasContext = !!(norm.prefix || norm.suffix);
-    if (!hasContext) {
-      return { status: "ambiguous", range: null, score: best.score, candidates: scored };
-    }
-    if (best.score < 100 + (norm.text ? norm.text.length : 0) + 1 && best.score < minScore + 100) {
-      if (!(best.score > (second ? second.score : 0))) {
-        return { status: "ambiguous", range: null, score: best.score, candidates: scored };
-      }
-    }
-    if (best.score === 100 + norm.text.length && second && second.score === best.score) {
+    const bestCtx = contextStrength(best);
+    if (bestCtx < STRONG_CONTEXT) {
       return { status: "ambiguous", range: null, score: best.score, candidates: scored };
     }
   }
@@ -62793,11 +62793,11 @@ function findAnnotationRange(doc5, annotation) {
             searchFrom = idx + 1;
           }
         }
-        scored.sort((a, b) => b.score - a.score);
-        if (scored.length && scored[0].score > 0) {
+        scored.sort((a, b) => b.score - a.score || a.from - b.from);
+        if (scored.length && scored[0].score >= 40) {
           const best = scored[0];
           const second = scored[1];
-          if (second && second.score === best.score) {
+          if (second && (second.score === best.score || best.score - second.score < 10)) {
             return { ambiguous: true, candidates: scored.slice(0, 5), fuzzy: true };
           }
           return { from: best.from, to: best.to, fuzzy: best.score < 100 };

@@ -6899,12 +6899,13 @@ function findAnnotationRange(doc5, annotation) {
             searchFrom = idx + 1;
           }
         }
-        scored.sort((a, b) => b.score - a.score);
-                if (scored.length && scored[0].score > 0) {
+        scored.sort((a, b) => b.score - a.score || a.from - b.from);
+                if (scored.length && scored[0].score >= 40) {
                   const best = scored[0];
                   const second = scored[1];
                   // P0: equal top scores → refuse auto-attach (never silent first-hit)
-                  if (second && second.score === best.score) {
+                  // Weak includes-only (15) is below 40 and never attaches among duplicates.
+                  if (second && (second.score === best.score || best.score - second.score < 10)) {
                     return { ambiguous: true, candidates: scored.slice(0, 5), fuzzy: true };
                   }
                   return { from: best.from, to: best.to, fuzzy: best.score < 100 };

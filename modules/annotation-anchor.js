@@ -145,7 +145,13 @@ export function resolveAnchor(doc, anchor, options = {}) {
 
   const scored = candidates.map((c) => {
     const s = scoreCandidate(doc, c, norm);
-    return { ...c, score: s.score, exactQuote: s.exactQuote };
+    return {
+      ...c,
+      score: s.score,
+      exactQuote: s.exactQuote,
+      prefixScore: s.prefixScore,
+      suffixScore: s.suffixScore
+    };
   }).sort((a, b) => b.score - a.score || a.from - b.from);
 
   // Unique exact quote without needing context
@@ -162,6 +168,10 @@ export function resolveAnchor(doc, anchor, options = {}) {
 
   const best = scored[0];
   const second = scored[1];
+  const contextStrength = (c) => (c && ((c.prefixScore || 0) + (c.suffixScore || 0))) || 0;
+  // Boundary match (>=40) is real evidence. Includes-only (15) + stale position
+  // must not auto-pick among duplicates — that is silent mis-attach.
+  const STRONG_CONTEXT = 40;
 
   // Multiple identical contexts / scores → ambiguous (never first-hit)
   if (second && second.score === best.score) {
@@ -171,20 +181,9 @@ export function resolveAnchor(doc, anchor, options = {}) {
     return { status: 'ambiguous', range: null, score: best.score, candidates: scored };
   }
 
-  // Need either unique exact or positive context evidence when duplicates exist
   if (scored.length > 1) {
-    const hasContext = !!(norm.prefix || norm.suffix);
-    if (!hasContext) {
-      return { status: 'ambiguous', range: null, score: best.score, candidates: scored };
-    }
-    if (best.score < 100 + (norm.text ? norm.text.length : 0) + 1 && best.score < minScore + 100) {
-      // Require at least some prefix/suffix contribution beyond exact-only when multi
-      if (!(best.score > (second ? second.score : 0))) {
-        return { status: 'ambiguous', range: null, score: best.score, candidates: scored };
-      }
-    }
-    // exact-only tie breakers with zero context match on all → ambiguous
-    if (best.score === 100 + norm.text.length && second && second.score === best.score) {
+    const bestCtx = contextStrength(best);
+    if (bestCtx < STRONG_CONTEXT) {
       return { status: 'ambiguous', range: null, score: best.score, candidates: scored };
     }
   }
