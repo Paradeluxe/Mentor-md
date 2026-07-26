@@ -6731,6 +6731,44 @@ function findAnnotationRange(doc5, annotation) {
     if (fuzzy) r.fuzzy = true;
     return r;
   };
+  // Exact quote resolution is owned by modules/annotation-anchor.js. Convert
+  // PM positions to plain offsets here; app-specific fuzzy recovery remains
+  // below for edited/deleted quote fallbacks.
+  if (text2) {
+    let plainPosition = null;
+    const prior = annotation.anchor && annotation.anchor.position || annotation.range;
+    if (prior && typeof prior.from === "number" && typeof prior.to === "number") {
+      try {
+        const fromPm = Math.max(0, Math.min(doc5.content.size, prior.from));
+        const toPm = Math.max(fromPm, Math.min(doc5.content.size, prior.to));
+        plainPosition = {
+          from: doc5.textBetween(0, fromPm, " ").length,
+          to: doc5.textBetween(0, toPm, " ").length
+        };
+      } catch (_) {
+        plainPosition = null;
+      }
+    }
+    const exactResolution = resolveAnchor(joined, {
+      text: text2,
+      prefix,
+      suffix,
+      position: plainPosition
+    });
+    if (exactResolution.status === "attached" && exactResolution.range) {
+      const r = makeRange(exactResolution.range.from, exactResolution.range.to, false);
+      r.confidence = exactResolution.confidence;
+      r.score = exactResolution.score;
+      return r;
+    }
+    if (exactResolution.status === "ambiguous") {
+      const candidates = (exactResolution.candidates || []).slice(0, 5).map((c) => ({
+        ...makeRange(c.from, c.to, false),
+        score: c.score
+      }));
+      return { ambiguous: true, fuzzy: true, candidates };
+    }
+  }
   if (text2) {
     const first3 = findInSegments(text2);
     if (first3) {
