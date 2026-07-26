@@ -126,7 +126,9 @@ const TEST_MD = `# 多批注测试
       });
       return {
         threads: window.__mdAnnotator.getAnnotations(),
-        inDocMarkCount: inDoc.length,
+        // One logical mark per thread; overlap splits a thread into adjacent PM text pieces.
+        inDocMarkCount: new Set(inDoc.map((x) => x.threadId)).size,
+        inDocPieceCount: inDoc.length,
         inDoc,
       };
     });

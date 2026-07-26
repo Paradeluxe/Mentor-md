@@ -305,6 +305,87 @@ const { chromium } = require('playwright');
     if (hits.length !== 1 || hits[0].alt !== 'right') throw new Error('duplicate src decorated wrong/all images: ' + JSON.stringify(result));
   });
 
+  await t('overlapping annotation marks coexist and deletion preserves the survivor', async () => {
+    const result = await page.evaluate(() => {
+      const M = window.__mdAnnotator;
+      M.openNewTabBlank();
+      M.loadMarkdownIntoEditor('overlap-live.md', 'alpha bravo charlie', { annotations: [] }, { alreadyPrepared: true });
+      const outer = M._testCreateAnnotation(1, 20, 'alpha bravo charlie');
+      const inner = M._testCreateAnnotation(7, 20, 'bravo charlie');
+      const collect = () => {
+        const byThread = {};
+        M.State.editor.state.doc.descendants((node, pos) => {
+          if (!node.isText) return;
+          for (const mark of node.marks) {
+            if (mark.type.name !== 'annotation') continue;
+            const tid = mark.attrs.threadId;
+            if (!byThread[tid]) byThread[tid] = [];
+            byThread[tid].push({ from: pos, to: pos + node.nodeSize, text: node.text });
+          }
+        });
+        return byThread;
+      };
+      const before = collect();
+      const beforeAudit = M.collectLiveAnnotationAudit();
+      M._testDeleteThread(inner.threadId);
+      const after = collect();
+      const afterAudit = M.collectLiveAnnotationAudit();
+      return { outerId: outer.threadId, innerId: inner.threadId, before, beforeAudit, after, afterAudit, threads: M.State.annotations.map((a) => a.threadId) };
+    });
+    if (!result.beforeAudit.healthy || !result.before[result.outerId] || !result.before[result.innerId]) {
+      throw new Error('overlap marks did not coexist: ' + JSON.stringify(result));
+    }
+    const overlapPiece = result.before[result.outerId].some((r) => r.from <= 7 && r.to >= 20);
+    if (!overlapPiece) throw new Error('outer mark missing inside overlap: ' + JSON.stringify(result));
+    if (!result.afterAudit.healthy || !result.after[result.outerId] || result.after[result.innerId] || result.threads.includes(result.innerId)) {
+      throw new Error('deleting inner damaged survivor: ' + JSON.stringify(result));
+    }
+  });
+
+  await t('overlapping annotations survive serialized reload with both marks', async () => {
+    const result = await page.evaluate(() => {
+      const M = window.__mdAnnotator;
+      M.openNewTabBlank();
+      M.loadMarkdownIntoEditor('overlap-reload.md', 'alpha bravo charlie', { annotations: [] }, { alreadyPrepared: true });
+      const outer = M._testCreateAnnotation(1, 20, 'alpha bravo charlie');
+      const inner = M._testCreateAnnotation(7, 20, 'bravo charlie');
+      const sidecar = { version: '1', annotations: M.State.annotations.map((a) => M.serializeAnnotationThread(a)) };
+      M.loadMarkdownIntoEditor('overlap-reload.md', 'alpha bravo charlie', sidecar, { alreadyPrepared: true, forceDisk: true });
+      const ids = new Set();
+      M.State.editor.state.doc.descendants((node) => {
+        if (!node.isText) return;
+        for (const mark of node.marks) if (mark.type.name === 'annotation') ids.add(mark.attrs.threadId);
+      });
+      return { ids: Array.from(ids), expected: [outer.threadId, inner.threadId], audit: M.collectLiveAnnotationAudit(), threads: M.State.annotations };
+    });
+    if (!result.audit.healthy || result.ids.length !== 2 || result.expected.some((id) => !result.ids.includes(id)) || result.threads.some((a) => a.invalid || a.deleted)) {
+      throw new Error('overlap lost after reload: ' + JSON.stringify(result));
+    }
+  });
+
+  await t('overlapping marks survive source and WYSIWYG roundtrip', async () => {
+    const result = await page.evaluate(async () => {
+      const M = window.__mdAnnotator;
+      M.openNewTabBlank();
+      M.loadMarkdownIntoEditor('overlap-source.md', 'alpha bravo charlie', { annotations: [] }, { alreadyPrepared: true });
+      const outer = M._testCreateAnnotation(1, 20, 'alpha bravo charlie');
+      const inner = M._testCreateAnnotation(7, 20, 'bravo charlie');
+      document.querySelector('#btn-toggle-render').click();
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      document.querySelector('#btn-toggle-render').click();
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      const ids = new Set();
+      M.State.editor.state.doc.descendants((node) => {
+        if (!node.isText) return;
+        for (const mark of node.marks) if (mark.type.name === 'annotation') ids.add(mark.attrs.threadId);
+      });
+      return { ids: Array.from(ids), expected: [outer.threadId, inner.threadId], audit: M.collectLiveAnnotationAudit(), mode: M.State.renderMode };
+    });
+    if (result.mode !== 'rendered' || !result.audit.healthy || result.ids.length !== 2 || result.expected.some((id) => !result.ids.includes(id))) {
+      throw new Error('overlap lost in source roundtrip: ' + JSON.stringify(result));
+    }
+  });
+
   await t('mentor handle open preserves references before citation anchor restore', async () => {
     const result = await page.evaluate(async () => {
       const M = window.__mdAnnotator;

@@ -56917,6 +56917,9 @@ var AnnotationMark = Mark2.create({
   inclusive: false,
   // 不延伸到光标位置，避免新增文字继承 mark
   exitable: true,
+  // Same-type annotation marks normally replace one another in ProseMirror.
+  // Allow distinct thread marks to coexist over nested/overlapping text.
+  excludes: "",
   // 光标可以移出 mark
   addAttributes() {
     return {
@@ -56979,22 +56982,23 @@ var AnnotationBubblePlugin = new Plugin({
       try {
         doc5.descendants((node, pos) => {
           if (!node.isText) return;
-          const annMark = node.marks.find((m) => m.type.name === "annotation");
-          if (!annMark) return;
-          const threadId = annMark.attrs.threadId;
-          if (!threadId || seenThreads.has(threadId)) return;
-          seenThreads.add(threadId);
-          try {
-            decorations.push(Decoration.widget(pos, () => {
-              const el = document.createElement("span");
-              el.className = `annotation-bubble${annMark.attrs.resolved ? " is-resolved" : ""}`;
-              el.setAttribute("data-annotation-thread-id", String(threadId));
-              el.setAttribute("data-author-color", String(annMark.attrs.authorColor || 0));
-              el.setAttribute("aria-hidden", "true");
-              return el;
-            }, { side: -1, ignoreSelection: true, stopEvent: () => true }));
-          } catch (err) {
-            console.warn("[AnnotationBubble] widget \u521B\u5EFA\u5931\u8D25:", err);
+          const annMarks = node.marks.filter((m) => m.type.name === "annotation");
+          for (const annMark of annMarks) {
+            const threadId = annMark.attrs.threadId;
+            if (!threadId || seenThreads.has(threadId)) continue;
+            seenThreads.add(threadId);
+            try {
+              decorations.push(Decoration.widget(pos, () => {
+                const el = document.createElement("span");
+                el.className = `annotation-bubble${annMark.attrs.resolved ? " is-resolved" : ""}`;
+                el.setAttribute("data-annotation-thread-id", String(threadId));
+                el.setAttribute("data-author-color", String(annMark.attrs.authorColor || 0));
+                el.setAttribute("aria-hidden", "true");
+                return el;
+              }, { side: -1, ignoreSelection: true, stopEvent: () => true }));
+            } catch (err) {
+              console.warn("[AnnotationBubble] widget \u521B\u5EFA\u5931\u8D25:", err);
+            }
           }
         });
       } catch (err) {
@@ -59140,17 +59144,35 @@ function handleSelectionChange(opts = {}) {
   const { from: from2, to, empty: empty4 } = editor2.state.selection;
   const btn = $("#float-comment-btn");
   const markType = editor2.schema.marks.annotation;
+  const isAttachedStatus = (status) => status === "attached" || status === "moved" || status === "edited";
+  const pickActiveThread = (marks) => {
+    const ids = (marks || []).filter((m) => m.type === markType && m.attrs.threadId).map((m) => m.attrs.threadId);
+    if (!ids.length) return null;
+    if (State2.activeThreadId && ids.includes(State2.activeThreadId)) return State2.activeThreadId;
+    let best = null;
+    let bestSpan = Infinity;
+    for (const tid of ids) {
+      const thread = State2.annotations.find((a) => a && a.threadId === tid);
+      const status = thread && thread.anchor && thread.anchor.status;
+      if (thread && !thread.invalid && !thread.deleted && (!status || isAttachedStatus(status))) {
+        const range = thread.range || thread.anchor && thread.anchor.position;
+        const span = range && typeof range.from === "number" && typeof range.to === "number" ? range.to - range.from : Infinity;
+        if (span < bestSpan) {
+          best = tid;
+          bestSpan = span;
+        }
+      }
+    }
+    return best || ids[ids.length - 1];
+  };
   let activeMarkThreadId = null;
   if (empty4) {
     const $pos = editor2.state.doc.resolve(from2);
-    const mark = $pos.marks().find((m) => m.type === markType);
-    if (mark) activeMarkThreadId = mark.attrs.threadId;
+    activeMarkThreadId = pickActiveThread($pos.marks());
   } else {
     const $from2 = editor2.state.doc.resolve(from2);
     const $to2 = editor2.state.doc.resolve(to);
-    const m1 = $from2.marks().find((m) => m.type === markType);
-    const m2 = $to2.marks().find((m) => m.type === markType);
-    activeMarkThreadId = m1 && m1.attrs.threadId || m2 && m2.attrs.threadId;
+    activeMarkThreadId = pickActiveThread([...$from2.marks(), ...$to2.marks()]);
   }
   if (dragging) {
     if (activeMarkThreadId && State2.activeThreadId !== activeMarkThreadId) {
@@ -60376,13 +60398,16 @@ function applyReattach() {
   const tr2 = ed.state.tr;
   const toRemove = [];
   ed.state.doc.descendants((node, pos) => {
-    if (node.isText && node.marks.some((m) => m.type === markType && m.attrs.threadId === tid)) {
-      toRemove.push({ from: pos, to: pos + node.nodeSize });
+    if (!node.isText) return;
+    for (const mark of node.marks) {
+      if (mark.type === markType && mark.attrs.threadId === tid) {
+        toRemove.push({ from: pos, to: pos + node.nodeSize, mark });
+      }
     }
   });
   toRemove.sort((a, b) => a.from - b.from);
   for (let i = toRemove.length - 1; i >= 0; i--) {
-    tr2.removeMark(toRemove[i].from, toRemove[i].to, markType);
+    tr2.removeMark(toRemove[i].from, toRemove[i].to, toRemove[i].mark);
   }
   tr2.addMark(sel.from, sel.to, markType.create({
     threadId: tid,
@@ -60429,7 +60454,7 @@ function deleteThread(threadId) {
   editor2.state.doc.descendants((node, pos) => {
     node.marks.forEach((m) => {
       if (m.type === markType && m.attrs.threadId === threadId) {
-        tr2.removeMark(pos, pos + node.nodeSize, markType);
+        tr2.removeMark(pos, pos + node.nodeSize, m);
       }
     });
   });
