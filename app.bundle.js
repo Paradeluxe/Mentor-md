@@ -10022,7 +10022,7 @@ function isTagRule(rule) {
 function isStyleRule(rule) {
   return rule.style != null;
 }
-var DOMParser = class _DOMParser {
+var DOMParser2 = class _DOMParser {
   /**
   Create a parser that targets the given schema, using the given
   parsing rules.
@@ -16267,7 +16267,7 @@ function parseFromClipboard(view, text2, html, plainText, $context) {
       dom = child;
     }
   if (!slice2) {
-    let parser = view.someProp("clipboardParser") || view.someProp("domParser") || DOMParser.fromSchema(view.state.schema);
+    let parser = view.someProp("clipboardParser") || view.someProp("domParser") || DOMParser2.fromSchema(view.state.schema);
     slice2 = parser.parseSlice(dom, {
       preserveWhitespace: !!(asText || sliceData),
       context: $context,
@@ -18199,7 +18199,7 @@ function parseBetween(view, from_, to_) {
     }
   }
   let startDoc = view.state.doc;
-  let parser = view.someProp("domParser") || DOMParser.fromSchema(view.state.schema);
+  let parser = view.someProp("domParser") || DOMParser2.fromSchema(view.state.schema);
   let $from = startDoc.resolve(from2);
   let sel = null, doc5 = parser.parse(parent, {
     topNode: $from.parent,
@@ -21252,7 +21252,7 @@ function createNodeFromContent(content, schema, options) {
     }
   }
   if (typeof content === "string") {
-    const parser = DOMParser.fromSchema(schema);
+    const parser = DOMParser2.fromSchema(schema);
     return options.slice ? parser.parseSlice(elementFromString(content), options.parseOptions).content : parser.parse(elementFromString(content), options.parseOptions);
   }
   return createNodeFromContent("", schema, options);
@@ -24024,15 +24024,15 @@ function createNodeFromContent2(content, schema, options) {
         })
       });
       if (options.slice) {
-        DOMParser.fromSchema(contentCheckSchema).parseSlice(elementFromString2(content), options.parseOptions);
+        DOMParser2.fromSchema(contentCheckSchema).parseSlice(elementFromString2(content), options.parseOptions);
       } else {
-        DOMParser.fromSchema(contentCheckSchema).parse(elementFromString2(content), options.parseOptions);
+        DOMParser2.fromSchema(contentCheckSchema).parse(elementFromString2(content), options.parseOptions);
       }
       if (options.errorOnInvalidContent && hasInvalidContent) {
         throw new Error("[tiptap error]: Invalid HTML content", { cause: new Error(`Invalid element found: ${invalidContent}`) });
       }
     }
-    const parser = DOMParser.fromSchema(schema);
+    const parser = DOMParser2.fromSchema(schema);
     if (options.slice) {
       return parser.parseSlice(elementFromString2(content), options.parseOptions).content;
     }
@@ -26895,7 +26895,7 @@ function parseFromClipboard2(view, text2, html, plainText, $context) {
       dom = child;
     }
   if (!slice2) {
-    let parser = view.someProp("clipboardParser") || view.someProp("domParser") || DOMParser.fromSchema(view.state.schema);
+    let parser = view.someProp("clipboardParser") || view.someProp("domParser") || DOMParser2.fromSchema(view.state.schema);
     slice2 = parser.parseSlice(dom, {
       preserveWhitespace: !!(asText || sliceData),
       context: $context,
@@ -34435,7 +34435,7 @@ function parseFromClipboard3(view, text2, html, plainText, $context) {
       dom = child;
     }
   if (!slice2) {
-    let parser = view.someProp("clipboardParser") || view.someProp("domParser") || DOMParser.fromSchema(view.state.schema);
+    let parser = view.someProp("clipboardParser") || view.someProp("domParser") || DOMParser2.fromSchema(view.state.schema);
     slice2 = parser.parseSlice(dom, {
       preserveWhitespace: !!(asText || sliceData),
       context: $context,
@@ -36367,7 +36367,7 @@ function parseBetween2(view, from_, to_) {
     }
   }
   let startDoc = view.state.doc;
-  let parser = view.someProp("domParser") || DOMParser.fromSchema(view.state.schema);
+  let parser = view.someProp("domParser") || DOMParser2.fromSchema(view.state.schema);
   let $from = startDoc.resolve(from2);
   let sel = null, doc5 = parser.parse(parent, {
     topNode: $from.parent,
@@ -54482,6 +54482,24 @@ function sessionsMatch(a, b) {
 }
 
 // modules/io.js
+function cloneReferences(value) {
+  if (value == null) return value;
+  if (!Array.isArray(value)) {
+    try {
+      return JSON.parse(JSON.stringify(value));
+    } catch (_) {
+      return value;
+    }
+  }
+  return value.map((entry) => {
+    if (entry == null || typeof entry !== "object") return entry;
+    try {
+      return JSON.parse(JSON.stringify(entry));
+    } catch (_) {
+      return Object.assign({}, entry);
+    }
+  });
+}
 function createSerialWriteQueue() {
   const chains = /* @__PURE__ */ new Map();
   return {
@@ -54769,8 +54787,12 @@ function createDraftStore(idbFactory = globalThis.indexedDB) {
       });
     },
     /**
-     * Atomic put of body + annotations (+ optional sidecar meta).
-     * @param {{ documentId: string, name: string, body: string, annotations: any[], sidecar?: object }} record
+     * Atomic put of body + annotations (+ optional sidecar meta, + optional
+     * references array). The references field is stored as a deep clone so
+     * callers can mutate their own copy after the write without corrupting
+     * persisted data. Schema/version are unchanged — references rides on the
+     * existing `drafts` object store as an extra column.
+     * @param {{ documentId: string, name: string, body: string, annotations: any[], sidecar?: object, references?: any[]|null }} record
      */
     async putDraft(record) {
       if (!record || !record.documentId) throw new Error("putDraft: documentId required");
@@ -54783,6 +54805,10 @@ function createDraftStore(idbFactory = globalThis.indexedDB) {
           body: typeof record.body === "string" ? record.body : "",
           annotations: Array.isArray(record.annotations) ? record.annotations : [],
           sidecar: record.sidecar || null,
+          // null/absent both map to null on disk; cloneReferences returns the
+          // input unchanged for null/undefined, otherwise deep-clones the
+          // payload so persistent storage cannot share references with caller.
+          references: record.references === void 0 || record.references === null ? null : cloneReferences(record.references),
           updatedAt: Date.now()
         };
         const tx = db.transaction("drafts", "readwrite");
@@ -54970,16 +54996,21 @@ function scanAnnotationMarksInRanges(doc5, markType, ranges, pad2 = 32) {
   const threadMarkRange = /* @__PURE__ */ new Map();
   const textCount = /* @__PURE__ */ new Map();
   const size = doc5.content.size;
+  const seenTextNodes = /* @__PURE__ */ new Set();
+  const markPieces = /* @__PURE__ */ new Map();
   const visitText = (node, pos) => {
     if (!node.isText) return;
+    const nodeKey = `${pos}:${node.nodeSize}`;
+    if (seenTextNodes.has(nodeKey)) return;
+    seenTextNodes.add(nodeKey);
     const text2 = node.text;
     if (text2) textCount.set(text2, (textCount.get(text2) || 0) + 1);
     for (const m of node.marks) {
       if (m.type === markType && m.attrs.threadId) {
         const tid = m.attrs.threadId;
         threadFound.add(tid);
-        if (!threadCurrentText.has(tid)) threadCurrentText.set(tid, text2);
-        else threadCurrentText.set(tid, threadCurrentText.get(tid) + text2);
+        if (!markPieces.has(tid)) markPieces.set(tid, []);
+        markPieces.get(tid).push({ from: pos, to: pos + node.nodeSize, text: text2 || "" });
         const end = pos + node.nodeSize;
         if (!threadMarkRange.has(tid)) threadMarkRange.set(tid, { from: pos, to: end });
         else {
@@ -54988,6 +55019,12 @@ function scanAnnotationMarksInRanges(doc5, markType, ranges, pad2 = 32) {
           if (end > r.to) r.to = end;
         }
       }
+    }
+  };
+  const finalizeText = () => {
+    for (const [tid, pieces] of markPieces) {
+      pieces.sort((a, b) => a.from - b.from || a.to - b.to);
+      threadCurrentText.set(tid, pieces.map((piece) => piece.text).join(""));
     }
   };
   if (!ranges || !ranges.length) {
@@ -55007,6 +55044,7 @@ function scanAnnotationMarksInRanges(doc5, markType, ranges, pad2 = 32) {
       }
     }
   }
+  finalizeText();
   return { threadFound, threadCurrentText, threadMarkRange, textCount, incremental: !!(ranges && ranges.length) };
 }
 function createActiveHighlightPlugin(getActiveThreadId) {
@@ -55082,6 +55120,24 @@ function isPatchHistoryEntry(entry) {
 }
 
 // modules/tabs.js
+function cloneReferences2(value) {
+  if (value == null) return value;
+  if (!Array.isArray(value)) {
+    try {
+      return JSON.parse(JSON.stringify(value));
+    } catch (_) {
+      return value;
+    }
+  }
+  return value.map((entry) => {
+    if (entry == null || typeof entry !== "object") return entry;
+    try {
+      return JSON.parse(JSON.stringify(entry));
+    } catch (_) {
+      return Object.assign({}, entry);
+    }
+  });
+}
 function genTabId() {
   if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID();
   return "tab-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8);
@@ -55108,8 +55164,10 @@ function snapshotTabState({
   mediaUrls,
   mediaFiles,
   currentFile,
-  replyDrafts
+  replyDrafts,
+  references
 }) {
+  const clonedReferences = references === void 0 ? void 0 : cloneReferences2(references);
   return {
     id,
     name: name || currentFile?.name || "untitled.md",
@@ -55126,15 +55184,1046 @@ function snapshotTabState({
       content: currentFile.content || "",
       dirty: !!currentFile.dirty,
       dirtyGen: currentFile.dirtyGen || 0,
-      handle: currentFile.handle || null
+      handle: currentFile.handle || null,
+      // Mirror references onto the per-document slice so a snapshot can
+      // round-trip without depending on the top-level field. Undefined
+      // stays undefined to keep the existing shape stable.
+      references: currentFile.references === void 0 ? void 0 : cloneReferences2(currentFile.references)
     } : { documentId: id, name: name || "untitled.md", content: "", dirty: !!dirty, dirtyGen: 0, handle: null },
-    replyDrafts: replyDrafts || {}
+    replyDrafts: replyDrafts || {},
+    // Only include references when the caller actually passed it in; omitting
+    // the key preserves the original snapshot shape for legacy callers.
+    ...clonedReferences === void 0 ? {} : { references: clonedReferences }
   };
 }
 function tabLabel(tab) {
   if (!tab) return "untitled";
   const n = tab.name || tab.currentFile?.name || "untitled.md";
   return tab.dirty ? n + " \u2022" : n;
+}
+
+// modules/references.js
+function cleanBibValue(value) {
+  return String(value || "").replace(/[{}]/g, "").replace(/\s+/g, " ").trim();
+}
+function readBalancedValue(body, start) {
+  const opener = body[start];
+  if (opener === "{") {
+    let depth = 1;
+    let i2 = start + 1;
+    let out = "";
+    for (; i2 < body.length && depth > 0; i2++) {
+      const ch = body[i2];
+      if (ch === "{") {
+        depth += 1;
+        out += ch;
+      } else if (ch === "}") {
+        depth -= 1;
+        if (depth > 0) out += ch;
+      } else {
+        out += ch;
+      }
+    }
+    return { value: out, end: i2 };
+  }
+  if (opener === '"') {
+    let i2 = start + 1;
+    let out = "";
+    for (; i2 < body.length; i2++) {
+      const ch = body[i2];
+      if (ch === '"' && body[i2 - 1] !== "\\") return { value: out, end: i2 + 1 };
+      out += ch;
+    }
+    return { value: out, end: i2 };
+  }
+  let i = start;
+  while (i < body.length && body[i] !== "," && body[i] !== "\n") i += 1;
+  return { value: body.slice(start, i), end: i };
+}
+function splitBibEntries(text2) {
+  const source = String(text2 || "");
+  const rows = [];
+  let i = 0;
+  while (i < source.length) {
+    const at = source.indexOf("@", i);
+    if (at < 0) break;
+    const head = source.slice(at).match(/^@(\w+)\s*([({])/);
+    if (!head) {
+      i = at + 1;
+      continue;
+    }
+    const type = head[1].toLowerCase();
+    const opener = head[2];
+    const closer = opener === "{" ? "}" : ")";
+    const bodyStart = at + head[0].length;
+    let depth = 1;
+    let quote = false;
+    let j = bodyStart;
+    for (; j < source.length && depth > 0; j++) {
+      const ch = source[j];
+      if (ch === '"' && source[j - 1] !== "\\") quote = !quote;
+      if (quote) continue;
+      if (ch === opener) depth += 1;
+      else if (ch === closer) depth -= 1;
+    }
+    const body = source.slice(bodyStart, Math.max(bodyStart, j - 1));
+    rows.push({ type, body, raw: source.slice(at, j) });
+    i = Math.max(j, at + 1);
+  }
+  return rows;
+}
+function parseBibTeX(text2) {
+  const entries = [];
+  for (const block of splitBibEntries(text2)) {
+    const comma = block.body.indexOf(",");
+    if (comma < 0) continue;
+    const key = block.body.slice(0, comma).trim();
+    if (!key) continue;
+    const fields = {};
+    const body = block.body.slice(comma + 1);
+    let i = 0;
+    while (i < body.length) {
+      while (i < body.length && /[\s,]/.test(body[i])) i += 1;
+      const nameMatch = body.slice(i).match(/^([A-Za-z][\w-]*)\s*=\s*/);
+      if (!nameMatch) break;
+      const name = nameMatch[1].toLowerCase();
+      i += nameMatch[0].length;
+      const parsed = readBalancedValue(body, i);
+      fields[name] = cleanBibValue(parsed.value);
+      i = parsed.end;
+    }
+    entries.push({
+      key,
+      type: block.type,
+      authors: cleanBibValue(fields.author).split(/\s+and\s+/i).filter(Boolean).join("; "),
+      year: fields.year || "",
+      title: fields.title || "",
+      journal: fields.journal || fields.booktitle || fields.publisher || "",
+      doi: fields.doi || "",
+      raw: block.raw
+    });
+  }
+  return entries;
+}
+function makeCitekey(firstAuthor, year, title) {
+  let name = String(firstAuthor || "").split(",")[0].split(/\s+/).filter(Boolean).pop() || "anon";
+  name = name.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]/g, "") || "anon";
+  const yearMatch = String(year || "").match(/\d{4}/);
+  const word = String(title || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().split(/[^a-z0-9]+/).find((x) => x.length > 2) || "item";
+  return `${name}${yearMatch ? yearMatch[0] : ""}${word}`;
+}
+function parseRIS(text2) {
+  const entries = [];
+  let cur = null;
+  let lastField = null;
+  const flush = () => {
+    if (!cur) return;
+    const authors = cur.AU || cur.A1 || [];
+    const title = (cur.TI || cur.T1 || [""])[0];
+    const journal = (cur.JO || cur.JF || cur.JA || cur.T2 || [""])[0];
+    const year = (cur.PY || cur.Y1 || [""])[0];
+    const doi = (cur.DO || [""])[0];
+    entries.push({
+      key: makeCitekey(authors[0] || "anon", year, title),
+      type: (cur.TY || ["misc"])[0],
+      authors: authors.join("; "),
+      year,
+      title,
+      journal,
+      doi,
+      raw: ""
+    });
+    cur = null;
+    lastField = null;
+  };
+  for (const line of String(text2 || "").split(/\r?\n/)) {
+    const match = line.match(/^([A-Z0-9]{2})\s+-\s*(.*)$/);
+    if (match) {
+      const field = match[1];
+      if (field === "TY") {
+        flush();
+        cur = {};
+      }
+      cur = cur || {};
+      if (field === "ER") {
+        flush();
+      } else {
+        cur[field] = (cur[field] || []).concat(match[2]);
+        lastField = field;
+      }
+    } else if (cur && lastField && /^\s+/.test(line) && cur[lastField]?.length) {
+      cur[lastField][cur[lastField].length - 1] += ` ${line.trim()}`;
+    }
+  }
+  flush();
+  return entries;
+}
+function parseCSLJSON(text2) {
+  let data;
+  try {
+    data = JSON.parse(String(text2 || ""));
+  } catch {
+    return [];
+  }
+  const rows = Array.isArray(data) ? data : [data];
+  return rows.filter(Boolean).map((item, index) => ({
+    key: String(item.id || item.citationKey || `entry${index + 1}`),
+    type: item.type || "misc",
+    authors: (item.author || []).map((a) => [a.given, a.family].filter(Boolean).join(" ")).join("; "),
+    year: item.issued?.["date-parts"]?.[0]?.[0] || "",
+    title: item.title || "",
+    journal: item["container-title"] || item.publisher || "",
+    doi: item.DOI || item.doi || "",
+    raw: ""
+  }));
+}
+function parseEndNoteTagged(text2) {
+  const entries = [];
+  let cur = null;
+  const flush = () => {
+    if (!cur) return;
+    const authors = cur.A || [];
+    const title = (cur.T || [""])[0];
+    const year = (cur.D || [""])[0];
+    entries.push({
+      key: makeCitekey(authors[0] || "anon", year, title),
+      type: (cur["0"] || ["misc"])[0],
+      authors: authors.join("; "),
+      year,
+      title,
+      journal: (cur.J || cur.B || [""])[0],
+      doi: (cur.R || [""])[0],
+      raw: ""
+    });
+    cur = null;
+  };
+  for (const line of String(text2 || "").split(/\r?\n/)) {
+    const match = line.match(/^%([0A-Z])\s+(.*)$/);
+    if (!match) continue;
+    if (match[1] === "0") {
+      flush();
+      cur = {};
+    }
+    cur = cur || {};
+    cur[match[1]] = (cur[match[1]] || []).concat(match[2].trim());
+  }
+  flush();
+  return entries;
+}
+function xmlText(node, selector) {
+  return node.querySelector(selector)?.textContent?.trim() || "";
+}
+function parseEndNoteXML(text2) {
+  if (typeof DOMParser === "undefined") {
+    const rows = [];
+    const recordMatches = String(text2 || "").match(/<record\b[\s\S]*?<\/record>/gi) || [];
+    const read = (record, tag) => {
+      const match = record.match(new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`, "i"));
+      return match ? match[1].replace(/<[^>]+>/g, "").trim() : "";
+    };
+    for (const record of recordMatches) {
+      const authorsBlock = record.match(/<authors[^>]*>([\s\S]*?)<\/authors>/i)?.[1] || "";
+      const authors = [...authorsBlock.matchAll(/<author[^>]*>([\s\S]*?)<\/author>/gi)].map((m) => m[1].replace(/<[^>]+>/g, "").trim());
+      const title = read(record, "title");
+      const year = read(record, "year");
+      rows.push({
+        key: makeCitekey(authors[0] || "anon", year, title),
+        type: read(record, "ref-type") || "misc",
+        authors: authors.join("; "),
+        year,
+        title,
+        journal: read(record, "secondary-title"),
+        doi: read(record, "electronic-resource-num"),
+        raw: record
+      });
+    }
+    return rows;
+  }
+  const doc5 = new DOMParser().parseFromString(String(text2 || ""), "application/xml");
+  if (doc5.querySelector("parsererror")) return [];
+  return [...doc5.querySelectorAll("record")].map((record) => {
+    const authors = [...record.querySelectorAll("contributors authors author")].map((node) => node.textContent.trim()).filter(Boolean);
+    const title = xmlText(record, "titles title");
+    const year = xmlText(record, "dates year");
+    return {
+      key: makeCitekey(authors[0] || "anon", year, title),
+      type: xmlText(record, "ref-type") || "misc",
+      authors: authors.join("; "),
+      year,
+      title,
+      journal: xmlText(record, "titles secondary-title"),
+      doi: xmlText(record, "electronic-resource-num"),
+      raw: record.outerHTML || ""
+    };
+  });
+}
+function detectReferenceFormat(filename, text2) {
+  const name = String(filename || "");
+  const source = String(text2 || "");
+  if (/\.bib$/i.test(name)) return "bibtex";
+  if (/\.(ris)$/i.test(name)) return "ris";
+  if (/\.enw$/i.test(name)) return "endnote-tagged";
+  if (/\.xml$/i.test(name) && /<records?[\s>]/i.test(source)) return "endnote-xml";
+  if (/\.json$/i.test(name)) return "csl-json";
+  if (/^\s*@\w+\s*[({]/.test(source)) return "bibtex";
+  if (/^TY\s+-/m.test(source)) return "ris";
+  if (/^%0\s+/m.test(source)) return "endnote-tagged";
+  if (/^\s*<\?xml|<records?[\s>]/i.test(source)) return "endnote-xml";
+  if (/^\s*[\[{]/.test(source)) return "csl-json";
+  return "unknown";
+}
+function parseReferenceFile(filename, text2) {
+  const format = detectReferenceFormat(filename, text2);
+  if (format === "bibtex") return parseBibTeX(text2);
+  if (format === "ris") return parseRIS(text2);
+  if (format === "endnote-tagged") return parseEndNoteTagged(text2);
+  if (format === "endnote-xml") return parseEndNoteXML(text2);
+  if (format === "csl-json") return parseCSLJSON(text2);
+  return [];
+}
+function sortReferenceEntries(entries) {
+  return [...entries || []].sort((a, b) => String(a.key || "").localeCompare(String(b.key || ""), void 0, { sensitivity: "base" }));
+}
+function filterReferenceEntries(entries, query) {
+  const q = String(query || "").trim().toLowerCase();
+  if (!q) return [...entries || []];
+  return (entries || []).filter((entry) => [entry.key, entry.authors, entry.title, entry.journal, entry.year, entry.doi].filter(Boolean).join(" ").toLowerCase().includes(q));
+}
+function parseCitationSyntax(raw) {
+  const source = String(raw || "").trim();
+  const empty4 = { raw: source, items: [] };
+  if (!source.startsWith("[") || !source.endsWith("]") || source.length < 2) return empty4;
+  const inner2 = source.slice(1, -1);
+  const parts = inner2.split(/\s*;\s*/);
+  const items = [];
+  for (const part of parts) {
+    const match = part.match(/^(-)?@([\w:.\/-]+)(?:,\s*(.*))?$/);
+    if (!match) return empty4;
+    items.push({
+      key: match[2],
+      suppressAuthor: Boolean(match[1]),
+      suffix: String(match[3] || "").trim()
+    });
+  }
+  if (!items.length) return empty4;
+  return { raw: source, items };
+}
+function serializeCitationSyntax(citation) {
+  const items = citation && citation.items || [];
+  if (!items.length) {
+    const raw = citation && citation.raw ? String(citation.raw) : "[]";
+    return raw;
+  }
+  const body = items.map((item) => {
+    const suppress = item.suppressAuthor ? "-" : "";
+    const suffix = item.suffix ? `, ${item.suffix}` : "";
+    return `${suppress}@${item.key}${suffix}`;
+  }).join("; ");
+  return `[${body}]`;
+}
+function splitAuthors(authors) {
+  return String(authors || "").split(/[;]|\s+and\s+/i).map((s) => s.trim()).filter(Boolean);
+}
+function authorSurname(author) {
+  const comma = author.indexOf(",");
+  const head = comma >= 0 ? author.slice(0, comma) : author;
+  const tokens = head.split(/\s+/).filter(Boolean);
+  return tokens.length ? tokens[tokens.length - 1] : author;
+}
+function formatSingleItem(item, entry) {
+  const year = entry && entry.year ? entry.year : "";
+  if (item.suppressAuthor) {
+    return year ? item.suffix ? `${year}, ${item.suffix}` : `${year}` : item.suffix || "";
+  }
+  const list = splitAuthors(entry && entry.authors);
+  let authorPart = "";
+  if (list.length === 0) {
+    authorPart = "";
+  } else if (list.length === 1) {
+    authorPart = authorSurname(list[0]);
+  } else if (list.length === 2) {
+    authorPart = `${authorSurname(list[0])} & ${authorSurname(list[1])}`;
+  } else {
+    authorPart = `${authorSurname(list[0])} et al.`;
+  }
+  const pieces = [];
+  if (authorPart) pieces.push(authorPart);
+  if (year) pieces.push(year);
+  let head = pieces.join(", ");
+  if (item.suffix) head = head ? `${head}, ${item.suffix}` : item.suffix;
+  return head;
+}
+function formatCitationLabel(parsed, entryMap) {
+  const items = parsed && parsed.items || [];
+  if (!items.length) {
+    const raw = parsed && parsed.raw ? String(parsed.raw) : "[]";
+    return { text: raw, missingKeys: [] };
+  }
+  const map2 = entryMap instanceof Map ? entryMap : new Map((entryMap || []).map((e) => [e && e.key, e]));
+  const present = [];
+  const missing = [];
+  for (const item of items) {
+    const entry = map2.get(item.key);
+    if (entry) {
+      present.push({ item, text: formatSingleItem(item, entry) });
+    } else {
+      missing.push(item.key);
+    }
+  }
+  if (present.length === 0) {
+    const raw = parsed && parsed.raw ? String(parsed.raw) : `[@${missing.join("; ")}]`;
+    return { text: `[\u7F3A\u5931\uFF1A@${missing.join("; ")}]`, missingKeys: missing };
+  }
+  const body = present.map((p) => p.text).filter(Boolean).join("; ");
+  return { text: `(${body})`, missingKeys: missing };
+}
+var REFERENCE_FIELDS = [
+  "key",
+  "type",
+  "authors",
+  "year",
+  "title",
+  "journal",
+  "doi",
+  "url",
+  "volume",
+  "issue",
+  "pages",
+  "publisher"
+];
+function asString(value) {
+  if (value === void 0 || value === null) return "";
+  return String(value);
+}
+function escapeBibValue(value) {
+  return asString(value).replace(/\\/g, "\\textbackslash{}").replace(/[{}]/g, "\\$&");
+}
+function normalizeReferenceEntry(entry) {
+  const src = entry || {};
+  const out = { key: "", type: "misc", authors: "", year: "", title: "", journal: "" };
+  for (const field of REFERENCE_FIELDS) {
+    out[field] = asString(src[field]).trim();
+  }
+  if (!out.type) out.type = "misc";
+  if (!out.key) out.key = "anon";
+  return out;
+}
+function formatReferenceEntry(entry) {
+  const normalized = normalizeReferenceEntry(entry);
+  const fake = { raw: `[@${normalized.key}]`, items: [{ key: normalized.key, suppressAuthor: false, suffix: "" }] };
+  const label = formatCitationLabel(fake, /* @__PURE__ */ new Map([[normalized.key, normalized]]));
+  return {
+    key: normalized.key,
+    type: normalized.type,
+    authors: normalized.authors,
+    year: normalized.year,
+    title: normalized.title,
+    journal: normalized.journal,
+    doi: normalized.doi,
+    url: normalized.url,
+    label: label.text
+  };
+}
+function createReferenceManifest({ sourceName = "", sourceFormat = "", entries = [] } = {}) {
+  return {
+    version: "1",
+    source: { name: String(sourceName || ""), format: String(sourceFormat || "") },
+    updatedAt: (/* @__PURE__ */ new Date()).toISOString(),
+    entries: sortReferenceEntries(entries).map(normalizeReferenceEntry)
+  };
+}
+function normalizeReferenceManifest(manifest) {
+  const src = manifest || {};
+  return {
+    version: "1",
+    source: {
+      name: asString(src.source && src.source.name).trim(),
+      format: asString(src.source && src.source.format).trim()
+    },
+    updatedAt: asString(src.updatedAt).trim() || (/* @__PURE__ */ new Date(0)).toISOString(),
+    entries: sortReferenceEntries((src.entries || []).map(normalizeReferenceEntry)).map(normalizeReferenceEntry)
+  };
+}
+function emptyReferenceManifest() {
+  return {
+    version: "1",
+    source: { name: "", format: "" },
+    updatedAt: (/* @__PURE__ */ new Date(0)).toISOString(),
+    entries: []
+  };
+}
+var BIBTEX_TYPE_MAP = {
+  article: "article",
+  journal: "article",
+  jour: "article",
+  "article-journal": "article",
+  inproceedings: "inproceedings",
+  conference: "inproceedings",
+  conf: "inproceedings",
+  proc: "inproceedings",
+  "paper-conference": "inproceedings",
+  proceedings: "proceedings",
+  book: "book",
+  inbook: "incollection",
+  incollection: "incollection",
+  chapter: "incollection",
+  thesis: "phdthesis",
+  phdthesis: "phdthesis",
+  mastersthesis: "mastersthesis",
+  techreport: "techreport",
+  manual: "manual",
+  misc: "misc",
+  gen: "misc",
+  unpublished: "unpublished"
+};
+function bibtexType(entry) {
+  const raw = String(entry.type || "misc").toLowerCase();
+  return BIBTEX_TYPE_MAP[raw] || raw || "misc";
+}
+function referenceEntryToBibTeX(entry) {
+  const norm = normalizeReferenceEntry(entry);
+  const fields = [];
+  if (norm.authors) fields.push(`  author = {${escapeBibValue(norm.authors.replace(/;\s*/g, " and "))}}`);
+  if (norm.year) fields.push(`  year = {${escapeBibValue(norm.year)}}`);
+  if (norm.title) fields.push(`  title = {${escapeBibValue(norm.title)}}`);
+  if (norm.journal) fields.push(`  journal = {${escapeBibValue(norm.journal)}}`);
+  if (norm.volume) fields.push(`  volume = {${escapeBibValue(norm.volume)}}`);
+  if (norm.issue) fields.push(`  number = {${escapeBibValue(norm.issue)}}`);
+  if (norm.pages) fields.push(`  pages = {${escapeBibValue(norm.pages)}}`);
+  if (norm.publisher) fields.push(`  publisher = {${escapeBibValue(norm.publisher)}}`);
+  if (norm.doi) fields.push(`  doi = {${escapeBibValue(norm.doi)}}`);
+  if (norm.url) fields.push(`  url = {${escapeBibValue(norm.url)}}`);
+  const body = fields.length ? `
+${fields.join(",\n")}
+` : "";
+  return `@${bibtexType(norm)}{${norm.key},${body}}`;
+}
+function serializeReferenceBibTeX(entries) {
+  const list = Array.isArray(entries) ? entries : entries && entries.entries || [];
+  if (!list.length) return "";
+  return list.map(referenceEntryToBibTeX).join("\n\n") + "\n";
+}
+
+// modules/annotation-anchor.js
+var DEFAULT_CONTEXT = 40;
+var SCORE_GAP_MIN = 1;
+var ATTACHED_MIN_SCORE = 1;
+function clamp(n, lo, hi) {
+  return Math.max(lo, Math.min(hi, n));
+}
+function findOccurrences(text2, exact) {
+  if (!text2 || !exact) return [];
+  const out = [];
+  let start = 0;
+  while (start < text2.length) {
+    const idx = text2.indexOf(exact, start);
+    if (idx === -1) break;
+    out.push(idx);
+    start = idx + 1;
+  }
+  return out;
+}
+function localContext(doc5, from2, to, maxLen = DEFAULT_CONTEXT) {
+  const preFrom = Math.max(0, from2 - maxLen);
+  const sufTo = Math.min(doc5.length, to + maxLen);
+  return {
+    localPrefix: doc5.slice(preFrom, from2),
+    localSuffix: doc5.slice(to, sufTo)
+  };
+}
+function scoreCandidate(doc5, candidate, anchor) {
+  const text2 = anchor && (anchor.text || anchor.quote && anchor.quote.exact) || "";
+  const prefix = anchor && (anchor.prefix != null ? anchor.prefix : anchor.quote && anchor.quote.prefix) || "";
+  const suffix = anchor && (anchor.suffix != null ? anchor.suffix : anchor.quote && anchor.quote.suffix) || "";
+  const exact = candidate.exact != null ? candidate.exact : doc5 && candidate.from != null ? doc5.slice(candidate.from, candidate.to) : "";
+  const localPrefix = candidate.localPrefix != null ? candidate.localPrefix : doc5 ? localContext(doc5, candidate.from, candidate.to).localPrefix : "";
+  const localSuffix = candidate.localSuffix != null ? candidate.localSuffix : doc5 ? localContext(doc5, candidate.from, candidate.to).localSuffix : "";
+  let score = 0;
+  const exactQuote = !!(text2 && exact === text2);
+  if (exactQuote) score += 100 + text2.length;
+  let prefixScore = 0;
+  if (prefix) {
+    if (localPrefix.endsWith(prefix)) {
+      prefixScore = 100 + prefix.length;
+    } else if (prefix.length >= 2 && localPrefix.endsWith(prefix.slice(-Math.min(prefix.length, 12)))) {
+      prefixScore = 40;
+    } else if (prefix.length >= 4 && localPrefix.includes(prefix.slice(-8))) {
+      prefixScore = 15;
+    }
+  }
+  score += prefixScore;
+  let suffixScore = 0;
+  if (suffix) {
+    if (localSuffix.startsWith(suffix)) {
+      suffixScore = 100 + suffix.length;
+    } else if (suffix.length >= 2 && localSuffix.startsWith(suffix.slice(0, Math.min(suffix.length, 12)))) {
+      suffixScore = 40;
+    } else if (suffix.length >= 4 && localSuffix.includes(suffix.slice(0, 8))) {
+      suffixScore = 15;
+    }
+  }
+  score += suffixScore;
+  if (anchor && anchor.position && typeof anchor.position.from === "number" && typeof candidate.from === "number") {
+    const dist = Math.abs(candidate.from - anchor.position.from);
+    score += Math.max(0, 20 - Math.min(20, Math.floor(dist / 20)));
+  }
+  return { score, exactQuote, prefixScore, suffixScore };
+}
+function normalizeAnchorInput(anchor) {
+  if (!anchor || typeof anchor !== "object") return { text: "", prefix: "", suffix: "" };
+  if (anchor.quote && typeof anchor.quote === "object") {
+    return {
+      text: anchor.quote.exact || anchor.text || "",
+      prefix: anchor.quote.prefix != null ? anchor.quote.prefix : anchor.prefix || "",
+      suffix: anchor.quote.suffix != null ? anchor.quote.suffix : anchor.suffix || "",
+      position: anchor.position || anchor.range || null,
+      structure: anchor.structure || null
+    };
+  }
+  return {
+    text: anchor.text || "",
+    prefix: anchor.prefix || "",
+    suffix: anchor.suffix || "",
+    position: anchor.position || anchor.range || null,
+    structure: anchor.structure || null
+  };
+}
+function buildCandidates(doc5, norm) {
+  const text2 = norm.text || "";
+  if (!text2 || !doc5) return [];
+  const offs = findOccurrences(doc5, text2);
+  return offs.map((from2) => {
+    const to = from2 + text2.length;
+    const ctx = localContext(doc5, from2, to);
+    return {
+      from: from2,
+      to,
+      exact: text2,
+      localPrefix: ctx.localPrefix,
+      localSuffix: ctx.localSuffix
+    };
+  });
+}
+function resolveAnchor(doc5, anchor, options = {}) {
+  const norm = normalizeAnchorInput(anchor);
+  const minScore = options.minScore != null ? options.minScore : ATTACHED_MIN_SCORE;
+  const gapMin = options.scoreGapMin != null ? options.scoreGapMin : SCORE_GAP_MIN;
+  if (!norm.text) {
+    return { status: "orphaned", range: null, score: 0, candidates: [] };
+  }
+  const candidates = buildCandidates(doc5, norm);
+  if (!candidates.length) {
+    return { status: "orphaned", range: null, score: 0, candidates: [] };
+  }
+  const scored = candidates.map((c) => {
+    const s = scoreCandidate(doc5, c, norm);
+    return { ...c, score: s.score, exactQuote: s.exactQuote };
+  }).sort((a, b) => b.score - a.score || a.from - b.from);
+  if (scored.length === 1 && scored[0].exactQuote) {
+    const best2 = scored[0];
+    return {
+      status: "attached",
+      range: { from: best2.from, to: best2.to },
+      score: best2.score,
+      candidates: scored,
+      confidence: 1
+    };
+  }
+  const best = scored[0];
+  const second = scored[1];
+  if (second && second.score === best.score) {
+    return { status: "ambiguous", range: null, score: best.score, candidates: scored };
+  }
+  if (second && best.score - second.score < gapMin) {
+    return { status: "ambiguous", range: null, score: best.score, candidates: scored };
+  }
+  if (scored.length > 1) {
+    const hasContext = !!(norm.prefix || norm.suffix);
+    if (!hasContext) {
+      return { status: "ambiguous", range: null, score: best.score, candidates: scored };
+    }
+    if (best.score < 100 + (norm.text ? norm.text.length : 0) + 1 && best.score < minScore + 100) {
+      if (!(best.score > (second ? second.score : 0))) {
+        return { status: "ambiguous", range: null, score: best.score, candidates: scored };
+      }
+    }
+    if (best.score === 100 + norm.text.length && second && second.score === best.score) {
+      return { status: "ambiguous", range: null, score: best.score, candidates: scored };
+    }
+  }
+  if (best.score < minScore && scored.length > 1) {
+    return { status: "ambiguous", range: null, score: best.score, candidates: scored };
+  }
+  return {
+    status: "attached",
+    range: { from: best.from, to: best.to },
+    score: best.score,
+    candidates: scored,
+    confidence: second ? clamp((best.score - second.score) / Math.max(1, best.score), 0, 1) : 1
+  };
+}
+function mapAnchorRange(range, mapping, options = {}) {
+  if (!range || typeof range.from !== "number" || typeof range.to !== "number") {
+    return { status: "orphaned", range: null };
+  }
+  if (!mapping || typeof mapping.mapResult !== "function") {
+    return {
+      status: "attached",
+      range: { from: range.from, to: range.to },
+      startAssoc: range.startAssoc != null ? range.startAssoc : 1,
+      endAssoc: range.endAssoc != null ? range.endAssoc : -1
+    };
+  }
+  const startAssoc = range.startAssoc != null ? range.startAssoc : options.startAssoc != null ? options.startAssoc : 1;
+  const endAssoc = range.endAssoc != null ? range.endAssoc : options.endAssoc != null ? options.endAssoc : -1;
+  const start = mapping.mapResult(range.from, startAssoc);
+  const end = mapping.mapResult(range.to, endAssoc);
+  const startGone = !!(start.deletedAcross || start.deleted && end.deletedAcross);
+  const endGone = !!(end.deletedAcross || end.deleted && start.deletedAcross);
+  if (start.deletedAcross || end.deletedAcross || start.deleted && end.deleted) {
+    return { status: "orphaned", range: null, start, end };
+  }
+  if (startGone || endGone) {
+    return { status: "orphaned", range: null, start, end };
+  }
+  let from2 = start.pos;
+  let to = end.pos;
+  if (to < from2) {
+    const tmp = from2;
+    from2 = to;
+    to = tmp;
+  }
+  if (from2 === to) {
+    if (!options.allowEmpty) {
+      return { status: "orphaned", range: null, start, end };
+    }
+  }
+  return {
+    status: "moved",
+    range: { from: from2, to },
+    startAssoc,
+    endAssoc,
+    start,
+    end
+  };
+}
+function resolveAnchorSet(doc5, anchors, options = {}) {
+  const list = Array.isArray(anchors) ? anchors : [];
+  const attached = [];
+  const ambiguous = [];
+  const orphaned = [];
+  const collisions = [];
+  const jobs = list.map((a, idx) => {
+    const threadId = a.threadId || a.id || `idx-${idx}`;
+    const norm = normalizeAnchorInput(a);
+    const resolved = resolveAnchor(doc5, { ...norm, position: a.position || a.range || norm.position }, options);
+    return {
+      threadId,
+      anchor: a,
+      norm,
+      resolved,
+      candidates: (resolved.candidates || []).map((c) => ({ ...c, threadId }))
+    };
+  });
+  const occupied = /* @__PURE__ */ new Map();
+  const rangeKey = (from2, to) => `${from2}:${to}`;
+  const ordered = jobs.slice().sort((a, b) => {
+    const sa = a.resolved.score || 0;
+    const sb = b.resolved.score || 0;
+    return sb - sa;
+  });
+  const claimCount = /* @__PURE__ */ new Map();
+  for (const job of ordered) {
+    if (job.resolved.status !== "attached" || !job.resolved.range) continue;
+    const k = rangeKey(job.resolved.range.from, job.resolved.range.to);
+    claimCount.set(k, (claimCount.get(k) || 0) + 1);
+  }
+  for (const job of ordered) {
+    if (job.resolved.status === "orphaned") {
+      orphaned.push({ threadId: job.threadId, reason: "no-candidate" });
+      continue;
+    }
+    if (job.resolved.status === "ambiguous" || !job.resolved.range) {
+      ambiguous.push({ threadId: job.threadId, candidates: job.candidates });
+      continue;
+    }
+    const k = rangeKey(job.resolved.range.from, job.resolved.range.to);
+    if ((claimCount.get(k) || 0) > 1) {
+      collisions.push({ threadId: job.threadId, range: job.resolved.range, reason: "shared-best" });
+      continue;
+    }
+    if (occupied.has(k)) {
+      collisions.push({ threadId: job.threadId, range: job.resolved.range, reason: "occupied", by: occupied.get(k) });
+      continue;
+    }
+    occupied.set(k, job.threadId);
+    attached.push({
+      threadId: job.threadId,
+      range: job.resolved.range,
+      score: job.resolved.score,
+      status: "attached"
+    });
+  }
+  return { attached, ambiguous, orphaned, collisions };
+}
+function captureAnchorEvidence(doc5, from2, to, options = {}) {
+  const maxContext = options.maxContext != null ? options.maxContext : DEFAULT_CONTEXT;
+  const safeFrom = clamp(from2 | 0, 0, doc5 ? doc5.length : 0);
+  const safeTo = clamp(to | 0, safeFrom, doc5 ? doc5.length : 0);
+  const exact = doc5 ? doc5.slice(safeFrom, safeTo) : "";
+  const ctx = doc5 ? localContext(doc5, safeFrom, safeTo, maxContext) : { localPrefix: "", localSuffix: "" };
+  const now = options.now || (/* @__PURE__ */ new Date()).toISOString();
+  const structure = options.structure || {
+    blockPath: options.blockPath || [],
+    blockType: options.blockType || "text",
+    blockFingerprint: options.blockFingerprint || simpleFingerprint(exact + "|" + ctx.localPrefix + "|" + ctx.localSuffix),
+    offsetInBlock: options.offsetInBlock != null ? options.offsetInBlock : safeFrom
+  };
+  return {
+    version: "1",
+    quote: {
+      exact,
+      prefix: ctx.localPrefix,
+      suffix: ctx.localSuffix
+    },
+    position: {
+      from: safeFrom,
+      to: safeTo,
+      startAssoc: options.startAssoc != null ? options.startAssoc : 1,
+      endAssoc: options.endAssoc != null ? options.endAssoc : -1
+    },
+    structure,
+    status: exact ? "attached" : "orphaned",
+    confidence: exact ? 1 : 0,
+    updatedAt: now
+  };
+}
+function simpleFingerprint(s) {
+  let h = 2166136261;
+  const str = String(s || "");
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return "fnv1a:" + (h >>> 0).toString(16);
+}
+function projectLegacyFlags(status) {
+  switch (status) {
+    case "attached":
+    case "moved":
+      return { fuzzy: false, invalid: false, deleted: false, invalidReason: void 0 };
+    case "edited":
+      return { fuzzy: true, invalid: false, deleted: false, invalidReason: "text-edited" };
+    case "orphaned":
+      return { fuzzy: false, invalid: true, deleted: true, invalidReason: "orphaned" };
+    case "ambiguous":
+      return { fuzzy: true, invalid: true, deleted: false, invalidReason: "ambiguous" };
+    case "collision":
+      return { fuzzy: true, invalid: true, deleted: false, invalidReason: "mark-collision" };
+    case "image-missing":
+      return { fuzzy: false, invalid: true, deleted: true, invalidReason: "image-deleted" };
+    default:
+      return { fuzzy: false, invalid: false, deleted: false, invalidReason: void 0 };
+  }
+}
+function auditAnnotationInvariants({ threads, marks, doc: doc5 }) {
+  const errors = [];
+  const thrList = Array.isArray(threads) ? threads.filter((t) => t && t.threadId) : [];
+  const markList = Array.isArray(marks) ? marks.filter((m) => m && m.threadId) : [];
+  const seenIds = /* @__PURE__ */ new Set();
+  for (const t of thrList) {
+    if (seenIds.has(t.threadId)) {
+      errors.push({ code: "duplicate-threadId", threadId: t.threadId });
+    }
+    seenIds.add(t.threadId);
+  }
+  const marksByTid = /* @__PURE__ */ new Map();
+  for (const m of markList) {
+    if (!seenIds.has(m.threadId)) {
+      errors.push({ code: "mark-unknown-thread", threadId: m.threadId });
+    }
+    if (!marksByTid.has(m.threadId)) marksByTid.set(m.threadId, []);
+    marksByTid.get(m.threadId).push(m);
+  }
+  for (const [tid, ms] of marksByTid) {
+    if (ms.length > 1) {
+      const thr = thrList.find((t) => t.threadId === tid);
+      const multiOk = thr && Array.isArray(thr.ranges) && thr.ranges.length > 1;
+      if (!multiOk) {
+        errors.push({ code: "duplicate-mark", threadId: tid, count: ms.length });
+      }
+    }
+  }
+  for (const t of thrList) {
+    const status = t.anchor && t.anchor.status || (t.deleted ? "orphaned" : t.fuzzy ? "ambiguous" : "attached");
+    const ms = marksByTid.get(t.threadId) || [];
+    const isMultiRange = Array.isArray(t.ranges) && t.ranges.length > 1;
+    const liveMark = (() => {
+      if (!ms.length) return null;
+      if (!isMultiRange) return ms[0];
+      const ordered = ms.slice().sort((a, b) => a.from - b.from || a.to - b.to);
+      return {
+        from: ordered[0].from,
+        to: ordered[ordered.length - 1].to,
+        text: ordered.map((m) => m.text || "").join(" ")
+      };
+    })();
+    const isImageOnly = Array.isArray(t.imageAnchors) && t.imageAnchors.length && (!t.ranges || !t.ranges.length) && (/^\[图片\]$/i.test(String(t.text || "").trim()) || t.skipMark);
+    if (status === "ambiguous" && ms.length) {
+      errors.push({ code: "ambiguous-has-mark", threadId: t.threadId });
+    }
+    if ((status === "orphaned" || status === "collision") && ms.length && !isImageOnly) {
+      errors.push({ code: "orphan-status-has-mark", threadId: t.threadId, status });
+    }
+    if ((status === "attached" || status === "moved" || status === "edited") && !isImageOnly) {
+      if (!ms.length) {
+        errors.push({ code: "attached-missing-mark", threadId: t.threadId });
+      } else {
+        const m = liveMark;
+        if (t.range && (t.range.from !== m.from || t.range.to !== m.to)) {
+          errors.push({ code: "range-mismatch", threadId: t.threadId, range: t.range, mark: { from: m.from, to: m.to } });
+        }
+        if (t.text != null && m.text != null && t.text !== m.text && status !== "edited") {
+          errors.push({ code: "text-mismatch", threadId: t.threadId, text: t.text, markText: m.text });
+        }
+        if (doc5 && m.from != null && m.to != null && doc5.slice) {
+          const slice2 = doc5.slice(m.from, m.to);
+          if (m.text != null && slice2 !== m.text && !doc5.includes(m.text)) {
+          }
+        }
+      }
+    }
+  }
+  const sorted = markList.slice().sort((a, b) => a.from - b.from || a.to - b.to);
+  const statusByTid = new Map(thrList.map((t) => [t.threadId, t.anchor && t.anchor.status || (t.deleted ? "orphaned" : t.fuzzy ? "ambiguous" : "attached")]));
+  for (let i = 0; i < sorted.length; i++) {
+    for (let j = i + 1; j < sorted.length; j++) {
+      const a = sorted[i];
+      const b = sorted[j];
+      if (b.from >= a.to) break;
+      if (a.threadId === b.threadId || a.from !== b.from || a.to !== b.to) continue;
+      const aStatus = statusByTid.get(a.threadId);
+      const bStatus = statusByTid.get(b.threadId);
+      const healthy = /* @__PURE__ */ new Set(["attached", "moved", "edited"]);
+      if (!healthy.has(aStatus) || !healthy.has(bStatus)) {
+        errors.push({ code: "mark-collision", a: a.threadId, b: b.threadId });
+      }
+    }
+  }
+  return {
+    healthy: errors.length === 0,
+    errors,
+    checkedAt: (/* @__PURE__ */ new Date()).toISOString()
+  };
+}
+
+// modules/annotation-anchor-plugin.js
+var annotationAnchorKey = new PluginKey("annotation-anchors");
+function createAnnotationAnchorPlugin(opts = {}) {
+  const getThreads = typeof opts.getThreads === "function" ? opts.getThreads : () => [];
+  const onAnchorsChanged = typeof opts.onAnchorsChanged === "function" ? opts.onAnchorsChanged : null;
+  return new Plugin({
+    key: annotationAnchorKey,
+    state: {
+      init() {
+        return { byId: /* @__PURE__ */ new Map(), gen: 0 };
+      },
+      apply(tr2, prev, _oldState, newState) {
+        const reset2 = tr2.getMeta(annotationAnchorKey);
+        if (reset2 && reset2.reset) {
+          const byId2 = /* @__PURE__ */ new Map();
+          for (const t of reset2.threads || getThreads() || []) {
+            if (!t || !t.threadId || !t.range) continue;
+            byId2.set(t.threadId, {
+              threadId: t.threadId,
+              from: t.range.from,
+              to: t.range.to,
+              startAssoc: t.anchor && t.anchor.position && t.anchor.position.startAssoc || 1,
+              endAssoc: t.anchor && t.anchor.position && t.anchor.position.endAssoc || -1,
+              status: t.anchor && t.anchor.status || "attached"
+            });
+          }
+          return { byId: byId2, gen: prev.gen + 1 };
+        }
+        if (!tr2.docChanged) return prev;
+        const byId = /* @__PURE__ */ new Map();
+        const patches = [];
+        const source = prev.byId.size ? prev.byId : seedFromThreads(getThreads());
+        for (const [tid, anc] of source) {
+          const mapped = mapAnchorRange(
+            {
+              from: anc.from,
+              to: anc.to,
+              startAssoc: anc.startAssoc != null ? anc.startAssoc : 1,
+              endAssoc: anc.endAssoc != null ? anc.endAssoc : -1
+            },
+            tr2.mapping
+          );
+          if (mapped.status === "orphaned" || !mapped.range) {
+            const next3 = { ...anc, status: "orphaned", from: anc.from, to: anc.to };
+            byId.set(tid, next3);
+            patches.push({ threadId: tid, status: "orphaned", range: null });
+            continue;
+          }
+          const next2 = {
+            ...anc,
+            from: mapped.range.from,
+            to: mapped.range.to,
+            status: mapped.status === "moved" ? "moved" : anc.status || "attached"
+          };
+          byId.set(tid, next2);
+          if (anc.from !== next2.from || anc.to !== next2.to) {
+            patches.push({
+              threadId: tid,
+              status: next2.status,
+              range: { from: next2.from, to: next2.to }
+            });
+          }
+        }
+        for (const t of getThreads() || []) {
+          if (!t || !t.threadId || !t.range) continue;
+          if (byId.has(t.threadId)) continue;
+          byId.set(t.threadId, {
+            threadId: t.threadId,
+            from: t.range.from,
+            to: t.range.to,
+            startAssoc: 1,
+            endAssoc: -1,
+            status: "attached"
+          });
+        }
+        const sourceDoc = newState && newState.doc;
+        if (patches.length && onAnchorsChanged && sourceDoc) {
+          queueMicrotask(() => {
+            try {
+              onAnchorsChanged(patches, sourceDoc);
+            } catch (e) {
+              console.warn("[annotation-anchor-plugin] onAnchorsChanged", e);
+            }
+          });
+        }
+        return { byId, gen: prev.gen + 1 };
+      }
+    }
+  });
+}
+function seedFromThreads(threads) {
+  const byId = /* @__PURE__ */ new Map();
+  for (const t of threads || []) {
+    if (!t || !t.threadId || !t.range) continue;
+    byId.set(t.threadId, {
+      threadId: t.threadId,
+      from: t.range.from,
+      to: t.range.to,
+      startAssoc: 1,
+      endAssoc: -1,
+      status: t.anchor && t.anchor.status || "attached"
+    });
+  }
+  return byId;
+}
+function setAnnotationAnchorResetMeta(tr2, threads) {
+  return tr2.setMeta(annotationAnchorKey, { reset: true, threads: threads || [] });
 }
 
 // app.js
@@ -55220,6 +56309,129 @@ var KatexBlock = Node2.create({
     };
   }
 });
+function buildCitationLabel(raw, references) {
+  if (!references || !(references.entries && references.entries.length)) {
+    return { label: raw || "[]", keys: [], missingKeys: [] };
+  }
+  try {
+    const parsed = parseCitationSyntax(raw);
+    const entryMap = new Map((references.entries || []).map((e) => [e.key, e]));
+    const formatted = formatCitationLabel(parsed, entryMap);
+    return {
+      label: formatted.text,
+      keys: (parsed.items || []).map((item) => item.key),
+      missingKeys: formatted.missingKeys || []
+    };
+  } catch (e) {
+    return { label: raw || "[]", keys: [], missingKeys: [] };
+  }
+}
+function citationRawToHtml(raw) {
+  const info = !State2.references || !(State2.references.entries || []).length ? { label: raw, keys: parseCitationSyntax(raw).items.map((item) => item.key), missingKeys: [] } : buildCitationLabel(raw, State2.references);
+  return `<span class="mentor-citation${info.missingKeys.length ? " is-missing" : ""}" data-citation-raw="${escapeHtml(raw)}" data-citation-keys="${escapeHtml(JSON.stringify(info.keys))}" data-key="${escapeHtml(info.keys[0] || "")}" data-citation-missing="${escapeHtml(JSON.stringify(info.missingKeys))}" contenteditable="false">${escapeHtml(info.label)}</span>`;
+}
+var CitationTextNormalizer = Extension.create({
+  name: "citationTextNormalizer",
+  addProseMirrorPlugins() {
+    return [new Plugin({
+      appendTransaction(transactions, _oldState, newState) {
+        if (!transactions.some((tr3) => tr3.docChanged) || transactions.some((tr3) => tr3.getMeta("citation-normalized"))) return null;
+        const targets = [];
+        newState.doc.descendants((node, pos) => {
+          if (node.isText && /\[-?@[\w:.\/-]+/.test(node.text || "")) targets.push({ node, pos });
+        });
+        if (!targets.length) return null;
+        let tr2 = newState.tr;
+        for (const { node, pos } of targets.reverse()) {
+          const parts = (node.text || "").split(/(\[(?:-?@[\w:.\/-]+(?:\s*,\s*[^;\]]+)?)(?:\s*;\s*-?@[\w:.\/-]+(?:\s*,\s*[^;\]]+)?)*\])/g);
+          if (parts.length < 2) continue;
+          const nodes = parts.filter(Boolean).map((part) => {
+            if (!/^\[-?@/.test(part)) return newState.schema.text(part, node.marks);
+            const info = !State2.references || !(State2.references.entries || []).length ? { label: part, keys: parseCitationSyntax(part).items.map((item) => item.key), missingKeys: [] } : buildCitationLabel(part, State2.references);
+            return newState.schema.nodes.citation.create({ raw: part, keys: info.keys, label: info.label, missingKeys: info.missingKeys });
+          });
+          tr2 = tr2.replaceWith(pos, pos + node.nodeSize, nodes);
+        }
+        tr2.setMeta("citation-normalized", true);
+        return tr2;
+      }
+    })];
+  }
+});
+var CitationNode = Node2.create({
+  name: "citation",
+  group: "inline",
+  inline: true,
+  atom: true,
+  selectable: true,
+  draggable: false,
+  addAttributes() {
+    return {
+      raw: { default: "[]" },
+      keys: {
+        default: [],
+        parseHTML: (el) => {
+          try {
+            const raw = el.getAttribute("data-citation-raw") || "[]";
+            return parseCitationSyntax(raw).items.map((item) => item.key);
+          } catch (e) {
+            return [];
+          }
+        },
+        renderHTML: (attrs) => ({ "data-citation-keys": JSON.stringify(attrs.keys || []) })
+      },
+      label: { default: "" },
+      missingKeys: {
+        default: [],
+        parseHTML: (el) => {
+          try {
+            return JSON.parse(el.getAttribute("data-citation-missing") || "[]");
+          } catch (e) {
+            return [];
+          }
+        },
+        renderHTML: (attrs) => ({ "data-citation-missing": JSON.stringify(attrs.missingKeys || []) })
+      }
+    };
+  },
+  parseHTML() {
+    return [{
+      tag: "span[data-citation-raw]",
+      getAttrs: (node) => ({
+        raw: node.getAttribute("data-citation-raw") || "[]",
+        label: (node.textContent || "").trim(),
+        keys: (() => {
+          try {
+            const raw = node.getAttribute("data-citation-raw") || "[]";
+            return parseCitationSyntax(raw).items.map((item) => item.key);
+          } catch (e) {
+            return [];
+          }
+        })(),
+        missingKeys: (() => {
+          try {
+            return JSON.parse(node.getAttribute("data-citation-missing") || "[]");
+          } catch (e) {
+            return [];
+          }
+        })()
+      })
+    }];
+  },
+  renderHTML({ node }) {
+    const attrs = node.attrs || {};
+    const missing = (attrs.missingKeys || []).length > 0;
+    const label = attrs.label || attrs.raw || "[]";
+    return ["span", {
+      class: `mentor-citation${missing ? " is-missing" : ""}`,
+      "data-citation-raw": attrs.raw || "[]",
+      "data-citation-keys": JSON.stringify(attrs.keys || []),
+      "data-key": (attrs.keys || [])[0] || "",
+      "data-citation-missing": JSON.stringify(attrs.missingKeys || []),
+      contenteditable: "false"
+    }, label];
+  }
+});
 var State2 = {
   editor: null,
   currentFile: null,
@@ -55232,6 +56444,10 @@ var State2 = {
   // 用户唯一 ID, 永不改变
   author: localStorage.getItem("Mentor:author") || "",
   // 显示名, 可改
+  // v1.43.51+: 当前文档的参考引用库. v0 manifest 形状:
+  //   { version, source: {name, format}, updatedAt, entries: [...] }
+  // 为空时正文 citation 显示原文 `[@key]`；非空时按 author-year 格式.
+  references: { version: "1", source: { name: "", format: "" }, entries: [] },
   // v2-resolve-btn: 默认 filter "all" — 用户解决批注后, 卡片仍可见才能点 "重新打开" 入口
   filterOpen: true,
   commentListLimit: 60,
@@ -55546,6 +56762,48 @@ md.inline.ruler.after("subscript", "math_inline", mathInlineRule);
 md.block.ruler.after("blockquote", "math_block", mathBlockRule, {
   alt: ["paragraph", "reference", "blockquote", "list"]
 });
+var MENTOR_CITATION_RE = /^\[(-?@[\w:.\/-]+(?:\s*,\s*[^;\]]+)?(?:\s*;\s*-?@[\w:.\/-]+(?:\s*,\s*[^;\]]+)?)*)\]/;
+function mentorCitationInlineRule(state, silent) {
+  const pos = state.pos;
+  const tail = state.src.slice(pos);
+  const match = tail.match(MENTOR_CITATION_RE);
+  if (!match) return false;
+  if (!silent) {
+    const token = state.push("mentor_citation", "", 0);
+    token.markup = "[]";
+    token.content = match[0];
+  }
+  state.pos = pos + match[0].length;
+  return true;
+}
+md.inline.ruler.before("link", "mentor_citation", mentorCitationInlineRule);
+md.renderer.rules.mentor_citation = (tokens, idx) => {
+  const raw = tokens[idx].content;
+  const safeRaw = escapeHtml(raw);
+  const parsed = (() => {
+    try {
+      return parseCitationSyntax(raw);
+    } catch (e) {
+      return { raw, items: [] };
+    }
+  })();
+  const keys3 = JSON.stringify((parsed.items || []).map((item) => item.key));
+  let label = raw;
+  let missingKeys = [];
+  try {
+    if (State2 && State2.references && State2.references.entries && State2.references.entries.length) {
+      const entryMap = new Map(State2.references.entries.map((e) => [e.key, e]));
+      const formatted = formatCitationLabel(parsed, entryMap);
+      label = formatted.text;
+      missingKeys = formatted.missingKeys || [];
+    }
+  } catch (e) {
+    label = raw;
+  }
+  const isMissing = missingKeys.length > 0;
+  const safeLabel = escapeHtml(label);
+  return `<span class="mentor-citation${isMissing ? " is-missing" : ""}" data-citation-raw="${safeRaw}" data-citation-keys="${escapeHtml(keys3)}" data-citation-missing="${escapeHtml(JSON.stringify(missingKeys))}" contenteditable="false">${safeLabel}</span>`;
+};
 md.renderer.rules.math_inline = (tokens, idx) => {
   const tex = tokens[idx].content;
   return `<span class="katex-wrapper" data-tex="${escapeHtml(tex)}" contenteditable="false"><span class="katex-placeholder">${escapeHtml(tex)}</span></span>`;
@@ -55597,6 +56855,13 @@ $$${tex}$$
 
 ` : content;
   }
+});
+turndown.addRule("mentor-citation", {
+  filter: (node) => {
+    if (!node || !node.getAttribute) return false;
+    return node.nodeName === "SPAN" && node.hasAttribute("data-citation-raw");
+  },
+  replacement: (_content, node) => node.getAttribute("data-citation-raw") || "[]"
 });
 turndown.addRule("gfm-table", {
   filter: "table",
@@ -55750,6 +57015,44 @@ var ActiveHighlightExtension = Extension.create({
   addProseMirrorPlugins() {
     return [
       createActiveHighlightPlugin(() => State2.activeThreadId)
+    ];
+  }
+});
+var AnnotationAnchorExtension = Extension.create({
+  name: "annotation-anchor-map",
+  addProseMirrorPlugins() {
+    return [
+      createAnnotationAnchorPlugin({
+        getThreads: () => State2.annotations || [],
+        onAnchorsChanged: (patches, sourceDoc) => {
+          if (!patches || !patches.length || !State2.annotations) return;
+          if (State2._suspendAnnValidate) return;
+          if (!State2.editor || !sourceDoc || State2.editor.state.doc !== sourceDoc) return;
+          let dirty = false;
+          for (const p of patches) {
+            const t = State2.annotations.find((x) => x && x.threadId === p.threadId);
+            if (!t) continue;
+            if (p.status === "orphaned") continue;
+            if (p.range) {
+              const nextStatus = p.status === "moved" ? "moved" : t.anchor && t.anchor.status || "attached";
+              syncThreadAnchorEvidence(t, sourceDoc, p.range, {
+                exact: t.text || "",
+                status: nextStatus
+              });
+              if (Array.isArray(t.ranges) && t.ranges.length === 1) {
+                t.ranges = [{ from: p.range.from, to: p.range.to }];
+              }
+              dirty = true;
+            }
+          }
+          if (dirty) {
+            try {
+              if (typeof scheduleRenderComments === "function") scheduleRenderComments();
+            } catch (_) {
+            }
+          }
+        }
+      })
     ];
   }
 });
@@ -56010,6 +57313,57 @@ function threadTypeOf(thread) {
   }
   return null;
 }
+function isAiCard(thread, aiAuthor = "AI Reviewer") {
+  if (!thread || typeof thread !== "object") return false;
+  if (thread.threadType === "ai") return true;
+  const comments = Array.isArray(thread.comments) ? thread.comments : [];
+  const root2 = comments[0];
+  if (!root2) return false;
+  if (isAiAuthor(root2.author, aiAuthor)) return true;
+  return false;
+}
+function humanCommentIsWork(thread, comment, aiAuthor = "AI Reviewer") {
+  if (!comment || isAiAuthor(comment.author, aiAuthor)) return false;
+  const body = String(comment.body || "").trim();
+  if (!body) return false;
+  if (isAiCard(thread, aiAuthor)) return true;
+  return bodyHasMarker(body);
+}
+function threadNeedsAiReply(thread, aiAuthor = "AI Reviewer") {
+  if (!thread || thread.resolved) return false;
+  const walk = (list) => {
+    if (!Array.isArray(list) || !list.length) return false;
+    for (let i = 0; i < list.length; i++) {
+      const c = list[i];
+      if (!c || typeof c !== "object") continue;
+      const nested = c.replies || c.comments || c.children || [];
+      if (isAiAuthor(c.author, aiAuthor)) {
+        if (walk(nested)) return true;
+        continue;
+      }
+      if (!humanCommentIsWork(thread, c, aiAuthor)) {
+        if (walk(nested)) return true;
+        continue;
+      }
+      let answered = Array.isArray(nested) && nested.some((r) => r && isAiAuthor(r.author, aiAuthor));
+      if (!answered) {
+        for (let j = i + 1; j < list.length; j++) {
+          const n = list[j];
+          if (!n) continue;
+          if (isAiAuthor(n.author, aiAuthor)) {
+            answered = true;
+            break;
+          }
+          if (humanCommentIsWork(thread, n, aiAuthor)) break;
+        }
+      }
+      if (!answered) return true;
+      if (walk(nested)) return true;
+    }
+    return false;
+  };
+  return walk(thread.comments || []);
+}
 function nowISO() {
   return (/* @__PURE__ */ new Date()).toISOString();
 }
@@ -56150,37 +57504,45 @@ function resyncImageAnchors(ann, doc5) {
       try {
         const n = doc5.nodeAt(anc.from);
         if (n && n.type.name === "image") {
-          const prev = anc;
-          pushLive(n, anc.from);
-          const cur = out[out.length - 1];
-          if (!prev || prev.src !== cur.src || prev.alt !== cur.alt || prev.title !== cur.title || prev.from !== cur.from || prev.to !== cur.to) changed = true;
-          hit = true;
+          const srcMatches = !anc.src || (n.attrs.src || "") === anc.src || mediaPathForSrc(n.attrs.src || "") === mediaPathForSrc(anc.src);
+          const altMatches = !anc.alt || (n.attrs.alt || "") === anc.alt;
+          const titleMatches = !anc.title || (n.attrs.title || "") === anc.title;
+          if (srcMatches && altMatches && titleMatches) {
+            const prev = anc;
+            pushLive(n, anc.from);
+            const cur = out[out.length - 1];
+            if (!prev || prev.src !== cur.src || prev.alt !== cur.alt || prev.title !== cur.title || prev.from !== cur.from || prev.to !== cur.to) changed = true;
+            hit = true;
+          }
         }
       } catch (e) {
       }
     }
     if (!hit && anc.src) {
-      let foundPos = -1;
+      const matches2 = [];
       const want = anc.src;
       const wantPath = mediaPathForSrc(want);
       const wantBlob = State2.mediaUrls && wantPath && State2.mediaUrls[wantPath] || (want.startsWith("blob:") ? want : "");
       const wantBase = (wantPath || want).split("/").pop();
       doc5.descendants((n, pos) => {
-        if (foundPos >= 0) return false;
         if (n.type.name !== "image" || usedPos.has(pos)) return;
         const s = n.attrs.src || "";
         const sPath = mediaPathForSrc(s);
         const sBase = (sPath || s).split("/").pop();
-        const eq = s === want || s === wantBlob || sPath === wantPath || wantPath && sPath === wantPath || wantBase && sBase === wantBase && wantBase.includes(".");
-        if (eq) {
-          foundPos = pos;
-          return false;
-        }
+        const srcMatch = s === want || s === wantBlob || sPath === wantPath || wantPath && sPath === wantPath || wantBase && sBase === wantBase && wantBase.includes(".");
+        if (!srcMatch) return;
+        const altMatch = !!(anc.alt && n.attrs.alt === anc.alt);
+        const titleMatch = !!(anc.title && n.attrs.title === anc.title);
+        const distance = ann.range && typeof ann.range.from === "number" ? Math.abs(pos - ann.range.from) : Number.MAX_SAFE_INTEGER;
+        matches2.push({ n, pos, altMatch, titleMatch, distance });
       });
-      if (foundPos >= 0) {
-        const n = doc5.nodeAt(foundPos);
-        pushLive(n, foundPos);
-        if (foundPos !== anc.from) changed = true;
+      if (matches2.length) {
+        matches2.sort(
+          (a, b) => Number(b.altMatch) - Number(a.altMatch) || Number(b.titleMatch) - Number(a.titleMatch) || a.distance - b.distance || a.pos - b.pos
+        );
+        const best = matches2[0];
+        pushLive(best.n, best.pos);
+        if (best.pos !== anc.from) changed = true;
         hit = true;
       }
     }
@@ -56374,8 +57736,39 @@ function _validateMarksAfterEdit(editor2, opts) {
         rangeMoved = true;
         changed = true;
       }
-      const currentText = threadCurrentText.get(ann.threadId) || "";
+      const currentText = (() => {
+        const literal = threadCurrentText.get(ann.threadId) || "";
+        if (!Array.isArray(ann.ranges) || ann.ranges.length <= 1) return literal;
+        const pieces = [];
+        for (const r of ann.ranges) {
+          if (!r || typeof r.from !== "number" || typeof r.to !== "number" || r.from >= r.to) continue;
+          try {
+            const piece = doc5.textBetween(r.from, r.to, " ");
+            if (piece) pieces.push(piece);
+          } catch (_) {
+          }
+        }
+        return pieces.length ? pieces.join(" ") : literal;
+      })();
       const textMatches = currentText === ann.text;
+      if (live) {
+        const status = textMatches && ann.invalidReason !== "text-edited" ? (ann.anchor && ann.anchor.status) === "moved" ? "moved" : "attached" : "edited";
+        const oldPrefix = ann.prefix || "";
+        const oldSuffix = ann.suffix || "";
+        const oldAnchorQuote = JSON.stringify(ann.anchor && ann.anchor.quote || null);
+        const oldAnchorPosition = JSON.stringify(ann.anchor && ann.anchor.position || null);
+        const oldAnchorStatus = ann.anchor && ann.anchor.status || "";
+        const oldAnchorConfidence = ann.anchor && ann.anchor.confidence;
+        syncThreadAnchorEvidence(ann, doc5, live, {
+          exact: currentText || ann.text || "",
+          status,
+          confidence: status === "edited" ? 0.75 : 1
+        });
+        if (oldPrefix !== (ann.prefix || "") || oldSuffix !== (ann.suffix || "") || oldAnchorQuote !== JSON.stringify(ann.anchor && ann.anchor.quote || null) || oldAnchorPosition !== JSON.stringify(ann.anchor && ann.anchor.position || null) || oldAnchorStatus !== (ann.anchor && ann.anchor.status || "") || oldAnchorConfidence !== (ann.anchor && ann.anchor.confidence)) changed = true;
+        if (Array.isArray(ann.ranges) && ann.ranges.length === 1) {
+          ann.ranges = [{ from: live.from, to: live.to }];
+        }
+      }
       if (textMatches) {
         if (ann.deleted) {
           ann.deleted = false;
@@ -56391,15 +57784,7 @@ function _validateMarksAfterEdit(editor2, opts) {
           touchUi(ann);
         }
         if (rangeMoved && live) {
-          try {
-            const ctx = computeContextAt(doc5, live.from, live.to);
-            if (ctx.prefix !== (ann.prefix || "") || ctx.suffix !== (ann.suffix || "")) {
-              ann.prefix = ctx.prefix;
-              ann.suffix = ctx.suffix;
-              changed = true;
-            }
-          } catch (e) {
-          }
+          changed = true;
         }
       } else {
         if (ann.text !== currentText) {
@@ -56408,12 +57793,11 @@ function _validateMarksAfterEdit(editor2, opts) {
           touchUi(ann);
         }
         if (live) {
-          try {
-            const ctx = computeContextAt(doc5, live.from, live.to);
-            ann.prefix = ctx.prefix;
-            ann.suffix = ctx.suffix;
-          } catch (e) {
-          }
+          syncThreadAnchorEvidence(ann, doc5, live, {
+            exact: currentText,
+            status: "edited",
+            confidence: 0.75
+          });
         }
         if (!ann.fuzzy || ann.invalidReason !== "text-edited") {
           ann.fuzzy = true;
@@ -56482,16 +57866,11 @@ function _validateMarksAfterEdit(editor2, opts) {
           fuzzy: !!rePos.fuzzy
         });
         occupiedRanges.push({ from: rePos.from, to: rePos.to, tid: ann.threadId });
-        if (!ann.range || ann.range.from !== rePos.from || ann.range.to !== rePos.to) {
-          ann.range = { from: rePos.from, to: rePos.to };
-          changed = true;
-        }
-        try {
-          const ctx = computeContextAt(doc5, rePos.from, rePos.to);
-          ann.prefix = ctx.prefix;
-          ann.suffix = ctx.suffix;
-        } catch (e) {
-        }
+        syncThreadAnchorEvidence(ann, doc5, rePos, {
+          exact: ann.text || "",
+          status: rePos.fuzzy ? "edited" : "attached",
+          confidence: rePos.fuzzy ? 0.5 : 1
+        });
         const wantFuzzy = !!rePos.fuzzy;
         if (ann.deleted) {
           ann.deleted = false;
@@ -56723,7 +58102,8 @@ async function putAtomicDraftForCurrent(opts = {}) {
       author: { id: State2.authorId, name: State2.author },
       annotations
     };
-    const mem = { body, sidecar, annotations, updatedAt: Date.now(), documentId, name };
+    const references = JSON.parse(JSON.stringify(State2.references || emptyReferenceManifest()));
+    const mem = { body, sidecar, annotations, references, updatedAt: Date.now(), documentId, name };
     State2.idbCache[documentId] = mem;
     if (name) State2.idbCache[name] = mem;
     await DraftStore.putDraft({
@@ -56731,7 +58111,8 @@ async function putAtomicDraftForCurrent(opts = {}) {
       name,
       body,
       annotations,
-      sidecar
+      sidecar,
+      references
     });
     await AnnotationStore.put(name, sidecar, documentId);
     return mem;
@@ -56749,6 +58130,7 @@ async function restoreDraftIfAny(documentId, name) {
       body: row.body || "",
       annotations: row.annotations || row.sidecar && row.sidecar.annotations || [],
       sidecar: row.sidecar || null,
+      references: normalizeReferenceManifest(row.references || emptyReferenceManifest()),
       updatedAt: row.updatedAt || 0
     };
   } catch (e) {
@@ -56812,7 +58194,23 @@ function serializeAnnotationThread(t) {
     o.range = { from: t.range.from, to: t.range.to };
   }
   if (Array.isArray(t.ranges) && t.ranges.length) {
-    o.ranges = t.ranges.map((r) => ({ from: r.from, to: r.to }));
+    const doc5 = State2.editor && State2.editor.state && State2.editor.state.doc;
+    o.ranges = t.ranges.map((r) => {
+      const out = { from: r.from, to: r.to };
+      if (r.text != null) out.text = String(r.text);
+      if (r.prefix != null) out.prefix = String(r.prefix);
+      if (r.suffix != null) out.suffix = String(r.suffix);
+      if (doc5 && typeof r.from === "number" && typeof r.to === "number" && r.from < r.to) {
+        try {
+          out.text = doc5.textBetween(r.from, r.to, " ");
+        } catch (_) {
+        }
+        const context = computeContextAt(doc5, r.from, r.to);
+        out.prefix = context.prefix;
+        out.suffix = context.suffix;
+      }
+      return out;
+    });
   }
   const ia = serializeImageAnchors(t.imageAnchors);
   if (ia && ia.length) o.imageAnchors = ia;
@@ -56820,13 +58218,121 @@ function serializeAnnotationThread(t) {
   if (t.invalid) o.invalid = true;
   if (t.invalidReason) o.invalidReason = t.invalidReason;
   if (t.fuzzy) o.fuzzy = true;
+  if (t.anchor && typeof t.anchor === "object") {
+    const a = t.anchor;
+    o.anchor = {
+      version: a.version || "1",
+      quote: a.quote ? {
+        exact: a.quote.exact != null ? a.quote.exact : t.text,
+        prefix: a.quote.prefix != null ? a.quote.prefix : t.prefix || "",
+        suffix: a.quote.suffix != null ? a.quote.suffix : t.suffix || ""
+      } : {
+        exact: t.text,
+        prefix: t.prefix || "",
+        suffix: t.suffix || ""
+      },
+      position: a.position && typeof a.position.from === "number" ? {
+        from: a.position.from,
+        to: a.position.to,
+        startAssoc: a.position.startAssoc != null ? a.position.startAssoc : 1,
+        endAssoc: a.position.endAssoc != null ? a.position.endAssoc : -1
+      } : t.range ? {
+        from: t.range.from,
+        to: t.range.to,
+        startAssoc: 1,
+        endAssoc: -1
+      } : void 0,
+      structure: a.structure || void 0,
+      status: a.status || "attached",
+      confidence: a.confidence != null ? a.confidence : 1,
+      updatedAt: a.updatedAt || t.createdAt || nowISO()
+    };
+    const proj = projectLegacyFlags(o.anchor.status);
+    if (proj.invalid && !o.invalid) o.invalid = true;
+    if (proj.deleted && !o.deleted) o.deleted = true;
+    if (proj.fuzzy && !o.fuzzy) o.fuzzy = true;
+    if (proj.invalidReason && !o.invalidReason) o.invalidReason = proj.invalidReason;
+  }
   return o;
 }
 function buildAnnotationsSidecar() {
   return State2.annotations.filter((x) => x && typeof x === "object" && x.threadId).map(serializeAnnotationThread).filter(Boolean);
 }
+function collectLiveAnnotationAudit() {
+  if (!State2.editor) {
+    return auditAnnotationInvariants({ threads: State2.annotations || [], marks: [], doc: "" });
+  }
+  const doc5 = State2.editor.state.doc;
+  const markType = State2.editor.schema.marks.annotation;
+  const marks = [];
+  doc5.descendants((node, pos) => {
+    if (!node.isText || !node.marks) return;
+    for (const m of node.marks) {
+      if (m.type === markType && m.attrs && m.attrs.threadId) {
+        marks.push({
+          threadId: m.attrs.threadId,
+          from: pos,
+          to: pos + node.nodeSize,
+          text: node.text || ""
+        });
+      }
+    }
+  });
+  marks.sort((a, b) => a.from - b.from || a.to - b.to);
+  const collapsed = [];
+  for (const m of marks) {
+    const last = collapsed[collapsed.length - 1];
+    if (last && last.threadId === m.threadId && last.to === m.from) {
+      last.to = m.to;
+      last.text += m.text;
+    } else {
+      collapsed.push({ ...m });
+    }
+  }
+  const sep = String.fromCharCode(10);
+  const plain = doc5.textBetween(0, doc5.content.size, sep, sep);
+  return auditAnnotationInvariants({ threads: State2.annotations || [], marks: collapsed, doc: plain });
+}
+function exportAnchorDiagnosis() {
+  const audit = collectLiveAnnotationAudit();
+  const threads = (State2.annotations || []).map((t) => ({
+    threadId: t.threadId,
+    text: t.text,
+    prefix: t.prefix,
+    suffix: t.suffix,
+    range: t.range,
+    fuzzy: !!t.fuzzy,
+    invalid: !!t.invalid,
+    deleted: !!t.deleted,
+    invalidReason: t.invalidReason,
+    anchorStatus: t.anchor && t.anchor.status,
+    anchor: t.anchor || null
+  }));
+  return {
+    version: "1",
+    exportedAt: nowISO(),
+    healthy: !!(audit && audit.healthy),
+    errors: audit && audit.errors || [],
+    threads
+  };
+}
 function createSaveSnapshot() {
   if (!State2.currentFile) throw new Error("\u672A\u6253\u5F00\u6587\u6863");
+  try {
+    const audit = collectLiveAnnotationAudit();
+    State2._lastAnchorAudit = audit;
+    if (audit && !audit.healthy) {
+      const hard = (audit.errors || []).filter(
+        (e) => e && (e.code === "duplicate-mark" || e.code === "mark-overlap" || e.code === "ambiguous-has-mark")
+      );
+      if (hard.length) {
+        console.warn("[anchor-audit] hard invariant failures", hard);
+        showToast("\u6279\u6CE8\u951A\u70B9\u5F02\u5E38\uFF0C\u8BF7\u68C0\u67E5\u4FA7\u680F\u5931\u6548\u9879", 3500);
+      }
+    }
+  } catch (e) {
+    console.warn("[anchor-audit]", e);
+  }
   const sourceMarkdown = flushSourceView();
   const currentFile = State2.currentFile;
   const mdText = sourceMarkdown !== null ? sourceMarkdown : htmlToMarkdownMedia(State2.editor.getHTML());
@@ -56847,7 +58353,8 @@ function createSaveSnapshot() {
     fileMtime: State2.fileMtime,
     mdText,
     sidecar: JSON.parse(JSON.stringify(sidecar)),
-    mediaFiles: Object.assign({}, State2.mediaFiles || {})
+    mediaFiles: Object.assign({}, State2.mediaFiles || {}),
+    references: JSON.parse(JSON.stringify(State2.references || emptyReferenceManifest()))
   };
 }
 function activeDocumentMatches(snapshot) {
@@ -56876,6 +58383,7 @@ function scheduleIdbCacheWrite() {
         body,
         sidecar: curSidecar,
         annotations: curSidecar.annotations,
+        references: JSON.parse(JSON.stringify(State2.references || emptyReferenceManifest())),
         updatedAt: Date.now(),
         documentId: State2.currentFile.documentId
       };
@@ -57038,7 +58546,7 @@ async function writeCurrentToHandle({ reason = "manual", showProgress = false } 
   try {
     if (snapshot.saveMode === "mentor-handle" || /\.mentor$/i.test(snapshot.name)) {
       if (showProgress) showExportProgress("\u6B63\u5728\u6253\u5305 .mentor\u2026");
-      payload = await buildMentorZipBlob(snapshot.mdText, snapshot.sidecar, snapshot.mediaFiles);
+      payload = await buildMentorZipBlob(snapshot.mdText, snapshot.sidecar, snapshot.mediaFiles, snapshot.references);
     } else {
       payload = snapshot.mdText;
     }
@@ -57095,7 +58603,8 @@ async function writeCurrentToHandle({ reason = "manual", showProgress = false } 
       annotations: snapshot.sidecar && snapshot.sidecar.annotations || [],
       updatedAt: Date.now(),
       documentId: docId,
-      name: snapshot.name
+      name: snapshot.name,
+      references: snapshot.references
     };
     if (State2.idbCache) {
       State2.idbCache[docId] = mem;
@@ -57106,7 +58615,8 @@ async function writeCurrentToHandle({ reason = "manual", showProgress = false } 
       name: snapshot.name,
       body: snapshot.mdText,
       annotations: mem.annotations,
-      sidecar: snapshot.sidecar
+      sidecar: snapshot.sidecar,
+      references: snapshot.references
     });
   } catch (eDraft) {
     console.warn("[save] DraftStore sync failed:", eDraft);
@@ -57347,9 +58857,12 @@ function initEditor() {
       TableCell,
       Superscript,
       Subscript,
+      CitationTextNormalizer,
+      CitationNode,
       AnnotationMark,
       AnnotationBubbleExtension,
       ActiveHighlightExtension,
+      AnnotationAnchorExtension,
       KatexInline,
       KatexBlock
     ],
@@ -57381,8 +58894,24 @@ function initEditor() {
     const ed = State2.editor;
     const _setContentOrig = ed.commands.setContent.bind(ed.commands);
     ed.commands.setContent = (content, emitUpdate, parseOptions) => {
-      const r = _setContentOrig(content, emitUpdate, parseOptions);
+      let normalizedContent = content;
+      if (typeof content === "string" && (content.includes("[@") || content.includes("[-@")) && !content.includes("data-citation-raw")) {
+        if (/^\s*</.test(content)) {
+          normalizedContent = content.replace(/\[(?:-?@[\w:.\-\/]+(?:\s*,\s*[^;\]]+)?)(?:\s*;\s*-?@[\w:.\-\/]+(?:\s*,\s*[^;\]]+)?)*\]/g, (raw) => citationRawToHtml(raw));
+        } else {
+          normalizedContent = markdownToHtml(content, State2.mediaUrls);
+        }
+      }
       try {
+        const trClear = ed.state.tr;
+        setAnnotationAnchorResetMeta(trClear, []);
+        trClear.setMeta("addToHistory", false);
+        ed.view.dispatch(trClear);
+      } catch (_) {
+      }
+      const r = _setContentOrig(normalizedContent, emitUpdate, parseOptions);
+      try {
+        reconcileCitationNodes();
         if (State2._suspendAnnValidate) return r;
         if (State2.annotations && State2.annotations.length) {
           scheduleValidateMarks(ed, { immediate: true, phase: "full" });
@@ -57843,6 +59372,10 @@ var MENTION_TYPES = {
     placeholder: "\u5199\u5BA1\u9605\u610F\u89C1\u2026"
   }
 };
+var MARKER_TOKEN_RE = /(?:@AI|@REVIEW)\b/i;
+function bodyHasMarker(body) {
+  return MARKER_TOKEN_RE.test(body || "");
+}
 function getMarkerType(body) {
   const t = body || "";
   for (const [type, cfg] of Object.entries(MENTION_TYPES)) {
@@ -58467,6 +60000,14 @@ function createAnnotationThread(from2, to, text2, opts = null) {
   }
   const threadId = uuid();
   const { prefix, suffix } = computeContextAt(State2.editor.state.doc, from2, to);
+  const anchorEv = {
+    version: "1",
+    quote: { exact: text2, prefix: prefix || "", suffix: suffix || "" },
+    position: { from: from2, to, startAssoc: 1, endAssoc: -1 },
+    status: "attached",
+    confidence: 1,
+    updatedAt: nowISO()
+  };
   const thread = {
     threadId,
     range: { from: from2, to },
@@ -58476,6 +60017,7 @@ function createAnnotationThread(from2, to, text2, opts = null) {
     // text 前的上下文 (max 20 字符, 换行截断)
     suffix,
     // text 后的上下文
+    anchor: anchorEv,
     resolved: false,
     createdAt: nowISO(),
     comments: [],
@@ -58551,6 +60093,14 @@ function handleCreateMultiCellAnnotation(cellSel, opts = {}) {
     text: text2,
     prefix,
     suffix,
+    anchor: {
+      version: "1",
+      quote: { exact: text2, prefix: prefix || "", suffix: suffix || "" },
+      position: { from: ranges[0].from, to: ranges[0].to, startAssoc: 1, endAssoc: -1 },
+      status: "attached",
+      confidence: 1,
+      updatedAt: nowISO()
+    },
     resolved: false,
     createdAt: nowISO(),
     comments: [{
@@ -58670,6 +60220,14 @@ function handleCreateMultiParagraphAnnotation(from2, to, opts = {}) {
     text: text2,
     prefix,
     suffix,
+    anchor: {
+      version: "1",
+      quote: { exact: text2, prefix: prefix || "", suffix: suffix || "" },
+      position: { from: ranges[0].from, to: ranges[0].to, startAssoc: 1, endAssoc: -1 },
+      status: "attached",
+      confidence: 1,
+      updatedAt: nowISO()
+    },
     resolved: false,
     createdAt: nowISO(),
     comments: [{
@@ -58841,18 +60399,21 @@ function applyReattach() {
   tr2.setMeta("__activeMarkSync", true);
   ed.view.dispatch(tr2);
   thread.text = newText;
-  thread.range = { from: sel.from, to: sel.to };
   thread.fuzzy = false;
   thread.deleted = false;
   thread.invalid = false;
   thread.invalidReason = void 0;
+  syncThreadAnchorEvidence(thread, ed.state.doc, { from: sel.from, to: sel.to }, {
+    exact: newText,
+    status: "attached",
+    confidence: 1
+  });
   try {
-    const ctx = computeContextAt(ed.state.doc, sel.from, sel.to);
-    thread.prefix = ctx.prefix;
-    thread.suffix = ctx.suffix;
-  } catch (e) {
-    thread.prefix = "";
-    thread.suffix = "";
+    const tr3 = ed.state.tr;
+    setAnnotationAnchorResetMeta(tr3, State2.annotations);
+    tr3.setMeta("addToHistory", false);
+    ed.view.dispatch(tr3);
+  } catch (_) {
   }
   State2.reattachTarget = null;
   document.querySelectorAll(".comment-thread.awaiting-reattach").forEach((c) => c.classList.remove("awaiting-reattach"));
@@ -59028,8 +60589,8 @@ function renderCommentList() {
     const threadType = threadTypeOf(thread);
     const safeThreadId = escapeHtml(thread.threadId);
     return `
-      <div class="comment-thread ${isActive2 ? "is-active" : ""} ${thread.resolved ? "is-resolved" : ""} ${thread.fuzzy ? "is-fuzzy" : ""} ${thread.deleted ? "is-deleted" : ""} ${isCollapsed ? "is-collapsed" : ""} ${thread.pending ? "is-pending" : ""}${threadTypeClass(thread)}" data-thread="${safeThreadId}" data-thread-type="${threadType || ""}">
-        ${thread.deleted ? '<div class="deleted-banner">\u{1F4CD} \u539F\u6587\u5DF2\u88AB\u5220\u9664 - <button class="link-btn" data-act="reattach" data-thread="' + safeThreadId + '">\u91CD\u65B0\u9009\u62E9\u6B63\u6587</button> \xB7 <button class="link-btn link-danger" data-act="delete-orphan" data-thread="' + safeThreadId + '">\u5220\u9664</button></div>' : thread.fuzzy ? '<div class="fuzzy-banner">\u26A0 \u4F4D\u7F6E\u53EF\u80FD\u504F\u79FB - \u8BF7\u68C0\u67E5\u6587\u6863</div>' : ""}
+      <div class="comment-thread ${isActive2 ? "is-active" : ""} ${thread.resolved ? "is-resolved" : ""} ${thread.fuzzy ? "is-fuzzy" : ""} ${thread.deleted ? "is-deleted" : ""} ${thread.invalidReason === "ambiguous" ? "is-ambiguous" : ""} ${isCollapsed ? "is-collapsed" : ""} ${thread.pending ? "is-pending" : ""}${threadTypeClass(thread)}" data-thread="${safeThreadId}" data-thread-type="${threadType || ""}">
+        ${thread.deleted ? '<div class="deleted-banner">\u{1F4CD} \u539F\u6587\u5DF2\u88AB\u5220\u9664 - <button class="link-btn" data-act="reattach" data-thread="' + safeThreadId + '">\u91CD\u65B0\u9009\u62E9\u6B63\u6587</button> \xB7 <button class="link-btn link-danger" data-act="delete-orphan" data-thread="' + safeThreadId + '">\u5220\u9664</button></div>' : thread.invalidReason === "ambiguous" ? '<div class="ambiguous-banner">\u26A0 \u65E0\u6CD5\u552F\u4E00\u786E\u5B9A\u539F\u6587\u4F4D\u7F6E\uFF08\u91CD\u590D\u951A\u70B9\uFF09\u2014 <button class="link-btn" data-act="reattach" data-thread="' + safeThreadId + '">\u91CD\u65B0\u9009\u62E9\u6B63\u6587</button> \xB7 <button class="link-btn link-danger" data-act="delete-orphan" data-thread="' + safeThreadId + '">\u5220\u9664</button></div>' : thread.invalid && !thread.deleted ? '<div class="invalid-banner">\u26A0 \u6279\u6CE8\u951A\u70B9\u5931\u6548 \u2014 <button class="link-btn" data-act="reattach" data-thread="' + safeThreadId + '">\u91CD\u65B0\u9009\u62E9\u6B63\u6587</button> \xB7 <button class="link-btn link-danger" data-act="delete-orphan" data-thread="' + safeThreadId + '">\u5220\u9664</button></div>' : thread.fuzzy ? '<div class="fuzzy-banner">\u26A0 \u4F4D\u7F6E\u53EF\u80FD\u504F\u79FB - \u8BF7\u68C0\u67E5\u6587\u6863</div>' : ""}
         <!-- \u5361\u7247\u5934: \u5E8F\u53F7 + \u5F15\u6587 (\u53EF\u70B9\u51FB\u8DF3\u8F6C) + \u22EF \u83DC\u5355\u6309\u94AE -->
         <!-- v5: \u70B9\u51FB\u5361\u7247\u6807\u9898\u533A\u57DF = \u6298\u53E0/\u5C55\u5F00 (\u7528\u6237\u660E\u786E\u8981\u6C42). \u8DF3\u8F6C\u6B63\u6587\u8D70 \u22EF \u83DC\u5355 "\u{1F4CD} \u8DF3\u8F6C\u5230\u6279\u6CE8\u5904" -->
         <div class="comment-quote" data-thread="${safeThreadId}" title="\u70B9\u51FB\u6536\u8D77/\u5C55\u5F00\u6279\u6CE8">
@@ -59646,24 +61207,39 @@ function flushSourceView() {
     const tr2 = editor2.state.tr;
     const markType = editor2.schema.marks.annotation;
     const failedThreadIds = /* @__PURE__ */ new Set();
+    const uniqueThreads = [];
+    const seenThreadIds = /* @__PURE__ */ new Set();
     for (const snap of markSnapshots) {
+      if (!snap || !snap.threadId || seenThreadIds.has(snap.threadId)) continue;
+      seenThreadIds.add(snap.threadId);
+      uniqueThreads.push(snap);
+    }
+    for (const snap of uniqueThreads) {
       const ann = State2.annotations.find((item) => item && item.threadId === snap.threadId);
-      const needle = String(ann && ann.text || snap.text || "");
-      if (!needle) {
+      if (!ann || !ann.text) {
         failedThreadIds.add(snap.threadId);
         continue;
       }
-      const found2 = findTextInDoc(editor2.state.doc, needle);
-      if (found2) {
-        tr2.addMark(found2.from, found2.from + needle.length, markType.create({
+      const found2 = findAnnotationRange(editor2.state.doc, ann);
+      if (found2 && typeof found2.from === "number" && typeof found2.to === "number" && found2.from < found2.to) {
+        tr2.addMark(found2.from, found2.to, markType.create({
           threadId: snap.threadId,
           resolved: snap.resolved,
           authorColor: snap.authorColor,
           active: false
         }));
+        syncThreadAnchorEvidence(ann, editor2.state.doc, found2, {
+          exact: ann.text,
+          status: found2.fuzzy ? "edited" : "attached",
+          confidence: found2.fuzzy ? 0.5 : 1
+        });
+        ann.fuzzy = !!found2.fuzzy;
+        ann.invalid = !!found2.fuzzy;
+        ann.deleted = false;
+        ann.invalidReason = found2.fuzzy ? "text-changed" : void 0;
       } else {
         failedThreadIds.add(snap.threadId);
-        console.warn(`[P-mark] mark restore \u5931\u8D25: text="${needle.slice(0, 20)}..." threadId=${String(snap.threadId).slice(0, 8)}`);
+        console.warn(`[P-mark] mark restore \u5931\u8D25: threadId=${String(snap.threadId).slice(0, 8)} reason=${found2 && found2.ambiguous ? "ambiguous" : "not-found"}`);
       }
     }
     tr2.setMeta("addToHistory", false);
@@ -59674,9 +61250,24 @@ function flushSourceView() {
         ann.fuzzy = true;
         ann.invalid = true;
         ann.invalidReason = ann.invalidReason || "text-changed";
+        if (ann.anchor && typeof ann.anchor === "object") {
+          ann.anchor = { ...ann.anchor, status: "ambiguous", confidence: 0, updatedAt: nowISO() };
+        }
       }
     }
+    try {
+      _validateMarksAfterEdit(editor2, { phase: "full", changedRanges: null });
+    } catch (e) {
+      console.warn("[P-mark] post-source validation", e);
+    }
     if (failedThreadIds.size > 0) renderCommentList();
+    try {
+      const trSeed = editor2.state.tr;
+      setAnnotationAnchorResetMeta(trSeed, State2.annotations || []);
+      trSeed.setMeta("addToHistory", false);
+      editor2.view.dispatch(trSeed);
+    } catch (_) {
+    }
   }
   if (State2.currentFile) State2.currentFile.content = markdown;
   return markdown;
@@ -59695,7 +61286,8 @@ function setRenderMode(mode) {
       if (sel && !sel.empty && sel.from !== sel.to) {
         const text2 = State2.editor.state.doc.textBetween(sel.from, sel.to, "\n", "\n");
         if (text2) {
-          State2.savedSelection = { from: sel.from, to: sel.to, text: text2 };
+          const context = computeContextAt(State2.editor.state.doc, sel.from, sel.to);
+          State2.savedSelection = { from: sel.from, to: sel.to, text: text2, prefix: context.prefix, suffix: context.suffix };
         }
       }
     } catch (e) {
@@ -59740,10 +61332,18 @@ function setRenderMode(mode) {
     let restored = false;
     if (savedText && State2.savedSelection) {
       try {
-        const found2 = findTextInDoc(State2.editor.state.doc, savedText);
-        if (found2) {
-          const len = State2.savedSelection.to - State2.savedSelection.from;
-          const to = found2.from + Math.min(len, savedText.length);
+        const selectionAnchor = {
+          text: savedText,
+          prefix: State2.savedSelection.prefix || "",
+          suffix: State2.savedSelection.suffix || "",
+          range: {
+            from: State2.savedSelection.from,
+            to: State2.savedSelection.to
+          }
+        };
+        const found2 = findAnnotationRange(State2.editor.state.doc, selectionAnchor);
+        if (found2 && typeof found2.from === "number" && typeof found2.to === "number") {
+          const to = found2.to;
           State2.editor.commands.focus(found2.from, { scrollIntoView: false });
           State2.editor.commands.setTextSelection({ from: found2.from, to });
           restored = true;
@@ -60172,6 +61772,7 @@ function snapshotActiveTab() {
     mediaFiles: Object.assign({}, State2.mediaFiles || {}),
     activeThreadId: State2.activeThreadId || null,
     replyDrafts: Object.assign({}, State2.replyDrafts || {}),
+    references: JSON.parse(JSON.stringify(State2.references || emptyReferenceManifest())),
     currentFile: State2.currentFile ? {
       documentId: State2.currentFile.documentId || id,
       name: State2.currentFile.name,
@@ -60205,6 +61806,7 @@ function restoreTab(tab) {
   State2.saveMode = tab.saveMode || "unknown";
   State2.activeThreadId = tab.activeThreadId || null;
   State2.replyDrafts = Object.assign({}, tab.replyDrafts || {});
+  State2.references = normalizeReferenceManifest(tab.references || emptyReferenceManifest());
   State2.reattachTarget = null;
   State2.annotations = [];
   State2._suspendAnnValidate = true;
@@ -60311,6 +61913,7 @@ function openNewTabBlank() {
   stopAutosaveTimer();
   revokeMediaUrls();
   State2.annotations = [];
+  State2.references = emptyReferenceManifest();
   State2.activeThreadId = null;
   State2._suspendAnnValidate = true;
   try {
@@ -60426,6 +62029,7 @@ async function activateOpenedDocument({
   name,
   content,
   annotations = null,
+  references = null,
   mediaFiles = null,
   handle = null,
   documentId = null,
@@ -60447,6 +62051,7 @@ async function activateOpenedDocument({
   }
   let contentOut = content;
   let annotationsOut = annotations;
+  let referencesOut = normalizeReferenceManifest(references || emptyReferenceManifest());
   if (preferDraft && !forceDisk) {
     try {
       let draft = await restoreDraftIfAny(resolvedDocumentId, null);
@@ -60504,6 +62109,7 @@ async function activateOpenedDocument({
               annotations: draftAnns
             };
           }
+          if (draft.references) referencesOut = normalizeReferenceManifest(draft.references);
           console.log(
             `[Draft] preferred unsaved draft over disk (updatedAt=${draft.updatedAt || 0}, diskMtime=${diskMtime})`
           );
@@ -60537,7 +62143,8 @@ async function activateOpenedDocument({
     documentId: resolvedDocumentId,
     alreadyPrepared: true,
     preferDraft: false,
-    forceDisk
+    forceDisk,
+    references: referencesOut
   });
   if (handle) {
     await rememberOpenedFile(handle);
@@ -60621,6 +62228,9 @@ function loadMarkdownIntoEditor(name, content, annotationsData = null, options =
   const documentId = opts.documentId || null;
   let preservedTabThreadId = null;
   let preservedTabAnnotations = null;
+  if (opts.references !== void 0) {
+    State2.references = normalizeReferenceManifest(opts.references);
+  }
   if (annotationsData && annotationsData.annotations) {
     const schemaReport = _validateSidecar(annotationsData.annotations);
     if (schemaReport.errors.length > 0) {
@@ -60669,6 +62279,7 @@ function loadMarkdownIntoEditor(name, content, annotationsData = null, options =
   } finally {
     State2._suspendAnnValidate = false;
   }
+  reconcileCitationNodes();
   if (State2.renderMode === "source") {
     const md2 = htmlToMarkdown(html);
     sourceEl.innerText = md2;
@@ -60697,6 +62308,40 @@ function loadMarkdownIntoEditor(name, content, annotationsData = null, options =
       const isIncomplete = !ann.threadId || !ann.text;
       const doc5 = State2.editor.state.doc;
       const hasImgAnchors = Array.isArray(ann.imageAnchors) && ann.imageAnchors.length > 0;
+      const hasTextRanges = Array.isArray(ann.ranges) && ann.ranges.length > 1;
+      const resolveSavedRanges = () => {
+        if (!hasTextRanges) return null;
+        const live = [];
+        const used = /* @__PURE__ */ new Set();
+        for (const saved of ann.ranges) {
+          if (!saved || typeof saved.from !== "number" || typeof saved.to !== "number" || saved.from >= saved.to) return null;
+          const expected = (() => {
+            if (saved.text != null && String(saved.text)) return String(saved.text);
+            try {
+              const atSaved = doc5.textBetween(saved.from, saved.to, " ");
+              if (atSaved && String(ann.text || "").includes(atSaved)) return atSaved;
+            } catch (_) {
+            }
+            const parts = String(ann.text || "").split(/\s+/).filter(Boolean);
+            const idx = ann.ranges.indexOf(saved);
+            return parts[idx] || "";
+          })();
+          if (!expected) return null;
+          const candidate = findAnnotationRange(doc5, {
+            text: expected,
+            prefix: saved.prefix || "",
+            suffix: saved.suffix || "",
+            range: saved,
+            anchor: { position: saved }
+          });
+          if (!candidate || candidate.ambiguous || typeof candidate.from !== "number" || candidate.from >= candidate.to) return null;
+          const key = `${candidate.from}:${candidate.to}`;
+          if (used.has(key)) return null;
+          used.add(key);
+          live.push({ from: candidate.from, to: candidate.to });
+        }
+        return live.length === ann.ranges.length ? live : null;
+      };
       const pureImageLabel = !!(ann.text && (/^\[图片\]$/i.test(String(ann.text).trim()) || /^\[image\]$/i.test(String(ann.text).trim())));
       if (!isDuplicate && !isIncomplete && hasImgAnchors) {
         const thread = {
@@ -60737,8 +62382,70 @@ function loadMarkdownIntoEditor(name, content, annotationsData = null, options =
         });
         continue;
       }
-      const positions = isDuplicate || isIncomplete ? null : findAnnotationRange(doc5, ann);
-      if (positions) {
+      const resolvedTextRanges = !isDuplicate && !isIncomplete ? resolveSavedRanges() : null;
+      if (resolvedTextRanges) {
+        const first3 = resolvedTextRanges[0];
+        const last = resolvedTextRanges[resolvedTextRanges.length - 1];
+        const thread = {
+          ...ann,
+          authorColor: annotationAuthorColor(ann),
+          ranges: resolvedTextRanges,
+          range: { from: first3.from, to: last.to },
+          invalid: false,
+          deleted: false,
+          fuzzy: false,
+          invalidReason: void 0
+        };
+        const parts = resolvedTextRanges.map((r) => {
+          try {
+            return doc5.textBetween(r.from, r.to, " ");
+          } catch (_) {
+            return "";
+          }
+        }).filter(Boolean);
+        if (parts.length) thread.text = parts.join(" ");
+        syncThreadAnchorEvidence(thread, doc5, thread.range, {
+          exact: thread.text,
+          status: "attached",
+          confidence: 1
+        });
+        State2.annotations.push(thread);
+        const tr2 = State2.editor.state.tr;
+        const mark = State2.editor.schema.marks.annotation.create({
+          threadId: ann.threadId,
+          resolved: ann.resolved,
+          authorColor: annotationAuthorColor(thread)
+        });
+        for (const r of resolvedTextRanges) tr2.addMark(r.from, r.to, mark);
+        tr2.setMeta("addToHistory", false);
+        tr2.setMeta("__activeMarkSync", true);
+        State2.editor.view.dispatch(tr2);
+        continue;
+      }
+      const positions = isDuplicate || isIncomplete || hasTextRanges ? null : findAnnotationRange(doc5, ann);
+      if (positions && positions.ambiguous) {
+        const thr = {
+          ...ann,
+          authorColor: annotationAuthorColor(ann),
+          range: null,
+          invalid: true,
+          fuzzy: true,
+          deleted: false,
+          invalidReason: "ambiguous"
+        };
+        if (thr.anchor && typeof thr.anchor === "object") {
+          thr.anchor = { ...thr.anchor, status: "ambiguous" };
+        } else {
+          thr.anchor = {
+            version: "1",
+            quote: { exact: ann.text || "", prefix: ann.prefix || "", suffix: ann.suffix || "" },
+            status: "ambiguous",
+            confidence: 0,
+            updatedAt: nowISO()
+          };
+        }
+        State2.annotations.push(thr);
+      } else if (positions && typeof positions.from === "number" && typeof positions.to === "number") {
         const thread = {
           ...ann,
           authorColor: annotationAuthorColor(ann),
@@ -60746,6 +62453,29 @@ function loadMarkdownIntoEditor(name, content, annotationsData = null, options =
           fuzzy: !!positions.fuzzy
           // P1-A: 降级匹配时标 fuzzy
         };
+        if (thread.anchor && typeof thread.anchor === "object") {
+          thread.anchor = {
+            ...thread.anchor,
+            status: positions.fuzzy ? "edited" : "attached",
+            position: {
+              from: positions.from,
+              to: positions.to,
+              startAssoc: 1,
+              endAssoc: -1
+            }
+          };
+        } else {
+          try {
+            const plain = doc5.textBetween(0, doc5.content.size, String.fromCharCode(10), String.fromCharCode(10));
+            const pf = plain.indexOf(ann.text || "");
+            const ev = captureAnchorEvidence(plain, pf >= 0 ? pf : 0, pf >= 0 ? pf + String(ann.text || "").length : 0, { now: nowISO() });
+            ev.position = { from: positions.from, to: positions.to, startAssoc: 1, endAssoc: -1 };
+            ev.quote = { exact: ann.text || "", prefix: ann.prefix || "", suffix: ann.suffix || "" };
+            ev.status = positions.fuzzy ? "edited" : "attached";
+            thread.anchor = ev;
+          } catch (_) {
+          }
+        }
         if (hasImgAnchors) {
           thread.imageAnchors = ann.imageAnchors.map((a) => ({ ...a }));
           resyncImageAnchors(thread, doc5);
@@ -60769,6 +62499,9 @@ function loadMarkdownIntoEditor(name, content, annotationsData = null, options =
         }
       } else {
         let reason = isDuplicate ? "duplicate-threadId" : isIncomplete ? "incomplete-data" : "text-not-found";
+        if (reason === "text-not-found" && hasTextRanges) {
+          reason = "multi-range-not-found";
+        }
         if (reason === "text-not-found" && ann.text && ann.text.includes("\n")) {
           reason = "cross-block";
         }
@@ -60780,10 +62513,40 @@ function loadMarkdownIntoEditor(name, content, annotationsData = null, options =
           authorColor: annotationAuthorColor(ann),
           range: null,
           invalid: true,
-          invalidReason: reason
+          invalidReason: reason,
+          anchor: ann.anchor && typeof ann.anchor === "object" ? { ...ann.anchor, status: "orphaned" } : {
+            version: "1",
+            quote: { exact: ann.text || "", prefix: ann.prefix || "", suffix: ann.suffix || "" },
+            status: "orphaned",
+            confidence: 0,
+            updatedAt: nowISO()
+          }
         });
       }
     }
+  }
+  try {
+    const seenThreadIds = /* @__PURE__ */ new Set();
+    for (const t of State2.annotations || []) {
+      if (!t || !t.threadId) continue;
+      if (seenThreadIds.has(t.threadId)) {
+        t.invalid = true;
+        t.fuzzy = true;
+        t.invalidReason = "duplicate-threadId";
+        if (t.anchor && typeof t.anchor === "object") t.anchor = { ...t.anchor, status: "ambiguous", confidence: 0 };
+      }
+      seenThreadIds.add(t.threadId);
+    }
+  } catch (_) {
+  }
+  try {
+    if (State2.editor) {
+      const trSeed = State2.editor.state.tr;
+      setAnnotationAnchorResetMeta(trSeed, State2.annotations || []);
+      trSeed.setMeta("addToHistory", false);
+      State2.editor.view.dispatch(trSeed);
+    }
+  } catch (_) {
   }
   if (preservedTabThreadId && State2.annotations.some((a) => a && a.threadId === preservedTabThreadId)) {
     State2.activeThreadId = preservedTabThreadId;
@@ -60938,18 +62701,16 @@ function findAnnotationRange(doc5, annotation) {
         if (scored.length && scored[0].score > 0) {
           const best = scored[0];
           const second = scored[1];
-          const ambiguous = second && second.score === best.score;
-          return { from: best.from, to: best.to, fuzzy: ambiguous || best.score < 100 };
+          if (second && second.score === best.score) {
+            return { ambiguous: true, candidates: scored.slice(0, 5), fuzzy: true };
+          }
+          return { from: best.from, to: best.to, fuzzy: best.score < 100 };
         }
       }
       if (!prefix && !suffix) {
-        return {
-          from: segments[first3.foundNodeIdx].pos + first3.inSegOffset,
-          to: segments[first3.foundNodeIdx].pos + first3.inSegOffset + text2.length,
-          fuzzy: true
-          // v1.43.43: 多处无上下文必须 fuzzy（旧版 fuzzy:false 会默默咬第一处）
-        };
+        return { ambiguous: true, fuzzy: true, candidates: [] };
       }
+      return { ambiguous: true, fuzzy: true, candidates: [] };
     } else {
       const firstIdx = joined.indexOf(text2);
       if (firstIdx !== -1) {
@@ -60965,6 +62726,7 @@ function findAnnotationRange(doc5, annotation) {
           const to = posAtOffset(firstIdx + text2.length);
           return { from: from2, to, fuzzy: false };
         }
+        return { ambiguous: true, fuzzy: true };
       }
     }
   }
@@ -60972,6 +62734,7 @@ function findAnnotationRange(doc5, annotation) {
     const pTail = prefix.slice(-5);
     const sHead = suffix.slice(0, 5);
     if (pTail && sHead) {
+      const softHits = [];
       for (let i = 0; i < segments.length; i++) {
         const seg = segments[i];
         let searchFrom = 0;
@@ -60981,53 +62744,70 @@ function findAnnotationRange(doc5, annotation) {
           const estTextStart = pIdx + pTail.length;
           const sSearchFromInSeg = estTextStart;
           let sIdx = seg.text.indexOf(sHead, sSearchFromInSeg);
-          let sFoundSegIdx = i;
-          let sFoundInSegOffset = sIdx;
           if (sIdx === -1 && i + 1 < segments.length) {
-            sFoundSegIdx = i + 1;
-            sFoundInSegOffset = segments[i + 1].text.indexOf(sHead);
+            const sFoundInSegOffset = segments[i + 1].text.indexOf(sHead);
             if (sFoundInSegOffset !== -1) {
-              return {
+              softHits.push({
                 from: seg.pos + estTextStart,
                 to: seg.pos + estTextStart + text2.length,
                 fuzzy: true
-              };
+              });
             }
           } else if (sIdx !== -1) {
-            return {
+            softHits.push({
               from: seg.pos + estTextStart,
               to: seg.pos + estTextStart + text2.length,
               fuzzy: true
-            };
+            });
           }
           searchFrom = pIdx + 1;
         }
       }
+      if (softHits.length === 1) return softHits[0];
+      if (softHits.length > 1) return { ambiguous: true, fuzzy: true, candidates: softHits.slice(0, 5) };
     }
   }
   if (text2 && prefix && prefix.length >= 5) {
     const pTail = prefix.slice(-5);
     const tHead = text2.slice(0, Math.min(text2.length, 5));
     const combined = pTail + tHead;
-    const found2 = findInSegments(combined);
-    if (found2) {
-      return {
-        from: segments[found2.foundNodeIdx].pos + found2.inSegOffset + pTail.length,
-        to: segments[found2.foundNodeIdx].pos + found2.inSegOffset + pTail.length + text2.length,
-        fuzzy: true
-      };
+    const hits = [];
+    for (let i = 0; i < segments.length; i++) {
+      let searchFrom = 0;
+      const text3 = segments[i].text;
+      while (searchFrom < text3.length) {
+        const idx = text3.indexOf(combined, searchFrom);
+        if (idx === -1) break;
+        hits.push({
+          from: segments[i].pos + idx + pTail.length,
+          to: segments[i].pos + idx + pTail.length + text2.length,
+          fuzzy: true
+        });
+        searchFrom = idx + 1;
+      }
     }
+    if (hits.length === 1) return hits[0];
+    if (hits.length > 1) return { ambiguous: true, fuzzy: true, candidates: hits.slice(0, 5) };
   }
   if (prefix && suffix) {
     const combined = prefix + suffix;
-    const found2 = findInSegments(combined);
-    if (found2) {
-      return {
-        from: segments[found2.foundNodeIdx].pos + found2.inSegOffset + prefix.length,
-        to: segments[found2.foundNodeIdx].pos + found2.inSegOffset + prefix.length + text2.length,
-        fuzzy: true
-      };
+    const hits = [];
+    for (let i = 0; i < segments.length; i++) {
+      let searchFrom = 0;
+      const text3 = segments[i].text;
+      while (searchFrom < text3.length) {
+        const idx = text3.indexOf(combined, searchFrom);
+        if (idx === -1) break;
+        hits.push({
+          from: segments[i].pos + idx + prefix.length,
+          to: segments[i].pos + idx + prefix.length + text2.length,
+          fuzzy: true
+        });
+        searchFrom = idx + 1;
+      }
     }
+    if (hits.length === 1) return hits[0];
+    if (hits.length > 1) return { ambiguous: true, fuzzy: true, candidates: hits.slice(0, 5) };
   }
   return null;
 }
@@ -61057,6 +62837,36 @@ function computeContextAt(doc5, from2, to, maxLen = 40) {
   if (prefix.length > maxLen) prefix = prefix.slice(-maxLen);
   if (suffix.length > maxLen) suffix = suffix.slice(0, maxLen);
   return { prefix, suffix };
+}
+function syncThreadAnchorEvidence(ann, doc5, range, opts = {}) {
+  if (!ann || !doc5 || !range || typeof range.from !== "number" || typeof range.to !== "number" || range.from >= range.to) return ann;
+  const context = opts.context || computeContextAt(doc5, range.from, range.to);
+  const exact = opts.exact != null ? String(opts.exact) : String(ann.text || "");
+  ann.range = { from: range.from, to: range.to };
+  ann.prefix = context.prefix || "";
+  ann.suffix = context.suffix || "";
+  const previous = ann.anchor && typeof ann.anchor === "object" ? ann.anchor : {};
+  const previousPosition = previous.position && typeof previous.position === "object" ? previous.position : {};
+  const status = opts.status || previous.status || "attached";
+  ann.anchor = {
+    ...previous,
+    version: previous.version || "1",
+    quote: {
+      exact,
+      prefix: ann.prefix,
+      suffix: ann.suffix
+    },
+    position: {
+      from: range.from,
+      to: range.to,
+      startAssoc: previousPosition.startAssoc != null ? previousPosition.startAssoc : 1,
+      endAssoc: previousPosition.endAssoc != null ? previousPosition.endAssoc : -1
+    },
+    status,
+    confidence: opts.confidence != null ? opts.confidence : status === "attached" || status === "moved" ? 1 : previous.confidence != null ? previous.confidence : 0.5,
+    updatedAt: nowISO()
+  };
+  return ann;
 }
 function computeContext(text2, fullDocText, maxLen = 40) {
   if (!text2) return { prefix: "", suffix: "" };
@@ -61635,31 +63445,19 @@ async function isMentorZip(file) {
   }
 }
 async function readMentorZip(file) {
-  if (file && typeof file.size === "number" && file.size > MENTOR_ZIP_MAX_COMPRESSED) {
-    throw new Error(`.mentor \u8FC7\u5927 (${Math.round(file.size / 1024 / 1024)}MB)`);
-  }
+  if (file && typeof file.size === "number" && file.size > MENTOR_ZIP_MAX_COMPRESSED) throw new Error(`.mentor \u8FC7\u5927 (${Math.round(file.size / 1024 / 1024)}MB)`);
   const rawBuf = await file.arrayBuffer();
   if (_zipWorker && _zipWorkerReady) {
     try {
       const transferBuf = rawBuf.slice(0);
       const workerResult = await _zipWorkerCall("load", { bytes: transferBuf }, [transferBuf]);
       const mediaFiles2 = {};
-      for (const [k, ab] of Object.entries(workerResult.mediaFiles || {})) {
-        mediaFiles2[k] = new Blob([ab]);
-      }
+      for (const [k, ab] of Object.entries(workerResult.mediaFiles || {})) mediaFiles2[k] = new Blob([ab]);
       const mdText2 = workerResult.mdText;
       const blobUrlCount2 = (mdText2.match(/!\[[^\]]*\]\(blob:[^)]+\)/g) || []).length;
       const mediaKeysCount2 = Object.keys(mediaFiles2).length;
-      if (blobUrlCount2 > 0) {
-        console.warn(`[readMentorZip] \u26A0 \u68C0\u6D4B\u5230 ${blobUrlCount2} \u5F20\u56FE\u7528 blob: \u5F15\u7528 (\u6765\u81EA\u4E4B\u524D session, \u5F53\u524D\u5DF2\u5931\u6548).`);
-        if (mediaKeysCount2 === 0) {
-          console.warn(`[readMentorZip] \u26A0 zip \u91CC\u65E0 media/ \u5B50\u76EE\u5F55, ${blobUrlCount2} \u5F20\u56FE\u6C38\u8FDC\u65E0\u6CD5\u663E\u793A. \u8FD9\u662F corrupt .mentor.`);
-        } else {
-          console.log(`[readMentorZip] zip \u542B ${mediaKeysCount2} \u4E2A media \u6587\u4EF6\u4F46 mdText \u6CA1\u5F15\u7528`);
-        }
-      }
       _zipWorkerStats.loads++;
-      return { mdText: mdText2, annotations: workerResult.annotations, mediaFiles: mediaFiles2, _diag: { blobUrlCount: blobUrlCount2, mediaKeysCount: mediaKeysCount2 } };
+      return { mdText: mdText2, annotations: workerResult.annotations, references: normalizeReferenceManifest(workerResult.referencesJson || emptyReferenceManifest()), referencesBib: workerResult.referencesBib || "", mediaFiles: mediaFiles2, _diag: { blobUrlCount: blobUrlCount2, mediaKeysCount: mediaKeysCount2 } };
     } catch (e) {
       console.warn("[zip-worker] load failed, falling back to main thread:", e);
       _zipWorkerStats.errors++;
@@ -61673,62 +63471,42 @@ async function readMentorZip(file) {
   }
   const zip = await import_jszip.default.loadAsync(rawBuf);
   assertMentorZipBudget(file, zip);
-  const mdEntry = zip.file(MENTOR_MD_NAME);
-  const annEntry = zip.file(MENTOR_ANN_NAME);
-  if (!mdEntry) {
-    throw new Error(`.mentor \u5305\u7F3A\u5C11 ${MENTOR_MD_NAME}`);
+  const mdEntry = zip.file(MENTOR_MD_NAME), annEntry = zip.file(MENTOR_ANN_NAME);
+  const refsEntry = zip.file("references.json"), refsBibEntry = zip.file("references.bib");
+  if (!mdEntry) throw new Error(`.mentor \u5305\u7F3A\u5C11 ${MENTOR_MD_NAME}`);
+  const mediaNames = Object.keys(zip.files).filter((name) => {
+    const e = zip.files[name];
+    return name.startsWith("media/") && !name.includes("..") && !name.startsWith("/") && e && !e.dir;
+  });
+  const all = await Promise.all([mdEntry.async("string"), annEntry ? annEntry.async("string") : null, refsEntry ? refsEntry.async("string") : null, refsBibEntry ? refsBibEntry.async("string") : null, ...mediaNames.map((name) => zip.file(name).async("blob").then((blob) => [name, blob]))]);
+  const [mdText, annText, refsText, referencesBib, ...mediaResults] = all;
+  let annotations = null, references = emptyReferenceManifest();
+  if (annText !== null) try {
+    annotations = JSON.parse(annText);
+  } catch (e) {
+    console.warn("[mentor] annotations.json \u89E3\u6790\u5931\u8D25:", e);
   }
-  const entries = Object.keys(zip.files);
-  const mediaNames = [];
-  for (const name of entries) {
-    if (!name.startsWith("media/")) continue;
-    if (name.includes("..") || name.startsWith("/")) continue;
-    const entry = zip.files[name];
-    if (!entry || entry.dir) continue;
-    mediaNames.push(name);
-  }
-  const allExtracts = await Promise.all([
-    mdEntry.async("string"),
-    annEntry ? annEntry.async("string") : Promise.resolve(null),
-    ...mediaNames.map((name) => zip.file(name).async("blob").then((blob) => [name, blob]))
-  ]);
-  const [mdText, annText, ...mediaResults] = allExtracts;
-  let annotations = null;
-  if (annText !== null) {
-    try {
-      annotations = JSON.parse(annText);
-    } catch (e) {
-      console.warn("[mentor] annotations.json \u89E3\u6790\u5931\u8D25, \u5F53\u4F5C\u7A7A\u6279\u6CE8:", e);
-      annotations = null;
-    }
+  if (refsText !== null) try {
+    references = normalizeReferenceManifest(JSON.parse(refsText));
+  } catch (e) {
+    console.warn("[mentor] references.json \u89E3\u6790\u5931\u8D25:", e);
   }
   const mediaFiles = {};
-  for (const [name, blob] of mediaResults) {
-    mediaFiles[name] = blob;
-  }
-  const blobUrlCount = (mdText.match(/!\[[^\]]*\]\(blob:[^)]+\)/g) || []).length;
-  const mediaKeysCount = Object.keys(mediaFiles).length;
-  if (blobUrlCount > 0) {
-    console.warn(`[readMentorZip] \u26A0 \u68C0\u6D4B\u5230 ${blobUrlCount} \u5F20\u56FE\u7528 blob: \u5F15\u7528 (\u6765\u81EA\u4E4B\u524D session, \u5F53\u524D\u5DF2\u5931\u6548).`);
-    if (mediaKeysCount === 0) {
-      console.warn(`[readMentorZip] \u26A0 zip \u91CC\u65E0 media/ \u5B50\u76EE\u5F55, ${blobUrlCount} \u5F20\u56FE\u6C38\u8FDC\u65E0\u6CD5\u663E\u793A. \u8FD9\u662F corrupt .mentor.`);
-      console.warn(`[readMentorZip] \u5EFA\u8BAE: \u7528\u539F\u59CB .docx \u901A\u8FC7 Pandoc \u91CD\u65B0 generate (.mentor v2 schema) \u6216\u6362\u53E6\u4E00\u5DE5\u5177.`);
-    } else {
-      console.log(`[readMentorZip] zip \u542B ${mediaKeysCount} \u4E2A media \u6587\u4EF6\u4F46 mdText \u6CA1\u5F15\u7528 \u2192 \u8FD9\u53EF\u80FD\u662F\u65B0\u751F\u6210\u7684 .mentor \u4F46 markdown \u7528\u65E7 blob URL`);
-    }
-  }
-  return { mdText, annotations, mediaFiles, _diag: { blobUrlCount, mediaKeysCount } };
+  for (const [name, blob] of mediaResults) mediaFiles[name] = blob;
+  const blobUrlCount = (mdText.match(/!\[[^\]]*\]\(blob:[^)]+\)/g) || []).length, mediaKeysCount = Object.keys(mediaFiles).length;
+  return { mdText, annotations, references, referencesBib: referencesBib || "", mediaFiles, _diag: { blobUrlCount, mediaKeysCount } };
 }
 async function openFromMentorFile(file, options = {}) {
   const quiet = !!(options && options.quiet);
   console.log("[openFromMentorFile] start, file=", file?.name, "size=", file?.size);
-  const { mdText, annotations, mediaFiles } = await readMentorZip(file);
+  const { mdText, annotations, references, mediaFiles } = await readMentorZip(file);
   console.log("[openFromMentorFile] mediaFiles keys=", Object.keys(mediaFiles || {}));
   const displayName = file.name;
   await activateOpenedDocument({
     name: displayName,
     content: mdText,
     annotations,
+    references,
     mediaFiles,
     handle: null,
     saveMode: "mentor-download",
@@ -61749,7 +63527,7 @@ async function openFromMentorFile(file, options = {}) {
   updateDocMeta();
   return { displayName, mdText, annotations };
 }
-async function buildMentorZipBlob(mdText, annotations, mediaFiles) {
+async function buildMentorZipBlob(mdText, annotations, mediaFiles, references = State2.references) {
   if (_zipWorker && _zipWorkerReady) {
     try {
       const mediaList = [];
@@ -61761,7 +63539,8 @@ async function buildMentorZipBlob(mdText, annotations, mediaFiles) {
           transferList.push(buf);
         }
       }
-      const workerResult = await _zipWorkerCall("build", { mdText, sidecar: annotations, mediaFiles: mediaList }, transferList);
+      const manifest2 = normalizeReferenceManifest(references || emptyReferenceManifest());
+      const workerResult = await _zipWorkerCall("build", { mdText, sidecar: annotations, referencesJson: manifest2.entries.length ? manifest2 : null, referencesBib: manifest2.entries.length ? serializeReferenceBibTeX(manifest2.entries) : "", mediaFiles: mediaList }, transferList);
       _zipWorkerStats.builds++;
       return new Blob([workerResult.bytes], { type: "application/zip" });
     } catch (e) {
@@ -61778,7 +63557,12 @@ async function buildMentorZipBlob(mdText, annotations, mediaFiles) {
   const zip = new import_jszip.default();
   zip.file(MENTOR_MD_NAME, mdText);
   zip.file(MENTOR_ANN_NAME, JSON.stringify(annotations, null, 2));
-  if (mediaFiles && Object.keys(mediaFiles).length > 0) {
+  const manifest = normalizeReferenceManifest(references || emptyReferenceManifest());
+  if (manifest.entries.length) {
+    zip.file("references.json", JSON.stringify(manifest, null, 2));
+    zip.file("references.bib", serializeReferenceBibTeX(manifest.entries));
+  }
+  if (mediaFiles) {
     for (const [path2, blob] of Object.entries(mediaFiles)) {
       if (!path2.startsWith("media/") || path2.includes("..") || path2.startsWith("/")) {
         console.warn("[mentor] buildMentorZipBlob \u8DF3\u8FC7\u975E\u6CD5 path:", path2);
@@ -62102,6 +63886,27 @@ async function buildDocxBlob(html, mediaFiles) {
   }
   const wrapper = document.createElement("div");
   wrapper.innerHTML = html;
+  const entryMapForDocx = new Map((State2.references.entries || []).map((e) => [e.key, e]));
+  const walker = document.createTreeWalker(wrapper, NodeFilter.SHOW_TEXT);
+  const textNodes = [];
+  while (walker.nextNode()) textNodes.push(walker.currentNode);
+  for (const textNode of textNodes) {
+    const value = textNode.nodeValue || "";
+    if (!value.includes("[@") && !value.includes("[-@")) continue;
+    const parts = value.split(/(\[(?:-?@[\w:.\/-]+(?:\s*,\s*[^;\]]+)?)(?:\s*;\s*-?@[\w:.\/-]+(?:\s*,\s*[^;\]]+)?)*\])/g);
+    if (parts.length < 2) continue;
+    const frag = document.createDocumentFragment();
+    for (const part of parts) {
+      if (/^\[-?@/.test(part)) {
+        try {
+          frag.appendChild(document.createTextNode(formatCitationLabel(parseCitationSyntax(part), entryMapForDocx).text));
+        } catch (_) {
+          frag.appendChild(document.createTextNode(part));
+        }
+      } else frag.appendChild(document.createTextNode(part));
+    }
+    textNode.replaceWith(frag);
+  }
   const imageMap = /* @__PURE__ */ new Map();
   async function inlineImage(imgEl) {
     const src = imgEl.getAttribute("src");
@@ -62274,6 +64079,20 @@ async function buildDocxBlob(html, mediaFiles) {
       continue;
     }
     bodyXml += processBlock(b);
+  }
+  const cited = /* @__PURE__ */ new Set();
+  const sourceForCites = String(html || "");
+  for (const entry of State2.references.entries || []) {
+    if (sourceForCites.includes(`@${entry.key}`)) cited.add(entry.key);
+  }
+  if (cited.size) {
+    bodyXml += makePara(makeRun("References"), { style: "Heading1" });
+    for (const entry of State2.references.entries || []) {
+      if (!cited.has(entry.key)) continue;
+      const rendered = formatReferenceEntry(entry);
+      const line = [rendered.authors, rendered.year ? `(${rendered.year}).` : "", rendered.title ? `${rendered.title}.` : "", rendered.journal].filter(Boolean).join(" ");
+      bodyXml += makePara(makeRun(line));
+    }
   }
   const rels = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
@@ -62589,6 +64408,162 @@ function setupFileListDropdown() {
     if (e.key === "Escape") closeFileListDropdown();
   });
   refreshFileListDropdown();
+}
+var _renderReferencesPane = () => {
+};
+var _setReferencesPaneOpen = () => {
+};
+function getCitationUsages() {
+  const usages = {};
+  if (!State2.editor) return usages;
+  State2.editor.state.doc.descendants((node) => {
+    if (node.type && node.type.name === "citation") for (const key of node.attrs.keys || []) usages[key] = (usages[key] || 0) + 1;
+  });
+  return usages;
+}
+function reconcileCitationNodes() {
+  if (!State2.editor) return;
+  const hasLibrary = !!(State2.references && (State2.references.entries || []).length);
+  const entryMap = new Map((State2.references.entries || []).map((e) => [e.key, e]));
+  let tr2 = State2.editor.state.tr, changed = false;
+  State2.editor.state.doc.descendants((node, pos) => {
+    if (!node.type || node.type.name !== "citation") return;
+    try {
+      const parsed = parseCitationSyntax(node.attrs.raw);
+      const formatted = hasLibrary ? formatCitationLabel(parsed, entryMap) : { text: node.attrs.raw, missingKeys: [] };
+      const attrs = { ...node.attrs, keys: parsed.items.map((i) => i.key), label: formatted.text, missingKeys: formatted.missingKeys || [] };
+      if (JSON.stringify(attrs) !== JSON.stringify(node.attrs)) {
+        tr2 = tr2.setNodeMarkup(pos, void 0, attrs);
+        changed = true;
+      }
+    } catch (_) {
+    }
+  });
+  if (changed) {
+    tr2.setMeta("addToHistory", false);
+    State2.editor.view.dispatch(tr2);
+  }
+  _renderReferencesPane();
+}
+function insertCitation(key) {
+  if (!State2.editor || !(State2.references.entries || []).some((e) => e.key === key)) return false;
+  const sel = State2.editor.state.selection;
+  let pos = sel.from, selected = sel.node && sel.node.type && sel.node.type.name === "citation" ? sel.node : null;
+  if (!selected) {
+    const $from = State2.editor.state.doc.resolve(sel.from);
+    const before = $from.nodeBefore;
+    const at = State2.editor.state.doc.nodeAt(sel.from);
+    if (before && before.type.name === "citation") {
+      selected = before;
+      pos = sel.from - before.nodeSize;
+    } else if (at && at.type.name === "citation") {
+      selected = at;
+      pos = sel.from;
+    }
+  }
+  if (selected) {
+    const parsed = parseCitationSyntax(selected.attrs.raw);
+    if (!parsed.items.some((i) => i.key === key)) parsed.items.push({ key, suppressAuthor: false, suffix: "" });
+    const raw = serializeCitationSyntax(parsed), info = buildCitationLabel(raw, State2.references);
+    const tr2 = State2.editor.state.tr.setNodeMarkup(pos, void 0, { ...selected.attrs, raw, keys: info.keys, label: info.label, missingKeys: info.missingKeys });
+    tr2.setSelection(NodeSelection.create(tr2.doc, pos));
+    State2.editor.view.dispatch(tr2);
+  } else {
+    const raw = `[@${key}]`, info = buildCitationLabel(raw, State2.references);
+    State2.editor.chain().focus().insertContent({ type: "citation", attrs: { raw, keys: info.keys, label: info.label, missingKeys: info.missingKeys } }).run();
+  }
+  markDirty();
+  reconcileCitationNodes();
+  return true;
+}
+function focusCitationByKey(key) {
+  _setReferencesPaneOpen(true);
+  _renderReferencesPane();
+  const card = document.querySelector(`.refs-card[data-key="${CSS.escape(key)}"]`);
+  if (!card) return false;
+  document.querySelectorAll(".refs-card.is-citation-target").forEach((x) => x.classList.remove("is-citation-target"));
+  card.classList.add("is-citation-target", "is-current", "is-highlighted");
+  card.scrollIntoView({ block: "nearest" });
+  return true;
+}
+function initReferencesPane() {
+  const button = document.querySelector("#btn-refs"), input = document.querySelector("#refs-file-input"), pane = document.querySelector("#refs-pane"), main2 = document.querySelector("#main"), list = document.querySelector("#refs-list"), sourceName = document.querySelector("#refs-source-name"), search = document.querySelector("#refs-search"), missing = document.querySelector("#refs-missing-summary"), collapse = pane?.querySelector('[data-act="toggle-refs-pane"]'), expand = document.querySelector("#expand-refs-pane-btn");
+  if (!button || !input || !pane || !main2 || !list) return;
+  let query = "";
+  const setOpen = (open2) => {
+    pane.classList.toggle("hidden", !open2);
+    main2.classList.toggle("refs-pane-open", open2);
+    document.body.classList.toggle("refs-pane-collapsed", !open2);
+    expand?.classList.toggle("hidden", open2 || !(State2.references.entries || []).length);
+  };
+  const render3 = () => {
+    const entries = State2.references.entries || [], usages = getCitationUsages(), rows = filterReferenceEntries(entries, query);
+    if (sourceName) sourceName.textContent = entries.length ? `${State2.references.source.name || "\u5F15\u7528\u5E93"} \xB7 ${entries.length} \u6761` : "\u672A\u52A0\u8F7D\u5F15\u7528\u5E93";
+    const missingKeys = [...document.querySelectorAll(".mentor-citation.is-missing")].flatMap((n) => {
+      try {
+        return JSON.parse(n.dataset.citationMissing || "[]");
+      } catch (_) {
+        return [];
+      }
+    });
+    if (missing) {
+      missing.classList.toggle("hidden", !missingKeys.length);
+      missing.textContent = missingKeys.length ? `\u7F3A\u5931\uFF1A${[...new Set(missingKeys)].map((k) => "@" + k).join("\u3001")}` : "";
+    }
+    if (!rows.length) {
+      list.innerHTML = `<div class="refs-empty">${entries.length ? "\u6CA1\u6709\u5339\u914D\u7684\u5F15\u7528" : "\u70B9\u51FB\u5DE5\u5177\u680F\u300C\u5F15\u7528\u300D\u5BFC\u5165 .bib / .ris / .enw / .xml / .json"}</div>`;
+      return;
+    }
+    list.innerHTML = rows.map((entry) => {
+      const key = escapeHtml(entry.key), meta = [entry.year, entry.journal].filter(Boolean).join(" \xB7 "), n = usages[entry.key] || 0;
+      return `<article class="refs-card" data-key="${key}"><div class="rc-key">@${key}</div><div class="rc-authors">${escapeHtml(entry.authors || "\u2014")}</div>${entry.title ? `<div class="rc-title">${escapeHtml(entry.title)}</div>` : ""}<div class="rc-meta">${escapeHtml(meta)}</div><div class="rc-usage${n ? "" : " is-unused"}">${n ? `\u6B63\u6587 \xD7${n}` : "\u672A\u5F15\u7528"}</div><button type="button" class="rc-insert-btn" data-act="insert-cite" data-key="${key}">\u63D2\u5165 [@${key}]</button></article>`;
+    }).join("");
+  };
+  _renderReferencesPane = render3;
+  _setReferencesPaneOpen = setOpen;
+  const loadFile = async (file) => {
+    const entries = sortReferenceEntries(parseReferenceFile(file.name, await file.text()));
+    if (!entries.length) {
+      showToast("\u672A\u8BC6\u522B\u5230\u5F15\u7528\u6761\u76EE", 2500);
+      return;
+    }
+    State2.references = createReferenceManifest({ sourceName: file.name, sourceFormat: (file.name.split(".").pop() || "").toLowerCase(), entries });
+    query = "";
+    if (search) search.value = "";
+    setOpen(true);
+    reconcileCitationNodes();
+    markDirty();
+    scheduleIdbCacheWrite();
+    showToast(`\u5DF2\u52A0\u8F7D ${entries.length} \u6761\u5F15\u7528`, 1800);
+  };
+  button.addEventListener("click", () => input.click());
+  input.addEventListener("change", () => {
+    const f = input.files?.[0];
+    if (f) loadFile(f).catch((e) => {
+      console.error(e);
+      showToast("\u5F15\u7528\u5E93\u89E3\u6790\u5931\u8D25", 2500);
+    });
+    input.value = "";
+  });
+  search?.addEventListener("input", () => {
+    query = search.value || "";
+    render3();
+  });
+  collapse?.addEventListener("click", () => setOpen(false));
+  expand?.addEventListener("click", () => setOpen(true));
+  list.addEventListener("click", (event) => {
+    const x = event.target.closest('[data-act="insert-cite"]');
+    if (x && insertCitation(x.dataset.key)) showToast(`\u5DF2\u63D2\u5165 [@${x.dataset.key}]`, 1400);
+  });
+  document.querySelector("#editor")?.addEventListener("click", (event) => {
+    const atom = event.target.closest(".mentor-citation");
+    if (atom) {
+      const keys3 = JSON.parse(atom.dataset.citationKeys || "[]");
+      if (keys3[0]) focusCitationByKey(keys3[0]);
+    }
+  });
+  setOpen(false);
+  render3();
 }
 function showExportProgress(label) {
   setStatus(label || "\u5BFC\u51FA\u4E2D\u2026", "\u8BF7\u7A0D\u5019");
@@ -63832,6 +65807,7 @@ async function boot() {
   setupFloatCommentButton();
   setupTableControls();
   setupFileListDropdown();
+  initReferencesPane();
   setupPaneResizer();
   setupEditorSelectionObserver();
   setupAnnotationMarkClickObserver();
@@ -64080,15 +66056,25 @@ window.__mdAnnotator = {
       isPatchHistoryEntry,
       activeHighlightKey
     },
-    tabs: { genTabId, findTabByDocument, snapshotTabState, tabLabel }
+    tabs: { genTabId, findTabByDocument, snapshotTabState, tabLabel },
+    annotationAnchor: { findOccurrences, scoreCandidate, resolveAnchor, resolveAnchorSet, mapAnchorRange, captureAnchorEvidence, projectLegacyFlags, auditAnnotationInvariants }
   },
   loadMarkdownIntoEditor,
+  insertCitation,
+  insertCitationIntoSelection: insertCitation,
+  focusCitationByKey,
+  getCitationUsages,
+  reconcileCitationNodes,
+  references: State2.references,
   newDocument,
   createAnnotationFromSelection,
   createAnnotationThread,
   bodyHasAiMarker,
   ensureAiMarker,
   ensureMarker,
+  isAiCard,
+  humanCommentIsWork,
+  threadNeedsAiReply,
   stripMarkers,
   getMarkerType,
   applyThreadType,
@@ -64145,6 +66131,13 @@ window.__mdAnnotator = {
   renderOutline,
   findAnnotationRange,
   computeContextAt,
+  collectLiveAnnotationAudit,
+  exportAnchorDiagnosis,
+  resolveAnchor,
+  resolveAnchorSet,
+  captureAnchorEvidence,
+  auditAnnotationInvariants,
+  mapAnchorRange,
   computeContext,
   clearPmHistory,
   mentorExportName,
@@ -64302,8 +66295,8 @@ window.__mdAnnotator = {
             body: t.comments[t.comments.length - 1].body.slice(0, 100),
             createdAt: t.comments[t.comments.length - 1].createdAt
           } : null,
-          // 是否需要 AI 回复：无 resolved、无 AI 评论
-          needsReply: !t.resolved && !t.comments.some((c) => isAiAuthor(c.author, AI_AUTHOR))
+          // AI 卡：人类留言无论有无 @AI 都待回；人类卡：仅 body 含 @AI/@REVIEW 时待回
+          needsReply: threadNeedsAiReply(t, AI_AUTHOR)
         }));
       },
       /** 取单条 thread 详情（拷贝返回，不暴露内部引用） */

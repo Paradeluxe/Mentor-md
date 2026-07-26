@@ -1,0 +1,38 @@
+[
+  {
+    "name": "identical-duplicate-is-ambiguous",
+    "doc": "same token tail\n\nsame token tail",
+    "anchor": { "text": "token", "prefix": "same ", "suffix": " tail" },
+    "expected": { "status": "ambiguous", "range": null }
+  },
+  {
+    "name": "unique-context-selects-second",
+    "doc": "Alpha token A\n\nBeta token B",
+    "anchor": { "text": "token", "prefix": "Beta ", "suffix": " B" },
+    "expected": { "status": "attached", "occurrence": 1 }
+  },
+  {
+    "name": "unique-exact-is-attached",
+    "doc": "prefix unique-anchor-xyz suffix",
+    "anchor": { "text": "unique-anchor-xyz", "prefix": "prefix ", "suffix": " suffix" },
+    "expected": { "status": "attached", "occurrence": 0 }
+  },
+  {
+    "name": "missing-quote-is-orphaned",
+    "doc": "nothing matching here",
+    "anchor": { "text": "gone-anchor", "prefix": "pre ", "suffix": " post" },
+    "expected": { "status": "orphaned", "range": null }
+  },
+  {
+    "name": "duplicate-without-context-is-ambiguous",
+    "doc": "tok end\n\ntok end\n\ntok end",
+    "anchor": { "text": "tok", "prefix": "", "suffix": "" },
+    "expected": { "status": "ambiguous", "range": null }
+  },
+  {
+    "name": "near-tie-context-is-ambiguous",
+    "doc": "xx same-word yy\n\nxx same-word yy",
+    "anchor": { "text": "same-word", "prefix": "xx ", "suffix": " yy" },
+    "expected": { "status": "ambiguous", "range": null }
+  }
+]
