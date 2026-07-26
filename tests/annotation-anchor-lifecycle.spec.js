@@ -246,6 +246,120 @@ const { chromium } = require('playwright');
     if (!anchor || anchor.from !== second.pos || anchor.alt !== 'two') throw new Error('image moved to wrong duplicate: ' + JSON.stringify(state));
   });
 
+  await t('global load allocation rejects two threads claiming one unique occurrence', async () => {
+    const result = await page.evaluate(() => {
+      const M = window.__mdAnnotator;
+      M.openNewTabBlank();
+      const sidecar = {
+        annotations: [
+          { threadId: 'claim-a', text: 'UNIQUE', prefix: 'pre ', suffix: ' post', range: { from: 999, to: 1005 }, comments: [] },
+          { threadId: 'claim-b', text: 'UNIQUE', prefix: 'pre ', suffix: ' post', range: { from: 999, to: 1005 }, comments: [] },
+        ],
+      };
+      M.loadMarkdownIntoEditor('collision.md', 'pre UNIQUE post', sidecar, { alreadyPrepared: true });
+      const marks = [];
+      M.State.editor.state.doc.descendants((node, pos) => {
+        if (!node.isText) return;
+        for (const mark of node.marks) {
+          if (mark.type.name === 'annotation') marks.push({ threadId: mark.attrs.threadId, from: pos, to: pos + node.nodeSize });
+        }
+      });
+      return {
+        threads: M.State.annotations.map((a) => ({ threadId: a.threadId, range: a.range, invalid: !!a.invalid, reason: a.invalidReason, status: a.anchor && a.anchor.status })),
+        marks,
+        audit: M.collectLiveAnnotationAudit(),
+      };
+    });
+    if (result.marks.length !== 0) throw new Error('collision silently attached a mark: ' + JSON.stringify(result));
+    if (result.threads.length !== 2 || result.threads.some((t) => !t.invalid || t.reason !== 'collision' || t.status !== 'collision' || t.range !== null)) {
+      throw new Error('collision threads not preserved unresolved: ' + JSON.stringify(result));
+    }
+  });
+
+  await t('duplicate image src decorates only the resolved image position', async () => {
+    const result = await page.evaluate(() => {
+      const M = window.__mdAnnotator;
+      M.openNewTabBlank();
+      const sidecar = {
+        annotations: [{
+          threadId: 'img-right',
+          text: '[图片]',
+          range: { from: 999, to: 1000 },
+          imageAnchors: [{ from: 999, to: 1000, src: 'media/same.png', alt: 'right', title: '' }],
+          comments: [],
+        }],
+      };
+      M.loadMarkdownIntoEditor('images.md', '![left](media/same.png)\n\n![right](media/same.png)', sidecar, { alreadyPrepared: true });
+      M.refreshAnnotationImageDecos();
+      return {
+        thread: M.State.annotations[0],
+        images: Array.from(M.State.editor.view.dom.querySelectorAll('img')).map((img, index) => ({
+          index,
+          alt: img.alt,
+          threadId: img.dataset.threadId || null,
+          decorated: img.dataset.annotationImage || null,
+        })),
+      };
+    });
+    const hits = result.images.filter((img) => img.threadId === 'img-right' && img.decorated === '1');
+    if (hits.length !== 1 || hits[0].alt !== 'right') throw new Error('duplicate src decorated wrong/all images: ' + JSON.stringify(result));
+  });
+
+  await t('mentor handle open preserves references before citation anchor restore', async () => {
+    const result = await page.evaluate(async () => {
+      const M = window.__mdAnnotator;
+      const manifest = {
+        version: 1,
+        source: { name: 'refs.json', format: 'json' },
+        entries: [{ key: 'alpha2020', type: 'article-journal', author: [{ family: 'Alpha' }], issued: { 'date-parts': [[2020]] }, title: 'Alpha paper' }],
+      };
+      const sidecar = { version: '1', annotations: [] };
+      const blob = await M.buildMentorZipBlob('See [@alpha2020] now.', sidecar, {}, manifest);
+      const file = new File([blob], 'citation-handle.mentor', { type: 'application/zip', lastModified: Date.now() });
+      const handle = {
+        name: file.name,
+        async getFile() { return file; },
+        async queryPermission() { return 'granted'; },
+        async requestPermission() { return 'granted'; },
+      };
+      await M.openFromMentorHandle(handle, { quiet: true, forceDisk: true });
+      return {
+        referenceKeys: (M.State.references.entries || []).map((e) => e.key),
+        citations: Array.from(document.querySelectorAll('.mentor-citation')).map((el) => ({ key: el.dataset.key, text: el.textContent })),
+      };
+    });
+    if (!result.referenceKeys.includes('alpha2020')) throw new Error('handle path dropped references: ' + JSON.stringify(result));
+    if (result.citations.length !== 1 || result.citations[0].key !== 'alpha2020') throw new Error('citation node not reconciled with handle references: ' + JSON.stringify(result));
+  });
+
+  await t('mark recovery permits intentional partial overlap', async () => {
+    const result = await page.evaluate(() => {
+      const M = window.__mdAnnotator;
+      M.openNewTabBlank();
+      const ed = M.State.editor;
+      M.State._suspendAnnValidate = true;
+      try { ed.commands.setContent('<p>alpha bravo charlie</p>', false); }
+      finally { M.State._suspendAnnValidate = false; }
+      let start = null;
+      ed.state.doc.descendants((node, pos) => { if (node.isText && start == null) start = pos; });
+      const outerMark = ed.schema.marks.annotation.create({ threadId: 'outer', resolved: false, authorColor: 0 });
+      ed.view.dispatch(ed.state.tr.addMark(start, start + 11, outerMark));
+      M.State.annotations = [
+        { threadId: 'outer', text: 'alpha bravo', prefix: '', suffix: ' charlie', range: { from: start, to: start + 11 }, comments: [] },
+        { threadId: 'inner', text: 'bravo charlie', prefix: 'alpha ', suffix: '', range: { from: start + 6, to: start + 19 }, comments: [] },
+      ];
+      M._validateMarksAfterEdit(ed, { phase: 'full' });
+      const marks = [];
+      ed.state.doc.descendants((node, pos) => {
+        if (!node.isText) return;
+        for (const mark of node.marks) if (mark.type.name === 'annotation') marks.push({ threadId: mark.attrs.threadId, from: pos, to: pos + node.nodeSize, text: node.text });
+      });
+      return { threads: M.State.annotations, marks };
+    });
+    const inner = result.threads.find((t) => t.threadId === 'inner');
+    if (!inner || inner.invalid || !result.marks.some((m) => m.threadId === 'inner')) throw new Error('partial overlap recovery blocked: ' + JSON.stringify(result));
+  });
+
   await t('live edits keep legacy range and anchor evidence synchronized', async () => {
     await setup('<p>AAA TOKEN ZZZ</p>');
     const made = await createNth('TOKEN', 0);

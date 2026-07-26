@@ -1073,7 +1073,9 @@ function refreshAnnotationImageDecos() {
             hit = true;
             break;
           }
-          if (anc.src && src && anc.src === src) {
+          // Once an image anchor has a live PM position, position is the identity.
+          // Falling back to src here decorates every copied image with the same src.
+          if (typeof anc.from !== "number" && anc.src && src && anc.src === src) {
             hit = true;
             break;
           }
@@ -1569,14 +1571,6 @@ function _validateMarksAfterEdit(editor2, opts) {
     }
     return joinedCache;
   };
-  const rangeOverlaps = (a, b) => a.from < b.to && b.from < a.to;
-  const isOccupiedByOther = (from2, to, selfTid) => {
-    for (const o of occupiedRanges) {
-      if (o.tid === selfTid) continue;
-      if (rangeOverlaps({ from: from2, to }, o)) return true;
-    }
-    return false;
-  };
   let changed = false;
   let uiChanged = false;
   const uiTouched = /* @__PURE__ */ new Set();
@@ -1772,7 +1766,10 @@ function _validateMarksAfterEdit(editor2, opts) {
       } catch (e) {
         rePos = null;
       }
-      if (rePos && typeof rePos.from === "number" && typeof rePos.to === "number" && rePos.from < rePos.to && !isOccupiedByOther(rePos.from, rePos.to, ann.threadId)) {
+      // Overlapping comments are supported. A mark held by another thread is only
+      // a conflict when both threads resolve to the exact same range; partial/nested
+      // overlap is valid and must not block recovery.
+      if (rePos && typeof rePos.from === "number" && typeof rePos.to === "number" && rePos.from < rePos.to && !occupiedRanges.some((o) => o.tid !== ann.threadId && o.from === rePos.from && o.to === rePos.to)) {
         pendingRemarks.push({
           threadId: ann.threadId,
           from: rePos.from,
@@ -2248,7 +2245,7 @@ function createSaveSnapshot() {
     State._lastAnchorAudit = audit;
     if (audit && !audit.healthy) {
       const hard = (audit.errors || []).filter((e) =>
-        e && (e.code === "duplicate-mark" || e.code === "mark-overlap" || e.code === "ambiguous-has-mark")
+        e && (e.code === "duplicate-threadId" || e.code === "duplicate-mark" || e.code === "mark-unknown-thread" || e.code === "mark-collision" || e.code === "ambiguous-has-mark" || e.code === "orphan-status-has-mark" || e.code === "range-mismatch" || e.code === "text-mismatch")
       );
       if (hard.length) {
         console.warn("[anchor-audit] hard invariant failures", hard);
@@ -4304,6 +4301,7 @@ function addReply(threadId, body) {
     thread.comments.push(comment);
   }
   delete State.replyDrafts[threadId];
+  commitHistoryIfNeeded();
   markDirty();
   renderCommentList();
   emitAI("newComment", { threadId, comment });
@@ -4337,6 +4335,7 @@ function toggleResolved(threadId) {
   tr2.setMeta("addToHistory", false);
   tr2.setMeta("__activeMarkSync", true);
   editor2.view.dispatch(tr2);
+  commitHistoryIfNeeded();
   refreshAnnotationImageDecos();
   markDirty();
   renderCommentList();
@@ -4460,6 +4459,7 @@ function deleteThread(threadId) {
   editor2.view.dispatch(tr2);
   State.annotations = State.annotations.filter((t) => t.threadId !== threadId);
   if (State.activeThreadId === threadId) State.activeThreadId = null;
+  commitHistoryIfNeeded();
   markDirty();
   renderCommentList();
   updateDocMeta();
@@ -6388,9 +6388,38 @@ function loadMarkdownIntoEditor(name, content, annotationsData = null, options =
     }
     const annsToProcess = validAnns;
     const seenThreadIds = /* @__PURE__ */ new Set();
+    const plainForAnchorSet = State.editor.state.doc.textBetween(0, State.editor.state.doc.content.size, " ");
+    const anchorSetJobs = validAnns.filter((ann) => {
+      if (!ann || !ann.threadId || !ann.text) return false;
+      if (Array.isArray(ann.imageAnchors) && ann.imageAnchors.length) return false;
+      if (Array.isArray(ann.ranges) && ann.ranges.length > 1) return false;
+      // Legacy sidecars may carry an expanded range while `text` still contains
+      // the shorter quote (e.g. nested-extension comments). Those ranges are
+      // intentionally distinct and must not be collapsed into one quote claim.
+      const saved = ann.anchor && ann.anchor.position || ann.range;
+      if (saved && typeof saved.from === "number" && typeof saved.to === "number" && saved.to - saved.from !== String(ann.text).length) return false;
+      return true;
+    });
+    const anchorSet = resolveAnchorSet(plainForAnchorSet, anchorSetJobs);
+    const anchorSetById = new Map(anchorSetJobs.map((ann) => [ann.threadId, ann]));
+    const anchorSetCollisionIds = new Set();
+    for (const collision of anchorSet.collisions || []) {
+      const ann = anchorSetById.get(collision.threadId);
+      const saved = ann && (ann.anchor && ann.anchor.position || ann.range);
+      const savedFrom = saved && typeof saved.from === "number"
+        ? State.editor.state.doc.textBetween(0, Math.max(0, Math.min(State.editor.state.doc.content.size, saved.from)), " ").length
+        : null;
+      // If two comments intentionally shared a healthy live range, preserve them.
+      // A collision is dangerous only when saved identity does not corroborate the
+      // shared candidate (external/legacy duplicate claim).
+      if (savedFrom == null || savedFrom !== collision.range.from || ann.invalid || ann.deleted || ann.fuzzy) {
+        anchorSetCollisionIds.add(collision.threadId);
+      }
+    }
     for (const ann of annsToProcess) {
       const isDuplicate = ann.threadId && seenThreadIds.has(ann.threadId);
       if (ann.threadId) seenThreadIds.add(ann.threadId);
+      const isAnchorCollision = !!(ann.threadId && anchorSetCollisionIds.has(ann.threadId));
       const isIncomplete = !ann.threadId || !ann.text;
       const doc5 = State.editor.state.doc;
       const hasImgAnchors = Array.isArray(ann.imageAnchors) && ann.imageAnchors.length > 0;
@@ -6470,6 +6499,28 @@ function loadMarkdownIntoEditor(name, content, annotationsData = null, options =
         });
         continue;
       }
+      if (isAnchorCollision) {
+        const thr = {
+          ...ann,
+          authorColor: annotationAuthorColor(ann),
+          range: null,
+          invalid: true,
+          fuzzy: true,
+          deleted: false,
+          invalidReason: "collision"
+        };
+        thr.anchor = ann.anchor && typeof ann.anchor === "object"
+          ? { ...ann.anchor, status: "collision", confidence: 0 }
+          : {
+              version: "1",
+              quote: { exact: ann.text || "", prefix: ann.prefix || "", suffix: ann.suffix || "" },
+              status: "collision",
+              confidence: 0,
+              updatedAt: nowISO()
+            };
+        State.annotations.push(thr);
+        continue;
+      }
       const resolvedTextRanges = !isDuplicate && !isIncomplete ? resolveSavedRanges() : null;
       if (resolvedTextRanges) {
         const first = resolvedTextRanges[0];
@@ -6506,7 +6557,7 @@ function loadMarkdownIntoEditor(name, content, annotationsData = null, options =
         State.editor.view.dispatch(tr2);
         continue;
       }
-      const positions = isDuplicate || isIncomplete || hasTextRanges ? null : findAnnotationRange(doc5, ann);
+      const positions = isDuplicate || isAnchorCollision || isIncomplete || hasTextRanges ? null : findAnnotationRange(doc5, ann);
             if (positions && positions.ambiguous) {
               const thr = {
                 ...ann,
@@ -7231,12 +7282,13 @@ async function openFromMentorHandle(fileHandle, options = {}) {
   const documentIdOpt = options && options.documentId || null;
   await ensureWritePermission(fileHandle);
   const file = await fileHandle.getFile();
-  const { mdText, annotations, mediaFiles } = await readMentorZip(file);
+  const { mdText, annotations, references, mediaFiles } = await readMentorZip(file);
   console.log("[openFromMentorHandle] mediaFiles=", Object.keys(mediaFiles || {}).length);
   await activateOpenedDocument({
     name: file.name,
     content: mdText,
     annotations,
+    references,
     mediaFiles,
     handle: fileHandle,
     documentId: documentIdOpt,

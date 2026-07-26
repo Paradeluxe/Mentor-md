@@ -466,7 +466,11 @@ const TEST_MD = `# 多批注测试
     await page.waitForTimeout(200);
     const st = await getMarkStats();
     if (st.threads.length !== 3) fail(`threads=${st.threads.length} 预期 3`);
-    return st;
+    const invalid = st.threads.filter((x) => x.invalid || x.deleted || x.fuzzy || (x.anchor && !['attached', 'moved', 'edited'].includes(x.anchor.status)));
+    if (invalid.length) fail(`reload 后嵌套扩展被误判失效: ${JSON.stringify(invalid)}`);
+    const represented = new Set(st.inDoc.map((x) => x.threadId));
+    if (represented.size < 1) fail('reload 后 3 个 thread 没有任何可见 mark');
+    return { threads: st.threads.length, representedMarks: represented.size, invalid: invalid.length };
   });
 
   // =========================================================

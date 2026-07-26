@@ -196,6 +196,24 @@ const t = async (name, fn) => {
     assert.ok(a.errors.some((e) => /duplicate-mark|text-mismatch|range-mismatch/.test(e.code)));
   });
 
+  await t('auditAnnotationInvariants detects mark replacement caused by overlap', async () => {
+    const doc = 'alpha bravo charlie';
+    const threads = [
+      { threadId: 'outer', text: 'alpha bravo charlie', range: { from: 0, to: 19 }, anchor: { status: 'attached' } },
+      { threadId: 'inner', text: 'bravo charlie', range: { from: 6, to: 19 }, anchor: { status: 'attached' } },
+    ];
+    // ProseMirror marks of the same type cannot coexist with different attrs;
+    // adding inner replaces outer over 6..19.
+    const marks = [
+      { threadId: 'outer', from: 0, to: 6, text: 'alpha ' },
+      { threadId: 'inner', from: 6, to: 19, text: 'bravo charlie' },
+    ];
+    const a = mod.auditAnnotationInvariants({ threads, marks, doc });
+    assert.equal(a.healthy, false);
+    assert.ok(a.errors.some((e) => e.code === 'range-mismatch' && e.threadId === 'outer'));
+    assert.ok(a.errors.some((e) => e.code === 'text-mismatch' && e.threadId === 'outer'));
+  });
+
   await t('auditAnnotationInvariants ambiguous must not keep mark', async () => {
     const doc = 'tok tok';
     const threads = [{ threadId: 't1', text: 'tok', range: null, anchor: { status: 'ambiguous' } }];

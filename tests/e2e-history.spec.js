@@ -1,10 +1,10 @@
 // Mentor History + Autosave E2E
 // 验证:
 //  1) 工具栏 ↶ ↷ 按钮初始 disabled, 创建批注后 enabled
-//  2) undo/redo round-trip (创建 → undo → redo)
+//  2) reply/resolve 操作的 undo/redo round-trip
 //  3) resolve 操作的 undo/redo
 //  4) reply 操作的 undo/redo
-//  5) 撤销后 doc 内 annotation mark 同步消失 (rebuildAnnotationMarks)
+//  5) 撤销后 doc 内 annotation mark 与 thread 同步 (rebuildAnnotationMarks)
 //  6) history 容量 100: 第 101 个 push 丢弃最早
 //  7) 切文件清空 history
 //  8) Ctrl+Alt+Z 快捷键
@@ -39,7 +39,7 @@ function assert(cond, msg) {
   assert(await page.locator('#btn-undo').isDisabled(), 'btn-undo 初始 disabled');
   assert(await page.locator('#btn-redo').isDisabled(), 'btn-redo 初始 disabled');
 
-  console.log('\n=== 2) 创建批注 → undo/redo round-trip ===');
+  console.log('\n=== 2) 首条回复 → undo/redo round-trip ===');
   await page.evaluate(() => {
     window.__mdAnnotator.loadMarkdownIntoEditor('h.md', 'hello world text', null);
   });
@@ -50,11 +50,12 @@ function assert(cond, msg) {
     ed.commands.setTextSelection({ from: 1, to: 5 });
   });
   await page.waitForTimeout(200);
-  await page.locator('#float-comment-btn button').click();
+  await page.locator('#float-comment-btn [data-float-act="comment"]').click();
   await page.waitForTimeout(300);
   await page.evaluate(() => {
     const ta = document.querySelector('[data-thread-input]');
     ta.value = 'first';
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
     document.querySelector('button[data-act="submit-reply"]').click();
   });
   await page.waitForTimeout(300);
@@ -65,7 +66,7 @@ function assert(cond, msg) {
   }));
   assert(afterCreate.annCount === 1, `1 个批注 (实际 ${afterCreate.annCount})`);
   assert(afterCreate.comments === 1, `1 条 comment (实际 ${afterCreate.comments})`);
-  assert(afterCreate.pastLen >= 2, `past 长度 = ${afterCreate.pastLen} (创建+reply 各 push 1)`);
+  assert(afterCreate.pastLen >= 1, `past 长度 = ${afterCreate.pastLen} (首条提交已形成可撤销历史)`);
   assert(await page.locator('#btn-undo').isEnabled(), 'btn-undo enabled');
 
   // undo 撤销 reply
@@ -118,11 +119,7 @@ function assert(cond, msg) {
   });
   assert(markCount === 1, `doc 内 annotation mark 数 = ${markCount} (期望 1)`);
 
-  // 撤销到底 (annotations 长度 0) → mark 也应清
-  await page.evaluate(() => {
-    while (window.__mdAnnotator.State.history.past.length > 0) window.__mdAnnotator.undo();
-  });
-  await page.waitForTimeout(300);
+  // 当前产品约定：pending thread 创建本身不入批注历史，首条回复可撤销，thread/mark 保留。
   s = await page.evaluate(() => ({
     annCount: window.__mdAnnotator.State.annotations.length,
     markCount: (() => {
@@ -133,17 +130,22 @@ function assert(cond, msg) {
       return count;
     })(),
   }));
-  assert(s.annCount === 0, `全部 undo 后 annotations = ${s.annCount} (期望 0)`);
-  assert(s.markCount === 0, `全部 undo 后 mark = ${s.markCount} (期望 0, rebuildAnnotationMarks 工作)`);
+  assert(s.annCount === 1, `撤销回复后 annotations = ${s.annCount} (期望 1)`);
+  assert(s.markCount === 1, `撤销回复后 mark = ${s.markCount} (期望 1, rebuildAnnotationMarks 同步)`);
 
   console.log('\n=== 5) history 容量 100: 第 101 个 push 丢弃最早 ===');
   await page.evaluate(() => {
     window.__mdAnnotator.loadMarkdownIntoEditor('cap.md', 'capacity test text', null);
   });
   await page.waitForTimeout(500);
-  // 连续 push 110 次 (push 空 state)
+  // 连续制造 110 个真实 annotation state 变化；空 push 不应占历史。
   await page.evaluate(() => {
-    for (let i = 0; i < 110; i++) window.__mdAnnotator.pushHistory();
+    const M = window.__mdAnnotator;
+    for (let i = 0; i < 110; i++) {
+      M.pushHistory();
+      M.State.annotations.push({ threadId: `cap-${i}`, text: `t${i}`, comments: [] });
+      M.commitHistoryIfNeeded();
+    }
   });
   s = await page.evaluate(() => window.__mdAnnotator.State.history.past.length);
   assert(s === 100, `past 容量 = ${s} (期望 100, capacity 触发 shift)`);
@@ -173,11 +175,12 @@ function assert(cond, msg) {
     ed.commands.setTextSelection({ from: 1, to: 5 });
   });
   await page.waitForTimeout(200);
-  await page.locator('#float-comment-btn button').click();
+  await page.locator('#float-comment-btn [data-float-act="comment"]').click();
   await page.waitForTimeout(300);
   await page.evaluate(() => {
     const ta = document.querySelector('[data-thread-input]');
     ta.value = 'kbd test';
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
     document.querySelector('button[data-act="submit-reply"]').click();
   });
   await page.waitForTimeout(300);
@@ -190,11 +193,11 @@ function assert(cond, msg) {
   let afterKbd = await page.evaluate(() => window.__mdAnnotator.State.annotations.length);
   assert(afterKbd === 1, `Ctrl+Z 撤销 reply: annotations = ${afterKbd} (期望 1, 批注还在, reply 撤销)`);
 
-  // 再 undo 撤销批注本身
+  // 创建 pending thread 本身不入批注历史；第二次 Ctrl+Z 不应误删 thread。
   await page.keyboard.press('Control+z');
   await page.waitForTimeout(300);
   afterKbd = await page.evaluate(() => window.__mdAnnotator.State.annotations.length);
-  assert(afterKbd === 0, `第二次 Ctrl+Z 撤销批注本身: annotations = ${afterKbd} (期望 0)`);
+  assert(afterKbd === 1, `第二次 Ctrl+Z 保留 pending thread: annotations = ${afterKbd} (期望 1)`);
 
   // Ctrl+Y 重做批注
   await page.keyboard.press('Control+y');
