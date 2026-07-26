@@ -1,11 +1,13 @@
 {
   "name": "mentor",
-  "version": "1.44.6",
+  "version": "1.44.8",
   "private": true,
   "description": "Mentor - WYSIWYG Markdown editor with docx-style annotations (.mentor package primary path)",
   "scripts": {
     "pretest": "node scripts/check-bundle-drift.mjs",
     "test": "node tests/e2e.spec.js",
+    "test:anchors": "node tests/unit-annotation-anchor.spec.js",
+    "test:anchors:matrix": "node tests/structure-matrix-anchors.spec.js",
     "test:report": "node tests/run-with-report.js",
     "test:ux:smoke": "node tests/chaos-ux/runner.js --level=smoke",
     "test:ux:full": "node tests/chaos-ux/runner.js --level=full",

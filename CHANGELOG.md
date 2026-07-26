@@ -2,6 +2,24 @@
 
 按时间倒序记录已发布的变化。最新条目在上方。
 
+## v1.44.8 (2026-07-26) — AI 卡必回 / 人类卡临时 @AI
+
+用户: AI 批注卡无论有没有 @AI 都要回复；人类批注卡才临时检测 @AI。
+
+### 行为
+- `isAiCard(thread)`：`threadType==='ai'` 或根评论 author=AI Reviewer
+- `threadNeedsAiReply(thread)`：AI 卡上任意非空人类留言待回；人类卡仅 body 含 `@AI`/`@REVIEW` 时待回
+- `ai.listThreads().needsReply` / `getPending` 改用窗口规则（对齐 fix-mentor / mentor_io v2.5）
+- 暴露 `__mdAnnotator.isAiCard` / `humanCommentIsWork` / `threadNeedsAiReply`
+
+### 配对
+- fix-mentor skill v2.5 + `mentor_io.is_ai_card` / synthetic `@AI`
+
+### Cache
+- bump `?v=`
+
+---
+
 ## v1.44.7 (2026-07-26) — 草稿 vs 外部写盘冲突
 
 用户: fix-mentor 写盘后 Mentor 仍「从本地草稿恢复」，盖掉 AI reply。
