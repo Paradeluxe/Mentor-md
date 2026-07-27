@@ -2,6 +2,22 @@
 
 按时间倒序记录已发布的变化。最新条目在上方。
 
+## v1.45.1 (2026-07-27) — .mentor media GC
+
+保存/导出 .mentor 时只打包正文、HTML 或 imageAnchors 仍引用的 media/*；未引用孤儿图不再进 zip。
+
+### 行为
+- createSaveSnapshot / buildMentorZipBlob 写前按引用剪枝
+- 图批注 imageAnchors 仍引用的 media 会保留
+- 内存 State.mediaFiles 暂不在保存时强清（避免未写盘撤销丢 blob）；落盘包已瘦身
+
+### 实现
+- collectReferencedMediaPaths / pruneMediaFiles / filterMediaFilesForArchive
+- 测试 tests/e2e-media-gc.spec.js
+
+### Cache
+- bump styles.css?v= / app.bundle.js?v=
+
 ## v1.45.0 (2026-07-27) — 结构化 HTML 批注锚点
 
 正常保存/重开优先用 .mentor 内 document.html + manifest.json 恢复 ProseMirror 批注 mark，不再全文搜原文。

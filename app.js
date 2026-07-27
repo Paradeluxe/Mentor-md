@@ -2153,6 +2153,107 @@ function mediaPathForSrc(src) {
   }
   return src;
 }
+/** Normalize a candidate path to media/* or empty. */
+function normalizeMediaPath(path2) {
+  if (!path2 || typeof path2 !== "string") return "";
+  let s = path2.trim().replace(/\\/g, "/");
+  if (s.startsWith("./")) s = s.slice(2);
+  // strip query/hash
+  s = s.split("#")[0].split("?")[0];
+  if (!s.startsWith("media/")) return "";
+  if (s.includes("..") || s.startsWith("media//")) return "";
+  return s;
+}
+/**
+ * Collect media/* paths still referenced by body md/html, blob reverse map,
+ * PM/image anchors in annotations, or live editor image nodes.
+ */
+function collectReferencedMediaPaths({
+  mdText = "",
+  html = "",
+  annotations = null,
+  mediaUrls = null,
+  editor = null
+} = {}) {
+  const refs = /* @__PURE__ */ new Set();
+  const add = (raw) => {
+    const pth = normalizeMediaPath(raw);
+    if (pth) refs.add(pth);
+  };
+  const reverseBlob = /* @__PURE__ */ new Map();
+  const urls = mediaUrls || State.mediaUrls || {};
+  for (const [path2, blobUrl] of Object.entries(urls)) {
+    if (blobUrl) reverseBlob.set(blobUrl, path2);
+  }
+  const addMaybeBlob = (src) => {
+    if (!src || typeof src !== "string") return;
+    if (src.startsWith("blob:") && reverseBlob.has(src)) {
+      add(reverseBlob.get(src));
+      return;
+    }
+    add(src);
+  };
+  const scanText = (text2) => {
+    if (!text2 || typeof text2 !== "string") return;
+    // markdown images
+    const mdRe = /!\[[^\]]*\]\((media\/[^)\s]+)\)/g;
+    let m;
+    while ((m = mdRe.exec(text2)) !== null) add(m[1]);
+    // bare media/ in src-like contexts
+    const bareRe = /(?:src|href)=["'](media\/[^"']+)["']/gi;
+    while ((m = bareRe.exec(text2)) !== null) add(m[1]);
+    // loose media/foo.ext tokens (html/md leftovers)
+    const looseRe = /(?:^|[\s("'=])(media\/[A-Za-z0-9_./\u4e00-\u9fff-]+\.(?:png|jpe?g|gif|webp|svg|bmp|pdf))/gi;
+    while ((m = looseRe.exec(text2)) !== null) add(m[1]);
+    // blob: URLs
+    const blobRe = /blob:[^\s"')]+/g;
+    while ((m = blobRe.exec(text2)) !== null) addMaybeBlob(m[0]);
+  };
+  scanText(mdText);
+  scanText(html);
+  let annList = [];
+  if (Array.isArray(annotations)) annList = annotations;
+  else if (annotations && Array.isArray(annotations.annotations)) annList = annotations.annotations;
+  else if (Array.isArray(State.annotations)) annList = State.annotations;
+  for (const ann of annList) {
+    if (!ann || typeof ann !== "object") continue;
+    if (Array.isArray(ann.imageAnchors)) {
+      for (const a of ann.imageAnchors) {
+        if (a && a.src) addMaybeBlob(a.src);
+      }
+    }
+  }
+  const ed = editor || State.editor;
+  if (ed && ed.state && ed.state.doc) {
+    try {
+      ed.state.doc.descendants((node) => {
+        if (node && node.type && node.type.name === "image" && node.attrs && node.attrs.src) {
+          addMaybeBlob(node.attrs.src);
+        }
+      });
+    } catch (_) {}
+  }
+  return refs;
+}
+/** Keep only mediaFiles keys present in referenced Set. */
+function pruneMediaFiles(mediaFiles, referenced) {
+  const out = {};
+  const ref = referenced instanceof Set ? referenced : new Set(referenced || []);
+  for (const [k, v] of Object.entries(mediaFiles || {})) {
+    if (ref.has(k)) out[k] = v;
+  }
+  return out;
+}
+function filterMediaFilesForArchive(mediaFiles, {
+  mdText = "",
+  html = "",
+  annotations = null,
+  mediaUrls = null,
+  editor = null
+} = {}) {
+  const refs = collectReferencedMediaPaths({ mdText, html, annotations, mediaUrls, editor });
+  return pruneMediaFiles(mediaFiles, refs);
+}
 function serializeImageAnchors(anchors) {
   if (!Array.isArray(anchors) || !anchors.length) return void 0;
   return anchors.map((a) => {
@@ -2348,6 +2449,13 @@ function createSaveSnapshot() {
     author: { id: State.authorId, name: State.author },
     annotations: buildAnnotationsSidecar()
   };
+  const mediaFiles = filterMediaFilesForArchive(State.mediaFiles || {}, {
+    mdText,
+    html: documentHtml,
+    annotations: sidecar,
+    mediaUrls: State.mediaUrls,
+    editor: State.editor
+  });
   return {
     tabId: State.activeTabId,
     documentId: currentFile.documentId || State.activeTabId,
@@ -2359,7 +2467,7 @@ function createSaveSnapshot() {
     mdText,
     documentHtml,
     sidecar: JSON.parse(JSON.stringify(sidecar)),
-    mediaFiles: Object.assign({}, State.mediaFiles || {}),
+    mediaFiles,
     references: JSON.parse(JSON.stringify(State.references || emptyReferenceManifest()))
   };
 }
@@ -8522,6 +8630,13 @@ async function buildMentorZipBlob(mdText, annotations, mediaFiles, references = 
     const archManifest = await createArchiveManifest({ mdText, annotationsText, documentHtml });
     manifestText = JSON.stringify(archManifest, null, 2);
   }
+  mediaFiles = filterMediaFilesForArchive(mediaFiles || {}, {
+    mdText,
+    html: typeof documentHtml === "string" ? documentHtml : "",
+    annotations,
+    mediaUrls: State.mediaUrls,
+    editor: State.editor
+  });
   const refManifest = normalizeReferenceManifest(references || emptyReferenceManifest());
   if (_zipWorker && _zipWorkerReady) {
     try {
@@ -11458,6 +11573,10 @@ window.__mdAnnotator = {
   buildAnnotationsSidecar,
   serializeAnnotationThread,
   mediaPathForSrc,
+  normalizeMediaPath,
+  collectReferencedMediaPaths,
+  pruneMediaFiles,
+  filterMediaFilesForArchive,
   applyImageSrcChange,
   refreshAnnotationImageDecos,
   scrollToThread,
