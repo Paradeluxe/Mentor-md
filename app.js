@@ -1161,13 +1161,47 @@ function escapeHtml(s) {
 }
 function escapeAttr(s) { return escapeHtml(s); }
 
+/** Short stable label from UUID (matches author chip when display name unset). */
+function authorIdToShortName(id) {
+  if (!id) return "";
+  return String(id).replace(/-/g, "").slice(0, 8);
+}
+
+/** Identity written into new comments (name may be empty until user sets it). */
+function currentAuthorPayload() {
+  return {
+    id: State.authorId || "",
+    name: (State.author || "").trim()
+  };
+}
+
+/**
+ * Normalize author for display.
+ * Prefer stored name → same-user current State.author → id short → 匿名.
+ * Fixes cards showing 匿名 while chip already shows id-derived / user name.
+ */
 function normalizeAuthor(a) {
-  if (!a) return { id: "", name: "\u533F\u540D" };
-  if (typeof a === "string") return { id: "", name: a || "\u533F\u540D" };
-  if (typeof a === "object") {
-    return { id: a.id || "", name: a.name || "\u533F\u540D" };
+  let id = "";
+  let name = "";
+  if (a == null || a === "") {
+    // keep empty
+  } else if (typeof a === "string") {
+    name = a.trim();
+  } else if (typeof a === "object") {
+    id = String(a.id || "").trim();
+    name = String(a.name || "").trim();
+  } else {
+    name = String(a).trim();
   }
-  return { id: "", name: "\u533F\u540D" };
+  if (!name) {
+    if (id && State.authorId && id === State.authorId) {
+      const me = (State.author || "").trim();
+      if (me) name = me;
+    }
+  }
+  if (!name && id) name = authorIdToShortName(id);
+  if (!name) name = "\u533F\u540D";
+  return { id, name };
 }
 function authorName(a) {
   return normalizeAuthor(a).name;
@@ -4152,7 +4186,7 @@ function handleCreateMultiCellAnnotation(cellSel, opts = {}) {
     createdAt: nowISO(),
     comments: [{
       id: commentId,
-      author: { id: State.authorId, name: State.author },
+      author: currentAuthorPayload(),
       body: "",
       createdAt: nowISO()
     }],
@@ -4279,7 +4313,7 @@ function handleCreateMultiParagraphAnnotation(from2, to, opts = {}) {
     createdAt: nowISO(),
     comments: [{
       id: commentId,
-      author: { id: State.authorId, name: State.author },
+      author: currentAuthorPayload(),
       body: "",
       createdAt: nowISO()
     }]
@@ -4322,7 +4356,7 @@ function addReply(threadId, body) {
   pushHistory();
   const comment = {
     id: uuid(),
-    author: { id: State.authorId, name: State.author },
+    author: currentAuthorPayload(),
     body: body.trim(),
     createdAt: nowISO()
   };
@@ -4666,7 +4700,11 @@ function renderCommentList() {
   };
   const avatar = (name) => (name || "\u533F").trim().charAt(0).toUpperCase() || "?";
   list.innerHTML = visibleThreads.map((thread, idx) => {
-    const first3 = thread.comments?.[0] || (thread.threadId === State.activeThreadId ? { author: { id: State.authorId, name: State.author }, body: "", createdAt: nowISO() } : { author: "\u533F\u540D", body: "", createdAt: thread.createdAt || (/* @__PURE__ */ new Date()).toISOString() });
+    const first3 = thread.comments?.[0] || {
+      author: currentAuthorPayload(),
+      body: "",
+      createdAt: thread.createdAt || (/* @__PURE__ */ new Date()).toISOString()
+    };
     const safeComments = Array.isArray(thread.comments) ? thread.comments : [];
     const replies = safeComments.slice(1);
     const isActive2 = State.activeThreadId === thread.threadId;
@@ -9229,10 +9267,6 @@ function loadDemoDocument() {
   renderOutline();
   showToast("\u5DF2\u52A0\u8F7D\u6F14\u793A\u6587\u6863, \u8BD5\u8BD5\u62D6\u9009\u6587\u5B57\u52A0\u6279\u6CE8", 3500);
 }
-function authorIdToShortName(id) {
-  if (!id) return "";
-  return String(id).replace(/-/g, "").slice(0, 8);
-}
 function renderAuthorChip() {
   const chip = document.querySelector("#author-chip");
   const name = document.querySelector("#author-chip-name");
@@ -9256,7 +9290,7 @@ function renderAuthorChip() {
       name.textContent = "\u672A\u8BBE\u7F6E";
       chip.classList.add("is-anonymous");
       chip.classList.remove("is-id-derived");
-      chip.title = "\u70B9\u51FB\u8BBE\u7F6E\u4F5C\u8005\u540D (\u7559\u7A7A\u7528\u533F\u540D)";
+      chip.title = "\u70B9\u51FB\u8BBE\u7F6E\u4F5C\u8005\u540D";
     }
   }
 }
@@ -9383,12 +9417,12 @@ function promptAuthor(options = {}) {
     const cancelBtn = $("#author-cancel");
     if (firstTime) {
       title.textContent = "\u5148\u8BA4\u8BC6\u4E00\u4E0B";
-      desc.textContent = '\u544A\u8BC9 Mentor \u4F60\u7684\u540D\u5B57, \u4E4B\u540E\u6240\u6709\u6279\u6CE8\u4F1A\u6807\u6CE8\u4F5C\u8005. \u4E5F\u53EF\u4EE5\u7559\u7A7A\u7528"\u533F\u540D".';
+      desc.textContent = "\u544A\u8BC9 Mentor \u4F60\u7684\u540D\u5B57\uFF0C\u4E4B\u540E\u6240\u6709\u6279\u6CE8\u4F1A\u6807\u6CE8\u4F5C\u8005\u3002\u7559\u7A7A\u5219\u5148\u7528\u77ED ID \u6807\u8BC6\uFF0C\u53EF\u968F\u65F6\u70B9\u53F3\u4E0A\u89D2\u6539\u540D\u3002";
       saveBtn.textContent = "\u5F00\u59CB\u4F7F\u7528";
       cancelBtn.style.display = "";
     } else {
       title.textContent = "\u4FEE\u6539\u4F5C\u8005\u540D";
-      desc.textContent = "\u65B0\u7684\u4F5C\u8005\u540D\u5C06\u7528\u4E8E\u4ECA\u540E\u6240\u6709\u6279\u6CE8. \u5DF2\u5B58\u5728\u7684\u6279\u6CE8\u4E0D\u53D7\u5F71\u54CD.";
+      desc.textContent = "\u65B0\u7684\u4F5C\u8005\u540D\u5C06\u7528\u4E8E\u4ECA\u540E\u6240\u6709\u6279\u6CE8\u3002\u5DF2\u5B58\u5728\u4E14\u540C\u4E00\u4F5C\u8005 ID \u7684\u7A7A\u540D\u6279\u6CE8\u4F1A\u968F\u4E4B\u663E\u793A\u65B0\u540D\u3002";
       saveBtn.textContent = "\u4FDD\u5B58";
       cancelBtn.style.display = "";
     }
@@ -9398,6 +9432,12 @@ function promptAuthor(options = {}) {
       input.focus();
       input.select();
     }, 50);
+    const markPrompted = () => {
+      try {
+        localStorage.setItem("Mentor:authorPrompted", "1");
+      } catch {
+      }
+    };
     const close3 = (resolved) => {
       modal.classList.add("hidden");
       saveBtn.removeEventListener("click", saveHandler);
@@ -9405,6 +9445,11 @@ function promptAuthor(options = {}) {
       input.removeEventListener("keydown", keyHandler);
       modal.removeEventListener("click", backdropHandler);
       renderAuthorChip();
+      // empty-name cards may resolve to new display name
+      try {
+        renderCommentList();
+      } catch {
+      }
       resolve(resolved);
     };
     const saveHandler = () => {
@@ -9416,9 +9461,13 @@ function promptAuthor(options = {}) {
         State.author = "";
         localStorage.removeItem("Mentor:author");
       }
+      markPrompted();
       close3(true);
     };
-    const cancelHandler = () => close3(false);
+    const cancelHandler = () => {
+      markPrompted();
+      close3(false);
+    };
     const keyHandler = (e) => {
       if (e.key === "Enter") saveHandler();
       if (e.key === "Escape" && !firstTime) cancelHandler();
@@ -10483,7 +10532,7 @@ async function boot() {
   } else {
     setStatus("\u5C31\u7EEA", "\u6253\u5F00\u6216\u65B0\u5EFA .md \u5F00\u59CB\u6279\u6CE8");
   }
-  const isFirstTime = !localStorage.getItem("Mentor:author");
+  const isFirstTime = !localStorage.getItem("Mentor:authorPrompted") && !localStorage.getItem("Mentor:author");
   if (isFirstTime) {
     setTimeout(() => promptAuthor({ firstTime: true }), 400);
   }
