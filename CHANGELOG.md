@@ -2,6 +2,26 @@
 
 按时间倒序记录已发布的变化。最新条目在上方。
 
+## v1.45.0 (2026-07-27) — 结构化 HTML 批注锚点
+
+正常保存/重开优先用 .mentor 内 document.html + manifest.json 恢复 ProseMirror 批注 mark，不再全文搜原文。
+
+### 行为
+- 新格式写包：content.md + annotations.json + document.html + manifest.json（三联 SHA-256）
+- 校验通过：打开直接按 HTML 中的 span[data-thread-id] 恢复 range；不调用 findAnnotationRange
+- 校验失败/旧包/外部改 md 或 json：忽略 HTML，回退现有多证据 resolver；禁止猜 first-hit
+- 保存前硬阻断结构不一致（range/mark 审计失败则停写）
+- 兼容：旧 .mentor 仍可读；首次再保存自动升级为结构快照
+
+### 实现
+- modules/mentor-archive.js：manifest 创建/校验
+- workers/zip-worker.js：读写结构文件
+- app.js：createSaveSnapshot.documentHtml、open 透传、HTML restore 路径、诊断 archive 字段
+- 测试：tests/unit-mentor-archive.spec.js、tests/unit-zip-worker-structural.spec.js、tests/e2e-structural-archive.spec.js
+
+### Cache
+- bump styles.css?v= / app.bundle.js?v=
+
 ## v1.44.9 (2026-07-27) — 多页面实时共享
 
 同一台电脑、同一浏览器配置中，多页打开同一文档时：
