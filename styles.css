@@ -1926,6 +1926,90 @@ body.refs-pane-collapsed #expand-refs-pane-btn {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+.refs-actions {
+  display: flex;
+  gap: 6px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border-warm);
+  flex-wrap: wrap;
+}
+.refs-action-btn {
+  padding: 3px 8px;
+  font-size: 10.5px;
+  border: 1px solid var(--border-warm);
+  background: transparent;
+  color: var(--text);
+  border-radius: var(--rounded-md);
+  cursor: pointer;
+}
+.refs-action-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.refs-card .rc-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+.refs-card .rc-edit-btn,
+.refs-card .rc-delete-btn {
+  padding: 3px 8px;
+  font-size: 10.5px;
+  border: 1px solid var(--border-warm);
+  background: transparent;
+  color: var(--text-2);
+  border-radius: var(--rounded-md);
+  cursor: pointer;
+}
+.refs-card .rc-edit-btn:hover { border-color: var(--accent); color: var(--accent); }
+.refs-card .rc-delete-btn:hover { border-color: var(--danger); color: var(--danger); }
+.refs-card.is-citation-target,
+.refs-card.is-highlighted {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+.refs-card .rc-usage.is-unused { font-style: italic; opacity: 0.75; }
+.reference-editor-content {
+  width: min(560px, calc(100vw - 32px));
+  max-height: calc(100vh - 48px);
+  overflow: auto;
+}
+.reference-form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px 12px;
+  margin-top: 8px;
+}
+.reference-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11.5px;
+  color: var(--text-2);
+}
+.reference-field-wide { grid-column: 1 / -1; }
+.reference-field input {
+  font-size: 12px;
+  padding: 6px 8px;
+  border: 1px solid var(--border-warm);
+  border-radius: var(--rounded-md);
+  background: transparent;
+  color: var(--text);
+}
+.reference-field input:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+.reference-form-error {
+  margin-top: 10px;
+  padding: 6px 8px;
+  border: 1px solid color-mix(in srgb, var(--danger) 45%, var(--border-warm));
+  border-radius: var(--rounded-md);
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
+  color: var(--danger);
+  font-size: 11px;
+}
 .refs-search-wrap { padding: 6px 10px; border-bottom: 1px solid var(--border-warm); }
 #refs-search {
   width: 100%;

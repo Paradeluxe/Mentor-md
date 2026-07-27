@@ -55703,6 +55703,114 @@ function serializeReferenceBibTeX(entries) {
   if (!list.length) return "";
   return list.map(referenceEntryToBibTeX).join("\n\n") + "\n";
 }
+var REFERENCE_EDITABLE_FIELDS = [
+  "key",
+  "type",
+  "authors",
+  "year",
+  "title",
+  "journal",
+  "doi",
+  "url",
+  "volume",
+  "issue",
+  "pages",
+  "publisher"
+];
+var CITEKEY_RE = /^[\w:.\-\/]+$/;
+function validateReferenceEntry(entry) {
+  const rawKey = asString(entry && entry.key).trim();
+  const value = normalizeReferenceEntry(entry);
+  const errors = {};
+  if (!rawKey) {
+    errors.key = "citekey \u4E0D\u80FD\u4E3A\u7A7A";
+    value.key = "";
+  } else if (!CITEKEY_RE.test(rawKey)) {
+    errors.key = "citekey \u53EA\u80FD\u5305\u542B\u5B57\u6BCD\u3001\u6570\u5B57\u3001_\u3001-\u3001:\u3001.\u3001/";
+  } else {
+    value.key = rawKey;
+  }
+  return { value, errors, valid: Object.keys(errors).length === 0 };
+}
+function referenceEntriesEqual(a, b) {
+  const left = normalizeReferenceEntry(a);
+  const right = normalizeReferenceEntry(b);
+  return REFERENCE_EDITABLE_FIELDS.every((field) => left[field] === right[field]);
+}
+function upsertReferenceEntry(manifest, entry, { originalKey = "" } = {}) {
+  const checked = validateReferenceEntry(entry);
+  const current = normalizeReferenceManifest(manifest);
+  if (!checked.valid) {
+    return { manifest: current, errors: checked.errors };
+  }
+  const target = asString(originalKey).trim() || checked.value.key;
+  const withoutTarget = current.entries.filter((row) => row.key !== target);
+  if (withoutTarget.some((row) => row.key === checked.value.key)) {
+    return { manifest: current, errors: { key: "citekey \u5DF2\u5B58\u5728" } };
+  }
+  return {
+    manifest: createReferenceManifest({
+      sourceName: current.source.name,
+      sourceFormat: current.source.format,
+      entries: [...withoutTarget, checked.value]
+    }),
+    errors: {}
+  };
+}
+function removeReferenceEntry(manifest, key) {
+  const current = normalizeReferenceManifest(manifest);
+  const drop = asString(key).trim();
+  return createReferenceManifest({
+    sourceName: current.source.name,
+    sourceFormat: current.source.format,
+    entries: current.entries.filter((row) => row.key !== drop)
+  });
+}
+function mergeReferenceEntries(manifest, incoming) {
+  const current = normalizeReferenceManifest(manifest);
+  const byKey = new Map(current.entries.map((entry) => [entry.key, entry]));
+  const added = [];
+  const duplicates = [];
+  const conflicts = [];
+  for (const raw of incoming || []) {
+    const checked = validateReferenceEntry(raw);
+    if (!checked.valid) continue;
+    const entry = checked.value;
+    const existing = byKey.get(entry.key);
+    if (!existing) {
+      byKey.set(entry.key, entry);
+      added.push(entry);
+    } else if (referenceEntriesEqual(existing, entry)) {
+      duplicates.push(entry);
+    } else {
+      conflicts.push({ existing, incoming: entry });
+    }
+  }
+  return {
+    manifest: createReferenceManifest({
+      sourceName: current.source.name,
+      sourceFormat: current.source.format,
+      entries: [...byKey.values()]
+    }),
+    added,
+    duplicates,
+    conflicts
+  };
+}
+function renameCitationKey(raw, oldKey, newKey) {
+  const from2 = asString(oldKey).trim();
+  const to = asString(newKey).trim();
+  if (!from2 || !to || from2 === to) return asString(raw);
+  const parsed = parseCitationSyntax(raw);
+  if (!parsed.items.length) return asString(raw);
+  const seen = /* @__PURE__ */ new Set();
+  parsed.items = parsed.items.map((item) => ({ ...item, key: item.key === from2 ? to : item.key })).filter((item) => {
+    if (seen.has(item.key)) return false;
+    seen.add(item.key);
+    return true;
+  });
+  return serializeCitationSyntax(parsed);
+}
 
 // modules/annotation-anchor.js
 var DEFAULT_CONTEXT = 40;
@@ -64969,6 +65077,7 @@ var _renderReferencesPane = () => {
 };
 var _setReferencesPaneOpen = () => {
 };
+var REFERENCE_FORM_FIELDS = ["key", "type", "authors", "year", "title", "journal", "doi", "url", "volume", "issue", "pages", "publisher"];
 function getCitationUsages() {
   const usages = {};
   if (!State2.editor) return usages;
@@ -64977,8 +65086,23 @@ function getCitationUsages() {
   });
   return usages;
 }
+function commitReferenceManifest(next2, { reconcile = true } = {}) {
+  State2.references = normalizeReferenceManifest(next2 || emptyReferenceManifest());
+  if (reconcile) reconcileCitationNodes();
+  else _renderReferencesPane();
+  markDirty();
+  scheduleIdbCacheWrite();
+  try {
+    if (typeof snapshotActiveTab === "function") snapshotActiveTab();
+  } catch (_) {
+  }
+  return State2.references;
+}
 function reconcileCitationNodes() {
-  if (!State2.editor) return;
+  if (!State2.editor) {
+    _renderReferencesPane();
+    return;
+  }
   const hasLibrary = !!(State2.references && (State2.references.entries || []).length);
   const entryMap = new Map((State2.references.entries || []).map((e) => [e.key, e]));
   let tr2 = State2.editor.state.tr, changed = false;
@@ -65000,6 +65124,29 @@ function reconcileCitationNodes() {
     State2.editor.view.dispatch(tr2);
   }
   _renderReferencesPane();
+}
+function renameCitationKeyInDocument(oldKey, newKey) {
+  if (!State2.editor || !oldKey || !newKey || oldKey === newKey) return false;
+  let tr2 = State2.editor.state.tr, changed = false;
+  State2.editor.state.doc.descendants((node, pos) => {
+    if (!node.type || node.type.name !== "citation") return;
+    const raw = renameCitationKey(node.attrs.raw, oldKey, newKey);
+    if (raw === node.attrs.raw) return;
+    const info = buildCitationLabel(raw, State2.references);
+    tr2 = tr2.setNodeMarkup(pos, void 0, {
+      ...node.attrs,
+      raw,
+      keys: info.keys,
+      label: info.label,
+      missingKeys: info.missingKeys
+    });
+    changed = true;
+  });
+  if (changed) {
+    tr2.setMeta("addToHistory", false);
+    State2.editor.view.dispatch(tr2);
+  }
+  return changed;
 }
 function insertCitation(key) {
   if (!State2.editor || !(State2.references.entries || []).some((e) => e.key === key)) return false;
@@ -65037,13 +65184,180 @@ function focusCitationByKey(key) {
   _renderReferencesPane();
   const card = document.querySelector(`.refs-card[data-key="${CSS.escape(key)}"]`);
   if (!card) return false;
-  document.querySelectorAll(".refs-card.is-citation-target").forEach((x) => x.classList.remove("is-citation-target"));
+  document.querySelectorAll(".refs-card.is-citation-target").forEach((x) => x.classList.remove("is-citation-target", "is-current", "is-highlighted"));
   card.classList.add("is-citation-target", "is-current", "is-highlighted");
   card.scrollIntoView({ block: "nearest" });
   return true;
 }
+function readReferenceForm() {
+  const out = {};
+  for (const field of REFERENCE_FORM_FIELDS) {
+    const el = document.querySelector(`#reference-${field}`);
+    out[field] = el ? String(el.value || "").trim() : "";
+  }
+  return out;
+}
+function fillReferenceForm(entry = {}) {
+  const norm = normalizeReferenceEntry(entry || {});
+  for (const field of REFERENCE_FORM_FIELDS) {
+    const el = document.querySelector(`#reference-${field}`);
+    if (el) el.value = norm[field] || "";
+  }
+  const original = document.querySelector("#reference-original-key");
+  if (original) original.value = String(entry && entry._originalKey != null ? entry._originalKey : norm.key || "");
+}
+function setReferenceFormError(msg) {
+  const box = document.querySelector("#reference-form-error");
+  if (!box) return;
+  if (!msg) {
+    box.textContent = "";
+    box.classList.add("hidden");
+    return;
+  }
+  box.textContent = msg;
+  box.classList.remove("hidden");
+}
+function openReferenceEditor({ mode = "add", entry = null, sourceName = "" } = {}) {
+  const modal = document.querySelector("#reference-editor-modal");
+  const title = document.querySelector("#reference-editor-title");
+  if (!modal) return false;
+  const base2 = entry ? normalizeReferenceEntry(entry) : normalizeReferenceEntry({});
+  if (mode === "edit") base2._originalKey = entry && entry.key ? entry.key : base2.key;
+  else base2._originalKey = "";
+  fillReferenceForm(base2);
+  setReferenceFormError("");
+  if (title) {
+    if (mode === "edit") title.textContent = "\u7F16\u8F91\u5F15\u7528";
+    else if (mode === "import") title.textContent = sourceName ? `\u5BFC\u5165\u5F15\u7528 \xB7 ${sourceName}` : "\u5BFC\u5165\u5F15\u7528";
+    else title.textContent = "\u6DFB\u52A0\u5F15\u7528";
+  }
+  modal.classList.remove("hidden");
+  const keyInput = document.querySelector("#reference-key");
+  if (keyInput) setTimeout(() => keyInput.focus(), 0);
+  return true;
+}
+function closeReferenceEditor() {
+  const modal = document.querySelector("#reference-editor-modal");
+  if (modal) modal.classList.add("hidden");
+  setReferenceFormError("");
+}
+function addReferenceEntry(entry) {
+  const result = upsertReferenceEntry(State2.references, entry);
+  if (Object.keys(result.errors || {}).length) return result;
+  commitReferenceManifest(result.manifest);
+  return result;
+}
+function updateReferenceEntry(originalKey, entry) {
+  const from2 = String(originalKey || "").trim();
+  const result = upsertReferenceEntry(State2.references, entry, { originalKey: from2 });
+  if (Object.keys(result.errors || {}).length) return result;
+  const nextKey = String(entry && entry.key || "").trim();
+  State2.references = normalizeReferenceManifest(result.manifest);
+  if (from2 && nextKey && from2 !== nextKey) renameCitationKeyInDocument(from2, nextKey);
+  commitReferenceManifest(State2.references, { reconcile: true });
+  return { manifest: State2.references, errors: {} };
+}
+function deleteReferenceEntry(key, { confirmUser = true } = {}) {
+  const drop = String(key || "").trim();
+  if (!drop) return false;
+  const count = getCitationUsages()[drop] || 0;
+  if (confirmUser) {
+    const message = count ? `\u201C@${drop}\u201D\u5728\u6B63\u6587\u4F7F\u7528 ${count} \u6B21\u3002\u5220\u9664\u5143\u6570\u636E\u540E\u6B63\u6587\u4F1A\u4FDD\u7559\u5E76\u6807\u4E3A\u7F3A\u5931\u3002\u7EE7\u7EED\uFF1F` : `\u5220\u9664\u201C@${drop}\u201D\uFF1F`;
+    if (!confirm(message)) return false;
+  }
+  commitReferenceManifest(removeReferenceEntry(State2.references, drop));
+  return true;
+}
+async function importReferenceFile(file) {
+  if (!file) return { error: "no-file" };
+  let text2 = "";
+  try {
+    text2 = await file.text();
+  } catch (e) {
+    return { error: String(e && e.message || e) };
+  }
+  const entries = sortReferenceEntries(parseReferenceFile(file.name, text2));
+  if (!entries.length) {
+    showToast("\u672A\u8BC6\u522B\u5230\u5F15\u7528\u6761\u76EE", 2500);
+    return { error: "empty" };
+  }
+  if (entries.length === 1) {
+    openReferenceEditor({ mode: "import", entry: entries[0], sourceName: file.name });
+    _setReferencesPaneOpen(true);
+    return { pending: 1, entries };
+  }
+  const result = mergeReferenceEntries(State2.references, entries);
+  if (result.conflicts.length) {
+    let applied = result.manifest;
+    let overwritten = 0;
+    for (const c of result.conflicts) {
+      const ok = confirm(
+        `citekey @${c.existing.key} \u5DF2\u5B58\u5728\u4E14\u5185\u5BB9\u4E0D\u540C\u3002
+
+\u5DF2\u6709: ${c.existing.authors || "\u2014"} / ${c.existing.year || "\u2014"} / ${c.existing.title || "\u2014"}
+\u5BFC\u5165: ${c.incoming.authors || "\u2014"} / ${c.incoming.year || "\u2014"} / ${c.incoming.title || "\u2014"}
+
+\u786E\u5B9A = \u4F7F\u7528\u5BFC\u5165\u9879\uFF1B\u53D6\u6D88 = \u4FDD\u7559\u5DF2\u6709`
+      );
+      if (ok) {
+        const up = upsertReferenceEntry(applied, c.incoming, { originalKey: c.existing.key });
+        if (!Object.keys(up.errors || {}).length) {
+          applied = up.manifest;
+          overwritten += 1;
+        }
+      }
+    }
+    result.manifest = applied;
+    result.overwritten = overwritten;
+  }
+  const srcName = file.name || State2.references.source.name || "";
+  const srcFmt = (file.name.split(".").pop() || State2.references.source.format || "").toLowerCase();
+  const next2 = createReferenceManifest({
+    sourceName: srcName,
+    sourceFormat: srcFmt,
+    entries: result.manifest.entries
+  });
+  commitReferenceManifest(next2);
+  _setReferencesPaneOpen(true);
+  const parts = [];
+  if (result.added.length) parts.push(`\u65B0\u589E ${result.added.length}`);
+  if (result.duplicates.length) parts.push(`\u8DF3\u8FC7\u91CD\u590D ${result.duplicates.length}`);
+  if (result.conflicts && result.conflicts.length) {
+    parts.push(`\u51B2\u7A81 ${result.conflicts.length}${result.overwritten ? `\uFF08\u8986\u76D6 ${result.overwritten}\uFF09` : ""}`);
+  }
+  showToast(parts.length ? `\u5DF2\u5BFC\u5165\uFF1A${parts.join(" \xB7 ")}` : `\u5DF2\u52A0\u8F7D ${next2.entries.length} \u6761\u5F15\u7528`, 2200);
+  return { ...result, manifest: next2 };
+}
+function exportReferencesBib({ download = true } = {}) {
+  const text2 = serializeReferenceBibTeX(State2.references.entries || []);
+  if (!download) return text2;
+  if (!text2) {
+    showToast("\u5F15\u7528\u5E93\u4E3A\u7A7A", 1800);
+    return "";
+  }
+  const rawName = typeof mentorBaseName === "function" ? mentorBaseName(State2.currentFile?.name || "document") : String(State2.currentFile?.name || "document");
+  const base2 = String(rawName || "document").replace(/\.(md|markdown|mentor)$/i, "") || "document";
+  downloadBlob(`${base2}.references.bib`, new Blob([text2], { type: "application/x-bibtex;charset=utf-8" }));
+  showToast("\u5DF2\u5BFC\u51FA .bib", 1400);
+  return text2;
+}
 function initReferencesPane() {
-  const button = document.querySelector("#btn-refs"), input = document.querySelector("#refs-file-input"), pane = document.querySelector("#refs-pane"), main2 = document.querySelector("#main"), list = document.querySelector("#refs-list"), sourceName = document.querySelector("#refs-source-name"), search = document.querySelector("#refs-search"), missing = document.querySelector("#refs-missing-summary"), collapse = pane?.querySelector('[data-act="toggle-refs-pane"]'), expand = document.querySelector("#expand-refs-pane-btn");
+  const button = document.querySelector("#btn-refs");
+  const input = document.querySelector("#refs-file-input");
+  const pane = document.querySelector("#refs-pane");
+  const main2 = document.querySelector("#main");
+  const list = document.querySelector("#refs-list");
+  const sourceName = document.querySelector("#refs-source-name");
+  const search = document.querySelector("#refs-search");
+  const missing = document.querySelector("#refs-missing-summary");
+  const collapse = pane?.querySelector('[data-act="toggle-refs-pane"]');
+  const expand = document.querySelector("#expand-refs-pane-btn");
+  const addBtn = document.querySelector("#refs-add-btn");
+  const importBtn = document.querySelector("#refs-import-btn");
+  const exportBtn = document.querySelector("#refs-export-btn");
+  const modal = document.querySelector("#reference-editor-modal");
+  const form = document.querySelector("#reference-editor-form");
+  const cancelBtn = document.querySelector("#reference-cancel");
   if (!button || !input || !pane || !main2 || !list) return;
   let query = "";
   const setOpen = (open2) => {
@@ -65053,7 +65367,9 @@ function initReferencesPane() {
     expand?.classList.toggle("hidden", open2 || !(State2.references.entries || []).length);
   };
   const render3 = () => {
-    const entries = State2.references.entries || [], usages = getCitationUsages(), rows = filterReferenceEntries(entries, query);
+    const entries = State2.references.entries || [];
+    const usages = getCitationUsages();
+    const rows = filterReferenceEntries(entries, query);
     if (sourceName) sourceName.textContent = entries.length ? `${State2.references.source.name || "\u5F15\u7528\u5E93"} \xB7 ${entries.length} \u6761` : "\u672A\u52A0\u8F7D\u5F15\u7528\u5E93";
     const missingKeys = [...document.querySelectorAll(".mentor-citation.is-missing")].flatMap((n) => {
       try {
@@ -65067,35 +65383,43 @@ function initReferencesPane() {
       missing.textContent = missingKeys.length ? `\u7F3A\u5931\uFF1A${[...new Set(missingKeys)].map((k) => "@" + k).join("\u3001")}` : "";
     }
     if (!rows.length) {
-      list.innerHTML = `<div class="refs-empty">${entries.length ? "\u6CA1\u6709\u5339\u914D\u7684\u5F15\u7528" : "\u70B9\u51FB\u5DE5\u5177\u680F\u300C\u5F15\u7528\u300D\u5BFC\u5165 .bib / .ris / .enw / .xml / .json"}</div>`;
+      list.innerHTML = `<div class="refs-empty">${entries.length ? "\u6CA1\u6709\u5339\u914D\u7684\u5F15\u7528" : "\u70B9\u300C\u6DFB\u52A0\u300D\u65B0\u5EFA\uFF0C\u6216\u300C\u5BFC\u5165\u300D.bib / .ris / .enw / .xml / .json\uFF08\u652F\u6301 Zotero \u5355\u6761\u5BFC\u51FA\uFF09"}</div>`;
       return;
     }
     list.innerHTML = rows.map((entry) => {
-      const key = escapeHtml(entry.key), meta = [entry.year, entry.journal].filter(Boolean).join(" \xB7 "), n = usages[entry.key] || 0;
-      return `<article class="refs-card" data-key="${key}"><div class="rc-key">@${key}</div><div class="rc-authors">${escapeHtml(entry.authors || "\u2014")}</div>${entry.title ? `<div class="rc-title">${escapeHtml(entry.title)}</div>` : ""}<div class="rc-meta">${escapeHtml(meta)}</div><div class="rc-usage${n ? "" : " is-unused"}">${n ? `\u6B63\u6587 \xD7${n}` : "\u672A\u5F15\u7528"}</div><button type="button" class="rc-insert-btn" data-act="insert-cite" data-key="${key}">\u63D2\u5165 [@${key}]</button></article>`;
+      const key = escapeHtml(entry.key);
+      const meta = [entry.year, entry.journal].filter(Boolean).join(" \xB7 ");
+      const n = usages[entry.key] || 0;
+      return `<article class="refs-card" data-key="${key}">
+        <div class="rc-key">@${key}</div>
+        <div class="rc-authors">${escapeHtml(entry.authors || "\u2014")}</div>
+        ${entry.title ? `<div class="rc-title">${escapeHtml(entry.title)}</div>` : ""}
+        <div class="rc-meta">${escapeHtml(meta)}</div>
+        <div class="rc-usage${n ? "" : " is-unused"}">${n ? `\u6B63\u6587 \xD7${n}` : "\u672A\u5F15\u7528"}</div>
+        <div class="rc-actions">
+          <button type="button" class="rc-insert-btn" data-act="insert-cite" data-key="${key}">\u63D2\u5165 [@${key}]</button>
+          <button type="button" class="rc-edit-btn" data-act="edit-reference" data-key="${key}">\u7F16\u8F91</button>
+          <button type="button" class="rc-delete-btn" data-act="delete-reference" data-key="${key}">\u5220\u9664</button>
+        </div>
+      </article>`;
     }).join("");
   };
   _renderReferencesPane = render3;
   _setReferencesPaneOpen = setOpen;
-  const loadFile = async (file) => {
-    const entries = sortReferenceEntries(parseReferenceFile(file.name, await file.text()));
-    if (!entries.length) {
-      showToast("\u672A\u8BC6\u522B\u5230\u5F15\u7528\u6761\u76EE", 2500);
-      return;
-    }
-    State2.references = createReferenceManifest({ sourceName: file.name, sourceFormat: (file.name.split(".").pop() || "").toLowerCase(), entries });
-    query = "";
-    if (search) search.value = "";
+  button.addEventListener("click", () => {
+    const open2 = pane.classList.contains("hidden");
+    setOpen(open2);
+    if (open2) render3();
+  });
+  addBtn?.addEventListener("click", () => {
     setOpen(true);
-    reconcileCitationNodes();
-    markDirty();
-    scheduleIdbCacheWrite();
-    showToast(`\u5DF2\u52A0\u8F7D ${entries.length} \u6761\u5F15\u7528`, 1800);
-  };
-  button.addEventListener("click", () => input.click());
+    openReferenceEditor({ mode: "add" });
+  });
+  importBtn?.addEventListener("click", () => input.click());
+  exportBtn?.addEventListener("click", () => exportReferencesBib({ download: true }));
   input.addEventListener("change", () => {
     const f = input.files?.[0];
-    if (f) loadFile(f).catch((e) => {
+    if (f) importReferenceFile(f).catch((e) => {
       console.error(e);
       showToast("\u5F15\u7528\u5E93\u89E3\u6790\u5931\u8D25", 2500);
     });
@@ -65108,14 +65432,56 @@ function initReferencesPane() {
   collapse?.addEventListener("click", () => setOpen(false));
   expand?.addEventListener("click", () => setOpen(true));
   list.addEventListener("click", (event) => {
-    const x = event.target.closest('[data-act="insert-cite"]');
-    if (x && insertCitation(x.dataset.key)) showToast(`\u5DF2\u63D2\u5165 [@${x.dataset.key}]`, 1400);
+    const insert = event.target.closest('[data-act="insert-cite"]');
+    if (insert && insertCitation(insert.dataset.key)) {
+      showToast(`\u5DF2\u63D2\u5165 [@${insert.dataset.key}]`, 1400);
+      return;
+    }
+    const edit = event.target.closest('[data-act="edit-reference"]');
+    if (edit) {
+      const entry = (State2.references.entries || []).find((e) => e.key === edit.dataset.key);
+      if (entry) openReferenceEditor({ mode: "edit", entry });
+      return;
+    }
+    const del2 = event.target.closest('[data-act="delete-reference"]');
+    if (del2) {
+      if (deleteReferenceEntry(del2.dataset.key)) showToast(`\u5DF2\u5220\u9664 @${del2.dataset.key}`, 1400);
+    }
   });
   document.querySelector("#editor")?.addEventListener("click", (event) => {
     const atom = event.target.closest(".mentor-citation");
     if (atom) {
-      const keys3 = JSON.parse(atom.dataset.citationKeys || "[]");
+      let keys3 = [];
+      try {
+        keys3 = JSON.parse(atom.dataset.citationKeys || "[]");
+      } catch (_) {
+        keys3 = [];
+      }
       if (keys3[0]) focusCitationByKey(keys3[0]);
+    }
+  });
+  cancelBtn?.addEventListener("click", () => closeReferenceEditor());
+  modal?.addEventListener("click", (e) => {
+    if (e.target === modal) closeReferenceEditor();
+  });
+  form?.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const data = readReferenceForm();
+    const originalKey = String(document.querySelector("#reference-original-key")?.value || "").trim();
+    const result = originalKey ? updateReferenceEntry(originalKey, data) : addReferenceEntry(data);
+    if (Object.keys(result.errors || {}).length) {
+      setReferenceFormError(Object.values(result.errors).join("\uFF1B") || "\u4FDD\u5B58\u5931\u8D25");
+      return;
+    }
+    closeReferenceEditor();
+    setOpen(true);
+    render3();
+    showToast(originalKey ? "\u5F15\u7528\u5DF2\u66F4\u65B0" : "\u5F15\u7528\u5DF2\u6DFB\u52A0", 1400);
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && modal && !modal.classList.contains("hidden")) {
+      e.preventDefault();
+      closeReferenceEditor();
     }
   });
   setOpen(false);
@@ -66636,7 +67002,17 @@ window.__mdAnnotator = {
   focusCitationByKey,
   getCitationUsages,
   reconcileCitationNodes,
-  references: State2.references,
+  get references() {
+    return normalizeReferenceManifest(State2.references);
+  },
+  addReferenceEntry,
+  updateReferenceEntry,
+  deleteReferenceEntry,
+  importReferenceFile,
+  exportReferencesBib,
+  openReferenceEditor,
+  closeReferenceEditor,
+  commitReferenceManifest,
   newDocument,
   createAnnotationFromSelection,
   createAnnotationThread,

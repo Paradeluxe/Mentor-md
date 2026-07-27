@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Mentor — 像 docx 一样批注 Markdown</title>
-<meta name="build" content="v1.44.8 cache-bust v=161" />
+<meta name="build" content="v1.44.9 cache-bust v=163" />
 <!-- v1.43.37 offline: local fonts + KaTeX (no CDN) -->
 <link rel="stylesheet" href="vendor/fonts/local-fonts.css?v=1" />
 <link rel="stylesheet" href="styles.css?v=163" />
@@ -31,7 +31,7 @@
       <button id="btn-save-as" title="导出 .mentor 单文件包 (md + 批注 + 图片)" class="tb-icon-text"><span class="tb-icon"></span><span>.mentor</span></button>
       <button id="btn-export-md" title="导出 Markdown" class="tb-icon-text"><span class="tb-icon"></span><span>MD</span></button>
       <button id="btn-export-docx" title="导出 DOCX（仅正文，不含批注）" data-export-mode="body-only" class="tb-icon-text"><span class="tb-icon"></span><span>DOCX</span></button>
-      <button id="btn-refs" title="导入引用库：BibTeX / RIS / EndNote / CSL-JSON；只读浏览并插入 citekey" class="tb-icon-text"><span class="tb-icon"></span><span>引用</span></button>
+      <button id="btn-refs" title="打开引用库：导入单条/批量、管理条目、插入 citekey" class="tb-icon-text"><span class="tb-icon"></span><span>引用</span></button>
       <input type="file" id="refs-file-input" accept=".bib,.ris,.enw,.xml,.json,.txt" style="display:none">
       <span class="tb-sep"></span>
       <button id="btn-undo" title="撤销批注操作 (Ctrl+Alt+Z)" class="tb-icon-text" disabled aria-label="撤销"><span class="tb-icon"></span></button>
@@ -180,7 +180,7 @@
                                   </div>
     </aside>
 
-    <!-- 引用库侧栏：只读浏览 + 插入 [@citekey] -->
+    <!-- 引用库侧栏：管理 + 插入 [@citekey] -->
     <aside id="refs-pane" class="refs-pane hidden" aria-label="引用库">
       <div class="pane-resizer" data-pane-resize="refs" title="拖动调整引用栏宽度"></div>
       <div class="pane-header">
@@ -188,12 +188,17 @@
         <span class="refs-source-name" id="refs-source-name">未加载</span>
         <button class="pane-collapse-btn" data-act="toggle-refs-pane" title="收起引用栏" aria-label="收起">‹</button>
       </div>
+      <div class="refs-actions" aria-label="引用库操作">
+        <button type="button" id="refs-add-btn" class="refs-action-btn">添加</button>
+        <button type="button" id="refs-import-btn" class="refs-action-btn">导入</button>
+        <button type="button" id="refs-export-btn" class="refs-action-btn">导出 .bib</button>
+      </div>
       <div class="refs-search-wrap">
         <input type="search" id="refs-search" placeholder="按 citekey/作者/标题过滤…" aria-label="过滤引用">
       </div>
       <div id="refs-missing-summary" class="refs-missing-summary hidden" role="status" aria-live="polite"></div>
       <div id="refs-list" class="refs-list">
-        <div class="refs-empty">点击工具栏「引用」导入 .bib / .ris / .enw / .xml / .json</div>
+        <div class="refs-empty">点「添加」新建，或「导入」.bib / .ris / .enw / .xml / .json（支持 Zotero 单条导出）</div>
       </div>
     </aside>
   </main>
@@ -219,12 +224,71 @@
   </div>
 </div>
 
+
+<!-- 引用条目编辑 / 单条导入确认 -->
+<div id="reference-editor-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="reference-editor-title">
+  <form id="reference-editor-form" class="modal-content reference-editor-content">
+    <h3 id="reference-editor-title">添加引用</h3>
+    <input id="reference-original-key" type="hidden" value="">
+    <div class="reference-form-grid">
+      <label class="reference-field">citekey
+        <input id="reference-key" name="key" type="text" autocomplete="off" aria-required="true" placeholder="smith2024title">
+      </label>
+      <label class="reference-field">类型
+        <input id="reference-type" name="type" type="text" list="reference-type-list" placeholder="article">
+        <datalist id="reference-type-list">
+          <option value="article"></option>
+          <option value="book"></option>
+          <option value="inproceedings"></option>
+          <option value="phdthesis"></option>
+          <option value="misc"></option>
+        </datalist>
+      </label>
+      <label class="reference-field reference-field-wide">作者
+        <input id="reference-authors" name="authors" type="text" placeholder="Family, Given; Family2, Given2">
+      </label>
+      <label class="reference-field">年份
+        <input id="reference-year" name="year" type="text" placeholder="2024">
+      </label>
+      <label class="reference-field reference-field-wide">标题
+        <input id="reference-title" name="title" type="text">
+      </label>
+      <label class="reference-field reference-field-wide">期刊/出版社
+        <input id="reference-journal" name="journal" type="text">
+      </label>
+      <label class="reference-field">DOI
+        <input id="reference-doi" name="doi" type="text" placeholder="10....">
+      </label>
+      <label class="reference-field">URL
+        <input id="reference-url" name="url" type="url" placeholder="https://">
+      </label>
+      <label class="reference-field">卷
+        <input id="reference-volume" name="volume" type="text">
+      </label>
+      <label class="reference-field">期
+        <input id="reference-issue" name="issue" type="text">
+      </label>
+      <label class="reference-field">页码
+        <input id="reference-pages" name="pages" type="text" placeholder="1-10">
+      </label>
+      <label class="reference-field">出版方
+        <input id="reference-publisher" name="publisher" type="text">
+      </label>
+    </div>
+    <div id="reference-form-error" class="reference-form-error hidden" role="alert"></div>
+    <div class="modal-actions">
+      <button type="button" id="reference-cancel" class="modal-btn-secondary">取消</button>
+      <button type="submit" id="reference-save" class="modal-btn-primary">保存</button>
+    </div>
+  </form>
+</div>
+
 <!-- 临时通知 -->
 <div id="toast" class="toast hidden"></div>
 
 <!-- v1.43.37 offline: bundled app (esbuild) + local icons; no esm.sh -->
 <script src="icons.js?v=3"></script>
-<script type="module" src="app.bundle.js?v=162"></script>
+<script type="module" src="app.bundle.js?v=163"></script>
 <!-- 帮助 popover (浮在 body 顶层, 位置由 JS 动态计算) -->
 <div id="help-popover" class="help-popover hidden" role="tooltip">
   <div class="help-popover-arrow"></div>
@@ -239,7 +303,10 @@
     <li><strong>离线运行:</strong> v1.43.37+ 依赖已本地打包, 无网也可打开编辑</li>
     <li><strong>保存:</strong> <kbd>Ctrl</kbd>+<kbd>S</kbd> Chrome/Edge 直接写回原位置; 其他浏览器下载到 <code>xxx.md</code> 同目录</li>
     <li><strong>跨刷新重连:</strong> 授权过的 .md handle 留在 IndexedDB; 重开应用自动恢复并继续保存</li>
-    <li><strong>正文引文:</strong> 从只读引用库插入；正文点击引文可定位对应文献，缺失 key 会明确标红</li>
+    <li><strong>正文引文:</strong> 从引用库插入；正文点击引文可定位对应文献，缺失 key 会明确标红</li>
+    <li><strong>引用库管理:</strong> 可添加/编辑/删除条目；改 citekey 会同步正文；导出 .bib 给 Pandoc/Zotero</li>
+    <li><strong>Zotero 单条导入:</strong> 在 Zotero 选中文献，导出 Better BibTeX (.bib) 或 CSL JSON，再到引用库点「导入」。单条记录会先进入确认表单，不会整库覆盖</li>
+    <li><strong>可移植引用:</strong> .mentor 内嵌 references.json + references.bib；不直接读取 zotero.sqlite，无自动 live sync</li>
     <li><strong>引文排版:</strong> Mentor 提供轻量作者—年份预览；期刊级 APA/CSL 请用 Pandoc citeproc</li>
   </ul>
   <hr class="help-divider">

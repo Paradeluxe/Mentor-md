@@ -86,9 +86,18 @@ python3 -m http.server 8787
 
 ### 引用库与正文引文
 
-工具栏 **引用** 可读取 `.bib`、`.ris`、`.enw`、EndNote `.xml` 和 CSL `.json`。文献卡片只读，作者、标题、年份、期刊和 DOI 不可直接编辑；点击卡片只会在光标处插入 Pandoc citekey。Mentor 正文显示轻量作者—年份字段，保存 Markdown 时仍保持 `[@citekey]`，避免显示文字污染源稿。
+工具栏 **引用** 打开当前文档的引用库侧栏。支持：
 
-`.mentor` 包可选保存 normalized `references.json` 与 canonical `references.bib`。Mentor 内置 DOCX 只保证可读的轻量作者—年份输出；期刊级 APA/CSL 请用 Pandoc citeproc，例如 `pandoc content.md --citeproc --bibliography=references.bib --csl=apa.csl -o output.docx`。
+- **添加 / 编辑 / 删除** 单条文献（表单编辑 citekey、作者、标题、年份、DOI 等）
+- **导入** `.bib`、`.ris`、`.enw`、EndNote `.xml`、CSL `.json`（含 Zotero / Better BibTeX 导出）
+  - **单条文件** → 预填确认表单后再写入（不会整库覆盖）
+  - **多条文件** → 合并进现有库；完全重复跳过，同 key 不同内容可选择覆盖
+- **导出** `*.references.bib` 给 Pandoc / Zotero
+- 卡片上 **插入 [@citekey]**；改 citekey 时会同步正文里的 Pandoc 标记
+
+不直接读取 `zotero.sqlite`，无自动 live sync——以导出文件为边界。Mentor 正文显示轻量作者—年份，保存 Markdown 时仍保持 `[@citekey]`。
+
+`.mentor` 包可选保存 normalized `references.json` 与 canonical `references.bib`。期刊级 APA/CSL 请用 Pandoc citeproc，例如 `pandoc content.md --citeproc --bibliography=references.bib --csl=apa.csl -o output.docx`。
 
 ### `.md` (源文件保持干净)
 

@@ -166,6 +166,64 @@ const { pathToFileURL } = require('url');
   assert.match(bibOut, /url = \{https:\/\/example\.com\/k\}/);
   assert.match(bibOut, /doi = \{10\.1\/k\}/);
 
+
+  // ---- CRUD / merge / rename helpers ----
+  const emptyErr = refs.validateReferenceEntry({ key: '', title: 'Paper' });
+  assert.strictEqual(emptyErr.valid, false);
+  assert.deepStrictEqual(emptyErr.errors, { key: 'citekey 不能为空' });
+  const badKey = refs.validateReferenceEntry({ key: 'bad key', title: 'Paper' });
+  assert.strictEqual(badKey.valid, false);
+  assert.deepStrictEqual(badKey.errors, { key: 'citekey 只能包含字母、数字、_、-、:、.、/' });
+  assert.strictEqual(
+    refs.referenceEntriesEqual(
+      { key: 'doe2024', type: 'article', title: ' Paper ' },
+      { key: 'doe2024', type: 'article', title: 'Paper' }
+    ),
+    true
+  );
+
+  const base = refs.createReferenceManifest({ entries: [normalized] });
+  const added = refs.upsertReferenceEntry(base, {
+    key: 'new2025', type: 'article', title: 'New paper'
+  });
+  assert.strictEqual(base.entries.length, 1, 'upsert is immutable');
+  assert.strictEqual(Object.keys(added.errors).length, 0);
+  assert.strictEqual(added.manifest.entries.length, 2);
+  assert.ok(added.manifest.entries.some((e) => e.key === 'new2025'));
+
+  const renamed = refs.upsertReferenceEntry(added.manifest, {
+    key: 'renamed2025', type: 'article', title: 'New paper'
+  }, { originalKey: 'new2025' });
+  assert.strictEqual(Object.keys(renamed.errors).length, 0);
+  assert.deepStrictEqual(renamed.manifest.entries.map((x) => x.key).sort(), ['k2024', 'renamed2025']);
+
+  const collision = refs.upsertReferenceEntry(renamed.manifest, {
+    key: 'k2024', type: 'article', title: 'Dup'
+  }, { originalKey: 'renamed2025' });
+  assert.deepStrictEqual(collision.errors, { key: 'citekey 已存在' });
+  assert.deepStrictEqual(collision.manifest.entries.map((x) => x.key).sort(), ['k2024', 'renamed2025']);
+
+  const removed = refs.removeReferenceEntry(renamed.manifest, 'renamed2025');
+  assert.deepStrictEqual(removed.entries.map((x) => x.key), ['k2024']);
+
+  const merged = refs.mergeReferenceEntries(base, [
+    { key: 'k2024', type: 'article', title: 'T', authors: 'Doe, J.', year: '2024', journal: 'J', doi: '10.1/k', url: 'https://example.com/k', volume: '12', issue: '3', pages: '1-10', publisher: 'Pub' },
+    { key: 'new2025', type: 'article', title: 'New' },
+    { key: 'k2024', type: 'article', title: 'Changed' },
+  ]);
+  assert.deepStrictEqual(merged.added.map((x) => x.key), ['new2025']);
+  assert.strictEqual(merged.duplicates.length, 1);
+  assert.strictEqual(merged.conflicts.length, 1);
+  assert.strictEqual(merged.manifest.entries.length, 2);
+  assert.strictEqual(merged.manifest.entries.find((e) => e.key === 'k2024').title, 'T');
+
+  assert.strictEqual(
+    refs.renameCitationKey('[-@old, p. 3; @other]', 'old', 'new'),
+    '[-@new, p. 3; @other]'
+  );
+  assert.strictEqual(refs.renameCitationKey('[@other]', 'old', 'new'), '[@other]');
+  assert.strictEqual(refs.renameCitationKey('[@old; @new]', 'old', 'new'), '[@new]');
+
   console.log('PASS references module');
 })().catch(err => {
   console.error(err.stack || err);

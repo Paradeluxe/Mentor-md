@@ -68,7 +68,14 @@ import {
   emptyReferenceManifest,
   createReferenceManifest,
   serializeReferenceBibTeX,
-  formatReferenceEntry
+  formatReferenceEntry,
+  normalizeReferenceEntry,
+  validateReferenceEntry,
+  referenceEntriesEqual,
+  upsertReferenceEntry,
+  removeReferenceEntry,
+  mergeReferenceEntries,
+  renameCitationKey
 } from './modules/references.js';
 import {
   findOccurrences,
@@ -9078,6 +9085,7 @@ function setupFileListDropdown() {
 
 let _renderReferencesPane = () => {};
 let _setReferencesPaneOpen = () => {};
+const REFERENCE_FORM_FIELDS = ["key", "type", "authors", "year", "title", "journal", "doi", "url", "volume", "issue", "pages", "publisher"];
 function getCitationUsages() {
   const usages = {};
   if (!State.editor) return usages;
@@ -9086,8 +9094,17 @@ function getCitationUsages() {
   });
   return usages;
 }
+function commitReferenceManifest(next, { reconcile = true } = {}) {
+  State.references = normalizeReferenceManifest(next || emptyReferenceManifest());
+  if (reconcile) reconcileCitationNodes();
+  else _renderReferencesPane();
+  markDirty();
+  scheduleIdbCacheWrite();
+  try { if (typeof snapshotActiveTab === "function") snapshotActiveTab(); } catch (_) {}
+  return State.references;
+}
 function reconcileCitationNodes() {
-  if (!State.editor) return;
+  if (!State.editor) { _renderReferencesPane(); return; }
   const hasLibrary = !!(State.references && (State.references.entries || []).length);
   const entryMap = new Map((State.references.entries || []).map((e) => [e.key, e]));
   let tr = State.editor.state.tr, changed = false;
@@ -9104,6 +9121,29 @@ function reconcileCitationNodes() {
   });
   if (changed) { tr.setMeta("addToHistory", false); State.editor.view.dispatch(tr); }
   _renderReferencesPane();
+}
+function renameCitationKeyInDocument(oldKey, newKey) {
+  if (!State.editor || !oldKey || !newKey || oldKey === newKey) return false;
+  let tr = State.editor.state.tr, changed = false;
+  State.editor.state.doc.descendants((node, pos) => {
+    if (!node.type || node.type.name !== "citation") return;
+    const raw = renameCitationKey(node.attrs.raw, oldKey, newKey);
+    if (raw === node.attrs.raw) return;
+    const info = buildCitationLabel(raw, State.references);
+    tr = tr.setNodeMarkup(pos, undefined, {
+      ...node.attrs,
+      raw,
+      keys: info.keys,
+      label: info.label,
+      missingKeys: info.missingKeys
+    });
+    changed = true;
+  });
+  if (changed) {
+    tr.setMeta("addToHistory", false);
+    State.editor.view.dispatch(tr);
+  }
+  return changed;
 }
 function insertCitation(key) {
   if (!State.editor || !(State.references.entries || []).some((e) => e.key === key)) return false;
@@ -9133,29 +9173,277 @@ function focusCitationByKey(key) {
   _setReferencesPaneOpen(true); _renderReferencesPane();
   const card = document.querySelector(`.refs-card[data-key="${CSS.escape(key)}"]`);
   if (!card) return false;
-  document.querySelectorAll(".refs-card.is-citation-target").forEach((x) => x.classList.remove("is-citation-target"));
+  document.querySelectorAll(".refs-card.is-citation-target").forEach((x) => x.classList.remove("is-citation-target", "is-current", "is-highlighted"));
   card.classList.add("is-citation-target", "is-current", "is-highlighted"); card.scrollIntoView({ block: "nearest" }); return true;
 }
+function readReferenceForm() {
+  const out = {};
+  for (const field of REFERENCE_FORM_FIELDS) {
+    const el = document.querySelector(`#reference-${field}`);
+    out[field] = el ? String(el.value || "").trim() : "";
+  }
+  return out;
+}
+function fillReferenceForm(entry = {}) {
+  const norm = normalizeReferenceEntry(entry || {});
+  for (const field of REFERENCE_FORM_FIELDS) {
+    const el = document.querySelector(`#reference-${field}`);
+    if (el) el.value = norm[field] || "";
+  }
+  const original = document.querySelector("#reference-original-key");
+  if (original) original.value = String(entry && entry._originalKey != null ? entry._originalKey : (norm.key || ""));
+}
+function setReferenceFormError(msg) {
+  const box = document.querySelector("#reference-form-error");
+  if (!box) return;
+  if (!msg) { box.textContent = ""; box.classList.add("hidden"); return; }
+  box.textContent = msg;
+  box.classList.remove("hidden");
+}
+function openReferenceEditor({ mode = "add", entry = null, sourceName = "" } = {}) {
+  const modal = document.querySelector("#reference-editor-modal");
+  const title = document.querySelector("#reference-editor-title");
+  if (!modal) return false;
+  const base = entry ? normalizeReferenceEntry(entry) : normalizeReferenceEntry({});
+  if (mode === "edit") base._originalKey = entry && entry.key ? entry.key : base.key;
+  else base._originalKey = "";
+  fillReferenceForm(base);
+  setReferenceFormError("");
+  if (title) {
+    if (mode === "edit") title.textContent = "编辑引用";
+    else if (mode === "import") title.textContent = sourceName ? `导入引用 · ${sourceName}` : "导入引用";
+    else title.textContent = "添加引用";
+  }
+  modal.classList.remove("hidden");
+  const keyInput = document.querySelector("#reference-key");
+  if (keyInput) setTimeout(() => keyInput.focus(), 0);
+  return true;
+}
+function closeReferenceEditor() {
+  const modal = document.querySelector("#reference-editor-modal");
+  if (modal) modal.classList.add("hidden");
+  setReferenceFormError("");
+}
+function addReferenceEntry(entry) {
+  const result = upsertReferenceEntry(State.references, entry);
+  if (Object.keys(result.errors || {}).length) return result;
+  commitReferenceManifest(result.manifest);
+  return result;
+}
+function updateReferenceEntry(originalKey, entry) {
+  const from = String(originalKey || "").trim();
+  const result = upsertReferenceEntry(State.references, entry, { originalKey: from });
+  if (Object.keys(result.errors || {}).length) return result;
+  const nextKey = String(entry && entry.key || "").trim();
+  State.references = normalizeReferenceManifest(result.manifest);
+  if (from && nextKey && from !== nextKey) renameCitationKeyInDocument(from, nextKey);
+  commitReferenceManifest(State.references, { reconcile: true });
+  return { manifest: State.references, errors: {} };
+}
+function deleteReferenceEntry(key, { confirmUser = true } = {}) {
+  const drop = String(key || "").trim();
+  if (!drop) return false;
+  const count = getCitationUsages()[drop] || 0;
+  if (confirmUser) {
+    const message = count
+      ? `“@${drop}”在正文使用 ${count} 次。删除元数据后正文会保留并标为缺失。继续？`
+      : `删除“@${drop}”？`;
+    if (!confirm(message)) return false;
+  }
+  commitReferenceManifest(removeReferenceEntry(State.references, drop));
+  return true;
+}
+async function importReferenceFile(file) {
+  if (!file) return { error: "no-file" };
+  let text = "";
+  try { text = await file.text(); } catch (e) { return { error: String(e && e.message || e) }; }
+  const entries = sortReferenceEntries(parseReferenceFile(file.name, text));
+  if (!entries.length) {
+    showToast("未识别到引用条目", 2500);
+    return { error: "empty" };
+  }
+  if (entries.length === 1) {
+    openReferenceEditor({ mode: "import", entry: entries[0], sourceName: file.name });
+    _setReferencesPaneOpen(true);
+    return { pending: 1, entries };
+  }
+  const result = mergeReferenceEntries(State.references, entries);
+  if (result.conflicts.length) {
+    let applied = result.manifest;
+    let overwritten = 0;
+    for (const c of result.conflicts) {
+      const ok = confirm(
+        `citekey @${c.existing.key} 已存在且内容不同。\n\n已有: ${c.existing.authors || "—"} / ${c.existing.year || "—"} / ${c.existing.title || "—"}\n导入: ${c.incoming.authors || "—"} / ${c.incoming.year || "—"} / ${c.incoming.title || "—"}\n\n确定 = 使用导入项；取消 = 保留已有`
+      );
+      if (ok) {
+        const up = upsertReferenceEntry(applied, c.incoming, { originalKey: c.existing.key });
+        if (!Object.keys(up.errors || {}).length) {
+          applied = up.manifest;
+          overwritten += 1;
+        }
+      }
+    }
+    result.manifest = applied;
+    result.overwritten = overwritten;
+  }
+  const srcName = file.name || State.references.source.name || "";
+  const srcFmt = (file.name.split(".").pop() || State.references.source.format || "").toLowerCase();
+  const next = createReferenceManifest({
+    sourceName: srcName,
+    sourceFormat: srcFmt,
+    entries: result.manifest.entries
+  });
+  commitReferenceManifest(next);
+  _setReferencesPaneOpen(true);
+  const parts = [];
+  if (result.added.length) parts.push(`新增 ${result.added.length}`);
+  if (result.duplicates.length) parts.push(`跳过重复 ${result.duplicates.length}`);
+  if (result.conflicts && result.conflicts.length) {
+    parts.push(`冲突 ${result.conflicts.length}${result.overwritten ? `（覆盖 ${result.overwritten}）` : ""}`);
+  }
+  showToast(parts.length ? `已导入：${parts.join(" · ")}` : `已加载 ${next.entries.length} 条引用`, 2200);
+  return { ...result, manifest: next };
+}
+function exportReferencesBib({ download = true } = {}) {
+  const text = serializeReferenceBibTeX(State.references.entries || []);
+  if (!download) return text;
+  if (!text) { showToast("引用库为空", 1800); return ""; }
+  const rawName = typeof mentorBaseName === "function"
+    ? mentorBaseName(State.currentFile?.name || "document")
+    : String(State.currentFile?.name || "document");
+  const base = String(rawName || "document").replace(/\.(md|markdown|mentor)$/i, "") || "document";
+  downloadBlob(`${base}.references.bib`, new Blob([text], { type: "application/x-bibtex;charset=utf-8" }));
+  showToast("已导出 .bib", 1400);
+  return text;
+}
 function initReferencesPane() {
-  const button = document.querySelector("#btn-refs"), input = document.querySelector("#refs-file-input"), pane = document.querySelector("#refs-pane"), main = document.querySelector("#main"), list = document.querySelector("#refs-list"), sourceName = document.querySelector("#refs-source-name"), search = document.querySelector("#refs-search"), missing = document.querySelector("#refs-missing-summary"), collapse = pane?.querySelector('[data-act="toggle-refs-pane"]'), expand = document.querySelector("#expand-refs-pane-btn");
+  const button = document.querySelector("#btn-refs");
+  const input = document.querySelector("#refs-file-input");
+  const pane = document.querySelector("#refs-pane");
+  const main = document.querySelector("#main");
+  const list = document.querySelector("#refs-list");
+  const sourceName = document.querySelector("#refs-source-name");
+  const search = document.querySelector("#refs-search");
+  const missing = document.querySelector("#refs-missing-summary");
+  const collapse = pane?.querySelector('[data-act="toggle-refs-pane"]');
+  const expand = document.querySelector("#expand-refs-pane-btn");
+  const addBtn = document.querySelector("#refs-add-btn");
+  const importBtn = document.querySelector("#refs-import-btn");
+  const exportBtn = document.querySelector("#refs-export-btn");
+  const modal = document.querySelector("#reference-editor-modal");
+  const form = document.querySelector("#reference-editor-form");
+  const cancelBtn = document.querySelector("#reference-cancel");
   if (!button || !input || !pane || !main || !list) return;
   let query = "";
-  const setOpen = (open) => { pane.classList.toggle("hidden", !open); main.classList.toggle("refs-pane-open", open); document.body.classList.toggle("refs-pane-collapsed", !open); expand?.classList.toggle("hidden", open || !(State.references.entries || []).length); };
-  const render = () => {
-    const entries = State.references.entries || [], usages = getCitationUsages(), rows = filterReferenceEntries(entries, query);
-    if (sourceName) sourceName.textContent = entries.length ? `${State.references.source.name || "引用库"} · ${entries.length} 条` : "未加载引用库";
-    const missingKeys = [...document.querySelectorAll('.mentor-citation.is-missing')].flatMap((n) => { try { return JSON.parse(n.dataset.citationMissing || '[]'); } catch (_) { return []; } });
-    if (missing) { missing.classList.toggle("hidden", !missingKeys.length); missing.textContent = missingKeys.length ? `缺失：${[...new Set(missingKeys)].map((k) => '@'+k).join('、')}` : ""; }
-    if (!rows.length) { list.innerHTML = `<div class="refs-empty">${entries.length ? "没有匹配的引用" : "点击工具栏「引用」导入 .bib / .ris / .enw / .xml / .json"}</div>`; return; }
-    list.innerHTML = rows.map((entry) => { const key=escapeHtml(entry.key), meta=[entry.year,entry.journal].filter(Boolean).join(" · "), n=usages[entry.key]||0; return `<article class="refs-card" data-key="${key}"><div class="rc-key">@${key}</div><div class="rc-authors">${escapeHtml(entry.authors||"—")}</div>${entry.title?`<div class="rc-title">${escapeHtml(entry.title)}</div>`:""}<div class="rc-meta">${escapeHtml(meta)}</div><div class="rc-usage${n?'':' is-unused'}">${n?`正文 ×${n}`:'未引用'}</div><button type="button" class="rc-insert-btn" data-act="insert-cite" data-key="${key}">插入 [@${key}]</button></article>`; }).join("");
+  const setOpen = (open) => {
+    pane.classList.toggle("hidden", !open);
+    main.classList.toggle("refs-pane-open", open);
+    document.body.classList.toggle("refs-pane-collapsed", !open);
+    expand?.classList.toggle("hidden", open || !(State.references.entries || []).length);
   };
-  _renderReferencesPane=render; _setReferencesPaneOpen=setOpen;
-  const loadFile=async(file)=>{ const entries=sortReferenceEntries(parseReferenceFile(file.name,await file.text())); if(!entries.length){showToast("未识别到引用条目",2500);return;} State.references=createReferenceManifest({sourceName:file.name,sourceFormat:(file.name.split('.').pop()||'').toLowerCase(),entries}); query=""; if(search)search.value=""; setOpen(true); reconcileCitationNodes(); markDirty(); scheduleIdbCacheWrite(); showToast(`已加载 ${entries.length} 条引用`,1800); };
-  button.addEventListener("click",()=>input.click()); input.addEventListener("change",()=>{const f=input.files?.[0];if(f)loadFile(f).catch((e)=>{console.error(e);showToast("引用库解析失败",2500);});input.value="";});
-  search?.addEventListener("input",()=>{query=search.value||"";render();}); collapse?.addEventListener("click",()=>setOpen(false)); expand?.addEventListener("click",()=>setOpen(true));
-  list.addEventListener("click",(event)=>{const x=event.target.closest('[data-act="insert-cite"]');if(x&&insertCitation(x.dataset.key))showToast(`已插入 [@${x.dataset.key}]`,1400);});
-  document.querySelector("#editor")?.addEventListener("click",(event)=>{const atom=event.target.closest('.mentor-citation');if(atom){const keys=JSON.parse(atom.dataset.citationKeys||'[]');if(keys[0])focusCitationByKey(keys[0]);}});
-  setOpen(false); render();
+  const render = () => {
+    const entries = State.references.entries || [];
+    const usages = getCitationUsages();
+    const rows = filterReferenceEntries(entries, query);
+    if (sourceName) sourceName.textContent = entries.length ? `${State.references.source.name || "引用库"} · ${entries.length} 条` : "未加载引用库";
+    const missingKeys = [...document.querySelectorAll(".mentor-citation.is-missing")].flatMap((n) => {
+      try { return JSON.parse(n.dataset.citationMissing || "[]"); } catch (_) { return []; }
+    });
+    if (missing) {
+      missing.classList.toggle("hidden", !missingKeys.length);
+      missing.textContent = missingKeys.length ? `缺失：${[...new Set(missingKeys)].map((k) => "@" + k).join("、")}` : "";
+    }
+    if (!rows.length) {
+      list.innerHTML = `<div class="refs-empty">${entries.length ? "没有匹配的引用" : "点「添加」新建，或「导入」.bib / .ris / .enw / .xml / .json（支持 Zotero 单条导出）"}</div>`;
+      return;
+    }
+    list.innerHTML = rows.map((entry) => {
+      const key = escapeHtml(entry.key);
+      const meta = [entry.year, entry.journal].filter(Boolean).join(" · ");
+      const n = usages[entry.key] || 0;
+      return `<article class="refs-card" data-key="${key}">
+        <div class="rc-key">@${key}</div>
+        <div class="rc-authors">${escapeHtml(entry.authors || "—")}</div>
+        ${entry.title ? `<div class="rc-title">${escapeHtml(entry.title)}</div>` : ""}
+        <div class="rc-meta">${escapeHtml(meta)}</div>
+        <div class="rc-usage${n ? "" : " is-unused"}">${n ? `正文 ×${n}` : "未引用"}</div>
+        <div class="rc-actions">
+          <button type="button" class="rc-insert-btn" data-act="insert-cite" data-key="${key}">插入 [@${key}]</button>
+          <button type="button" class="rc-edit-btn" data-act="edit-reference" data-key="${key}">编辑</button>
+          <button type="button" class="rc-delete-btn" data-act="delete-reference" data-key="${key}">删除</button>
+        </div>
+      </article>`;
+    }).join("");
+  };
+  _renderReferencesPane = render;
+  _setReferencesPaneOpen = setOpen;
+  button.addEventListener("click", () => {
+    const open = pane.classList.contains("hidden");
+    setOpen(open);
+    if (open) render();
+  });
+  addBtn?.addEventListener("click", () => { setOpen(true); openReferenceEditor({ mode: "add" }); });
+  importBtn?.addEventListener("click", () => input.click());
+  exportBtn?.addEventListener("click", () => exportReferencesBib({ download: true }));
+  input.addEventListener("change", () => {
+    const f = input.files?.[0];
+    if (f) importReferenceFile(f).catch((e) => { console.error(e); showToast("引用库解析失败", 2500); });
+    input.value = "";
+  });
+  search?.addEventListener("input", () => { query = search.value || ""; render(); });
+  collapse?.addEventListener("click", () => setOpen(false));
+  expand?.addEventListener("click", () => setOpen(true));
+  list.addEventListener("click", (event) => {
+    const insert = event.target.closest('[data-act="insert-cite"]');
+    if (insert && insertCitation(insert.dataset.key)) {
+      showToast(`已插入 [@${insert.dataset.key}]`, 1400);
+      return;
+    }
+    const edit = event.target.closest('[data-act="edit-reference"]');
+    if (edit) {
+      const entry = (State.references.entries || []).find((e) => e.key === edit.dataset.key);
+      if (entry) openReferenceEditor({ mode: "edit", entry });
+      return;
+    }
+    const del = event.target.closest('[data-act="delete-reference"]');
+    if (del) {
+      if (deleteReferenceEntry(del.dataset.key)) showToast(`已删除 @${del.dataset.key}`, 1400);
+    }
+  });
+  document.querySelector("#editor")?.addEventListener("click", (event) => {
+    const atom = event.target.closest(".mentor-citation");
+    if (atom) {
+      let keys = [];
+      try { keys = JSON.parse(atom.dataset.citationKeys || "[]"); } catch (_) { keys = []; }
+      if (keys[0]) focusCitationByKey(keys[0]);
+    }
+  });
+  cancelBtn?.addEventListener("click", () => closeReferenceEditor());
+  modal?.addEventListener("click", (e) => { if (e.target === modal) closeReferenceEditor(); });
+  form?.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const data = readReferenceForm();
+    const originalKey = String(document.querySelector("#reference-original-key")?.value || "").trim();
+    const result = originalKey
+      ? updateReferenceEntry(originalKey, data)
+      : addReferenceEntry(data);
+    if (Object.keys(result.errors || {}).length) {
+      setReferenceFormError(Object.values(result.errors).join("；") || "保存失败");
+      return;
+    }
+    closeReferenceEditor();
+    setOpen(true);
+    render();
+    showToast(originalKey ? "引用已更新" : "引用已添加", 1400);
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && modal && !modal.classList.contains("hidden")) {
+      e.preventDefault();
+      closeReferenceEditor();
+    }
+  });
+  setOpen(false);
+  render();
 }
 function showExportProgress(label) {
   setStatus(label || "\u5BFC\u51FA\u4E2D\u2026", "\u8BF7\u7A0D\u5019");
@@ -10723,7 +11011,15 @@ window.__mdAnnotator = {
   focusCitationByKey,
   getCitationUsages,
   reconcileCitationNodes,
-  references: State.references,
+  get references() { return normalizeReferenceManifest(State.references); },
+  addReferenceEntry,
+  updateReferenceEntry,
+  deleteReferenceEntry,
+  importReferenceFile,
+  exportReferencesBib,
+  openReferenceEditor,
+  closeReferenceEditor,
+  commitReferenceManifest,
   newDocument,
   createAnnotationFromSelection,
   createAnnotationThread,

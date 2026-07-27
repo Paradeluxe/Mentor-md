@@ -1,10 +1,32 @@
 const { chromium } = require('playwright');
+const fs = require('fs');
 
 const URL = `http://127.0.0.1:8787/index.html?v=${Date.now()}`;
 
 function assert(cond, message) {
   if (!cond) throw new Error(`ASSERT FAIL: ${message}`);
   console.log(`  ✓ ${message}`);
+}
+
+async function importAndConfirm(page, file) {
+  await page.locator('#refs-file-input').setInputFiles(file);
+  // multi-entry: cards appear; single-entry: editor modal opens
+  const modal = page.locator('#reference-editor-modal');
+  try {
+    await modal.waitFor({ state: 'visible', timeout: 1500 });
+    await page.locator('#reference-save').click();
+    await modal.waitFor({ state: 'hidden', timeout: 5000 });
+  } catch (_) {
+    // multi-entry path: no modal
+  }
+}
+
+async function clearSearch(page) {
+  await page.locator('#refs-search').fill('');
+}
+
+async function waitForKey(page, key) {
+  await page.waitForFunction((k) => !!document.querySelector(`.refs-card[data-key="${k}"]`), key, { timeout: 15000 });
 }
 
 (async () => {
@@ -66,58 +88,73 @@ function assert(cond, message) {
     const editorMd = await page.evaluate(() => window.__mdAnnotator.htmlToMarkdownMedia(window.__mdAnnotator.State.editor.getHTML()));
     assert(editorMd.includes('[@alpha2020first]') && !editorText.includes('[@alpha2020first]'), 'insert button writes citekey source and renders author-year atom');
 
-    console.log('\n=== Real PsyClaw refs.bib ===');
-    await page.locator('#refs-file-input').setInputFiles('E:/hermes_playground/paper-writing/projects/psyclaw-paper/refs.bib');
-    await page.waitForFunction(() => document.querySelectorAll('.refs-card').length === 10);
-    const realState = await page.evaluate(() => ({
-      count: document.querySelectorAll('.refs-card').length,
-      keys: [...document.querySelectorAll('.refs-card .rc-key')].map(x => x.textContent),
-      contentEditables: document.querySelectorAll('#refs-pane [contenteditable="true"], #refs-pane textarea').length,
-    }));
-    assert(realState.count === 10, 'real PsyClaw refs.bib loads all 10 records');
-    assert(realState.keys[0] === '@anwylirvine2020gorilla', 'real library is sorted by citekey');
-    assert(realState.contentEditables === 0, 'real library remains read-only');
+    console.log('\n=== Real PsyClaw refs.bib (merge, not replace) ===');
+    await clearSearch(page);
+    const psyPath = 'E:/hermes_playground/paper-writing/projects/psyclaw-paper/refs.bib';
+    if (!fs.existsSync(psyPath)) {
+      console.log('  ⊘ skip: PsyClaw refs.bib not found at', psyPath);
+    } else {
+      const beforeKeys = await page.evaluate(() => (window.__mdAnnotator.State.references.entries || []).map(e => e.key));
+      await page.locator('#refs-file-input').setInputFiles(psyPath);
+      await page.waitForFunction(() => document.querySelector('.refs-card[data-key="anwylirvine2020gorilla"]'), null, { timeout: 20000 });
+      const realState = await page.evaluate(() => ({
+        count: document.querySelectorAll('.refs-card').length,
+        keys: [...document.querySelectorAll('.refs-card .rc-key')].map(x => x.textContent),
+        entryCount: (window.__mdAnnotator.State.references.entries || []).length,
+        contentEditables: document.querySelectorAll('#refs-pane [contenteditable="true"], #refs-pane textarea').length,
+      }));
+      assert(realState.entryCount >= 10, `merge keeps ≥10 entries (got ${realState.entryCount})`);
+      assert(realState.keys.includes('@anwylirvine2020gorilla'), 'real library includes anwylirvine2020gorilla');
+      assert(beforeKeys.every(k => realState.keys.includes('@' + k)), 'previous library keys survive merge');
+      assert(realState.contentEditables === 0, 'real library remains non-contenteditable');
+    }
     await page.locator('#refs-pane [data-act="toggle-refs-pane"]').click();
     assert(await page.locator('#refs-pane').isHidden(), 'reference pane can collapse');
     assert(await page.locator('#expand-refs-pane-btn').isVisible(), 'collapsed library exposes reopen control');
     await page.locator('#expand-refs-pane-btn').click();
     assert(await page.locator('#refs-pane').isVisible(), 'reopen control restores loaded library');
 
-    console.log('\n=== RIS import ===');
+    console.log('\n=== RIS import (single → confirm form; merge) ===');
+    await clearSearch(page);
     const ris = `TY  - JOUR\nAU  - Gamma, Grace\nAU  - Delta, Dan\nTI  - RIS title\nJO  - RIS Journal\nPY  - 2021\nDO  - 10.2/ris\nER  - \n`;
-    await page.locator('#refs-file-input').setInputFiles({
+    await importAndConfirm(page, {
       name: 'library.ris',
       mimeType: 'application/x-research-info-systems',
       buffer: Buffer.from(ris, 'utf8'),
     });
-    await page.waitForFunction(() => document.querySelectorAll('.refs-card').length === 1);
-    const risCard = await page.locator('.refs-card').innerText();
+    // RIS citekey is generated — find by title
+    await page.waitForFunction(() => [...document.querySelectorAll('.refs-card')].some(c => c.textContent.includes('RIS title')));
+    const risCard = await page.evaluate(() => [...document.querySelectorAll('.refs-card')].find(c => c.textContent.includes('RIS title'))?.innerText || '');
     assert(risCard.includes('Gamma, Grace') && risCard.includes('Delta, Dan'), 'RIS keeps multiple authors in one record');
     assert(risCard.includes('RIS title') && risCard.includes('2021'), 'RIS title and year are rendered');
+    assert(await page.locator('.refs-card[data-key="alpha2020first"]').count() === 1, 'merge keeps earlier BibTeX entry');
 
     console.log('\n=== EndNote tagged import ===');
+    await clearSearch(page);
     const enw = `%0 Journal Article\n%A Endnote, Erin\n%A Other, Owen\n%T Tagged title\n%J EndNote Journal\n%D 2023\n%R 10.4/endnote\n`;
-    await page.locator('#refs-file-input').setInputFiles({
+    await importAndConfirm(page, {
       name: 'library.enw',
       mimeType: 'text/plain',
       buffer: Buffer.from(enw, 'utf8'),
     });
-    await page.waitForFunction(() => document.querySelectorAll('.refs-card').length === 1);
-    const enwCard = await page.locator('.refs-card').innerText();
+    await page.waitForFunction(() => [...document.querySelectorAll('.refs-card')].some(c => c.textContent.includes('Tagged title')));
+    const enwCard = await page.evaluate(() => [...document.querySelectorAll('.refs-card')].find(c => c.textContent.includes('Tagged title'))?.innerText || '');
     assert(enwCard.includes('Endnote, Erin') && enwCard.includes('Tagged title'), 'EndNote tagged record is rendered');
 
     console.log('\n=== EndNote XML import ===');
+    await clearSearch(page);
     const xml = `<xml><records><record><rec-number>42</rec-number><ref-type name="Journal Article">17</ref-type><contributors><authors><author>Xml, Xena</author></authors></contributors><titles><title>XML title</title><secondary-title>XML Journal</secondary-title></titles><dates><year>2024</year></dates><electronic-resource-num>10.5/xml</electronic-resource-num></record></records></xml>`;
-    await page.locator('#refs-file-input').setInputFiles({
+    await importAndConfirm(page, {
       name: 'library.xml',
       mimeType: 'application/xml',
       buffer: Buffer.from(xml, 'utf8'),
     });
-    await page.waitForFunction(() => document.querySelectorAll('.refs-card').length === 1);
-    const xmlCard = await page.locator('.refs-card').innerText();
+    await page.waitForFunction(() => [...document.querySelectorAll('.refs-card')].some(c => c.textContent.includes('XML title')));
+    const xmlCard = await page.evaluate(() => [...document.querySelectorAll('.refs-card')].find(c => c.textContent.includes('XML title'))?.innerText || '');
     assert(xmlCard.includes('Xml, Xena') && xmlCard.includes('XML title'), 'EndNote XML record is rendered');
 
     console.log('\n=== CSL-JSON import ===');
+    await clearSearch(page);
     const csl = JSON.stringify([{
       id: 'omega2022json',
       type: 'article-journal',
@@ -127,13 +164,13 @@ function assert(cond, message) {
       'container-title': 'JSON Journal',
       DOI: '10.3/json'
     }]);
-    await page.locator('#refs-file-input').setInputFiles({
+    await importAndConfirm(page, {
       name: 'library.json',
       mimeType: 'application/json',
       buffer: Buffer.from(csl, 'utf8'),
     });
-    await page.waitForFunction(() => document.querySelectorAll('.refs-card').length === 1);
-    const jsonCard = await page.locator('.refs-card').innerText();
+    await waitForKey(page, 'omega2022json');
+    const jsonCard = await page.locator('.refs-card[data-key="omega2022json"]').innerText();
     assert(jsonCard.includes('@omega2022json') && jsonCard.includes('JSON title'), 'CSL-JSON record is rendered');
 
     assert(pageErrors.length === 0, `no page errors: ${pageErrors.join(' | ')}`);

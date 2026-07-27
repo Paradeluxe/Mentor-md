@@ -579,3 +579,136 @@ export function serializeReferenceBibTeX(entries) {
   if (!list.length) return "";
   return list.map(referenceEntryToBibTeX).join("\n\n") + "\n";
 }
+
+// ============================================================================
+// Reference library CRUD / import merge / citekey rename
+// ============================================================================
+
+export const REFERENCE_EDITABLE_FIELDS = [
+  "key", "type", "authors", "year", "title", "journal",
+  "doi", "url", "volume", "issue", "pages", "publisher",
+];
+
+const CITEKEY_RE = /^[\w:.\-\/]+$/;
+
+/**
+ * Validate an editable reference entry before it is written into a manifest.
+ * Empty/invalid citekeys are rejected before normalizeReferenceEntry can
+ * coerce them to the "anon" fallback used by serialization.
+ */
+export function validateReferenceEntry(entry) {
+  const rawKey = asString(entry && entry.key).trim();
+  const value = normalizeReferenceEntry(entry);
+  const errors = {};
+  if (!rawKey) {
+    errors.key = "citekey 不能为空";
+    value.key = "";
+  } else if (!CITEKEY_RE.test(rawKey)) {
+    errors.key = "citekey 只能包含字母、数字、_、-、:、.、/";
+  } else {
+    value.key = rawKey;
+  }
+  return { value, errors, valid: Object.keys(errors).length === 0 };
+}
+
+/** Field-wise equality after canonical normalization. */
+export function referenceEntriesEqual(a, b) {
+  const left = normalizeReferenceEntry(a);
+  const right = normalizeReferenceEntry(b);
+  return REFERENCE_EDITABLE_FIELDS.every((field) => left[field] === right[field]);
+}
+
+/**
+ * Insert or replace one entry. When originalKey is set, that row is replaced
+ * (allowing citekey rename). Collisions with a different row return errors
+ * and leave the previous manifest untouched.
+ */
+export function upsertReferenceEntry(manifest, entry, { originalKey = "" } = {}) {
+  const checked = validateReferenceEntry(entry);
+  const current = normalizeReferenceManifest(manifest);
+  if (!checked.valid) {
+    return { manifest: current, errors: checked.errors };
+  }
+  const target = asString(originalKey).trim() || checked.value.key;
+  const withoutTarget = current.entries.filter((row) => row.key !== target);
+  if (withoutTarget.some((row) => row.key === checked.value.key)) {
+    return { manifest: current, errors: { key: "citekey 已存在" } };
+  }
+  return {
+    manifest: createReferenceManifest({
+      sourceName: current.source.name,
+      sourceFormat: current.source.format,
+      entries: [...withoutTarget, checked.value],
+    }),
+    errors: {},
+  };
+}
+
+/** Remove one entry by citekey. Missing keys are a no-op. */
+export function removeReferenceEntry(manifest, key) {
+  const current = normalizeReferenceManifest(manifest);
+  const drop = asString(key).trim();
+  return createReferenceManifest({
+    sourceName: current.source.name,
+    sourceFormat: current.source.format,
+    entries: current.entries.filter((row) => row.key !== drop),
+  });
+}
+
+/**
+ * Merge imported rows into the current library without replacement.
+ * Exact duplicates are skipped; same-key different content becomes a conflict
+ * and leaves the existing row untouched by default.
+ */
+export function mergeReferenceEntries(manifest, incoming) {
+  const current = normalizeReferenceManifest(manifest);
+  const byKey = new Map(current.entries.map((entry) => [entry.key, entry]));
+  const added = [];
+  const duplicates = [];
+  const conflicts = [];
+  for (const raw of incoming || []) {
+    const checked = validateReferenceEntry(raw);
+    if (!checked.valid) continue;
+    const entry = checked.value;
+    const existing = byKey.get(entry.key);
+    if (!existing) {
+      byKey.set(entry.key, entry);
+      added.push(entry);
+    } else if (referenceEntriesEqual(existing, entry)) {
+      duplicates.push(entry);
+    } else {
+      conflicts.push({ existing, incoming: entry });
+    }
+  }
+  return {
+    manifest: createReferenceManifest({
+      sourceName: current.source.name,
+      sourceFormat: current.source.format,
+      entries: [...byKey.values()],
+    }),
+    added,
+    duplicates,
+    conflicts,
+  };
+}
+
+/**
+ * Rename one citekey inside a Pandoc citation group, preserving suppress-author
+ * and suffix metadata. Duplicate keys after rename collapse to the first item.
+ */
+export function renameCitationKey(raw, oldKey, newKey) {
+  const from = asString(oldKey).trim();
+  const to = asString(newKey).trim();
+  if (!from || !to || from === to) return asString(raw);
+  const parsed = parseCitationSyntax(raw);
+  if (!parsed.items.length) return asString(raw);
+  const seen = new Set();
+  parsed.items = parsed.items
+    .map((item) => ({ ...item, key: item.key === from ? to : item.key }))
+    .filter((item) => {
+      if (seen.has(item.key)) return false;
+      seen.add(item.key);
+      return true;
+    });
+  return serializeCitationSyntax(parsed);
+}
