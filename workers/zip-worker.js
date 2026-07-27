@@ -1,5 +1,6 @@
 // Mentor zip worker — classic Worker + local JSZip (no CDN)
 // v1.43.18: importScripts('./jszip.min.js') 离线可用
+// v1.45.0: optional document.html + manifest.json structural snapshot
 /* global JSZip, self */
 importScripts('./jszip.min.js');
 
@@ -27,10 +28,27 @@ self.onmessage = async (e) => {
   const { cmd, id } = e.data || {};
   try {
     if (cmd === 'build') {
-      const { mdText, sidecar, mediaFiles, referencesJson, referencesBib } = e.data;
+      const {
+        mdText,
+        sidecar,
+        sidecarText,
+        documentHtml,
+        manifestText,
+        mediaFiles,
+        referencesJson,
+        referencesBib,
+      } = e.data;
       const zip = new JSZip();
       zip.file('content.md', mdText);
-      zip.file('annotations.json', JSON.stringify(sidecar, null, 2));
+      // Prefer caller-provided raw annotationsText so main/worker hashes match.
+      zip.file(
+        'annotations.json',
+        typeof sidecarText === 'string' ? sidecarText : JSON.stringify(sidecar, null, 2),
+      );
+      if (typeof documentHtml === 'string' && typeof manifestText === 'string') {
+        zip.file('document.html', documentHtml);
+        zip.file('manifest.json', manifestText);
+      }
       // Optional citation library: written only when the caller actually
       // supplied them so legacy archives stay byte-identical when no
       // references exist. referencesJson is normalised to a JSON string so
@@ -69,6 +87,8 @@ self.onmessage = async (e) => {
       const mdEntry = zip.file('content.md');
       if (!mdEntry) throw new Error('.mentor 包缺少 content.md');
       const annEntry = zip.file('annotations.json');
+      const htmlEntry = zip.file('document.html');
+      const manifestEntry = zip.file('manifest.json');
       const refsJsonEntry = zip.file('references.json');
       const refsBibEntry = zip.file('references.bib');
       const entries = Object.keys(zip.files);
@@ -83,11 +103,13 @@ self.onmessage = async (e) => {
       const allExtracts = await Promise.all([
         mdEntry.async('string'),
         annEntry ? annEntry.async('string') : Promise.resolve(null),
+        htmlEntry ? htmlEntry.async('string') : Promise.resolve(null),
+        manifestEntry ? manifestEntry.async('string') : Promise.resolve(null),
         refsJsonEntry ? refsJsonEntry.async('string') : Promise.resolve(null),
         refsBibEntry ? refsBibEntry.async('string') : Promise.resolve(''),
         ...mediaNames.map(name => zip.file(name).async('uint8array').then(u8 => ({ name, bytes: u8 }))),
       ]);
-      const [mdText, annText, refsJsonText, refsBibText, ...mediaResults] = allExtracts;
+      const [mdText, annText, documentHtml, manifestText, refsJsonText, refsBibText, ...mediaResults] = allExtracts;
       let annotations = null;
       if (annText !== null) {
         try { annotations = JSON.parse(annText); } catch (err) { annotations = null; }
@@ -115,6 +137,9 @@ self.onmessage = async (e) => {
         result: {
           mdText,
           annotations,
+          annotationsText: annText,
+          documentHtml: typeof documentHtml === 'string' ? documentHtml : null,
+          manifestText: typeof manifestText === 'string' ? manifestText : null,
           mediaFiles,
           referencesJson: parsedRefsJson,
           referencesBib,

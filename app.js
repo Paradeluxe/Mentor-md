@@ -95,6 +95,12 @@ import {
   getAnnotationAnchorState
 } from './modules/annotation-anchor-plugin.js';
 import {
+  STRUCTURAL_HTML_NAME,
+  ARCHIVE_MANIFEST_NAME,
+  createArchiveManifest,
+  verifyStructuralArchive,
+} from './modules/mentor-archive.js';
+import {
   LIVE_SYNC_SCHEMA,
   channelNameForDocument,
   compareLease,
@@ -2293,30 +2299,48 @@ function exportAnchorDiagnosis() {
     exportedAt: nowISO(),
     healthy: !!(audit && audit.healthy),
     errors: audit && audit.errors || [],
-    threads
+    threads,
+    archive: {
+      restoreMode: State._archiveRestoreMode || "legacy",
+      verification: State._archiveVerification || null
+    }
   };
 }
 function createSaveSnapshot() {
   if (!State.currentFile) throw new Error("\u672A\u6253\u5F00\u6587\u6863");
-  // Invariant audit before package write (warn-only unless hard collision)
+  // Hard-block structurally inconsistent archives before write
   try {
     const audit = collectLiveAnnotationAudit();
     State._lastAnchorAudit = audit;
     if (audit && !audit.healthy) {
-      const hard = (audit.errors || []).filter((e) =>
-        e && (e.code === "duplicate-threadId" || e.code === "duplicate-mark" || e.code === "mark-unknown-thread" || e.code === "mark-collision" || e.code === "ambiguous-has-mark" || e.code === "orphan-status-has-mark" || e.code === "range-mismatch" || e.code === "text-mismatch")
-      );
+      const hardCodes = new Set([
+        "duplicate-threadId",
+        "duplicate-mark",
+        "mark-unknown-thread",
+        "mark-collision",
+        "ambiguous-has-mark",
+        "orphan-status-has-mark",
+        "range-mismatch",
+        "text-mismatch",
+        "attached-missing-mark"
+      ]);
+      const hard = (audit.errors || []).filter((e) => e && hardCodes.has(e.code));
       if (hard.length) {
         console.warn("[anchor-audit] hard invariant failures", hard);
-        showToast("\u6279\u6CE8\u951A\u70B9\u5F02\u5E38\uFF0C\u8BF7\u68C0\u67E5\u4FA7\u680F\u5931\u6548\u9879", 3500);
+        const err = new Error("\u6279\u6CE8\u951A\u70B9\u4E0D\u4E00\u81F4\uFF0C\u5DF2\u505C\u6B62\u4FDD\u5B58");
+        err.code = "ANNOTATION_ANCHOR_AUDIT_FAILED";
+        err.audit = hard;
+        throw err;
       }
     }
   } catch (e) {
+    if (e && e.code === "ANNOTATION_ANCHOR_AUDIT_FAILED") throw e;
     console.warn("[anchor-audit]", e);
   }
   const sourceMarkdown = flushSourceView();
   const currentFile = State.currentFile;
-  const mdText = sourceMarkdown !== null ? sourceMarkdown : htmlToMarkdownMedia(State.editor.getHTML());
+  const documentHtml = State.editor ? State.editor.getHTML() : "";
+  const mdText = sourceMarkdown !== null ? sourceMarkdown : htmlToMarkdownMedia(documentHtml);
   const sidecar = {
     version: "1",
     document: currentFile.name,
@@ -2333,6 +2357,7 @@ function createSaveSnapshot() {
     saveMode: State.saveMode,
     fileMtime: State.fileMtime,
     mdText,
+    documentHtml,
     sidecar: JSON.parse(JSON.stringify(sidecar)),
     mediaFiles: Object.assign({}, State.mediaFiles || {}),
     references: JSON.parse(JSON.stringify(State.references || emptyReferenceManifest()))
@@ -2559,7 +2584,7 @@ async function writeCurrentToHandle({ reason = "manual", showProgress = false } 
   try {
     if (snapshot.saveMode === "mentor-handle" || /\.mentor$/i.test(snapshot.name)) {
       if (showProgress) showExportProgress("\u6B63\u5728\u6253\u5305 .mentor\u2026");
-      payload = await buildMentorZipBlob(snapshot.mdText, snapshot.sidecar, snapshot.mediaFiles, snapshot.references);
+      payload = await buildMentorZipBlob(snapshot.mdText, snapshot.sidecar, snapshot.mediaFiles, snapshot.references, { documentHtml: snapshot.documentHtml });
     } else {
       payload = snapshot.mdText;
     }
@@ -5601,14 +5626,29 @@ function snapshotAnnotationMarks() {
   const result = [];
   const markType = ed.schema.marks.annotation;
   if (!markType) return [];
+  const doc5 = ed.state.doc;
   ed.state.doc.descendants((node, pos) => {
     if (!node.isText) return;
     node.marks.forEach((m) => {
       if (m.type === markType && m.attrs.threadId) {
+        const from = pos;
+        const to = pos + node.nodeSize;
+        let prefix = "";
+        let suffix = "";
+        try {
+          const ctx = typeof computeContextAt === "function" ? computeContextAt(doc5, from, to) : null;
+          if (ctx) {
+            prefix = ctx.prefix || "";
+            suffix = ctx.suffix || "";
+          }
+        } catch (_) {}
         result.push({
           threadId: m.attrs.threadId,
-          from: pos,
-          to: pos + node.nodeSize,
+          from,
+          to,
+          text: node.text || "",
+          prefix,
+          suffix,
           resolved: !!m.attrs.resolved
         });
       }
@@ -5798,7 +5838,49 @@ function rebuildAnnotationMarks(markSnapshot) {
   };
   if (Array.isArray(markSnapshot) && markSnapshot.length > 0) {
     markSnapshot.forEach((snap) => {
-      tryAdd(snap.threadId, snap.from, snap.to, snap.resolved);
+      if (!snap || !snap.threadId) return;
+      let from2 = snap.from;
+      let to = snap.to;
+      let okPos = typeof from2 === "number" && typeof to === "number" && from2 >= 0 && to <= docSize && from2 < to;
+      if (okPos) {
+        try {
+          const live = ed.state.doc.textBetween(from2, to, " ");
+          if (snap.text != null && String(snap.text) && live !== String(snap.text)) okPos = false;
+        } catch (_) {
+          okPos = false;
+        }
+      }
+      if (!okPos && (snap.text || snap.prefix || snap.suffix)) {
+        const found = findAnnotationRange(ed.state.doc, {
+          text: snap.text || "",
+          prefix: snap.prefix || "",
+          suffix: snap.suffix || "",
+          range: { from: snap.from, to: snap.to },
+          anchor: { position: { from: snap.from, to: snap.to } }
+        });
+        if (found && !found.ambiguous && typeof found.from === "number" && found.from < found.to) {
+          from2 = found.from;
+          to = found.to;
+          okPos = true;
+        } else {
+          const thr = State.annotations.find((x) => x && x.threadId === snap.threadId);
+          if (thr) {
+            thr.invalid = true;
+            thr.fuzzy = !!(found && found.ambiguous);
+            thr.invalidReason = found && found.ambiguous ? "ambiguous" : "text-not-found";
+            thr.range = null;
+            if (thr.anchor && typeof thr.anchor === "object") {
+              thr.anchor = {
+                ...thr.anchor,
+                status: found && found.ambiguous ? "ambiguous" : "orphaned",
+                confidence: 0
+              };
+            }
+          }
+          return;
+        }
+      }
+      if (okPos) tryAdd(snap.threadId, from2, to, snap.resolved);
     });
   } else {
     State.annotations.forEach((t) => {
@@ -6211,7 +6293,9 @@ async function activateOpenedDocument({
   preferDraft = false,
   forceDisk = false,
   // disk file lastModified (ms) when opened from handle — used to beat stale IDB drafts
-  diskMtime = null
+  diskMtime = null,
+  structuralHtml = null,
+  archiveVerification = null
 } = {}) {
   if (!name) throw new Error("activateOpenedDocument: name required");
   const resolvedDocumentId = await resolveDocumentId({ name, content, handle, documentId });
@@ -6326,7 +6410,9 @@ async function activateOpenedDocument({
     alreadyPrepared: true,
     preferDraft: false,
     forceDisk,
-    references: referencesOut
+    references: referencesOut,
+    structuralHtml,
+    archiveVerification
   });
   if (handle) {
     await rememberOpenedFile(handle);
@@ -6409,12 +6495,55 @@ function setupDocTabs() {
  *  - saveMode: 'mentor-handle' | 'mentor-download' | 'handle' | 'download' | ...
  *  - alreadyPrepared: skip prepareOpenDocument (caller already claimed a tab + media)
  */
+function sanitizeStructuralHtml(html) {
+  if (typeof html !== "string") return "";
+  try {
+    const doc = new DOMParser().parseFromString(String(html), "text/html");
+    doc.querySelectorAll("script,style,iframe,object,embed").forEach((el) => el.remove());
+    doc.querySelectorAll("*").forEach((el) => {
+      for (const attr of Array.from(el.attributes || [])) {
+        const n = String(attr.name || "").toLowerCase();
+        if (n.startsWith("on") || n === "srcdoc") el.removeAttribute(attr.name);
+      }
+    });
+    return doc.body ? doc.body.innerHTML : "";
+  } catch (_) {
+    return String(html);
+  }
+}
+
+function collectEmbeddedAnnotationRanges(doc, markType) {
+  const byId = new Map();
+  if (!doc || !markType) return byId;
+  doc.descendants((node, pos) => {
+    if (!node.isText) return;
+    for (const mark of node.marks || []) {
+      if (mark.type !== markType || !mark.attrs || !mark.attrs.threadId) continue;
+      const list = byId.get(mark.attrs.threadId) || [];
+      const next = { from: pos, to: pos + node.nodeSize, text: node.text || "" };
+      const last = list[list.length - 1];
+      if (last && last.to === next.from) {
+        last.to = next.to;
+        last.text += next.text;
+      } else {
+        list.push(next);
+      }
+      byId.set(mark.attrs.threadId, list);
+    }
+  });
+  return byId;
+}
+
 function loadMarkdownIntoEditor(name, content, annotationsData = null, options = {}) {
   const opts = options && typeof options === "object" ? options : {};
   const fileHandle = opts.handle || null;
   const saveModeOpt = opts.saveMode != null ? opts.saveMode : null;
   const alreadyPrepared = !!opts.alreadyPrepared;
   const documentId = opts.documentId || null;
+  const structuralHtmlRaw = typeof opts.structuralHtml === "string" ? opts.structuralHtml : null;
+  const structuralHtml = structuralHtmlRaw ? sanitizeStructuralHtml(structuralHtmlRaw) : null;
+  const archiveVerification = opts.archiveVerification || null;
+  const useStructuralHtml = !!(structuralHtml && archiveVerification && archiveVerification.usable);
   let preservedTabThreadId = null;
   let preservedTabAnnotations = null;
   if (opts.references !== undefined) {
@@ -6466,7 +6595,12 @@ function loadMarkdownIntoEditor(name, content, annotationsData = null, options =
     annotationsData = preservedTabAnnotations;
   }
   if (draftBody != null) content = draftBody;
-  const html = markdownToHtml(content, State.mediaUrls);
+  State._archiveRestoreMode = useStructuralHtml ? "html" : (archiveVerification && archiveVerification.reason ? "markdown-fallback" : "legacy");
+  State._archiveVerification = archiveVerification || null;
+  if (!useStructuralHtml && archiveVerification && typeof archiveVerification.reason === "string" && archiveVerification.reason.endsWith("-mismatch")) {
+    console.warn("[mentor-archive] ignored stale document.html:", archiveVerification.reason);
+  }
+  const html = useStructuralHtml ? structuralHtml : markdownToHtml(content, State.mediaUrls);
   State.annotations = [];
   State.activeThreadId = null;
   State._suspendAnnValidate = true;
@@ -6477,12 +6611,128 @@ function loadMarkdownIntoEditor(name, content, annotationsData = null, options =
   }
   reconcileCitationNodes();
   if (State.renderMode === "source") {
-    const md2 = htmlToMarkdown(html);
+    const md2 = useStructuralHtml ? (content || htmlToMarkdown(html)) : htmlToMarkdown(html);
     sourceEl.innerText = md2;
   }
   resetHistory();
   clearPmHistory();
-  if (annotationsData && annotationsData.annotations) {
+  if (useStructuralHtml && annotationsData && annotationsData.annotations) {
+    const markType = State.editor.schema.marks.annotation;
+    const doc5 = State.editor.state.doc;
+    const embedded = collectEmbeddedAnnotationRanges(doc5, markType);
+    const schemaReport = _validateSidecar(annotationsData.annotations);
+    if (schemaReport.warnings.length > 0) {
+      schemaReport.warnings.forEach((w) => showToast(`⚠ 侧车数据警告: ${w}`, 5e3));
+    }
+    const validAnns = annotationsData.annotations.filter((a) => a && a.threadId);
+    const seenThreadIds = new Set();
+    for (const ann of validAnns) {
+      const isDuplicate = ann.threadId && seenThreadIds.has(ann.threadId);
+      if (ann.threadId) seenThreadIds.add(ann.threadId);
+      const ranges = !isDuplicate ? (embedded.get(ann.threadId) || []) : [];
+      const hasImgAnchors = Array.isArray(ann.imageAnchors) && ann.imageAnchors.length > 0;
+      const pureImageLabel = !!(ann.text && (/^\[图片\]$/i.test(String(ann.text).trim()) || /^\[image\]$/i.test(String(ann.text).trim())));
+      const savedStatus = ann.anchor && ann.anchor.status;
+      const intentionallyUnattached = ["ambiguous", "orphaned", "collision", "image-missing"].includes(savedStatus);
+      if (isDuplicate) {
+        State.annotations.push({
+          ...ann,
+          authorColor: annotationAuthorColor(ann),
+          range: null,
+          ranges: [],
+          invalid: true,
+          invalidReason: "duplicate-threadId"
+        });
+        continue;
+      }
+      if (hasImgAnchors && (!ranges.length || pureImageLabel)) {
+        const thread = {
+          ...ann,
+          authorColor: annotationAuthorColor(ann),
+          imageAnchors: ann.imageAnchors.map((a) => ({ ...a })),
+          invalid: false,
+          deleted: false,
+          fuzzy: false,
+          invalidReason: void 0
+        };
+        const sync = resyncImageAnchors(thread, doc5);
+        if (sync.resolved > 0 && thread.imageAnchors && thread.imageAnchors.length) {
+          if (ranges.length) {
+            thread.ranges = ranges.map((r) => ({ from: r.from, to: r.to }));
+            thread.range = { from: ranges[0].from, to: ranges[ranges.length - 1].to };
+            const parts = ranges.map((r) => r.text).filter(Boolean);
+            if (parts.length) thread.text = parts.join(" ");
+            syncThreadAnchorEvidence(thread, doc5, thread.range, { exact: thread.text, status: "attached", confidence: 1 });
+          }
+          State.annotations.push(thread);
+          continue;
+        }
+        State.annotations.push({ ...thread, range: null, invalid: true, invalidReason: "image-deleted" });
+        continue;
+      }
+      if (ranges.length) {
+        const thread = {
+          ...ann,
+          authorColor: annotationAuthorColor(ann),
+          ranges: ranges.map((r) => ({ from: r.from, to: r.to })),
+          range: { from: ranges[0].from, to: ranges[ranges.length - 1].to },
+          invalid: false,
+          deleted: false,
+          fuzzy: false,
+          invalidReason: void 0
+        };
+        const parts = ranges.map((r) => r.text).filter(Boolean);
+        if (parts.length) thread.text = parts.join(" ");
+        syncThreadAnchorEvidence(thread, doc5, thread.range, {
+          exact: thread.text,
+          status: "attached",
+          confidence: 1
+        });
+        if (hasImgAnchors) {
+          thread.imageAnchors = ann.imageAnchors.map((a) => ({ ...a }));
+          resyncImageAnchors(thread, doc5);
+        }
+        State.annotations.push(thread);
+        continue;
+      }
+      if (intentionallyUnattached) {
+        State.annotations.push({
+          ...ann,
+          authorColor: annotationAuthorColor(ann),
+          range: null,
+          ranges: [],
+          invalid: true,
+          fuzzy: savedStatus === "ambiguous" || !!ann.fuzzy,
+          deleted: false,
+          invalidReason: ann.invalidReason || savedStatus
+        });
+        continue;
+      }
+      // HTML verified but mark missing: do NOT text-search.
+      const thr = {
+        ...ann,
+        authorColor: annotationAuthorColor(ann),
+        range: null,
+        ranges: [],
+        invalid: true,
+        fuzzy: false,
+        deleted: false,
+        invalidReason: "structural-mark-missing"
+      };
+      thr.anchor = ann.anchor && typeof ann.anchor === "object"
+        ? { ...ann.anchor, status: "orphaned", confidence: 0, updatedAt: nowISO() }
+        : {
+            version: "1",
+            quote: { exact: ann.text || "", prefix: ann.prefix || "", suffix: ann.suffix || "" },
+            status: "orphaned",
+            confidence: 0,
+            updatedAt: nowISO()
+          };
+      State.annotations.push(thr);
+    }
+    // Ghost marks in HTML without sidecar threads are left as schema marks;
+    // collectLiveAnnotationAudit reports mark-unknown-thread on save/open.
+  } else if (annotationsData && annotationsData.annotations) {
     const schemaReport = _validateSidecar(annotationsData.annotations);
     if (schemaReport.warnings.length > 0) {
       schemaReport.warnings.forEach((w) => showToast(`\u26A0 \u4FA7\u8F66\u6570\u636E\u8B66\u544A: ${w}`, 5e3));
@@ -6837,6 +7087,7 @@ function loadMarkdownIntoEditor(name, content, annotationsData = null, options =
   renderDocTabs();
 }
 function findAnnotationRange(doc5, annotation) {
+  _anchorResolveCallCount++;
   if (!annotation) return null;
   const text2 = annotation.text || "";
   const prefix = annotation.prefix || "";
@@ -7393,7 +7644,7 @@ async function openFromMentorHandle(fileHandle, options = {}) {
   const documentIdOpt = options && options.documentId || null;
   await ensureWritePermission(fileHandle);
   const file = await fileHandle.getFile();
-  const { mdText, annotations, references, mediaFiles } = await readMentorZip(file);
+  const { mdText, annotations, references, mediaFiles, archive } = await readMentorZip(file);
   console.log("[openFromMentorHandle] mediaFiles=", Object.keys(mediaFiles || {}).length);
   await activateOpenedDocument({
     name: file.name,
@@ -7407,7 +7658,9 @@ async function openFromMentorHandle(fileHandle, options = {}) {
     quiet,
     preferDraft,
     forceDisk,
-    diskMtime: file.lastModified
+    diskMtime: file.lastModified,
+    structuralHtml: archive && archive.documentHtml || null,
+    archiveVerification: archive && archive.verification || null
   });
   if (!State.diskPathHint) State.diskPathHint = file.name;
   if (isProtectedMentorTarget(file.name, State.diskPathHint)) {
@@ -8080,6 +8333,11 @@ async function tryLoadSidecar(mdFileName, mdFile) {
 }
 var MENTOR_MD_NAME = "content.md";
 var MENTOR_ANN_NAME = "annotations.json";
+var MENTOR_HTML_NAME = STRUCTURAL_HTML_NAME;
+var MENTOR_MANIFEST_NAME = ARCHIVE_MANIFEST_NAME;
+var _anchorResolveCallCount = 0;
+function __anchorResolveCount() { return _anchorResolveCallCount; }
+function __resetAnchorResolveCount() { _anchorResolveCallCount = 0; }
 var MENTOR_ZIP_MAX_COMPRESSED = 80 * 1024 * 1024;
 var MENTOR_ZIP_MAX_ENTRIES = 500;
 var MENTOR_ZIP_MAX_UNCOMPRESSED = 200 * 1024 * 1024;
@@ -8117,6 +8375,45 @@ async function isMentorZip(file) {
     return false;
   }
 }
+async function finishMentorArchiveRead({
+  mdText,
+  annotations,
+  annotationsText,
+  documentHtml,
+  manifestText,
+  references,
+  referencesBib,
+  mediaFiles,
+  _diag
+}) {
+  let manifest = null;
+  try {
+    manifest = manifestText ? JSON.parse(manifestText) : null;
+  } catch (_) {
+    manifest = null;
+  }
+  const annTextRaw = typeof annotationsText === "string"
+    ? annotationsText
+    : JSON.stringify(annotations == null ? { annotations: [] } : annotations, null, 2);
+  const verification = await verifyStructuralArchive({
+    mdText,
+    annotationsText: annTextRaw,
+    documentHtml: typeof documentHtml === "string" ? documentHtml : null,
+    manifest
+  });
+  return {
+    mdText,
+    annotations,
+    references,
+    referencesBib: referencesBib || "",
+    mediaFiles,
+    archive: {
+      documentHtml: verification.usable ? documentHtml : null,
+      verification
+    },
+    _diag
+  };
+}
 async function readMentorZip(file) {
   if (file && typeof file.size === "number" && file.size > MENTOR_ZIP_MAX_COMPRESSED) throw new Error(`.mentor 过大 (${Math.round(file.size / 1024 / 1024)}MB)`);
   const rawBuf = await file.arrayBuffer();
@@ -8130,7 +8427,17 @@ async function readMentorZip(file) {
       const blobUrlCount = (mdText.match(/!\[[^\]]*\]\(blob:[^)]+\)/g) || []).length;
       const mediaKeysCount = Object.keys(mediaFiles).length;
       _zipWorkerStats.loads++;
-      return { mdText, annotations: workerResult.annotations, references: normalizeReferenceManifest(workerResult.referencesJson || emptyReferenceManifest()), referencesBib: workerResult.referencesBib || "", mediaFiles, _diag: { blobUrlCount, mediaKeysCount } };
+      return await finishMentorArchiveRead({
+        mdText,
+        annotations: workerResult.annotations,
+        annotationsText: workerResult.annotationsText,
+        documentHtml: workerResult.documentHtml,
+        manifestText: workerResult.manifestText,
+        references: normalizeReferenceManifest(workerResult.referencesJson || emptyReferenceManifest()),
+        referencesBib: workerResult.referencesBib || "",
+        mediaFiles,
+        _diag: { blobUrlCount, mediaKeysCount }
+      });
     } catch (e) {
       console.warn("[zip-worker] load failed, falling back to main thread:", e);
       _zipWorkerStats.errors++; _zipWorkerStats.lastError = e.message || String(e); _zipWorkerStats.fallbacks++;
@@ -8140,23 +8447,42 @@ async function readMentorZip(file) {
   const zip = await JSZip.loadAsync(rawBuf);
   assertMentorZipBudget(file, zip);
   const mdEntry = zip.file(MENTOR_MD_NAME), annEntry = zip.file(MENTOR_ANN_NAME);
+  const htmlEntry = zip.file(MENTOR_HTML_NAME), manifestEntry = zip.file(MENTOR_MANIFEST_NAME);
   const refsEntry = zip.file("references.json"), refsBibEntry = zip.file("references.bib");
   if (!mdEntry) throw new Error(`.mentor 包缺少 ${MENTOR_MD_NAME}`);
   const mediaNames = Object.keys(zip.files).filter((name) => { const e = zip.files[name]; return name.startsWith("media/") && !name.includes("..") && !name.startsWith("/") && e && !e.dir; });
-  const all = await Promise.all([mdEntry.async("string"), annEntry ? annEntry.async("string") : null, refsEntry ? refsEntry.async("string") : null, refsBibEntry ? refsBibEntry.async("string") : null, ...mediaNames.map((name) => zip.file(name).async("blob").then((blob) => [name, blob]))]);
-  const [mdText, annText, refsText, referencesBib, ...mediaResults] = all;
+  const all = await Promise.all([
+    mdEntry.async("string"),
+    annEntry ? annEntry.async("string") : null,
+    htmlEntry ? htmlEntry.async("string") : null,
+    manifestEntry ? manifestEntry.async("string") : null,
+    refsEntry ? refsEntry.async("string") : null,
+    refsBibEntry ? refsBibEntry.async("string") : null,
+    ...mediaNames.map((name) => zip.file(name).async("blob").then((blob) => [name, blob]))
+  ]);
+  const [mdText, annText, documentHtml, manifestText, refsText, referencesBib, ...mediaResults] = all;
   let annotations = null, references = emptyReferenceManifest();
   if (annText !== null) try { annotations = JSON.parse(annText); } catch (e) { console.warn("[mentor] annotations.json 解析失败:", e); }
   if (refsText !== null) try { references = normalizeReferenceManifest(JSON.parse(refsText)); } catch (e) { console.warn("[mentor] references.json 解析失败:", e); }
   const mediaFiles = {}; for (const [name, blob] of mediaResults) mediaFiles[name] = blob;
   const blobUrlCount = (mdText.match(/!\[[^\]]*\]\(blob:[^)]+\)/g) || []).length, mediaKeysCount = Object.keys(mediaFiles).length;
-  return { mdText, annotations, references, referencesBib: referencesBib || "", mediaFiles, _diag: { blobUrlCount, mediaKeysCount } };
+  return await finishMentorArchiveRead({
+    mdText,
+    annotations,
+    annotationsText: annText,
+    documentHtml,
+    manifestText,
+    references,
+    referencesBib: referencesBib || "",
+    mediaFiles,
+    _diag: { blobUrlCount, mediaKeysCount }
+  });
 }
 async function openFromMentorFile(file, options = {}) {
   const quiet = !!(options && options.quiet);
   console.log("[openFromMentorFile] start, file=", file?.name, "size=", file?.size);
   // Never replace a user-selected File with a same-basename handle; that can open the wrong path.
-  const { mdText, annotations, references, mediaFiles } = await readMentorZip(file);
+  const { mdText, annotations, references, mediaFiles, archive } = await readMentorZip(file);
   console.log("[openFromMentorFile] mediaFiles keys=", Object.keys(mediaFiles || {}));
   const displayName = file.name;
   await activateOpenedDocument({
@@ -8167,7 +8493,10 @@ async function openFromMentorFile(file, options = {}) {
     mediaFiles,
     handle: null,
     saveMode: "mentor-download",
-    quiet
+    quiet,
+    forceDisk: !!(options && options.forceDisk),
+    structuralHtml: archive && archive.documentHtml || null,
+    archiveVerification: archive && archive.verification || null
   });
   const mediaCount = Object.keys(mediaFiles || {}).length;
   const blobUrlCount = (mdText.match(/!\[[^\]]*\]\(blob:[^)]+\)/g) || []).length;
@@ -8184,7 +8513,16 @@ async function openFromMentorFile(file, options = {}) {
   updateDocMeta();
   return { displayName, mdText, annotations };
 }
-async function buildMentorZipBlob(mdText, annotations, mediaFiles, references = State.references) {
+async function buildMentorZipBlob(mdText, annotations, mediaFiles, references = State.references, archive = {}) {
+  const annotationsText = JSON.stringify(annotations, null, 2);
+  let documentHtml = null;
+  let manifestText = null;
+  if (archive && typeof archive.documentHtml === "string") {
+    documentHtml = archive.documentHtml;
+    const archManifest = await createArchiveManifest({ mdText, annotationsText, documentHtml });
+    manifestText = JSON.stringify(archManifest, null, 2);
+  }
+  const refManifest = normalizeReferenceManifest(references || emptyReferenceManifest());
   if (_zipWorker && _zipWorkerReady) {
     try {
       const mediaList = [];
@@ -8196,8 +8534,16 @@ async function buildMentorZipBlob(mdText, annotations, mediaFiles, references = 
           transferList.push(buf);
         }
       }
-      const manifest = normalizeReferenceManifest(references || emptyReferenceManifest());
-      const workerResult = await _zipWorkerCall("build", { mdText, sidecar: annotations, referencesJson: manifest.entries.length ? manifest : null, referencesBib: manifest.entries.length ? serializeReferenceBibTeX(manifest.entries) : "", mediaFiles: mediaList }, transferList);
+      const workerResult = await _zipWorkerCall("build", {
+        mdText,
+        sidecar: annotations,
+        sidecarText: annotationsText,
+        documentHtml,
+        manifestText,
+        referencesJson: refManifest.entries.length ? refManifest : null,
+        referencesBib: refManifest.entries.length ? serializeReferenceBibTeX(refManifest.entries) : "",
+        mediaFiles: mediaList
+      }, transferList);
       _zipWorkerStats.builds++;
       return new Blob([workerResult.bytes], { type: "application/zip" });
     } catch (e) {
@@ -8213,16 +8559,19 @@ async function buildMentorZipBlob(mdText, annotations, mediaFiles, references = 
   }
   const zip = new JSZip();
   zip.file(MENTOR_MD_NAME, mdText);
-  zip.file(MENTOR_ANN_NAME, JSON.stringify(annotations, null, 2));
-  const manifest = normalizeReferenceManifest(references || emptyReferenceManifest());
-  if (manifest.entries.length) {
-    zip.file("references.json", JSON.stringify(manifest, null, 2));
-    zip.file("references.bib", serializeReferenceBibTeX(manifest.entries));
+  zip.file(MENTOR_ANN_NAME, annotationsText);
+  if (typeof documentHtml === "string" && typeof manifestText === "string") {
+    zip.file(MENTOR_HTML_NAME, documentHtml);
+    zip.file(MENTOR_MANIFEST_NAME, manifestText);
+  }
+  if (refManifest.entries.length) {
+    zip.file("references.json", JSON.stringify(refManifest, null, 2));
+    zip.file("references.bib", serializeReferenceBibTeX(refManifest.entries));
   }
   if (mediaFiles) {
     for (const [path2, blob] of Object.entries(mediaFiles)) {
       if (!path2.startsWith("media/") || path2.includes("..") || path2.startsWith("/")) {
-        console.warn("[mentor] buildMentorZipBlob \u8DF3\u8FC7\u975E\u6CD5 path:", path2);
+        console.warn("[mentor] buildMentorZipBlob 跳过非法 path:", path2);
         continue;
       }
       zip.file(path2, blob);
@@ -8393,7 +8742,7 @@ async function saveCurrent() {
   if (isMentorPackMode()) {
     try {
       showExportProgress("\u6B63\u5728\u6253\u5305 .mentor\u2026");
-      const blob = await buildMentorZipBlob(snapshot.mdText, snapshot.sidecar, snapshot.mediaFiles);
+      const blob = await buildMentorZipBlob(snapshot.mdText, snapshot.sidecar, snapshot.mediaFiles, snapshot.references, { documentHtml: snapshot.documentHtml });
       const outName = /\.mentor$/i.test(snapshot.name)
         ? snapshot.name
         : mentorExportName(snapshot.name);
@@ -8433,7 +8782,7 @@ async function tryWriteBackMentor(mdText, sidecar, mentorName) {
     const perm = await ensureWritePermission(handle);
     if (perm === "denied") return { handle: false, error: "\u6743\u9650\u88AB\u62D2" };
     showExportProgress("\u6B63\u5728\u6253\u5305 .mentor\u2026");
-    const blob = await buildMentorZipBlob(mdText, sidecar, State.mediaFiles);
+    const blob = await buildMentorZipBlob(mdText, sidecar, State.mediaFiles, State.references, { documentHtml: State.editor ? State.editor.getHTML() : undefined });
     const wr = await writeToHandle(handle, blob);
     if (!wr.ok) {
       hideExportProgress("\u4FDD\u5B58\u5931\u8D25");
@@ -9897,7 +10246,7 @@ function setupToolbar() {
     try {
       const snapshot = createSaveSnapshot();
       showExportProgress("\u6B63\u5728\u6253\u5305 .mentor\u2026");
-      const blob = await buildMentorZipBlob(snapshot.mdText, snapshot.sidecar, snapshot.mediaFiles);
+      const blob = await buildMentorZipBlob(snapshot.mdText, snapshot.sidecar, snapshot.mediaFiles, snapshot.references, { documentHtml: snapshot.documentHtml });
       const exportName = /\.mentor$/i.test(snapshot.name) ? snapshot.name : mentorExportName(snapshot.name);
       downloadBlob(exportName, blob);
       hideExportProgress("\u5DF2\u4E0B\u8F7D");
@@ -11003,7 +11352,8 @@ window.__mdAnnotator = {
       activeHighlightKey
     },
     tabs: { genTabId: genTabIdPure, findTabByDocument: findTabByDocumentPure, snapshotTabState, tabLabel },
-    annotationAnchor: { findOccurrences, scoreCandidate, resolveAnchor, resolveAnchorSet, mapAnchorRange, captureAnchorEvidence, projectLegacyFlags, auditAnnotationInvariants }
+    annotationAnchor: { findOccurrences, scoreCandidate, resolveAnchor, resolveAnchorSet, mapAnchorRange, captureAnchorEvidence, projectLegacyFlags, auditAnnotationInvariants },
+    mentorArchive: { createArchiveManifest, verifyStructuralArchive, STRUCTURAL_HTML_NAME, ARCHIVE_MANIFEST_NAME }
   },
   loadMarkdownIntoEditor,
   insertCitation,
@@ -11084,6 +11434,10 @@ window.__mdAnnotator = {
   setTheme,
   renderOutline,
   findAnnotationRange,
+  __anchorResolveCount,
+  __resetAnchorResolveCount,
+  collectEmbeddedAnnotationRanges,
+  sanitizeStructuralHtml,
   computeContextAt,
   collectLiveAnnotationAudit,
   exportAnchorDiagnosis,
