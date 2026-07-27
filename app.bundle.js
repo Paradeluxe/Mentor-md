@@ -59182,14 +59182,7 @@ function handleSelectionChange(opts = {}) {
     return;
   }
   if (activeMarkThreadId) {
-    const switched = State2.activeThreadId !== activeMarkThreadId;
-    State2.activeThreadId = activeMarkThreadId;
-    highlightActiveMark();
-    if (switched) {
-      if (!setActiveCommentCard(activeMarkThreadId)) {
-        renderCommentList();
-      }
-    }
+    activateAnnotationThread(activeMarkThreadId, { ensureCard: true });
   }
   const popover = $("#mark-delete-popover");
   if (popover) {
@@ -59208,12 +59201,7 @@ function handleSelectionChange(opts = {}) {
         (a) => a && !a.invalid && Array.isArray(a.imageAnchors) && a.imageAnchors.some((x) => x && (x.from === sel0.from || src && x.src === src))
       );
       if (hit) {
-        const switched = State2.activeThreadId !== hit.threadId;
-        State2.activeThreadId = hit.threadId;
-        highlightActiveMark();
-        if (switched) {
-          if (!setActiveCommentCard(hit.threadId)) renderCommentList();
-        }
+        activateAnnotationThread(hit.threadId, { ensureCard: true });
         refreshAnnotationImageDecos();
       }
     } catch (e) {
@@ -59664,9 +59652,7 @@ function setupFloatCommentButton() {
               }
             }
           }
-          State2.activeThreadId = markClick.threadId;
-          highlightActiveMark();
-          if (!setActiveCommentCard(markClick.threadId)) renderCommentList();
+          activateAnnotationThread(markClick.threadId, { ensureCard: true });
           positionMarkDeletePopover();
           return;
         }
@@ -60060,7 +60046,7 @@ function createAnnotationThread(from2, to, text2, opts = null) {
     applyAnnotationMark(threadId, from2, to);
   }
   refreshAnnotationImageDecos();
-  State2.activeThreadId = threadId;
+  activateAnnotationThread(threadId, { ensureCard: false });
   if (options.type) seedDraft(threadId, options.type);
   renderCommentList();
   positionMarkDeletePopover();
@@ -60131,7 +60117,7 @@ function handleCreateMultiCellAnnotation(cellSel, opts = {}) {
   State2.annotations.push(thread);
   applyAnnotationMarksMultiCell(threadId, ranges);
   State2.editor.commands.setTextSelection(ranges[0].from);
-  State2.activeThreadId = threadId;
+  activateAnnotationThread(threadId, { ensureCard: false });
   if (options.type) seedDraft(threadId, options.type);
   renderCommentList();
   focusThreadInput(threadId, { type: options.type });
@@ -60272,7 +60258,7 @@ function handleCreateMultiParagraphAnnotation(from2, to, opts = {}) {
   ed.view.dispatch(tr2);
   refreshAnnotationImageDecos();
   ed.commands.setTextSelection(ranges[0].from);
-  State2.activeThreadId = threadId;
+  activateAnnotationThread(threadId, { ensureCard: false });
   if (options.type) seedDraft(threadId, options.type);
   renderCommentList();
   focusThreadInput(threadId, { type: options.type });
@@ -60508,6 +60494,37 @@ function ensureCommentCardVisible(threadId) {
   renderCommentList();
   return !!document.querySelector(`#comment-list .comment-thread[data-thread="${threadId}"]`);
 }
+function annotationWarningState(thread) {
+  if (!thread || typeof thread !== "object") return null;
+  const status = thread.anchor && thread.anchor.status;
+  const reason = thread.invalidReason || "";
+  if (status === "ambiguous" || reason === "ambiguous") return { kind: "ambiguous" };
+  if (status === "collision" || reason === "mark-collision" || reason === "collision") return { kind: "collision" };
+  if (status === "image-missing" || reason === "image-deleted") return { kind: "image-missing" };
+  if (status === "orphaned" || thread.deleted || thread.invalid) return { kind: "orphaned" };
+  return null;
+}
+function activateAnnotationThread(threadId, options = {}) {
+  if (!threadId) {
+    const switched2 = State2.activeThreadId != null;
+    State2.activeThreadId = null;
+    if (options.skipHighlight !== true) highlightActiveMark();
+    if (options.ensureCard !== false && switched2) {
+      setActiveCommentCard(null);
+    }
+    return true;
+  }
+  const thread = (State2.annotations || []).find((item) => item && item.threadId === threadId);
+  if (!thread) return false;
+  const ensureCard = options.ensureCard !== false;
+  const switched = State2.activeThreadId !== threadId;
+  State2.activeThreadId = threadId;
+  if (options.skipHighlight !== true) highlightActiveMark();
+  if (ensureCard && switched && !setActiveCommentCard(threadId)) {
+    renderCommentList();
+  }
+  return true;
+}
 function setActiveCommentCard(threadId) {
   const list = document.getElementById("comment-list");
   if (!list) return false;
@@ -60604,13 +60621,15 @@ function renderCommentList() {
     const safeComments = Array.isArray(thread.comments) ? thread.comments : [];
     const replies = safeComments.slice(1);
     const isActive2 = State2.activeThreadId === thread.threadId;
+    const warnState = annotationWarningState(thread);
+    const warnKind = warnState && warnState.kind;
     const number = (windowStart || 0) + idx + 1;
     const isCollapsed = thread.resolved && !State2.expandedThreadIds?.[thread.threadId] || !!State2.manuallyCollapsedIds?.[thread.threadId];
     const threadType = threadTypeOf(thread);
     const safeThreadId = escapeHtml(thread.threadId);
     return `
-      <div class="comment-thread ${isActive2 ? "is-active" : ""} ${thread.resolved ? "is-resolved" : ""} ${thread.fuzzy ? "is-fuzzy" : ""} ${thread.deleted ? "is-deleted" : ""} ${thread.invalidReason === "ambiguous" ? "is-ambiguous" : ""} ${isCollapsed ? "is-collapsed" : ""} ${thread.pending ? "is-pending" : ""}${threadTypeClass(thread)}" data-thread="${safeThreadId}" data-thread-type="${threadType || ""}">
-        ${thread.deleted ? '<div class="deleted-banner">\u{1F4CD} \u539F\u6587\u5DF2\u88AB\u5220\u9664 - <button class="link-btn" data-act="reattach" data-thread="' + safeThreadId + '">\u91CD\u65B0\u9009\u62E9\u6B63\u6587</button> \xB7 <button class="link-btn link-danger" data-act="delete-orphan" data-thread="' + safeThreadId + '">\u5220\u9664</button></div>' : thread.invalidReason === "ambiguous" ? '<div class="ambiguous-banner">\u26A0 \u65E0\u6CD5\u552F\u4E00\u786E\u5B9A\u539F\u6587\u4F4D\u7F6E\uFF08\u91CD\u590D\u951A\u70B9\uFF09\u2014 <button class="link-btn" data-act="reattach" data-thread="' + safeThreadId + '">\u91CD\u65B0\u9009\u62E9\u6B63\u6587</button> \xB7 <button class="link-btn link-danger" data-act="delete-orphan" data-thread="' + safeThreadId + '">\u5220\u9664</button></div>' : thread.invalid && !thread.deleted ? '<div class="invalid-banner">\u26A0 \u6279\u6CE8\u951A\u70B9\u5931\u6548 \u2014 <button class="link-btn" data-act="reattach" data-thread="' + safeThreadId + '">\u91CD\u65B0\u9009\u62E9\u6B63\u6587</button> \xB7 <button class="link-btn link-danger" data-act="delete-orphan" data-thread="' + safeThreadId + '">\u5220\u9664</button></div>' : thread.fuzzy ? '<div class="fuzzy-banner">\u26A0 \u4F4D\u7F6E\u53EF\u80FD\u504F\u79FB - \u8BF7\u68C0\u67E5\u6587\u6863</div>' : ""}
+      <div class="comment-thread ${isActive2 ? "is-active" : ""} ${thread.resolved ? "is-resolved" : ""} ${thread.fuzzy ? "is-fuzzy" : ""} ${thread.deleted ? "is-deleted" : ""} ${warnKind === "ambiguous" || thread.invalidReason === "ambiguous" ? "is-ambiguous" : ""} ${isCollapsed ? "is-collapsed" : ""} ${thread.pending ? "is-pending" : ""}${threadTypeClass(thread)}" data-thread="${safeThreadId}" data-thread-type="${threadType || ""}">
+        ${warnKind === "orphaned" || thread.deleted ? '<div class="deleted-banner">\u{1F4CD} \u539F\u6587\u5DF2\u88AB\u5220\u9664 - <button class="link-btn" data-act="reattach" data-thread="' + safeThreadId + '">\u91CD\u65B0\u9009\u62E9\u6B63\u6587</button> \xB7 <button class="link-btn link-danger" data-act="delete-orphan" data-thread="' + safeThreadId + '">\u5220\u9664</button></div>' : warnKind === "ambiguous" ? '<div class="ambiguous-banner">\u26A0 \u65E0\u6CD5\u552F\u4E00\u786E\u5B9A\u539F\u6587\u4F4D\u7F6E\uFF08\u91CD\u590D\u951A\u70B9\uFF09\u2014 <button class="link-btn" data-act="reattach" data-thread="' + safeThreadId + '">\u91CD\u65B0\u9009\u62E9\u6B63\u6587</button> \xB7 <button class="link-btn link-danger" data-act="delete-orphan" data-thread="' + safeThreadId + '">\u5220\u9664</button></div>' : warnKind === "collision" || warnKind === "image-missing" || thread.invalid && !thread.deleted ? '<div class="invalid-banner">\u26A0 \u6279\u6CE8\u951A\u70B9\u5931\u6548 \u2014 <button class="link-btn" data-act="reattach" data-thread="' + safeThreadId + '">\u91CD\u65B0\u9009\u62E9\u6B63\u6587</button> \xB7 <button class="link-btn link-danger" data-act="delete-orphan" data-thread="' + safeThreadId + '">\u5220\u9664</button></div>' : thread.fuzzy ? '<div class="fuzzy-banner">\u26A0 \u4F4D\u7F6E\u53EF\u80FD\u504F\u79FB - \u8BF7\u68C0\u67E5\u6587\u6863</div>' : ""}
         <!-- \u5361\u7247\u5934: \u5E8F\u53F7 + \u5F15\u6587 (\u53EF\u70B9\u51FB\u8DF3\u8F6C) + \u22EF \u83DC\u5355\u6309\u94AE -->
         <!-- v5: \u70B9\u51FB\u5361\u7247\u6807\u9898\u533A\u57DF = \u6298\u53E0/\u5C55\u5F00 (\u7528\u6237\u660E\u786E\u8981\u6C42). \u8DF3\u8F6C\u6B63\u6587\u8D70 \u22EF \u83DC\u5355 "\u{1F4CD} \u8DF3\u8F6C\u5230\u6279\u6CE8\u5904" -->
         <div class="comment-quote" data-thread="${safeThreadId}" title="\u70B9\u51FB\u6536\u8D77/\u5C55\u5F00\u6279\u6CE8">
@@ -60902,10 +60921,8 @@ function toggleManualCollapse(tid) {
   }
 }
 function scrollToCommentText(tid) {
-  State2.activeThreadId = tid;
-  highlightActiveMark();
+  if (!activateAnnotationThread(tid, { ensureCard: true })) return;
   scrollToThread(tid);
-  renderCommentList();
 }
 function scrollToThread(threadId) {
   const thread = State2.annotations.find((t) => t && typeof t === "object" && t.threadId === threadId);
@@ -60941,9 +60958,7 @@ function scrollToThread(threadId) {
       } catch (e2) {
       }
     }
-    State2.activeThreadId = threadId;
-    highlightActiveMark();
-    if (!setActiveCommentCard(threadId)) renderCommentList();
+    activateAnnotationThread(threadId, { ensureCard: true });
     return;
   }
   try {
@@ -60980,19 +60995,17 @@ function scrollToThread(threadId) {
       } catch (e2) {
       }
     }
-    State2.activeThreadId = threadId;
     try {
       const dom = editor2.view.nodeDOM(imgPos);
       const el = dom && (dom.tagName === "IMG" ? dom : dom.querySelector && dom.querySelector("img"));
       if (el && el.scrollIntoView) el.scrollIntoView({ block: "center", behavior: "smooth" });
     } catch (e) {
     }
-    highlightActiveMark();
+    activateAnnotationThread(threadId, { ensureCard: true });
     try {
       refreshAnnotationImageDecos();
     } catch (e) {
     }
-    if (!setActiveCommentCard(threadId)) renderCommentList();
     return;
   }
   showToast("\u6279\u6CE8\u4F4D\u7F6E\u5DF2\u5931\u6548\uFF08\u53EF\u80FD\u6587\u6863\u88AB\u4FEE\u6539\uFF09");
@@ -61012,21 +61025,6 @@ function highlightActiveMark() {
   } catch (e) {
     console.warn("[highlightActiveMark] deco", e);
   }
-  const editorEl = editor2.view.dom;
-  const prevTid = highlightActiveMark._prevTid || null;
-  if (prevTid && prevTid !== targetTid) {
-    editorEl.querySelectorAll(`.annotation-mark[data-thread-id="${CSS.escape ? CSS.escape(prevTid) : prevTid}"]`).forEach((el) => el.classList.remove("is-active"));
-  } else if (!prevTid) {
-    editorEl.querySelectorAll(".annotation-mark.is-active").forEach((el) => el.classList.remove("is-active"));
-  }
-  if (targetTid) {
-    const safe = CSS.escape ? CSS.escape(targetTid) : targetTid;
-    editorEl.querySelectorAll(`.annotation-mark[data-thread-id="${safe}"]`).forEach((el) => el.classList.add("is-active"));
-  } else if (prevTid) {
-    const safe = CSS.escape ? CSS.escape(prevTid) : prevTid;
-    editorEl.querySelectorAll(`.annotation-mark[data-thread-id="${safe}"]`).forEach((el) => el.classList.remove("is-active"));
-  }
-  highlightActiveMark._prevTid = targetTid || null;
   const hasImgAnn = (State2.annotations || []).some((a) => a && Array.isArray(a.imageAnchors) && a.imageAnchors.length);
   if (hasImgAnn) {
     try {
@@ -66573,6 +66571,8 @@ window.__mdAnnotator = {
   flushCommentListUi: () => flushCommentListUi(),
   // v1.43.47: 只切 active 卡，不整表重渲
   setActiveCommentCard: (tid) => setActiveCommentCard(tid),
+  activateAnnotationThread: (tid, opts) => activateAnnotationThread(tid, opts),
+  annotationWarningState: (thread) => annotationWarningState(thread),
   ensureCommentCardVisible: (tid) => ensureCommentCardVisible(tid),
   // highlightActiveMark exported as function ref above (DecorationSet path)
   // P-reload: 同步列出所有 IDB 缓存 (返回 Object 不返回 Promise, 方便 console.log 检查)
