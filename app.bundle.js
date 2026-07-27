@@ -56462,6 +56462,171 @@ function mediaRevision(mediaFiles) {
   }).join("|");
 }
 
+// modules/toolbar-actions.js
+var PRIMARY_TOOLBAR_ACTIONS = Object.freeze([
+  { id: "new", label: "\u65B0\u5EFA" },
+  { id: "open", label: "\u6253\u5F00" },
+  { id: "save", label: "\u4FDD\u5B58" },
+  { id: "saveAs", label: "\u53E6\u5B58" },
+  { id: "exportMd", label: "MD" },
+  { id: "exportDocx", label: "DOCX" },
+  { id: "references", label: "\u6587\u732E" },
+  { id: "undo", label: "\u64A4\u9500" },
+  { id: "redo", label: "\u91CD\u505A" },
+  { id: "source", label: "\u6E90\u7801" }
+]);
+function getToolbarActionState(input = {}) {
+  const hasDocument = !!input.hasDocument;
+  const readOnly = !!input.readOnly;
+  const busy = !!input.busy;
+  const renderMode = input.renderMode === "source" ? "source" : "rendered";
+  return {
+    new: {
+      label: "\u65B0\u5EFA",
+      disabled: busy
+    },
+    open: {
+      label: "\u6253\u5F00",
+      disabled: busy
+    },
+    save: {
+      label: "\u4FDD\u5B58",
+      disabled: !hasDocument || readOnly || busy,
+      intent: input.hasWriteHandle ? "write-current" : "choose-save-target",
+      dirty: !!input.dirty
+    },
+    saveAs: {
+      label: "\u53E6\u5B58",
+      disabled: !hasDocument || busy
+    },
+    exportMd: {
+      label: "MD",
+      disabled: !hasDocument || busy
+    },
+    exportDocx: {
+      label: "DOCX",
+      disabled: !hasDocument || busy,
+      detail: "\u4EC5\u6B63\u6587\uFF0C\u4E0D\u542B\u6279\u6CE8\u4E0E\u5F15\u7528\u5E93\u5143\u6570\u636E"
+    },
+    references: {
+      label: "\u6587\u732E",
+      disabled: !hasDocument || busy,
+      pressed: !!input.referencesOpen
+    },
+    undo: {
+      label: "\u64A4\u9500",
+      disabled: !hasDocument || !input.canUndo || busy
+    },
+    redo: {
+      label: "\u91CD\u505A",
+      disabled: !hasDocument || !input.canRedo || busy
+    },
+    source: {
+      label: renderMode === "source" ? "\u9884\u89C8" : "\u6E90\u7801",
+      disabled: !hasDocument || busy,
+      pressed: renderMode === "source"
+    }
+  };
+}
+
+// modules/save-dialog.js
+function buildSaveDialogModel(input = {}) {
+  const fileName = input.fileName || "document";
+  const ann = Number(input.annotations) || 0;
+  const refs = Number(input.references) || 0;
+  const media = Number(input.media) || 0;
+  switch (input.kind) {
+    case "external-modified":
+      return {
+        title: "\u6587\u4EF6\u5DF2\u5728\u5916\u90E8\u4FEE\u6539",
+        message: "\u7EE7\u7EED\u4FDD\u5B58\u4F1A\u8986\u76D6\u5916\u90E8\u7248\u672C\u3002\u5EFA\u8BAE\u5148\u53D6\u6D88\u5E76\u91CD\u65B0\u6253\u5F00\u6216\u53E6\u5B58\u526F\u672C\u3002",
+        primaryLabel: "\u4ECD\u7136\u8986\u76D6",
+        secondaryLabel: "\u53E6\u5B58\u526F\u672C",
+        cancelLabel: "\u53D6\u6D88",
+        severity: "danger",
+        details: [
+          { label: "\u6587\u4EF6", value: fileName },
+          { label: "\u98CE\u9669", value: "\u8986\u76D6\u78C1\u76D8\u4E0A\u7684\u5916\u90E8\u4FEE\u6539" }
+        ]
+      };
+    case "protected":
+      return {
+        title: "\u6B64\u6587\u6863\u53D7\u4FDD\u62A4",
+        message: "\u4E3A\u907F\u514D\u8986\u76D6\u7814\u7A76\u539F\u7A3F\uFF0CMentor \u5DF2\u963B\u6B62\u76F4\u63A5\u5199\u56DE\u3002",
+        primaryLabel: "\u53E6\u5B58\u526F\u672C",
+        secondaryLabel: "",
+        cancelLabel: "\u53D6\u6D88",
+        severity: "warning",
+        details: [
+          { label: "\u6587\u4EF6", value: fileName },
+          { label: "\u5EFA\u8BAE", value: "\u53E6\u5B58\u4E3A .mentor \u526F\u672C\uFF0C\u4E0D\u6539\u539F\u6587\u4EF6" }
+        ]
+      };
+    case "anchor-audit":
+      return {
+        title: "\u6279\u6CE8\u4F4D\u7F6E\u9700\u8981\u68C0\u67E5",
+        message: `\u68C0\u6D4B\u5230 ${input.issueCount || 1} \u4E2A\u6279\u6CE8\u4F4D\u7F6E\u4E0D\u4E00\u81F4\uFF0C\u5DF2\u505C\u6B62\u4FDD\u5B58\u4EE5\u907F\u514D\u5199\u574F\u6587\u4EF6\u3002`,
+        primaryLabel: "\u67E5\u770B\u95EE\u9898",
+        secondaryLabel: "\u53E6\u5B58\u8BCA\u65AD\u526F\u672C",
+        cancelLabel: "\u53D6\u6D88",
+        severity: "danger",
+        details: [
+          { label: "\u6587\u4EF6", value: fileName },
+          { label: "\u95EE\u9898\u6570", value: String(input.issueCount || 1) }
+        ]
+      };
+    case "permission-denied":
+      return {
+        title: "\u6CA1\u6709\u5199\u6743\u9650",
+        message: "\u6D4F\u89C8\u5668\u62D2\u7EDD\u5199\u56DE\u539F\u6587\u4EF6\u3002\u53EF\u53E6\u5B58 .mentor \u526F\u672C\uFF0C\u6216\u91CD\u65B0\u6253\u5F00\u6587\u4EF6\u5E76\u6388\u6743\u3002",
+        primaryLabel: "\u53E6\u5B58 .mentor",
+        secondaryLabel: "",
+        cancelLabel: "\u53D6\u6D88",
+        severity: "warning",
+        details: [{ label: "\u6587\u4EF6", value: fileName }]
+      };
+    case "no-handle":
+    default:
+      return {
+        title: "\u4FDD\u5B58\u6587\u6863",
+        message: "\u5F53\u524D\u6D4F\u89C8\u5668\u4E0D\u80FD\u76F4\u63A5\u5199\u56DE\u539F\u6587\u4EF6\u3002\u5EFA\u8BAE\u4FDD\u5B58\u4E3A .mentor\uFF0C\u4EE5\u4FDD\u7559\u6B63\u6587\u3001\u6279\u6CE8\u3001\u56FE\u7247\u548C\u6587\u732E\u5E93\u3002",
+        primaryLabel: "\u4FDD\u5B58 .mentor",
+        secondaryLabel: "\u4EC5\u5BFC\u51FA Markdown",
+        cancelLabel: "\u53D6\u6D88",
+        severity: "normal",
+        details: [
+          { label: "\u6587\u4EF6", value: mentorLikeName(fileName) },
+          { label: "\u53BB\u5411", value: "\u4E0B\u8F7D\u5230\u672C\u673A" },
+          { label: "\u5305\u542B", value: `\u6B63\u6587 \xB7 \u6279\u6CE8 ${ann} \xB7 \u6587\u732E ${refs} \xB7 \u56FE\u7247 ${media}` },
+          { label: "\u4E0D\u542B", value: "\u4E0D\u4F1A\u5199\u56DE\u539F\u8DEF\u5F84" }
+        ]
+      };
+  }
+}
+function mentorLikeName(name) {
+  const n = String(name || "document");
+  if (/\.mentor$/i.test(n)) return n;
+  return n.replace(/\.(md|markdown)$/i, "") + ".mentor";
+}
+function buildSaveResultCopy({ kind, fileName } = {}) {
+  if (kind === "write-current") {
+    return { status: "\u5DF2\u4FDD\u5B58", detail: `\u5DF2\u5199\u56DE ${fileName || ""}`.trim(), clearsDirty: true };
+  }
+  if (kind === "save-copy") {
+    return { status: "\u526F\u672C\u5DF2\u4E0B\u8F7D", detail: "\u539F\u6587\u4EF6\u672A\u6539\u53D8", clearsDirty: false };
+  }
+  if (kind === "save-download-mentor") {
+    return { status: "\u5DF2\u4FDD\u5B58", detail: `${fileName || ".mentor"} \u5DF2\u4E0B\u8F7D`, clearsDirty: true };
+  }
+  if (kind === "export-md") {
+    return { status: "Markdown \u5DF2\u5BFC\u51FA", detail: "\u539F\u6587\u4EF6\u672A\u6539\u53D8", clearsDirty: false };
+  }
+  if (kind === "export-docx") {
+    return { status: "DOCX \u5DF2\u5BFC\u51FA", detail: "\u4EC5\u6B63\u6587\uFF1B\u6279\u6CE8\u4E0E\u6587\u732E\u5E93\u672A\u5BFC\u51FA", clearsDirty: false };
+  }
+  return { status: "\u5DF2\u5B8C\u6210", detail: "", clearsDirty: false };
+}
+
 // app.js
 var KatexInline = Node2.create({
   name: "katex",
@@ -57743,6 +57908,10 @@ function markDirty() {
     } catch {
     }
   }
+  try {
+    syncToolbarActionState();
+  } catch {
+  }
 }
 function resyncImageAnchors(ann, doc5) {
   if (!ann || !doc5 || !Array.isArray(ann.imageAnchors) || ann.imageAnchors.length === 0) {
@@ -58797,6 +58966,10 @@ function markClean() {
     }
     updateTreeDirtyDots();
   }
+  try {
+    syncToolbarActionState();
+  } catch {
+  }
 }
 var _autosaveTimer = null;
 var AUTOSAVE_INTERVAL = 3e4;
@@ -58862,7 +59035,8 @@ async function writeToHandle(handle, data) {
     }
   }
 }
-async function writeCurrentToHandle({ reason = "manual", showProgress = false } = {}) {
+async function writeCurrentToHandle({ reason = "manual", showProgress = false, forceOverwriteExternal = false } = {}) {
+  const options = { forceOverwriteExternal };
   if (!State2.currentFile || !State2.currentFile.handle) {
     return { ok: false, error: "\u65E0\u6587\u4EF6\u53E5\u67C4" };
   }
@@ -58876,8 +59050,13 @@ async function writeCurrentToHandle({ reason = "manual", showProgress = false } 
     if (reason === "autosave") {
       return { ok: false, skipped: true, error: "protected" };
     }
-    if (!confirmProtectedWrite("\u4FDD\u5B58")) {
-      return { ok: false, error: "\u5DF2\u53D6\u6D88\u5199\u56DE\u53D7\u4FDD\u62A4\u8DEF\u5F84 (\u53EF\u53E6\u5B58\u4E3A\u526F\u672C)" };
+    const baseProt = mentorBaseName(State2.currentFile.name);
+    if (!State2.protectedWriteUnlocked[baseProt]) {
+      return {
+        ok: false,
+        conflict: { kind: "protected", fileName: State2.currentFile.name },
+        error: "protected"
+      };
     }
   }
   let snapshot;
@@ -58905,18 +59084,17 @@ async function writeCurrentToHandle({ reason = "manual", showProgress = false } 
         if (reason === "autosave") {
           return { ok: false, skipped: true, error: "external-modified" };
         }
-        const ok = confirm(
-          `\u26A0 \u4E3B\u6587\u4EF6\u5728\u5916\u90E8\u88AB\u4FEE\u6539!
-
-\u4F60\u6700\u540E\u4E00\u6B21\u6253\u5F00/\u4FDD\u5B58: ${new Date(snapshot.fileMtime).toLocaleTimeString()}
-\u5F53\u524D\u6587\u4EF6 mtime: ${new Date(currentFile.lastModified).toLocaleTimeString()}
-
-\u7EE7\u7EED\u4FDD\u5B58\u4F1A\u8986\u76D6\u5916\u90E8\u4FEE\u6539\u3002
-
-\u786E\u5B9A\u8981\u8986\u76D6\u5417? (\u5EFA\u8BAE\u5148\u53D6\u6D88, \u5907\u4EFD\u5916\u90E8\u6539\u52A8, \u518D\u5408\u5E76)`
-        );
-        if (!ok) {
-          return { ok: false, error: "\u7528\u6237\u53D6\u6D88: \u68C0\u6D4B\u5230\u5916\u90E8\u4FEE\u6539" };
+        if (!options.forceOverwriteExternal) {
+          return {
+            ok: false,
+            conflict: {
+              kind: "external-modified",
+              fileName: snapshot.name,
+              fileMtime: snapshot.fileMtime,
+              diskMtime: currentFile.lastModified
+            },
+            error: "external-modified"
+          };
         }
       }
     } catch (e) {
@@ -61790,8 +61968,15 @@ function highlightSelectionInSource(md2, selectedText) {
 function updateToggleBtnIcon() {
   const btn = $("#btn-toggle-render");
   if (!btn) return;
-  const iconSpan = btn.querySelector(".tb-icon");
-  iconSpan.innerHTML = State2.renderMode === "rendered" ? window.MentorIcons.sourceMode : window.MentorIcons.renderMode;
+  const source = State2.renderMode === "source";
+  btn.dataset.mode = source ? "source" : "rendered";
+  btn.setAttribute("aria-pressed", source ? "true" : "false");
+  const label = btn.querySelector(".tb-label") || btn.querySelector("span:not(.tb-icon)");
+  if (label) label.textContent = source ? "\u9884\u89C8" : "\u6E90\u7801";
+  try {
+    syncToolbarActionState();
+  } catch {
+  }
 }
 var _renderOutlineTimer = null;
 function scheduleRenderOutline() {
@@ -62171,6 +62356,61 @@ function updateHistoryButtons() {
   const redoBtn = $("#btn-redo");
   if (undoBtn) undoBtn.disabled = State2.history.past.length === 0;
   if (redoBtn) redoBtn.disabled = State2.history.future.length === 0;
+  try {
+    syncToolbarActionState();
+  } catch {
+  }
+}
+function applyToolbarActionState(sel, state) {
+  const el = typeof sel === "string" ? document.querySelector(sel) : sel;
+  if (!el || !state) return;
+  if ("disabled" in state) el.disabled = !!state.disabled;
+  if ("label" in state) {
+    const lab = el.querySelector(".tb-label");
+    if (lab) lab.textContent = state.label;
+  }
+  if ("pressed" in state) {
+    el.setAttribute("aria-pressed", state.pressed ? "true" : "false");
+    if (el.id === "btn-refs") el.setAttribute("aria-expanded", state.pressed ? "true" : "false");
+  }
+  if (state.detail) el.setAttribute("data-detail", state.detail);
+  if (state.intent) el.setAttribute("data-intent", state.intent);
+  if ("dirty" in state && el.id === "btn-save") el.setAttribute("data-dirty", state.dirty ? "true" : "false");
+}
+function syncToolbarActionState() {
+  let canUndo = State2.history.past.length > 0;
+  let canRedo = State2.history.future.length > 0;
+  try {
+    if (State2.editor?.can?.().undo?.()) canUndo = true;
+    if (State2.editor?.can?.().redo?.()) canRedo = true;
+  } catch {
+  }
+  const refsPane = document.querySelector("#refs-pane");
+  const referencesOpen = !!(refsPane && !refsPane.classList.contains("hidden"));
+  const actionState = getToolbarActionState({
+    hasDocument: !!State2.currentFile,
+    hasWriteHandle: hasWriteHandle(),
+    dirty: !!(State2.currentFile && State2.currentFile.dirty),
+    readOnly: !!State2.readOnlyMode || !canWriteLiveDocument(),
+    saveMode: State2.saveMode,
+    renderMode: State2.renderMode === "source" ? "source" : "rendered",
+    referencesOpen,
+    canUndo,
+    canRedo,
+    busy: !!State2._toolbarBusy
+  });
+  applyToolbarActionState("#btn-new", actionState.new);
+  applyToolbarActionState("#btn-open-files", actionState.open);
+  applyToolbarActionState("#btn-save", actionState.save);
+  applyToolbarActionState("#btn-save-as", actionState.saveAs);
+  applyToolbarActionState("#btn-export-md", actionState.exportMd);
+  applyToolbarActionState("#btn-export-docx", actionState.exportDocx);
+  applyToolbarActionState("#btn-refs", actionState.references);
+  applyToolbarActionState("#btn-undo", actionState.undo);
+  applyToolbarActionState("#btn-redo", actionState.redo);
+  applyToolbarActionState("#btn-toggle-render", actionState.source);
+  const saveBtn = document.querySelector("#btn-save");
+  if (saveBtn) saveBtn.setAttribute("data-dirty", String(!!(State2.currentFile && State2.currentFile.dirty)));
 }
 function resetHistory() {
   State2.history = createPatchHistory(100);
@@ -63941,6 +64181,10 @@ function setLiveRole(role) {
     }
   }
   renderLiveSyncBanner();
+  try {
+    syncToolbarActionState();
+  } catch {
+  }
   if (role === "owner" && prev !== "owner") {
     try {
       startAutosaveTimer();
@@ -64840,85 +65084,263 @@ function _zipWorkerCall(cmd, args, transferList = []) {
 function mentorExportName(mdName) {
   return mdName.replace(/\.(md|markdown)$/i, "") + ".mentor";
 }
-async function saveCurrent() {
-  if (State2.readOnlyMode) {
-    showToast("\u53EA\u8BFB\u6A21\u5F0F: \u53E6\u4E00\u6807\u7B7E\u5728\u7F16\u8F91, \u5DF2\u7981\u7528 Ctrl+S", 3e3);
-    return;
+var _saveDialogResolver = null;
+var _saveDialogBusy = false;
+function renderSaveDialog(model) {
+  const root2 = document.querySelector("#save-dialog");
+  if (!root2 || !model) return;
+  root2.dataset.severity = model.severity || "normal";
+  const title = document.querySelector("#save-dialog-title");
+  const msg = document.querySelector("#save-dialog-message");
+  const details = document.querySelector("#save-dialog-details");
+  const err = document.querySelector("#save-dialog-error");
+  const primary = document.querySelector("#save-dialog-primary");
+  const secondary = document.querySelector("#save-dialog-secondary");
+  const cancel = document.querySelector("#save-dialog-cancel");
+  if (title) title.textContent = model.title || "";
+  if (msg) msg.textContent = model.message || "";
+  if (err) {
+    err.textContent = "";
+    err.classList.add("hidden");
   }
-  if (!State2.currentFile) {
-    showToast("\u672A\u6253\u5F00\u6587\u6863");
-    return;
+  if (details) {
+    const rows = Array.isArray(model.details) ? model.details : [];
+    details.innerHTML = rows.map((d) => `<dt>${escapeHtml(d.label || "")}</dt><dd>${escapeHtml(d.value || "")}</dd>`).join("");
+    details.classList.toggle("hidden", rows.length === 0);
   }
-  if (!State2.author) {
-    await promptAuthor();
-    if (!State2.author) return;
+  if (primary) {
+    primary.textContent = model.primaryLabel || "\u786E\u5B9A";
+    primary.classList.toggle("hidden", !model.primaryLabel);
   }
-  const finishOk = (msg, detail) => {
+  if (secondary) {
+    const hasSec = !!(model.secondaryLabel && String(model.secondaryLabel).trim());
+    secondary.textContent = model.secondaryLabel || "";
+    secondary.classList.toggle("hidden", !hasSec);
+  }
+  if (cancel) cancel.textContent = model.cancelLabel || "\u53D6\u6D88";
+  root2.classList.remove("hidden");
+  root2.setAttribute("aria-busy", "false");
+  try {
+    primary?.focus();
+  } catch {
+  }
+}
+function closeSaveDialog() {
+  const root2 = document.querySelector("#save-dialog");
+  if (root2) {
+    root2.classList.add("hidden");
+    root2.removeAttribute("aria-busy");
+  }
+  _saveDialogBusy = false;
+  const prev = openSaveDialog._lastFocus;
+  openSaveDialog._lastFocus = null;
+  try {
+    if (prev && typeof prev.focus === "function") prev.focus();
+  } catch {
+  }
+}
+function openSaveDialog(model) {
+  return new Promise((resolve) => {
+    initSaveDialog();
+    openSaveDialog._lastFocus = document.activeElement;
+    const root2 = document.querySelector("#save-dialog");
+    if (!root2) {
+      resolve("cancel");
+      return;
+    }
+    if (_saveDialogResolver) {
+      const prev = _saveDialogResolver;
+      _saveDialogResolver = null;
+      prev("cancel");
+    }
+    _saveDialogResolver = resolve;
+    renderSaveDialog(model);
+  });
+}
+function initSaveDialog() {
+  const root2 = document.querySelector("#save-dialog");
+  if (!root2 || root2.dataset.bound === "1") return;
+  root2.dataset.bound = "1";
+  const finish = (choice) => {
+    if (_saveDialogBusy) return;
+    const r = _saveDialogResolver;
+    _saveDialogResolver = null;
+    closeSaveDialog();
+    if (r) r(choice);
+  };
+  document.querySelector("#save-dialog-primary")?.addEventListener("click", () => finish("primary"));
+  document.querySelector("#save-dialog-secondary")?.addEventListener("click", () => finish("secondary"));
+  document.querySelector("#save-dialog-cancel")?.addEventListener("click", () => finish("cancel"));
+  root2.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      finish("cancel");
+    }
+  });
+}
+async function downloadMentorSnapshot(snapshot, { markCleanOnSuccess = true } = {}) {
+  showExportProgress("\u6B63\u5728\u6253\u5305 .mentor\u2026");
+  try {
+    const blob = await buildMentorZipBlob(snapshot.mdText, snapshot.sidecar, snapshot.mediaFiles, snapshot.references, { documentHtml: snapshot.documentHtml });
+    const outName = /\.mentor$/i.test(snapshot.name) ? snapshot.name : mentorExportName(snapshot.name);
+    downloadBlob(outName, blob);
+    hideExportProgress("\u5DF2\u4E0B\u8F7D");
+    if (markCleanOnSuccess && activeDocumentMatches(snapshot) && (State2.currentFile.dirtyGen || 0) === snapshot.dirtyGen) {
+      markClean();
+    }
     try {
       snapshotActiveTab();
     } catch {
     }
-    if (msg) showToast(msg);
-    if (detail != null) setStatus(detail.status || "\u5DF2\u4FDD\u5B58", detail.right || State2.currentFile.name);
-  };
-  if (hasWriteHandle()) {
-    const showProgress = isMentorPackMode();
-    const result = await writeCurrentToHandle({ reason: "manual", showProgress });
-    if (result.ok) {
-      finishOk(
-        isMentorPackMode() ? "\u5DF2\u4FDD\u5B58\u5230\u539F\u4F4D\u7F6E \u2713 (.mentor)" : "\u5DF2\u4FDD\u5B58\u5230\u539F\u4F4D\u7F6E \u2713",
-        { status: "\u5DF2\u4FDD\u5B58", right: State2.currentFile.name }
-      );
-      return;
-    }
-    if (result.skipped && result.error === "busy") {
-      showToast("\u6B63\u5728\u4FDD\u5B58\u2026", 1500);
-      return;
-    }
-    if (result.error) {
-      showToast("\u4FDD\u5B58\u5931\u8D25: " + result.error);
-      setStatus("\u4FDD\u5B58\u5931\u8D25", result.error);
-      return;
-    }
-  }
-  let snapshot;
-  try {
-    snapshot = createSaveSnapshot();
+    const copy2 = buildSaveResultCopy({ kind: markCleanOnSuccess ? "save-download-mentor" : "save-copy", fileName: outName });
+    setStatus(copy2.status, copy2.detail);
+    showToast(markCleanOnSuccess ? `\u5DF2\u4FDD\u5B58 ${outName}` : `\u526F\u672C\u5DF2\u4E0B\u8F7D ${outName} \xB7 \u539F\u6587\u4EF6\u672A\u6539\u53D8`);
+    return { ok: true, name: outName };
   } catch (e) {
-    showToast("\u4FDD\u5B58\u5931\u8D25: " + (e.message || e), 4e3);
-    return;
+    hideExportProgress("\u5BFC\u51FA\u5931\u8D25");
+    showToast("\u4FDD\u5B58\u5931\u8D25: " + (e && e.message ? e.message : e), 4e3);
+    return { ok: false, error: e && e.message ? e.message : String(e) };
   }
-  State2.currentFile.content = snapshot.mdText;
-  State2.currentFile.annotations = snapshot.sidecar;
+}
+async function exportMarkdownSnapshot(snapshot, { markCleanOnSuccess = false } = {}) {
   try {
-    await AnnotationStore.put(snapshot.name, snapshot.sidecar);
+    downloadFile(snapshot.name.replace(/\.mentor$/i, ".md"), snapshot.mdText);
+    if (markCleanOnSuccess && activeDocumentMatches(snapshot) && (State2.currentFile.dirtyGen || 0) === snapshot.dirtyGen) markClean();
+    const copy2 = buildSaveResultCopy({ kind: "export-md", fileName: snapshot.name });
+    setStatus(copy2.status, copy2.detail);
+    showToast("Markdown \u5DF2\u5BFC\u51FA \xB7 \u539F\u6587\u4EF6\u672A\u6539\u53D8");
+    return { ok: true };
   } catch (e) {
-    console.warn("[IDB] put \u5931\u8D25:", e);
+    showToast("\u5BFC\u51FA\u5931\u8D25: " + (e && e.message ? e.message : e), 4e3);
+    return { ok: false, error: e && e.message ? e.message : String(e) };
   }
-  if (isMentorPackMode()) {
+}
+async function runManualSave() {
+  if (!State2.currentFile) {
+    showToast("\u8BF7\u5148\u6253\u5F00\u6216\u65B0\u5EFA\u6587\u6863");
+    return { ok: false, error: "no-document" };
+  }
+  if (State2.readOnlyMode || !canWriteLiveDocument()) {
+    showToast("\u6B64\u9875\u9762\u6B63\u5728\u5B9E\u65F6\u67E5\u770B\uFF0C\u9700\u5148\u63A5\u7BA1\u7F16\u8F91", 3e3);
+    return { ok: false, error: "read-only" };
+  }
+  if (!State2.author) {
+    await promptAuthor();
+    if (!State2.author) return { ok: false, cancelled: true };
+  }
+  State2._toolbarBusy = true;
+  try {
+    syncToolbarActionState();
+  } catch {
+  }
+  try {
+    if (hasWriteHandle()) {
+      const showProgress = isMentorPackMode();
+      let result = await writeCurrentToHandle({ reason: "manual", showProgress });
+      if (result.conflict?.kind === "protected") {
+        const choice2 = await openSaveDialog(buildSaveDialogModel({ kind: "protected", fileName: State2.currentFile.name }));
+        if (choice2 === "primary") {
+          const snap = createSaveSnapshot();
+          return await downloadMentorSnapshot(snap, { markCleanOnSuccess: false });
+        }
+        return { ok: false, cancelled: true };
+      }
+      if (result.conflict?.kind === "external-modified") {
+        const choice2 = await openSaveDialog(buildSaveDialogModel({
+          kind: "external-modified",
+          fileName: result.conflict.fileName || State2.currentFile.name
+        }));
+        if (choice2 === "primary") {
+          result = await writeCurrentToHandle({ reason: "manual", showProgress, forceOverwriteExternal: true });
+        } else if (choice2 === "secondary") {
+          const snap = createSaveSnapshot();
+          return await downloadMentorSnapshot(snap, { markCleanOnSuccess: false });
+        } else {
+          return { ok: false, cancelled: true };
+        }
+      }
+      if (result.ok) {
+        const copy2 = buildSaveResultCopy({ kind: "write-current", fileName: State2.currentFile.name });
+        setStatus(copy2.status, copy2.detail);
+        showToast(isMentorPackMode() ? "\u5DF2\u4FDD\u5B58\u5230\u539F\u4F4D\u7F6E \u2713 (.mentor)" : "\u5DF2\u4FDD\u5B58\u5230\u539F\u4F4D\u7F6E \u2713");
+        try {
+          snapshotActiveTab();
+        } catch {
+        }
+        return result;
+      }
+      if (result.skipped && result.error === "busy") {
+        showToast("\u6B63\u5728\u4FDD\u5B58\u2026", 1500);
+        return result;
+      }
+      if (result.error === "\u6743\u9650\u88AB\u62D2" || result.error === "need-permission") {
+        const choice2 = await openSaveDialog(buildSaveDialogModel({ kind: "permission-denied", fileName: State2.currentFile.name }));
+        if (choice2 === "primary") {
+          const snap = createSaveSnapshot();
+          return await downloadMentorSnapshot(snap, { markCleanOnSuccess: false });
+        }
+        return { ok: false, cancelled: true };
+      }
+      if (result.error && /ANNOTATION_ANCHOR_AUDIT_FAILED|批注/.test(String(result.error))) {
+        const choice2 = await openSaveDialog(buildSaveDialogModel({ kind: "anchor-audit", fileName: State2.currentFile.name, issueCount: 1 }));
+        if (choice2 === "secondary") {
+          try {
+            const snap = createSaveSnapshot();
+            return await downloadMentorSnapshot(snap, { markCleanOnSuccess: false });
+          } catch (e2) {
+            showToast("\u65E0\u6CD5\u53E6\u5B58: " + (e2.message || e2), 4e3);
+          }
+        }
+        return { ok: false, error: result.error };
+      }
+      if (result.error) {
+        showToast("\u4FDD\u5B58\u5931\u8D25: " + result.error);
+        setStatus("\u4FDD\u5B58\u5931\u8D25", result.error);
+      }
+      return result;
+    }
+    let snapshot;
     try {
-      showExportProgress("\u6B63\u5728\u6253\u5305 .mentor\u2026");
-      const blob = await buildMentorZipBlob(snapshot.mdText, snapshot.sidecar, snapshot.mediaFiles, snapshot.references, { documentHtml: snapshot.documentHtml });
-      const outName = /\.mentor$/i.test(snapshot.name) ? snapshot.name : mentorExportName(snapshot.name);
-      downloadBlob(outName, blob);
-      hideExportProgress("\u5DF2\u4E0B\u8F7D");
-      if (activeDocumentMatches(snapshot) && (State2.currentFile.dirtyGen || 0) === snapshot.dirtyGen) markClean();
-      finishOk("\u5DF2\u4E0B\u8F7D \u2713 (.mentor)", { status: "\u5DF2\u4E0B\u8F7D", right: outName });
+      snapshot = createSaveSnapshot();
     } catch (e) {
-      hideExportProgress("\u5BFC\u51FA\u5931\u8D25");
-      showToast("\u5BFC\u51FA\u5931\u8D25: " + (e.message || e), 4e3);
-      setStatus("\u5BFC\u51FA\u5931\u8D25", e.message || String(e));
+      const msg = e && e.message ? e.message : String(e);
+      if (/ANNOTATION_ANCHOR_AUDIT_FAILED/.test(msg)) {
+        const choice2 = await openSaveDialog(buildSaveDialogModel({ kind: "anchor-audit", fileName: State2.currentFile?.name, issueCount: 1 }));
+        if (choice2 === "secondary") showToast("\u8BCA\u65AD\u526F\u672C\u6682\u4E0D\u53EF\u7528: \u8BF7\u5148\u4FEE\u590D\u6279\u6CE8\u4F4D\u7F6E", 4e3);
+        return { ok: false, error: msg };
+      }
+      showToast("\u4FDD\u5B58\u5931\u8D25: " + msg, 4e3);
+      return { ok: false, error: msg };
     }
-    return;
+    const model = buildSaveDialogModel({
+      kind: "no-handle",
+      fileName: snapshot.name,
+      annotations: (snapshot.sidecar && snapshot.sidecar.annotations || []).length,
+      references: (snapshot.references && snapshot.references.entries || []).length,
+      media: Object.keys(snapshot.mediaFiles || {}).length
+    });
+    const choice = await openSaveDialog(model);
+    if (choice === "primary") {
+      try {
+        await AnnotationStore.put(snapshot.name, snapshot.sidecar);
+      } catch {
+      }
+      return await downloadMentorSnapshot(snapshot, { markCleanOnSuccess: true });
+    }
+    if (choice === "secondary") {
+      return await exportMarkdownSnapshot(snapshot, { markCleanOnSuccess: false });
+    }
+    return { ok: false, cancelled: true };
+  } finally {
+    State2._toolbarBusy = false;
+    try {
+      syncToolbarActionState();
+    } catch {
+    }
   }
-  const sidecarName = snapshot.name.replace(/\.md$/i, "") + ".annotations.json";
-  downloadFile(snapshot.name, snapshot.mdText);
-  downloadFile(sidecarName, JSON.stringify(snapshot.sidecar, null, 2));
-  if (activeDocumentMatches(snapshot) && (State2.currentFile.dirtyGen || 0) === snapshot.dirtyGen) markClean();
-  finishOk("\u5DF2\u4E0B\u8F7D \u2713 (\u6D4F\u89C8\u5668\u4E0D\u652F\u6301\u6216\u672A\u6388\u6743)", {
-    status: "\u5DF2\u4E0B\u8F7D",
-    right: `${snapshot.name} + ${sidecarName}`
-  });
+}
+async function saveCurrent() {
+  return runManualSave();
 }
 async function tryWriteBackMentor(mdText, sidecar, mentorName) {
   if (!(State2.saveMode === "mentor-handle" && State2.currentFile && State2.currentFile.handle)) {
@@ -65017,11 +65439,13 @@ function exportMd() {
   const baseName = (State2.currentFile.name || "untitled").replace(/\.(md|markdown|mentor)$/i, "");
   const blob = new Blob([mdText], { type: "text/markdown;charset=utf-8" });
   downloadBlob(`${baseName}.md`, blob);
-  showToast(`\u5DF2\u5BFC\u51FA ${baseName}.md`, 2500);
+  const _mdCopy = buildSaveResultCopy({ kind: "export-md", fileName: `${baseName}.md` });
+  setStatus(_mdCopy.status, _mdCopy.detail);
+  showToast(`${_mdCopy.status} \xB7 ${_mdCopy.detail}`, 2500);
 }
 async function exportDocx() {
   if (!State2.editor || !State2.currentFile) {
-    showToast("\u8BF7\u5148\u6253\u5F00\u6216\u65B0\u5EFA\u6587\u6863", 2e3);
+    showToast("\u8BF7\u5148\u6253\u5F00\u6587\u6863");
     return;
   }
   if (typeof import_jszip.default === "undefined") {
@@ -65036,7 +65460,9 @@ async function exportDocx() {
     const baseName = (State2.currentFile.name || "untitled").replace(/\.(md|markdown|mentor)$/i, "");
     downloadBlob(`${baseName}.docx`, zip);
     hideExportProgress("\u5DF2\u5BFC\u51FA\uFF08\u4EC5\u6B63\u6587\uFF09");
-    showToast(`\u5DF2\u5BFC\u51FA ${baseName}.docx\uFF08\u4EC5\u6B63\u6587\uFF0C\u4E0D\u542B\u6279\u6CE8\uFF09`, 2800);
+    const _docxCopy = buildSaveResultCopy({ kind: "export-docx", fileName: `${baseName}.docx` });
+    setStatus(_docxCopy.status, _docxCopy.detail);
+    showToast(`${_docxCopy.status} \xB7 ${_docxCopy.detail}`, 2800);
   } catch (e) {
     console.error("[exportDocx] \u5931\u8D25:", e);
     hideExportProgress("\u5BFC\u51FA\u5931\u8D25");
@@ -65729,9 +66155,9 @@ function openReferenceEditor({ mode = "add", entry = null, sourceName = "" } = {
   fillReferenceForm(base2);
   setReferenceFormError("");
   if (title) {
-    if (mode === "edit") title.textContent = "\u7F16\u8F91\u5F15\u7528";
-    else if (mode === "import") title.textContent = sourceName ? `\u5BFC\u5165\u5F15\u7528 \xB7 ${sourceName}` : "\u5BFC\u5165\u5F15\u7528";
-    else title.textContent = "\u6DFB\u52A0\u5F15\u7528";
+    if (mode === "edit") title.textContent = "\u7F16\u8F91\u6587\u732E";
+    else if (mode === "import") title.textContent = sourceName ? `\u5BFC\u5165\u6587\u732E \xB7 ${sourceName}` : "\u5BFC\u5165\u6587\u732E";
+    else title.textContent = "\u65B0\u5EFA\u6587\u732E";
   }
   modal.classList.remove("hidden");
   const keyInput = document.querySelector("#reference-key");
@@ -65764,7 +66190,7 @@ function deleteReferenceEntry(key, { confirmUser = true } = {}) {
   if (!drop) return false;
   const count = getCitationUsages()[drop] || 0;
   if (confirmUser) {
-    const message = count ? `\u201C@${drop}\u201D\u5728\u6B63\u6587\u4F7F\u7528 ${count} \u6B21\u3002\u5220\u9664\u5143\u6570\u636E\u540E\u6B63\u6587\u4F1A\u4FDD\u7559\u5E76\u6807\u4E3A\u7F3A\u5931\u3002\u7EE7\u7EED\uFF1F` : `\u5220\u9664\u201C@${drop}\u201D\uFF1F`;
+    const message = count ? `\u6587\u732E @${drop} \u5728\u6B63\u6587\u5F15\u7528 ${count} \u6B21\u3002\u5220\u9664\u5E93\u6761\u76EE\u540E\u6B63\u6587\u4ECD\u4FDD\u7559 [@${drop}] \u5E76\u6807\u4E3A\u7F3A\u5931\u3002\u7EE7\u7EED\uFF1F` : `\u4ECE\u6587\u732E\u5E93\u5220\u9664 @${drop}\uFF1F`;
     if (!confirm(message)) return false;
   }
   commitReferenceManifest(removeReferenceEntry(State2.references, drop));
@@ -65780,7 +66206,7 @@ async function importReferenceFile(file) {
   }
   const entries = sortReferenceEntries(parseReferenceFile(file.name, text2));
   if (!entries.length) {
-    showToast("\u672A\u8BC6\u522B\u5230\u5F15\u7528\u6761\u76EE", 2500);
+    showToast("\u672A\u8BC6\u522B\u5230\u6587\u732E\u6761\u76EE", 2500);
     return { error: "empty" };
   }
   if (entries.length === 1) {
@@ -65794,12 +66220,12 @@ async function importReferenceFile(file) {
     let overwritten = 0;
     for (const c of result.conflicts) {
       const ok = confirm(
-        `citekey @${c.existing.key} \u5DF2\u5B58\u5728\u4E14\u5185\u5BB9\u4E0D\u540C\u3002
+        `\u6587\u732E @${c.existing.key} \u5DF2\u5B58\u5728\u4E14\u5185\u5BB9\u4E0D\u540C\u3002
 
-\u5DF2\u6709: ${c.existing.authors || "\u2014"} / ${c.existing.year || "\u2014"} / ${c.existing.title || "\u2014"}
+\u5E93\u4E2D: ${c.existing.authors || "\u2014"} / ${c.existing.year || "\u2014"} / ${c.existing.title || "\u2014"}
 \u5BFC\u5165: ${c.incoming.authors || "\u2014"} / ${c.incoming.year || "\u2014"} / ${c.incoming.title || "\u2014"}
 
-\u786E\u5B9A = \u4F7F\u7528\u5BFC\u5165\u9879\uFF1B\u53D6\u6D88 = \u4FDD\u7559\u5DF2\u6709`
+\u786E\u5B9A = \u7528\u5BFC\u5165\u9879\u8986\u76D6\uFF1B\u53D6\u6D88 = \u4FDD\u7559\u5E93\u4E2D\u6761\u76EE`
       );
       if (ok) {
         const up = upsertReferenceEntry(applied, c.incoming, { originalKey: c.existing.key });
@@ -65867,6 +66293,10 @@ function initReferencesPane() {
     main2.classList.toggle("refs-pane-open", open2);
     document.body.classList.toggle("refs-pane-collapsed", !open2);
     expand?.classList.toggle("hidden", open2 || !(State2.references.entries || []).length);
+    try {
+      syncToolbarActionState();
+    } catch {
+    }
   };
   const render3 = () => {
     const entries = State2.references.entries || [];
@@ -66348,12 +66778,48 @@ function setupFormatMoreMenu() {
     if (window.matchMedia("(min-width: 1180px)").matches) close3();
   });
 }
+var _toolbarActionInflight = /* @__PURE__ */ Object.create(null);
+function runToolbarAction(id, fn) {
+  const key = String(id || "");
+  if (!key || typeof fn !== "function") return Promise.resolve();
+  if (_toolbarActionInflight[key]) return _toolbarActionInflight[key];
+  const btnMap = {
+    save: "#btn-save",
+    saveAs: "#btn-save-as",
+    exportMd: "#btn-export-md",
+    exportDocx: "#btn-export-docx"
+  };
+  const sel = btnMap[key];
+  const el = sel ? document.querySelector(sel) : null;
+  State2._toolbarBusy = true;
+  if (el) {
+    el.setAttribute("aria-busy", "true");
+    el.disabled = true;
+  }
+  try {
+    syncToolbarActionState();
+  } catch {
+  }
+  const p = Promise.resolve().then(fn).finally(() => {
+    delete _toolbarActionInflight[key];
+    State2._toolbarBusy = Object.keys(_toolbarActionInflight).length > 0;
+    if (el) {
+      el.removeAttribute("aria-busy");
+    }
+    try {
+      syncToolbarActionState();
+    } catch {
+    }
+  });
+  _toolbarActionInflight[key] = p;
+  return p;
+}
 function setupToolbar() {
   $("#btn-new").addEventListener("click", newDocument);
   $("#btn-open-files").addEventListener("click", openFiles);
-  $("#btn-save").addEventListener("click", saveCurrent);
-  $("#btn-export-md").addEventListener("click", exportMd);
-  $("#btn-export-docx").addEventListener("click", exportDocx);
+  $("#btn-save").addEventListener("click", () => runToolbarAction("save", saveCurrent));
+  $("#btn-export-md").addEventListener("click", () => runToolbarAction("exportMd", exportMd));
+  $("#btn-export-docx").addEventListener("click", () => runToolbarAction("exportDocx", exportDocx));
   $("#btn-undo").addEventListener("click", () => {
     if (undoSmartDispatch()) showToast("\u5DF2\u64A4\u9500");
   });
@@ -66361,6 +66827,10 @@ function setupToolbar() {
     if (redoSmartDispatch()) showToast("\u5DF2\u91CD\u505A");
   });
   updateHistoryButtons();
+  try {
+    syncToolbarActionState();
+  } catch {
+  }
   document.addEventListener("keydown", (e) => {
     const tag = e.target?.tagName;
     if (tag === "TEXTAREA" || tag === "INPUT") return;
@@ -66435,21 +66905,16 @@ function setupToolbar() {
     }
     return false;
   }
-  $("#btn-save-as").addEventListener("click", async () => {
+  $("#btn-save-as").addEventListener("click", () => runToolbarAction("saveAs", async () => {
     if (!State2.currentFile) return;
     try {
       const snapshot = createSaveSnapshot();
-      showExportProgress("\u6B63\u5728\u6253\u5305 .mentor\u2026");
-      const blob = await buildMentorZipBlob(snapshot.mdText, snapshot.sidecar, snapshot.mediaFiles, snapshot.references, { documentHtml: snapshot.documentHtml });
-      const exportName = /\.mentor$/i.test(snapshot.name) ? snapshot.name : mentorExportName(snapshot.name);
-      downloadBlob(exportName, blob);
-      hideExportProgress("\u5DF2\u4E0B\u8F7D");
-      showToast(`\u5DF2\u4E0B\u8F7D ${exportName} \u2713`);
+      await downloadMentorSnapshot(snapshot, { markCleanOnSuccess: false });
     } catch (e) {
       hideExportProgress("\u5BFC\u51FA\u5931\u8D25");
-      showToast("\u5BFC\u51FA\u5931\u8D25: " + (e && e.message ? e.message : e), 4e3);
+      showToast("\u53E6\u5B58\u5931\u8D25: " + (e && e.message ? e.message : e), 4e3);
     }
-  });
+  }));
   $$("#format-toolbar button[data-cmd]").forEach((btn) => {
     btn.addEventListener("click", () => {
       const cmd = btn.dataset.cmd;
@@ -67243,6 +67708,7 @@ async function boot() {
     console.warn("[tabs] setup", e);
   }
   setupToolbar();
+  initSaveDialog();
   setupFloatCommentButton();
   setupTableControls();
   setupFileListDropdown();
@@ -67516,6 +67982,13 @@ window.__mdAnnotator = {
   openReferenceEditor,
   closeReferenceEditor,
   commitReferenceManifest,
+  syncToolbarActionState,
+  getToolbarActionState,
+  PRIMARY_TOOLBAR_ACTIONS,
+  runManualSave,
+  openSaveDialog,
+  buildSaveDialogModel,
+  buildSaveResultCopy,
   newDocument,
   createAnnotationFromSelection,
   createAnnotationThread,

@@ -69,16 +69,19 @@ const path = require('path');
     return {
       btnExportMd: !!document.getElementById('btn-export-md'),
       btnExportDocx: !!document.getElementById('btn-export-docx'),
-      btnSaveNext: document.getElementById('btn-save-as')?.nextElementSibling?.id,
+      saveAsGroup: document.getElementById('btn-save-as')?.closest('[data-toolbar-group]')?.getAttribute('data-toolbar-group'),
+      exportGroup: document.getElementById('btn-export-md')?.closest('[data-toolbar-group]')?.getAttribute('data-toolbar-group'),
+      exportMdNext: document.getElementById('btn-export-md')?.nextElementSibling?.id,
       iconMdHasSvg: !!document.querySelector('#btn-export-md .tb-icon'),
     };
   });
   console.log(JSON.stringify(buttons));
   assert(buttons.btnExportMd, '#btn-export-md 存在');
   assert(buttons.btnExportDocx, '#btn-export-docx 存在');
-  assert(buttons.btnSaveNext === 'btn-export-md', 'btn-export-md 是 save-as 的下一个兄弟节点');
-  assert(buttons.btnSaveNext?.nextElementSibling?.id === 'btn-export-docx' || buttons.iconMdHasSvg, 'btn-export-md 后面紧跟 btn-export-docx');
-  // 检查两个 icon 都有 (mask image 通过 CSS 设的, 验证 ::before computed style 包含 mask-image)
+  assert(buttons.saveAsGroup === 'save', 'save-as 在 save 组');
+  assert(buttons.exportGroup === 'export', 'export-md 在 export 组');
+  assert(buttons.exportMdNext === 'btn-export-docx', 'export 组内 md 后跟 docx');
+  assert(buttons.iconMdHasSvg, 'btn-export-md 有 tb-icon');
   const iconMd = await page.evaluate(() => {
     const el = document.getElementById('btn-export-md');
     if (!el) return null;

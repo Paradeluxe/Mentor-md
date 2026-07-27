@@ -4,10 +4,10 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Mentor — 像 docx 一样批注 Markdown</title>
-<meta name="build" content="v1.45.1 cache-bust v=165" />
+<meta name="build" content="v1.45.2 cache-bust v=166" />
 <!-- v1.43.37 offline: local fonts + KaTeX (no CDN) -->
 <link rel="stylesheet" href="vendor/fonts/local-fonts.css?v=1" />
-<link rel="stylesheet" href="styles.css?v=165" />
+<link rel="stylesheet" href="styles.css?v=166" />
 <link rel="stylesheet" href="vendor/katex/katex.min.css?v=1" />
 <!-- 字体：系统无衬线 + 等宽（侧栏时间戳、文件名） -->
 <style>
@@ -21,25 +21,34 @@
 
   <!-- Toolbar -->
   <header id="toolbar">
-    <div class="tb-group">
+    <div class="tb-group" data-toolbar-group="chrome">
       <button id="help-btn" class="help-btn" data-act="toggle-help" title="使用帮助 (按 ? 键)" aria-label="使用帮助" onclick="window.__mdAnnotator && window.__mdAnnotator.toggleHelp && window.__mdAnnotator.toggleHelp(); event.stopPropagation();">?</button>
       <button id="settings-btn" class="settings-btn" data-act="toggle-settings" title="设置" aria-label="设置"></button>
-      <span class="tb-sep"></span>
-      <button id="btn-new" title="新建空白文档" class="tb-icon-text"><span class="tb-icon"></span><span>新建</span></button>
-      <button id="btn-open-files" title="打开文件 (Ctrl 多选 .md + .annotations.json)" class="tb-icon-text"><span class="tb-icon"></span><span>打开</span></button>
-      <button id="btn-save" title="保存当前 .md 和批注 (Ctrl+S)" class="tb-icon-text"><span class="tb-icon"></span><span>保存</span></button>
-      <button id="btn-save-as" title="导出 .mentor 单文件包 (md + 批注 + 图片)" class="tb-icon-text"><span class="tb-icon"></span><span>.mentor</span></button>
-      <button id="btn-export-md" title="导出 Markdown" class="tb-icon-text"><span class="tb-icon"></span><span>MD</span></button>
-      <button id="btn-export-docx" title="导出 DOCX（仅正文，不含批注）" data-export-mode="body-only" class="tb-icon-text"><span class="tb-icon"></span><span>DOCX</span></button>
-      <button id="btn-refs" title="打开引用库：导入单条/批量、管理条目、插入 citekey" class="tb-icon-text"><span class="tb-icon"></span><span>引用</span></button>
-      <input type="file" id="refs-file-input" accept=".bib,.ris,.enw,.xml,.json,.txt" style="display:none">
-      <span class="tb-sep"></span>
-      <button id="btn-undo" title="撤销批注操作 (Ctrl+Alt+Z)" class="tb-icon-text" disabled aria-label="撤销"><span class="tb-icon"></span></button>
-      <button id="btn-redo" title="重做批注操作 (Ctrl+Alt+Shift+Z)" class="tb-icon-text" disabled aria-label="重做"><span class="tb-icon"></span></button>
-      <span class="tb-sep"></span>
-      <button id="btn-toggle-render" title="切换源码/渲染视图" class="tb-icon-text tb-toggle" data-mode="rendered"><span class="tb-icon"></span><span>源码</span></button>
     </div>
-    <div class="tb-group" id="format-toolbar">
+    <div class="tb-group" data-toolbar-group="document">
+      <button id="btn-new" title="新建空白文档" class="tb-icon-text"><span class="tb-icon"></span><span class="tb-label">新建</span></button>
+      <button id="btn-open-files" title="打开 .mentor 或 Markdown" class="tb-icon-text"><span class="tb-icon"></span><span class="tb-label">打开</span></button>
+    </div>
+    <div class="tb-group" data-toolbar-group="save">
+      <button id="btn-save" title="保存当前文档" class="tb-icon-text" aria-keyshortcuts="Control+S Meta+S"><span class="tb-icon"></span><span class="tb-label">保存</span></button>
+      <button id="btn-save-as" title="另存为 .mentor 副本" class="tb-icon-text"><span class="tb-icon"></span><span class="tb-label">另存</span></button>
+    </div>
+    <div class="tb-group" data-toolbar-group="export">
+      <button id="btn-export-md" title="导出 Markdown 副本" class="tb-icon-text"><span class="tb-icon"></span><span class="tb-label">MD</span></button>
+      <button id="btn-export-docx" title="导出 DOCX 副本（仅正文）" data-export-mode="body-only" class="tb-icon-text"><span class="tb-icon"></span><span class="tb-label">DOCX</span></button>
+    </div>
+    <div class="tb-group" data-toolbar-group="references">
+      <button id="btn-refs" title="打开文献库" class="tb-icon-text" aria-controls="refs-pane" aria-expanded="false" aria-pressed="false"><span class="tb-icon"></span><span class="tb-label">文献</span></button>
+      <input type="file" id="refs-file-input" accept=".bib,.ris,.enw,.xml,.json,.txt" style="display:none">
+    </div>
+    <div class="tb-group" data-toolbar-group="history">
+      <button id="btn-undo" title="撤销 (Ctrl+Z)" class="tb-icon-text" disabled aria-label="撤销"><span class="tb-icon"></span></button>
+      <button id="btn-redo" title="重做 (Ctrl+Y)" class="tb-icon-text" disabled aria-label="重做"><span class="tb-icon"></span></button>
+    </div>
+    <div class="tb-group" data-toolbar-group="view">
+      <button id="btn-toggle-render" title="切换源码/渲染视图" class="tb-icon-text tb-toggle" data-mode="rendered" aria-pressed="false"><span class="tb-icon"></span><span class="tb-label">源码</span></button>
+    </div>
+    <div class="tb-group" id="format-toolbar" data-toolbar-group="format">
       <button data-cmd="bold" title="加粗 (Ctrl+B)" class="tb-format" aria-label="加粗"></button>
       <button data-cmd="italic" title="斜体 (Ctrl+I)" class="tb-format" aria-label="斜体"></button>
       <span class="tb-sep tb-sep-primary"></span>
@@ -62,12 +71,12 @@
           <span class="tb-sep"></span>
           <button data-cmd="h3" title="三级标题" class="tb-format" aria-label="三级标题"></button>
           <span class="tb-sep"></span>
-          <button data-cmd="blockquote" title="引用" class="tb-format" aria-label="引用"></button>
+          <button data-cmd="blockquote" title="块引用" class="tb-format" aria-label="块引用"></button>
           <button data-cmd="codeBlock" title="代码块" class="tb-format" aria-label="代码块"></button>
         </div>
       </div>
     </div>
-    <div class="tb-group" id="title-group">
+    <div class="tb-group" id="title-group" data-toolbar-group="title">
           <div id="file-list-wrap" class="file-list-wrap">
             <button type="button" id="file-list-trigger" class="file-list-trigger" title="最近文件 / 切换文档" aria-haspopup="listbox" aria-expanded="false">
               <span id="current-file-name" class="file-list-name">未打开文档</span>
@@ -181,24 +190,24 @@
     </aside>
 
     <!-- 引用库侧栏：管理 + 插入 [@citekey] -->
-    <aside id="refs-pane" class="refs-pane hidden" aria-label="引用库">
+    <aside id="refs-pane" class="refs-pane hidden" aria-label="文献库">
       <div class="pane-resizer" data-pane-resize="refs" title="拖动调整引用栏宽度"></div>
       <div class="pane-header">
-        <span class="pane-title"><span class="pane-icon pane-icon-refs" aria-hidden="true"></span><span>引用库</span></span>
+        <span class="pane-title"><span class="pane-icon pane-icon-refs" aria-hidden="true"></span><span>文献库</span></span>
         <span class="refs-source-name" id="refs-source-name">未加载</span>
-        <button class="pane-collapse-btn" data-act="toggle-refs-pane" title="收起引用栏" aria-label="收起">‹</button>
+        <button class="pane-collapse-btn" data-act="toggle-refs-pane" title="收起文献栏" aria-label="收起">‹</button>
       </div>
-      <div class="refs-actions" aria-label="引用库操作">
-        <button type="button" id="refs-add-btn" class="refs-action-btn">添加</button>
-        <button type="button" id="refs-import-btn" class="refs-action-btn">导入</button>
-        <button type="button" id="refs-export-btn" class="refs-action-btn">导出 .bib</button>
+      <div class="refs-actions" aria-label="文献库操作">
+        <button type="button" id="refs-add-btn" class="refs-action-btn"><span class="refs-action-icon" aria-hidden="true"></span><span>新建</span></button>
+        <button type="button" id="refs-import-btn" class="refs-action-btn"><span class="refs-action-icon" aria-hidden="true"></span><span>导入文献</span></button>
+        <button type="button" id="refs-export-btn" class="refs-action-btn"><span class="refs-action-icon" aria-hidden="true"></span><span>导出 BibTeX</span></button>
       </div>
       <div class="refs-search-wrap">
-        <input type="search" id="refs-search" placeholder="按 citekey/作者/标题过滤…" aria-label="过滤引用">
+        <input type="search" id="refs-search" placeholder="按 citekey / 作者 / 标题过滤…" aria-label="过滤文献">
       </div>
       <div id="refs-missing-summary" class="refs-missing-summary hidden" role="status" aria-live="polite"></div>
       <div id="refs-list" class="refs-list">
-        <div class="refs-empty">点「添加」新建，或「导入」.bib / .ris / .enw / .xml / .json（支持 Zotero 单条导出）</div>
+        <div class="refs-empty">点「新建」添加条目，或「导入文献」.bib / .ris / .enw / .xml / .json（支持 Zotero 导出）</div>
       </div>
     </aside>
   </main>
@@ -228,7 +237,7 @@
 <!-- 引用条目编辑 / 单条导入确认 -->
 <div id="reference-editor-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="reference-editor-title">
   <form id="reference-editor-form" class="modal-content reference-editor-content">
-    <h3 id="reference-editor-title">添加引用</h3>
+    <h3 id="reference-editor-title">新建文献</h3>
     <input id="reference-original-key" type="hidden" value="">
     <div class="reference-form-grid">
       <label class="reference-field">citekey
@@ -283,12 +292,28 @@
   </form>
 </div>
 
+<!-- 保存决策弹窗 -->
+<div id="save-dialog" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="save-dialog-title" aria-describedby="save-dialog-message">
+  <div class="modal-content save-dialog-content">
+    <div class="save-dialog-icon" aria-hidden="true"></div>
+    <h3 id="save-dialog-title"></h3>
+    <p id="save-dialog-message"></p>
+    <dl id="save-dialog-details" class="save-dialog-details"></dl>
+    <div id="save-dialog-error" class="save-dialog-error hidden" role="alert"></div>
+    <div class="modal-actions">
+      <button type="button" id="save-dialog-cancel" class="modal-btn-secondary">取消</button>
+      <button type="button" id="save-dialog-secondary" class="modal-btn-secondary hidden"></button>
+      <button type="button" id="save-dialog-primary" class="modal-btn-primary"></button>
+    </div>
+  </div>
+</div>
+
 <!-- 临时通知 -->
 <div id="toast" class="toast hidden"></div>
 
 <!-- v1.43.37 offline: bundled app (esbuild) + local icons; no esm.sh -->
-<script src="icons.js?v=3"></script>
-<script type="module" src="app.bundle.js?v=165"></script>
+<script src="icons.js?v=4"></script>
+<script type="module" src="app.bundle.js?v=166"></script>
 <!-- 帮助 popover (浮在 body 顶层, 位置由 JS 动态计算) -->
 <div id="help-popover" class="help-popover hidden" role="tooltip">
   <div class="help-popover-arrow"></div>
@@ -301,11 +326,13 @@
     <li><strong>图片批注:</strong> 点选图片 → 批注; 保存/重开靠 imageAnchors, 不只靠正文文字</li>
     <li><strong>双模式兼容:</strong> 旧 <code>.md</code> + <code>.annotations.json</code> 侧车仍可加载; 建议另存为 .mentor</li>
     <li><strong>离线运行:</strong> v1.43.37+ 依赖已本地打包, 无网也可打开编辑</li>
-    <li><strong>保存:</strong> <kbd>Ctrl</kbd>+<kbd>S</kbd> Chrome/Edge 直接写回原位置; 其他浏览器下载到 <code>xxx.md</code> 同目录</li>
+    <li><strong>保存:</strong> 写回当前文档；无原位写权限时会先说明并推荐 <code>.mentor</code></li>
+    <li><strong>另存:</strong> 下载 <code>.mentor</code> 副本，不改变原文件</li>
+    <li><strong>导出 DOCX:</strong> 仅正文，不含批注与引用库元数据</li>
     <li><strong>跨刷新重连:</strong> 授权过的 .md handle 留在 IndexedDB; 重开应用自动恢复并继续保存</li>
-    <li><strong>正文引文:</strong> 从引用库插入；正文点击引文可定位对应文献，缺失 key 会明确标红</li>
-    <li><strong>引用库管理:</strong> 可添加/编辑/删除条目；改 citekey 会同步正文；导出 .bib 给 Pandoc/Zotero</li>
-    <li><strong>Zotero 单条导入:</strong> 在 Zotero 选中文献，导出 Better BibTeX (.bib) 或 CSL JSON，再到引用库点「导入」。单条记录会先进入确认表单，不会整库覆盖</li>
+    <li><strong>正文引文:</strong> 从文献库插入；正文点击引文可定位对应文献，缺失 key 会明确标红</li>
+    <li><strong>文献库:</strong> 管理元数据；正文引文使用 Pandoc <code>[@citekey]</code>；改 citekey 会同步正文；导出 BibTeX 给 Pandoc/Zotero</li>
+    <li><strong>Zotero 单条导入:</strong> 在 Zotero 选中文献，导出 Better BibTeX (.bib) 或 CSL JSON，再到文献库点「导入文献」。单条记录会先进入确认表单，不会整库覆盖</li>
     <li><strong>可移植引用:</strong> .mentor 内嵌 references.json + references.bib；不直接读取 zotero.sqlite，无自动 live sync</li>
     <li><strong>引文排版:</strong> Mentor 提供轻量作者—年份预览；期刊级 APA/CSL 请用 Pandoc citeproc</li>
   </ul>

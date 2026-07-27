@@ -10,6 +10,11 @@ ROOT = Path(r"E:\hermes_playground\Mentor")
 ICONS = {
     # --- files / chrome ---
     "file": "<path d='M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z'/><path d='M14 2v4a2 2 0 0 0 2 2h4'/><path d='M10 9H8'/><path d='M16 13H8'/><path d='M16 17H8'/>",
+    "filePlus2": "<path d='M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z'/><path d='M14 2v4a2 2 0 0 0 2 2h4'/><path d='M9 15h6'/><path d='M12 12v6'/>",
+    "fileArchive": "<path d='M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z'/><path d='M14 2v4a2 2 0 0 0 2 2h4'/><path d='M10 12v6'/><path d='M14 12v6'/><path d='M10 12a2 2 0 1 0 0 4h4a2 2 0 1 0 0-4'/>",
+    "library": "<path d='m16 6 4 14'/><path d='M12 6v14'/><path d='M8 8v12'/><path d='M4 4v16'/>",
+    "bookPlus": "<path d='M12 7v14'/><path d='M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z'/><path d='M12 11h4'/><path d='M14 9v4'/>",
+    "upload": "<path d='M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4'/><polyline points='17 8 12 3 7 8'/><line x1='12' x2='12' y1='3' y2='15'/>",
     "filePlain": "<path d='M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z'/><path d='M14 2v4a2 2 0 0 0 2 2h4'/>",
     "fileJson": "<path d='M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z'/><path d='M14 2v4a2 2 0 0 0 2 2h4'/><path d='M10 12a1 1 0 0 0-1 1v1a1 1 0 0 1-1 1 1 1 0 0 1 1 1v1a1 1 0 0 0 1 1'/><path d='M14 18a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1 1 1 0 0 1-1-1v-1a1 1 0 0 0-1-1'/>",
     "folder": "<path d='M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z'/>",
@@ -62,16 +67,25 @@ ICONS = {
 
 # Map CSS selectors → icon key
 CSS_MASKS = {
-    '#btn-new .tb-icon::before': 'file',
+    '#btn-new .tb-icon::before': 'filePlus2',
     '#btn-open-files .tb-icon::before': 'folderOpen',
     '#btn-open-folder .tb-icon::before': 'folder',
     '#btn-save .tb-icon::before': 'save',
-    '#btn-save-as .tb-icon::before': 'download',
+    '#btn-save-as .tb-icon::before': 'fileArchive',
     '#btn-export-md .tb-icon::before': 'fileDown',
     '#btn-export-docx .tb-icon::before': 'fileType',
     '#btn-undo .tb-icon::before': 'undo',
     '#btn-redo .tb-icon::before': 'redo',
     '#btn-toggle-render .tb-icon::before': 'code2',
+    '#btn-refs .tb-icon::before': 'library',
+    '#file-pane .pane-icon-refs::before': 'library',
+    '#refs-pane .pane-icon-refs::before': 'library',
+    '#refs-add-btn .refs-action-icon': 'bookPlus',
+    '#refs-import-btn .refs-action-icon': 'upload',
+    '#refs-export-btn .refs-action-icon': 'download',
+    '.rc-insert-btn::before': 'quote',
+    '.rc-edit-btn::before': 'pencil',
+    '.rc-delete-btn::before': 'trash',
     '[data-cmd="bold"]::before': 'bold',
     '[data-cmd="italic"]::before': 'italic',
     '[data-cmd="strike"]::before': 'strikethrough',
@@ -144,6 +158,11 @@ JS_ALIASES = {
     'pencil': 'pencil',
     'table': 'table',
     'trash': 'trash',
+    'library': 'library',
+    'filePlus2': 'filePlus2',
+    'fileArchive': 'fileArchive',
+    'bookPlus': 'bookPlus',
+    'upload': 'upload',
 }
 
 
@@ -277,9 +296,13 @@ new_icon_base = """/* ============ SVG 图标基础样式 (v1.43.34 Lucide strok
   mask-size: contain;
 }"""
 
-if old_icon_base not in css:
+if old_icon_base in css:
+    css = css.replace(old_icon_base, new_icon_base, 1)
+    print("upgraded icon base block")
+elif "v1.43.34 Lucide stroke-2" in css or "/* mask 图标通用 */" in css:
+    print("icon base already upgraded — skip")
+else:
     raise SystemExit("icon base block not found")
-css = css.replace(old_icon_base, new_icon_base, 1)
 
 # 2) Format button slightly larger
 old_fmt = """.tb-format {
@@ -336,9 +359,13 @@ new_fmt = """.tb-format {
   -webkit-mask-position: center;
   mask-position: center;
 }"""
-if old_fmt not in css:
+if old_fmt in css:
+    css = css.replace(old_fmt, new_fmt, 1)
+    print("upgraded tb-format block")
+elif ".tb-format::before" in css and "width: 15px" in css:
+    print("tb-format already upgraded — skip")
+else:
     raise SystemExit("tb-format block not found")
-css = css.replace(old_fmt, new_fmt, 1)
 
 # 3) tb-icon size bump
 old_tb_icon = """.tb-icon-text .tb-icon {
@@ -385,9 +412,13 @@ new_tb_icon = """.tb-icon-text .tb-icon {
   -webkit-mask-position: center;
   mask-position: center;
 }"""
-if old_tb_icon not in css:
+if old_tb_icon in css:
+    css = css.replace(old_tb_icon, new_tb_icon, 1)
+    print("upgraded tb-icon block")
+elif "禁 ↶ 等字符泄漏" in css or (".tb-icon-text .tb-icon::before" in css and "width: 15px" in css):
+    print("tb-icon already upgraded — skip")
+else:
     raise SystemExit("tb-icon block not found")
-css = css.replace(old_tb_icon, new_tb_icon, 1)
 
 # 4) Remove old individual mask definitions and append new block
 # Strategy: strip lines that are ONLY the old #btn-new / [data-cmd] mask rules.

@@ -33,6 +33,7 @@
 - ✅ **模块划分** — `modules/document-session.js` / `io.js` / `annotations.js` / `tabs.js`
 - ✅ **正文引文联动** — 导入 BibTeX / RIS / EndNote / CSL-JSON，只读文献卡片插入不可直接编辑的作者—年份引文字段
 - ✅ **引用库随文档保存** — `.mentor` 可选携带 `references.json` + `references.bib`；精确 APA/CSL 继续使用 Pandoc citeproc
+- ✅ **文献库** — 工具栏「文献」管理元数据；正文引文为 Pandoc `[@citekey]`
 - ✅ **多页面实时共享** — 同一浏览器配置里多页打开同一文档：一页编辑并保存，其他页实时查看正文/批注/引用/图片；点「接管编辑」切换写入权（不是跨设备或多人网络协作）
 
 ---
@@ -74,25 +75,25 @@ python3 -m http.server 8787
 ### 方式 2：双击 `index.html` 直接打开
 
 浏览器直接打开 `file:///.../Mentor/index.html`。基本功能可用，但：
-- `📂 打开文件` 走 `<input type="file">` fallback，保存会下载 .md + .annotations.json 两个文件到本地，需手动放回原目录
+- 打开文件走 `<input type="file">` fallback；**保存**无写回权限时会弹出说明并推荐下载 `.mentor` 单文件包（不是默默下两个侧车文件）
 
 ### 方式 3：Firefox / Safari
 
-不支持 File System Access API。保存时会下载两个文件，需手动放回同目录。
+不支持 File System Access API。**保存**会说明原因并推荐 `.mentor`；**另存**始终下载 `.mentor` 副本且不改变原文件。
 
 ---
 
 ## 文件格式
 
-### 引用库与正文引文
+### 文献库与正文引文
 
-工具栏 **引用** 打开当前文档的引用库侧栏。支持：
+工具栏 **文献** 打开当前文档的文献库侧栏。支持：
 
-- **添加 / 编辑 / 删除** 单条文献（表单编辑 citekey、作者、标题、年份、DOI 等）
-- **导入** `.bib`、`.ris`、`.enw`、EndNote `.xml`、CSL `.json`（含 Zotero / Better BibTeX 导出）
+- **新建 / 编辑 / 删除** 单条文献（表单编辑 citekey、作者、标题、年份、DOI 等）
+- **导入文献** `.bib`、`.ris`、`.enw`、EndNote `.xml`、CSL `.json`（含 Zotero / Better BibTeX 导出）
   - **单条文件** → 预填确认表单后再写入（不会整库覆盖）
   - **多条文件** → 合并进现有库；完全重复跳过，同 key 不同内容可选择覆盖
-- **导出** `*.references.bib` 给 Pandoc / Zotero
+- **导出 BibTeX** `*.references.bib` 给 Pandoc / Zotero
 - 卡片上 **插入 [@citekey]**；改 citekey 时会同步正文里的 Pandoc 标记
 
 不直接读取 `zotero.sqlite`，无自动 live sync——以导出文件为边界。Mentor 正文显示轻量作者—年份，保存 Markdown 时仍保持 `[@citekey]`。
@@ -152,7 +153,9 @@ python3 -m http.server 8787
 - **光标移到已有批注上** → 侧栏自动 pinned 显示（即使 filter 隐藏）
 - **侧栏每个线程**：引用原文、嵌套回复、`📍 跳转` / `✓ 解决` / `🗑 删除`
 - **批注过滤**：右侧顶部复选框切换 `未解决` / `已解决`
-- **`Ctrl+S`** 保存：下载 `.md` + `.annotations.json`
+- **`Ctrl+S`** 保存：有写权限则写回当前文档；否则弹出说明并推荐 `.mentor`
+- **另存**：下载 `.mentor` 副本，原文件不变
+- **导出 MD / DOCX**：导出副本，不清除 dirty；DOCX 仅正文
 
 ---
 
@@ -215,7 +218,7 @@ Mentor/
 
 - ⚠️ 选区不能跨段落（ProseMirror mark 限制）
 - ⚠️ 公式编辑：KaTeX node 是 atomic（不可编辑内部），改公式源码需要删除再重输
-- ⚠️ Firefox/Safari：保存会下载两个文件，需手动放回 .md 同目录
+- ⚠️ Firefox/Safari：保存无写回权限时推荐 `.mentor` 包；另存始终是副本
 - ⚠️ 文本被改后批注可能位置失效（标 `invalid` 但不自动重新定位）
 
 ## 单 .md 模式说明 (v2)

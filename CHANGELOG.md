@@ -2,6 +2,28 @@
 
 按时间倒序记录已发布的变化。最新条目在上方。
 
+## v1.45.2 (2026-07-28) — 工具栏保存/文献/图标流
+
+工具栏按钮语义与保存决策弹窗统一；文献库文案消歧；Lucide 图标补齐。
+
+### 行为
+- 工具栏分组：文档 / 保存 / 导出 / 文献 / 历史 / 视图；「.mentor」→「另存」，「引用」→「文献」
+- 无写回权限时 Ctrl+S 弹出说明，推荐保存 `.mentor`（可改导出 Markdown）；取消保持 dirty
+- 另存始终下载 `.mentor` 副本且不清除 dirty；导出 MD/DOCX 不清除 dirty；DOCX 状态明确「仅正文」
+- 受保护路径 / 外部修改 / 权限拒绝走应用内对话框，不再依赖原生 confirm 做主路径
+- 文献库：新建 / 导入文献 / 导出 BibTeX；编辑器标题「新建/编辑/导入文献」
+- Lucide：filePlus2 / fileArchive / library 等；refs 操作图标；build-icons 可重复运行
+
+### 实现
+- modules/toolbar-actions.js + syncToolbarActionState
+- modules/save-dialog.js + openSaveDialog / runManualSave / runToolbarAction
+- scripts/build-icons.py 幂等升级 + 新 masks
+
+### 测试
+- tests/unit-toolbar-actions.spec.js, unit-save-dialog.spec.js, unit-toolbar-icons.spec.js
+- tests/e2e-toolbar-contract.spec.js, e2e-save-dialog.spec.js
+- verify-export-buttons / e2e-reference-management 更新对齐
+
 ## v1.45.1 (2026-07-27) — .mentor media GC
 
 保存/导出 .mentor 时只打包正文、HTML 或 imageAnchors 仍引用的 media/*；未引用孤儿图不再进 zip。

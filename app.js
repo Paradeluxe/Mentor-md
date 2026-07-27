@@ -109,6 +109,14 @@ import {
   mapImageSources,
   mediaRevision
 } from './modules/cross-tab-sync.js';
+import {
+  getToolbarActionState,
+  PRIMARY_TOOLBAR_ACTIONS
+} from './modules/toolbar-actions.js';
+import {
+  buildSaveDialogModel,
+  buildSaveResultCopy
+} from './modules/save-dialog.js';
 
 var KatexInline = Node.create({
   name: "katex",
@@ -1438,6 +1446,7 @@ function markDirty() {
     } catch {
     }
   }
+  try { syncToolbarActionState(); } catch {}
 }
 function resyncImageAnchors(ann, doc5) {
   if (!ann || !doc5 || !Array.isArray(ann.imageAnchors) || ann.imageAnchors.length === 0) {
@@ -2533,6 +2542,7 @@ function markClean() {
     }
     updateTreeDirtyDots();
   }
+  try { syncToolbarActionState(); } catch {}
 }
 // ---------------------------------------------------------------------------
 // Save / Autosave — single-flight, dirtyGen-safe, simple rules:
@@ -2625,7 +2635,8 @@ async function writeToHandle(handle, data) {
  * Build current editor payload and write to the open handle.
  * reason: 'autosave' | 'manual'
  */
-async function writeCurrentToHandle({ reason = "manual", showProgress = false } = {}) {
+async function writeCurrentToHandle({ reason = "manual", showProgress = false, forceOverwriteExternal = false } = {}) {
+  const options = { forceOverwriteExternal };
   if (!State.currentFile || !State.currentFile.handle) {
     return { ok: false, error: "\u65E0\u6587\u4EF6\u53E5\u67C4" };
   }
@@ -2639,8 +2650,13 @@ async function writeCurrentToHandle({ reason = "manual", showProgress = false } 
     if (reason === "autosave") {
       return { ok: false, skipped: true, error: "protected" };
     }
-    if (!confirmProtectedWrite("\u4FDD\u5B58")) {
-      return { ok: false, error: "\u5DF2\u53D6\u6D88\u5199\u56DE\u53D7\u4FDD\u62A4\u8DEF\u5F84 (\u53EF\u53E6\u5B58\u4E3A\u526F\u672C)" };
+    const baseProt = mentorBaseName(State.currentFile.name);
+    if (!State.protectedWriteUnlocked[baseProt]) {
+      return {
+        ok: false,
+        conflict: { kind: "protected", fileName: State.currentFile.name },
+        error: "protected"
+      };
     }
   }
   let snapshot;
@@ -2670,18 +2686,17 @@ async function writeCurrentToHandle({ reason = "manual", showProgress = false } 
         if (reason === "autosave") {
           return { ok: false, skipped: true, error: "external-modified" };
         }
-        const ok = confirm(
-          `\u26A0 \u4E3B\u6587\u4EF6\u5728\u5916\u90E8\u88AB\u4FEE\u6539!
-
-\u4F60\u6700\u540E\u4E00\u6B21\u6253\u5F00/\u4FDD\u5B58: ${new Date(snapshot.fileMtime).toLocaleTimeString()}
-\u5F53\u524D\u6587\u4EF6 mtime: ${new Date(currentFile.lastModified).toLocaleTimeString()}
-
-\u7EE7\u7EED\u4FDD\u5B58\u4F1A\u8986\u76D6\u5916\u90E8\u4FEE\u6539\u3002
-
-\u786E\u5B9A\u8981\u8986\u76D6\u5417? (\u5EFA\u8BAE\u5148\u53D6\u6D88, \u5907\u4EFD\u5916\u90E8\u6539\u52A8, \u518D\u5408\u5E76)`
-        );
-        if (!ok) {
-          return { ok: false, error: "\u7528\u6237\u53D6\u6D88: \u68C0\u6D4B\u5230\u5916\u90E8\u4FEE\u6539" };
+        if (!options.forceOverwriteExternal) {
+          return {
+            ok: false,
+            conflict: {
+              kind: "external-modified",
+              fileName: snapshot.name,
+              fileMtime: snapshot.fileMtime,
+              diskMtime: currentFile.lastModified
+            },
+            error: "external-modified"
+          };
         }
       }
     } catch (e) {
@@ -5628,8 +5643,12 @@ function highlightSelectionInSource(md2, selectedText) {
 function updateToggleBtnIcon() {
   const btn = $("#btn-toggle-render");
   if (!btn) return;
-  const iconSpan = btn.querySelector(".tb-icon");
-  iconSpan.innerHTML = State.renderMode === "rendered" ? window.MentorIcons.sourceMode : window.MentorIcons.renderMode;
+  const source = State.renderMode === "source";
+  btn.dataset.mode = source ? "source" : "rendered";
+  btn.setAttribute("aria-pressed", source ? "true" : "false");
+  const label = btn.querySelector(".tb-label") || btn.querySelector("span:not(.tb-icon)");
+  if (label) label.textContent = source ? "预览" : "源码";
+  try { syncToolbarActionState(); } catch {}
 }
 var _renderOutlineTimer = null;
 function scheduleRenderOutline() {
@@ -6028,7 +6047,61 @@ function updateHistoryButtons() {
   const redoBtn = $("#btn-redo");
   if (undoBtn) undoBtn.disabled = State.history.past.length === 0;
   if (redoBtn) redoBtn.disabled = State.history.future.length === 0;
+  try { syncToolbarActionState(); } catch {}
 }
+
+function applyToolbarActionState(sel, state) {
+  const el = typeof sel === "string" ? document.querySelector(sel) : sel;
+  if (!el || !state) return;
+  if ("disabled" in state) el.disabled = !!state.disabled;
+  if ("label" in state) {
+    const lab = el.querySelector(".tb-label");
+    if (lab) lab.textContent = state.label;
+  }
+  if ("pressed" in state) {
+    el.setAttribute("aria-pressed", state.pressed ? "true" : "false");
+    if (el.id === "btn-refs") el.setAttribute("aria-expanded", state.pressed ? "true" : "false");
+  }
+  if (state.detail) el.setAttribute("data-detail", state.detail);
+  if (state.intent) el.setAttribute("data-intent", state.intent);
+  if ("dirty" in state && el.id === "btn-save") el.setAttribute("data-dirty", state.dirty ? "true" : "false");
+}
+
+function syncToolbarActionState() {
+  let canUndo = State.history.past.length > 0;
+  let canRedo = State.history.future.length > 0;
+  try {
+    if (State.editor?.can?.().undo?.()) canUndo = true;
+    if (State.editor?.can?.().redo?.()) canRedo = true;
+  } catch {}
+  const refsPane = document.querySelector("#refs-pane");
+  const referencesOpen = !!(refsPane && !refsPane.classList.contains("hidden"));
+  const actionState = getToolbarActionState({
+    hasDocument: !!State.currentFile,
+    hasWriteHandle: hasWriteHandle(),
+    dirty: !!(State.currentFile && State.currentFile.dirty),
+    readOnly: !!State.readOnlyMode || !canWriteLiveDocument(),
+    saveMode: State.saveMode,
+    renderMode: State.renderMode === "source" ? "source" : "rendered",
+    referencesOpen,
+    canUndo,
+    canRedo,
+    busy: !!State._toolbarBusy,
+  });
+  applyToolbarActionState("#btn-new", actionState.new);
+  applyToolbarActionState("#btn-open-files", actionState.open);
+  applyToolbarActionState("#btn-save", actionState.save);
+  applyToolbarActionState("#btn-save-as", actionState.saveAs);
+  applyToolbarActionState("#btn-export-md", actionState.exportMd);
+  applyToolbarActionState("#btn-export-docx", actionState.exportDocx);
+  applyToolbarActionState("#btn-refs", actionState.references);
+  applyToolbarActionState("#btn-undo", actionState.undo);
+  applyToolbarActionState("#btn-redo", actionState.redo);
+  applyToolbarActionState("#btn-toggle-render", actionState.source);
+  const saveBtn = document.querySelector("#btn-save");
+  if (saveBtn) saveBtn.setAttribute("data-dirty", String(!!(State.currentFile && State.currentFile.dirty)));
+}
+
 function resetHistory() {
   State.history = createPatchHistory(100);
   updateHistoryButtons();
@@ -7884,6 +7957,7 @@ function setLiveRole(role) {
     }
   }
   renderLiveSyncBanner();
+  try { syncToolbarActionState(); } catch {}
   if (role === "owner" && prev !== "owner") {
     try {
       startAutosaveTimer();
@@ -8795,91 +8869,246 @@ function _zipWorkerCall(cmd, args, transferList = []) {
 function mentorExportName(mdName) {
   return mdName.replace(/\.(md|markdown)$/i, "") + ".mentor";
 }
-async function saveCurrent() {
-  if (State.readOnlyMode) {
-    showToast("\u53EA\u8BFB\u6A21\u5F0F: \u53E6\u4E00\u6807\u7B7E\u5728\u7F16\u8F91, \u5DF2\u7981\u7528 Ctrl+S", 3e3);
-    return;
+
+var _saveDialogResolver = null;
+var _saveDialogBusy = false;
+function renderSaveDialog(model) {
+  const root = document.querySelector("#save-dialog");
+  if (!root || !model) return;
+  root.dataset.severity = model.severity || "normal";
+  const title = document.querySelector("#save-dialog-title");
+  const msg = document.querySelector("#save-dialog-message");
+  const details = document.querySelector("#save-dialog-details");
+  const err = document.querySelector("#save-dialog-error");
+  const primary = document.querySelector("#save-dialog-primary");
+  const secondary = document.querySelector("#save-dialog-secondary");
+  const cancel = document.querySelector("#save-dialog-cancel");
+  if (title) title.textContent = model.title || "";
+  if (msg) msg.textContent = model.message || "";
+  if (err) { err.textContent = ""; err.classList.add("hidden"); }
+  if (details) {
+    const rows = Array.isArray(model.details) ? model.details : [];
+    details.innerHTML = rows.map((d) => `<dt>${escapeHtml(d.label || "")}</dt><dd>${escapeHtml(d.value || "")}</dd>`).join("");
+    details.classList.toggle("hidden", rows.length === 0);
   }
+  if (primary) {
+    primary.textContent = model.primaryLabel || "确定";
+    primary.classList.toggle("hidden", !model.primaryLabel);
+  }
+  if (secondary) {
+    const hasSec = !!(model.secondaryLabel && String(model.secondaryLabel).trim());
+    secondary.textContent = model.secondaryLabel || "";
+    secondary.classList.toggle("hidden", !hasSec);
+  }
+  if (cancel) cancel.textContent = model.cancelLabel || "取消";
+  root.classList.remove("hidden");
+  root.setAttribute("aria-busy", "false");
+  try { primary?.focus(); } catch {}
+}
+function closeSaveDialog() {
+  const root = document.querySelector("#save-dialog");
+  if (root) {
+    root.classList.add("hidden");
+    root.removeAttribute("aria-busy");
+  }
+  _saveDialogBusy = false;
+  const prev = openSaveDialog._lastFocus;
+  openSaveDialog._lastFocus = null;
+  try { if (prev && typeof prev.focus === "function") prev.focus(); } catch {}
+}
+function openSaveDialog(model) {
+  return new Promise((resolve) => {
+    initSaveDialog();
+    openSaveDialog._lastFocus = document.activeElement;
+    const root = document.querySelector("#save-dialog");
+    if (!root) {
+      resolve("cancel");
+      return;
+    }
+    if (_saveDialogResolver) {
+      const prev = _saveDialogResolver;
+      _saveDialogResolver = null;
+      prev("cancel");
+    }
+    _saveDialogResolver = resolve;
+    renderSaveDialog(model);
+  });
+}
+function initSaveDialog() {
+  const root = document.querySelector("#save-dialog");
+  if (!root || root.dataset.bound === "1") return;
+  root.dataset.bound = "1";
+  const finish = (choice) => {
+    if (_saveDialogBusy) return;
+    const r = _saveDialogResolver;
+    _saveDialogResolver = null;
+    closeSaveDialog();
+    if (r) r(choice);
+  };
+  document.querySelector("#save-dialog-primary")?.addEventListener("click", () => finish("primary"));
+  document.querySelector("#save-dialog-secondary")?.addEventListener("click", () => finish("secondary"));
+  document.querySelector("#save-dialog-cancel")?.addEventListener("click", () => finish("cancel"));
+  root.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      finish("cancel");
+    }
+  });
+}
+async function downloadMentorSnapshot(snapshot, { markCleanOnSuccess = true } = {}) {
+  showExportProgress("正在打包 .mentor…");
+  try {
+    const blob = await buildMentorZipBlob(snapshot.mdText, snapshot.sidecar, snapshot.mediaFiles, snapshot.references, { documentHtml: snapshot.documentHtml });
+    const outName = /\.mentor$/i.test(snapshot.name) ? snapshot.name : mentorExportName(snapshot.name);
+    downloadBlob(outName, blob);
+    hideExportProgress("已下载");
+    if (markCleanOnSuccess && activeDocumentMatches(snapshot) && (State.currentFile.dirtyGen || 0) === snapshot.dirtyGen) {
+      markClean();
+    }
+    try { snapshotActiveTab(); } catch {}
+    const copy = buildSaveResultCopy({ kind: markCleanOnSuccess ? "save-download-mentor" : "save-copy", fileName: outName });
+    setStatus(copy.status, copy.detail);
+    showToast(markCleanOnSuccess ? `已保存 ${outName}` : `副本已下载 ${outName} · 原文件未改变`);
+    return { ok: true, name: outName };
+  } catch (e) {
+    hideExportProgress("导出失败");
+    showToast("保存失败: " + (e && e.message ? e.message : e), 4000);
+    return { ok: false, error: e && e.message ? e.message : String(e) };
+  }
+}
+async function exportMarkdownSnapshot(snapshot, { markCleanOnSuccess = false } = {}) {
+  try {
+    downloadFile(snapshot.name.replace(/\.mentor$/i, ".md"), snapshot.mdText);
+    if (markCleanOnSuccess && activeDocumentMatches(snapshot) && (State.currentFile.dirtyGen || 0) === snapshot.dirtyGen) markClean();
+    const copy = buildSaveResultCopy({ kind: "export-md", fileName: snapshot.name });
+    setStatus(copy.status, copy.detail);
+    showToast("Markdown 已导出 · 原文件未改变");
+    return { ok: true };
+  } catch (e) {
+    showToast("导出失败: " + (e && e.message ? e.message : e), 4000);
+    return { ok: false, error: e && e.message ? e.message : String(e) };
+  }
+}
+async function runManualSave() {
   if (!State.currentFile) {
-    showToast("\u672A\u6253\u5F00\u6587\u6863");
-    return;
+    showToast("请先打开或新建文档");
+    return { ok: false, error: "no-document" };
+  }
+  if (State.readOnlyMode || !canWriteLiveDocument()) {
+    showToast("此页面正在实时查看，需先接管编辑", 3000);
+    return { ok: false, error: "read-only" };
   }
   if (!State.author) {
     await promptAuthor();
-    if (!State.author) return;
+    if (!State.author) return { ok: false, cancelled: true };
   }
-  const finishOk = (msg, detail) => {
-    // markClean already done by writeCurrentToHandle when gen matches;
-    // for download path we markClean here.
-    try {
-      snapshotActiveTab();
-    } catch {
-    }
-    if (msg) showToast(msg);
-    if (detail != null) setStatus(detail.status || "\u5DF2\u4FDD\u5B58", detail.right || State.currentFile.name);
-  };
-  // Path A: in-place write via FileSystemFileHandle
-  if (hasWriteHandle()) {
-    const showProgress = isMentorPackMode();
-    const result = await writeCurrentToHandle({ reason: "manual", showProgress });
-    if (result.ok) {
-      finishOk(
-        isMentorPackMode() ? "\u5DF2\u4FDD\u5B58\u5230\u539F\u4F4D\u7F6E \u2713 (.mentor)" : "\u5DF2\u4FDD\u5B58\u5230\u539F\u4F4D\u7F6E \u2713",
-        { status: "\u5DF2\u4FDD\u5B58", right: State.currentFile.name }
-      );
-      return;
-    }
-    if (result.skipped && result.error === "busy") {
-      showToast("\u6B63\u5728\u4FDD\u5B58\u2026", 1500);
-      return;
-    }
-    if (result.error) {
-      showToast("\u4FDD\u5B58\u5931\u8D25: " + result.error);
-      setStatus("\u4FDD\u5B58\u5931\u8D25", result.error);
-      return;
-    }
-  }
-  // Path B: download (no handle / download modes)
-  let snapshot;
+  State._toolbarBusy = true;
+  try { syncToolbarActionState(); } catch {}
   try {
-    snapshot = createSaveSnapshot();
-  } catch (e) {
-    showToast("\u4FDD\u5B58\u5931\u8D25: " + (e.message || e), 4e3);
-    return;
-  }
-  State.currentFile.content = snapshot.mdText;
-  State.currentFile.annotations = snapshot.sidecar;
-  try {
-    await AnnotationStore.put(snapshot.name, snapshot.sidecar);
-  } catch (e) {
-    console.warn("[IDB] put \u5931\u8D25:", e);
-  }
-  if (isMentorPackMode()) {
+    if (hasWriteHandle()) {
+      const showProgress = isMentorPackMode();
+      let result = await writeCurrentToHandle({ reason: "manual", showProgress });
+      if (result.conflict?.kind === "protected") {
+        const choice = await openSaveDialog(buildSaveDialogModel({ kind: "protected", fileName: State.currentFile.name }));
+        if (choice === "primary") {
+          const snap = createSaveSnapshot();
+          return await downloadMentorSnapshot(snap, { markCleanOnSuccess: false });
+        }
+        return { ok: false, cancelled: true };
+      }
+      if (result.conflict?.kind === "external-modified") {
+        const choice = await openSaveDialog(buildSaveDialogModel({
+          kind: "external-modified",
+          fileName: result.conflict.fileName || State.currentFile.name
+        }));
+        if (choice === "primary") {
+          result = await writeCurrentToHandle({ reason: "manual", showProgress, forceOverwriteExternal: true });
+        } else if (choice === "secondary") {
+          const snap = createSaveSnapshot();
+          return await downloadMentorSnapshot(snap, { markCleanOnSuccess: false });
+        } else {
+          return { ok: false, cancelled: true };
+        }
+      }
+      if (result.ok) {
+        const copy = buildSaveResultCopy({ kind: "write-current", fileName: State.currentFile.name });
+        setStatus(copy.status, copy.detail);
+        showToast(isMentorPackMode() ? "已保存到原位置 ✓ (.mentor)" : "已保存到原位置 ✓");
+        try { snapshotActiveTab(); } catch {}
+        return result;
+      }
+      if (result.skipped && result.error === "busy") {
+        showToast("正在保存…", 1500);
+        return result;
+      }
+      if (result.error === "权限被拒" || result.error === "need-permission") {
+        const choice = await openSaveDialog(buildSaveDialogModel({ kind: "permission-denied", fileName: State.currentFile.name }));
+        if (choice === "primary") {
+          const snap = createSaveSnapshot();
+          return await downloadMentorSnapshot(snap, { markCleanOnSuccess: false });
+        }
+        return { ok: false, cancelled: true };
+      }
+      if (result.error && /ANNOTATION_ANCHOR_AUDIT_FAILED|批注/.test(String(result.error))) {
+        const choice = await openSaveDialog(buildSaveDialogModel({ kind: "anchor-audit", fileName: State.currentFile.name, issueCount: 1 }));
+        if (choice === "secondary") {
+          try {
+            const snap = createSaveSnapshot(); // may throw again
+            return await downloadMentorSnapshot(snap, { markCleanOnSuccess: false });
+          } catch (e2) {
+            showToast("无法另存: " + (e2.message || e2), 4000);
+          }
+        }
+        return { ok: false, error: result.error };
+      }
+      if (result.error) {
+        showToast("保存失败: " + result.error);
+        setStatus("保存失败", result.error);
+      }
+      return result;
+    }
+
+    // No write handle: explain + recommend .mentor
+    let snapshot;
     try {
-      showExportProgress("\u6B63\u5728\u6253\u5305 .mentor\u2026");
-      const blob = await buildMentorZipBlob(snapshot.mdText, snapshot.sidecar, snapshot.mediaFiles, snapshot.references, { documentHtml: snapshot.documentHtml });
-      const outName = /\.mentor$/i.test(snapshot.name)
-        ? snapshot.name
-        : mentorExportName(snapshot.name);
-      downloadBlob(outName, blob);
-      hideExportProgress("\u5DF2\u4E0B\u8F7D");
-      if (activeDocumentMatches(snapshot) && (State.currentFile.dirtyGen || 0) === snapshot.dirtyGen) markClean();
-      finishOk("\u5DF2\u4E0B\u8F7D \u2713 (.mentor)", { status: "\u5DF2\u4E0B\u8F7D", right: outName });
+      snapshot = createSaveSnapshot();
     } catch (e) {
-      hideExportProgress("\u5BFC\u51FA\u5931\u8D25");
-      showToast("\u5BFC\u51FA\u5931\u8D25: " + (e.message || e), 4e3);
-      setStatus("\u5BFC\u51FA\u5931\u8D25", e.message || String(e));
+      const msg = e && e.message ? e.message : String(e);
+      if (/ANNOTATION_ANCHOR_AUDIT_FAILED/.test(msg)) {
+        const choice = await openSaveDialog(buildSaveDialogModel({ kind: "anchor-audit", fileName: State.currentFile?.name, issueCount: 1 }));
+        if (choice === "secondary") showToast("诊断副本暂不可用: 请先修复批注位置", 4000);
+        return { ok: false, error: msg };
+      }
+      showToast("保存失败: " + msg, 4000);
+      return { ok: false, error: msg };
     }
-    return;
+    const model = buildSaveDialogModel({
+      kind: "no-handle",
+      fileName: snapshot.name,
+      annotations: (snapshot.sidecar && snapshot.sidecar.annotations || []).length,
+      references: (snapshot.references && snapshot.references.entries || []).length,
+      media: Object.keys(snapshot.mediaFiles || {}).length,
+    });
+    const choice = await openSaveDialog(model);
+    if (choice === "primary") {
+      try {
+        await AnnotationStore.put(snapshot.name, snapshot.sidecar);
+      } catch {}
+      return await downloadMentorSnapshot(snapshot, { markCleanOnSuccess: true });
+    }
+    if (choice === "secondary") {
+      return await exportMarkdownSnapshot(snapshot, { markCleanOnSuccess: false });
+    }
+    return { ok: false, cancelled: true };
+  } finally {
+    State._toolbarBusy = false;
+    try { syncToolbarActionState(); } catch {}
   }
-  const sidecarName = snapshot.name.replace(/\.md$/i, "") + ".annotations.json";
-  downloadFile(snapshot.name, snapshot.mdText);
-  downloadFile(sidecarName, JSON.stringify(snapshot.sidecar, null, 2));
-  if (activeDocumentMatches(snapshot) && (State.currentFile.dirtyGen || 0) === snapshot.dirtyGen) markClean();
-  finishOk("\u5DF2\u4E0B\u8F7D \u2713 (\u6D4F\u89C8\u5668\u4E0D\u652F\u6301\u6216\u672A\u6388\u6743)", {
-    status: "\u5DF2\u4E0B\u8F7D",
-    right: `${snapshot.name} + ${sidecarName}`
-  });
+}
+
+
+async function saveCurrent() {
+  return runManualSave();
 }
 /**
  * Legacy API (tests / plugins): write given mentor payload to current handle.
@@ -8975,7 +9204,7 @@ function downloadBlob(name, blob) {
 }
 function exportMd() {
   if (!State.editor || !State.currentFile) {
-    showToast("\u8BF7\u5148\u6253\u5F00\u6216\u65B0\u5EFA\u6587\u6863", 2e3);
+    showToast("请先打开或新建文档", 2e3);
     return;
   }
   const html = State.editor.getHTML();
@@ -8983,31 +9212,36 @@ function exportMd() {
   const baseName = (State.currentFile.name || "untitled").replace(/\.(md|markdown|mentor)$/i, "");
   const blob = new Blob([mdText], { type: "text/markdown;charset=utf-8" });
   downloadBlob(`${baseName}.md`, blob);
-  showToast(`\u5DF2\u5BFC\u51FA ${baseName}.md`, 2500);
+  const _mdCopy = buildSaveResultCopy({ kind: "export-md", fileName: `${baseName}.md` });
+  setStatus(_mdCopy.status, _mdCopy.detail);
+  showToast(`${_mdCopy.status} · ${_mdCopy.detail}`, 2500);
 }
 async function exportDocx() {
+  // DOCX = body-only export copy (never clears dirty)
   if (!State.editor || !State.currentFile) {
-    showToast("\u8BF7\u5148\u6253\u5F00\u6216\u65B0\u5EFA\u6587\u6863", 2e3);
+    showToast("请先打开文档");
     return;
   }
   if (typeof JSZip === "undefined") {
-    showToast("JSZip \u672A\u52A0\u8F7D, \u65E0\u6CD5\u5BFC\u51FA docx", 3e3);
+    showToast("JSZip 未加载, 无法导出 docx", 3e3);
     return;
   }
   // Body-only export: annotations are not embedded as Word comments
-  showExportProgress("\u6B63\u5728\u751F\u6210 .docx\uff08\u4ec5\u6b63\u6587\uff09\u2026");
-  showToast("\u6B63\u5728\u751F\u6210 .docx\uff08\u4ec5\u6b63\u6587\uff0c\u4e0d\u542b\u6279\u6ce8\uff09\u2026", 1800);
+  showExportProgress("正在生成 .docx（仅正文）…");
+  showToast("正在生成 .docx（仅正文，不含批注）…", 1800);
   try {
     const html = State.editor.getHTML();
     const zip = await buildDocxBlob(html, State.mediaFiles || {});
     const baseName = (State.currentFile.name || "untitled").replace(/\.(md|markdown|mentor)$/i, "");
     downloadBlob(`${baseName}.docx`, zip);
-    hideExportProgress("\u5DF2\u5BFC\u51FA\uff08\u4ec5\u6b63\u6587\uff09");
-    showToast(`\u5DF2\u5BFC\u51FA ${baseName}.docx\uff08\u4ec5\u6b63\u6587\uff0c\u4e0d\u542b\u6279\u6ce8\uff09`, 2800);
+    hideExportProgress("已导出（仅正文）");
+    const _docxCopy = buildSaveResultCopy({ kind: "export-docx", fileName: `${baseName}.docx` });
+    setStatus(_docxCopy.status, _docxCopy.detail);
+    showToast(`${_docxCopy.status} · ${_docxCopy.detail}`, 2800);
   } catch (e) {
-    console.error("[exportDocx] \u5931\u8D25:", e);
-    hideExportProgress("\u5BFC\u51FA\u5931\u8D25");
-    showToast("\u5BFC\u51FA docx \u5931\u8D25: " + (e.message || "\u672A\u77E5\u9519\u8BEF"), 4e3);
+    console.error("[exportDocx] 失败:", e);
+    hideExportProgress("导出失败");
+    showToast("导出 docx 失败: " + (e.message || "未知错误"), 4e3);
   }
 }
 async function buildDocxBlob(html, mediaFiles) {
@@ -9674,9 +9908,9 @@ function openReferenceEditor({ mode = "add", entry = null, sourceName = "" } = {
   fillReferenceForm(base);
   setReferenceFormError("");
   if (title) {
-    if (mode === "edit") title.textContent = "编辑引用";
-    else if (mode === "import") title.textContent = sourceName ? `导入引用 · ${sourceName}` : "导入引用";
-    else title.textContent = "添加引用";
+    if (mode === "edit") title.textContent = "编辑文献";
+    else if (mode === "import") title.textContent = sourceName ? `导入文献 · ${sourceName}` : "导入文献";
+    else title.textContent = "新建文献";
   }
   modal.classList.remove("hidden");
   const keyInput = document.querySelector("#reference-key");
@@ -9710,8 +9944,8 @@ function deleteReferenceEntry(key, { confirmUser = true } = {}) {
   const count = getCitationUsages()[drop] || 0;
   if (confirmUser) {
     const message = count
-      ? `“@${drop}”在正文使用 ${count} 次。删除元数据后正文会保留并标为缺失。继续？`
-      : `删除“@${drop}”？`;
+      ? `文献 @${drop} 在正文引用 ${count} 次。删除库条目后正文仍保留 [@${drop}] 并标为缺失。继续？`
+      : `从文献库删除 @${drop}？`;
     if (!confirm(message)) return false;
   }
   commitReferenceManifest(removeReferenceEntry(State.references, drop));
@@ -9723,7 +9957,7 @@ async function importReferenceFile(file) {
   try { text = await file.text(); } catch (e) { return { error: String(e && e.message || e) }; }
   const entries = sortReferenceEntries(parseReferenceFile(file.name, text));
   if (!entries.length) {
-    showToast("未识别到引用条目", 2500);
+    showToast("未识别到文献条目", 2500);
     return { error: "empty" };
   }
   if (entries.length === 1) {
@@ -9737,7 +9971,7 @@ async function importReferenceFile(file) {
     let overwritten = 0;
     for (const c of result.conflicts) {
       const ok = confirm(
-        `citekey @${c.existing.key} 已存在且内容不同。\n\n已有: ${c.existing.authors || "—"} / ${c.existing.year || "—"} / ${c.existing.title || "—"}\n导入: ${c.incoming.authors || "—"} / ${c.incoming.year || "—"} / ${c.incoming.title || "—"}\n\n确定 = 使用导入项；取消 = 保留已有`
+        `文献 @${c.existing.key} 已存在且内容不同。\n\n库中: ${c.existing.authors || "—"} / ${c.existing.year || "—"} / ${c.existing.title || "—"}\n导入: ${c.incoming.authors || "—"} / ${c.incoming.year || "—"} / ${c.incoming.title || "—"}\n\n确定 = 用导入项覆盖；取消 = 保留库中条目`
       );
       if (ok) {
         const up = upsertReferenceEntry(applied, c.incoming, { originalKey: c.existing.key });
@@ -9804,6 +10038,7 @@ function initReferencesPane() {
     main.classList.toggle("refs-pane-open", open);
     document.body.classList.toggle("refs-pane-collapsed", !open);
     expand?.classList.toggle("hidden", open || !(State.references.entries || []).length);
+    try { syncToolbarActionState(); } catch {}
   };
   const render = () => {
     const entries = State.references.entries || [];
@@ -10269,12 +10504,45 @@ function setupFormatMoreMenu() {
     if (window.matchMedia("(min-width: 1180px)").matches) close3();
   });
 }
+
+var _toolbarActionInflight = Object.create(null);
+function runToolbarAction(id, fn) {
+  const key = String(id || "");
+  if (!key || typeof fn !== "function") return Promise.resolve();
+  if (_toolbarActionInflight[key]) return _toolbarActionInflight[key];
+  const btnMap = {
+    save: "#btn-save",
+    saveAs: "#btn-save-as",
+    exportMd: "#btn-export-md",
+    exportDocx: "#btn-export-docx",
+  };
+  const sel = btnMap[key];
+  const el = sel ? document.querySelector(sel) : null;
+  State._toolbarBusy = true;
+  if (el) {
+    el.setAttribute("aria-busy", "true");
+    el.disabled = true;
+  }
+  try { syncToolbarActionState(); } catch {}
+  const p = Promise.resolve().then(fn).finally(() => {
+    delete _toolbarActionInflight[key];
+    State._toolbarBusy = Object.keys(_toolbarActionInflight).length > 0;
+    if (el) {
+      el.removeAttribute("aria-busy");
+      // leave disabled state to syncToolbarActionState
+    }
+    try { syncToolbarActionState(); } catch {}
+  });
+  _toolbarActionInflight[key] = p;
+  return p;
+}
+
 function setupToolbar() {
   $("#btn-new").addEventListener("click", newDocument);
   $("#btn-open-files").addEventListener("click", openFiles);
-  $("#btn-save").addEventListener("click", saveCurrent);
-  $("#btn-export-md").addEventListener("click", exportMd);
-  $("#btn-export-docx").addEventListener("click", exportDocx);
+  $("#btn-save").addEventListener("click", () => runToolbarAction("save", saveCurrent));
+  $("#btn-export-md").addEventListener("click", () => runToolbarAction("exportMd", exportMd));
+  $("#btn-export-docx").addEventListener("click", () => runToolbarAction("exportDocx", exportDocx));
   $("#btn-undo").addEventListener("click", () => {
     if (undoSmartDispatch()) showToast("\u5DF2\u64A4\u9500");
   });
@@ -10282,6 +10550,7 @@ function setupToolbar() {
     if (redoSmartDispatch()) showToast("\u5DF2\u91CD\u505A");
   });
   updateHistoryButtons();
+  try { syncToolbarActionState(); } catch {}
   document.addEventListener("keydown", (e) => {
     const tag = e.target?.tagName;
     if (tag === "TEXTAREA" || tag === "INPUT") return;
@@ -10356,21 +10625,16 @@ function setupToolbar() {
     }
     return false;
   }
-  $("#btn-save-as").addEventListener("click", async () => {
+  $("#btn-save-as").addEventListener("click", () => runToolbarAction("saveAs", async () => {
     if (!State.currentFile) return;
     try {
       const snapshot = createSaveSnapshot();
-      showExportProgress("\u6B63\u5728\u6253\u5305 .mentor\u2026");
-      const blob = await buildMentorZipBlob(snapshot.mdText, snapshot.sidecar, snapshot.mediaFiles, snapshot.references, { documentHtml: snapshot.documentHtml });
-      const exportName = /\.mentor$/i.test(snapshot.name) ? snapshot.name : mentorExportName(snapshot.name);
-      downloadBlob(exportName, blob);
-      hideExportProgress("\u5DF2\u4E0B\u8F7D");
-      showToast(`\u5DF2\u4E0B\u8F7D ${exportName} \u2713`);
+      await downloadMentorSnapshot(snapshot, { markCleanOnSuccess: false });
     } catch (e) {
-      hideExportProgress("\u5BFC\u51FA\u5931\u8D25");
-      showToast("\u5BFC\u51FA\u5931\u8D25: " + (e && e.message ? e.message : e), 4e3);
+      hideExportProgress("导出失败");
+      showToast("另存失败: " + (e && e.message ? e.message : e), 4e3);
     }
-  });
+  }));
   $$("#format-toolbar button[data-cmd]").forEach((btn) => {
     btn.addEventListener("click", () => {
       const cmd = btn.dataset.cmd;
@@ -11210,6 +11474,7 @@ async function boot() {
     console.warn("[tabs] setup", e);
   }
   setupToolbar();
+  initSaveDialog();
   setupFloatCommentButton();
   setupTableControls();
   setupFileListDropdown();
@@ -11485,6 +11750,13 @@ window.__mdAnnotator = {
   openReferenceEditor,
   closeReferenceEditor,
   commitReferenceManifest,
+  syncToolbarActionState,
+  getToolbarActionState,
+  PRIMARY_TOOLBAR_ACTIONS,
+  runManualSave,
+  openSaveDialog,
+  buildSaveDialogModel,
+  buildSaveResultCopy,
   newDocument,
   createAnnotationFromSelection,
   createAnnotationThread,
