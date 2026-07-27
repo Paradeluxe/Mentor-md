@@ -117,7 +117,7 @@ const URL = 'http://127.0.0.1:8787/index.html';
   // 3. 验证 2 个不同用户的 avatar 颜色不一样 (李四 ≠ 张三)
   const avatarColors = await page.evaluate(() => {
     const els = document.querySelectorAll('.comment-avatar');
-    return Array.from(els).slice(0, 4).map(e => e.style.background);
+    return Array.from(els).slice(0, 4).map(e => getComputedStyle(e).backgroundColor);
   });
   const uniqueColors = new Set(avatarColors).size;
   record('不同用户 avatar 颜色不同', uniqueColors >= 2, `unique colors=${uniqueColors}, samples=${JSON.stringify(avatarColors)}`);
@@ -130,38 +130,38 @@ const URL = 'http://127.0.0.1:8787/index.html';
   });
   record('回复输入框在卡片末尾 (v2: 无 details 折叠)', inputFormCount >= 1, `count=${inputFormCount}`);
 
-  // 5. 验证 textarea 不显示 native resize handle
+  // 5. 回复框允许纵向扩展，避免长批注遮挡内容
   const ta = await page.evaluate(() => {
     const t = document.querySelector('textarea[data-thread-input]');
     if (!t) return null;
     return window.getComputedStyle(t).resize;
   });
-  record('Textarea resize: none', ta === 'none', `resize=${ta}`);
+  record('Textarea resize: vertical', ta === 'vertical', `resize=${ta}`);
 
-  // 6. 验证 resolved thread 有 line-through
+  // 6. 已解决线程保持可读，不使用删除线
   const resolvedStrike = await page.evaluate(() => {
     const t = document.querySelector('.comment-thread.is-resolved .comment-body');
     if (!t) return null;
     return window.getComputedStyle(t).textDecorationLine;
   });
-  record('Resolved 批注 body 有 line-through', resolvedStrike && resolvedStrike.includes('line-through'), `decoration=${resolvedStrike}`);
+  record('Resolved 批注 body 无 line-through', resolvedStrike === 'none', `decoration=${resolvedStrike}`);
 
-  // 7. 验证 active thread 边框 = accent color
-  const activeBorder = await page.evaluate(() => {
+  // 7. 普通 active thread 使用主强调色 token
+  const activeStyle = await page.evaluate(() => {
     const t = document.querySelector('.comment-thread.is-active');
     if (!t) return null;
-    return window.getComputedStyle(t).borderColor;
+    const style = window.getComputedStyle(t);
+    return { border: style.borderColor, accent: style.getPropertyValue('--thread-accent').trim() };
   });
-  record('Active thread 边框 = accent orange', activeBorder && activeBorder.includes('245, 78, 0'), `border=${activeBorder}`);
+  record('Active thread 使用 accent token', activeStyle && activeStyle.accent === '#b93800' && activeStyle.border !== 'rgba(0, 0, 0, 0)', `style=${JSON.stringify(activeStyle)}`);
 
-  // 8. 验证 resolve button 在 menu popover 里, 文字色不是绿色
-  // (产品改用 menu popover 后, 旧的 .comment-actions .resolve-action CSS 已无对应元素, 这里改为 menu 内的 resolve)
+  // 8. 已解决卡片的重新打开按钮固定使用 success 绿色
   const resolveColor = await page.evaluate(() => {
-    const t = document.querySelector('.comment-menu button[data-act="resolve"]');
+    const t = document.querySelector('.comment-thread.is-resolved .comment-resolve-btn');
     if (!t) return null;
     return window.getComputedStyle(t).color;
   });
-  record('Resolve 按钮文字色 = 中性 (非绿色)', resolveColor && !resolveColor.includes('31, 138, 101'), `color=${resolveColor}`);
+  record('重新打开按钮文字色 = success green', resolveColor === 'rgb(24, 115, 87)', `color=${resolveColor}`);
 
   // 9. 验证 delete button 在 menu popover 里, 有 "🗑 删除批注" 文字
   const deleteBtn = await page.evaluate(() => {

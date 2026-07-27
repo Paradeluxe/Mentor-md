@@ -22,7 +22,35 @@
 
 **content.md 中引用**: `![](media/image5.png)` — 打开时 `markdownToHtml(md, State.mediaUrls)` 自动替换 src 为 blob URL.
 
-ZIP 内 `content.md` + `annotations.json` 同名约定, media/* 子目录按需打包. 任何带 BOM 的 utf-8 必须先 strip.
+ZIP 内 `content.md` + `annotations.json` 同名约定, media/* 子目录按需
+
+引用联动后的容器布局（引用文件均可选，旧 reader 可直接忽略）：
+
+```text
+.mentor ZIP
+├── content.md
+├── annotations.json
+├── references.json   # 可选 normalized reference manifest v1
+├── references.bib    # 可选 canonical BibTeX，供 Pandoc citeproc 使用
+└── media/
+```
+
+`references.json` 使用独立 `version: "1"`，不得塞进 `annotations.json` 顶层，也不得由 Mentor UI 直接编辑元数据字段。无引用库的旧 `.mentor` 不需要迁移；`annotations.json.version` 仍保持 `"1"`。
+
+`references.json` 最小形状：
+
+```json
+{
+  "version": "1",
+  "source": { "name": "refs.bib", "format": "bibtex" },
+  "updatedAt": "2026-07-26T00:00:00.000Z",
+  "entries": [
+    { "key": "alpha2020", "type": "article", "authors": "Alpha, Ann", "year": "2020", "title": "Title" }
+  ]
+}
+```
+
+任何带 BOM 的 UTF-8 必须先 strip.
 
 ---
 
@@ -53,8 +81,32 @@ ZIP 内 `content.md` + `annotations.json` 同名约定, media/* 子目录按需�
 | `resolved`   | boolean  | 必   | `false`  | 是否已解决                                   |
 | `createdAt`  | string   | 必   | -        | ISO-8601 UTC, thread 创建时刻               |
 | `comments`   | array    | 必   | `[]`     | 评论数组, 见下                              |
+| `range`      | object   | 否   | -        | `{ from, to }` PM 位置缓存 (保存可选)       |
+| `ranges`     | array    | 否   | -        | 多 cell / 跨块范围 `[{from,to}, ...]`       |
+| `imageAnchors` | array  | 否   | -        | 图片锚点 `[{from,to,src,alt,title}]`        |
+| `deleted`    | boolean  | 否   | `false`  | 正文锚点丢失                               |
+| `invalid`    | boolean  | 否   | `false`  | 位置不可靠                                 |
+| `invalidReason` | string | 否  | -        | e.g. `text-edited` / `mark-missing` / `ambiguous` / `orphaned` |
+| `fuzzy`      | boolean  | 否   | `false`  | 模糊重定位                                 |
+| `authorColor`| number   | 否   | `0`      | 0–7 作者色槽                               |
+| `threadType` | string   | 否   | -        | `ai` / `review` (mention 类型)             |
+| `anchor`     | object   | 否   | -        | 多证据锚点（可选扩展，见下）               |
 
 **`prefix` / `suffix` 不能丢**: 用于跨 edit 后重新定位 quoted text. 空字符串允许, 字段必须存在.
+
+### `anchor` (可选, v1 multi-evidence)
+
+| 字段 | 类型 | 说明 |
+| ---- | ---- | ---- |
+| `version` | string | `"1"` |
+| `quote` | object | `{ exact, prefix, suffix }` — 与顶层 text/prefix/suffix 同步投影 |
+| `position` | object | `{ from, to, startAssoc, endAssoc }` 会话内 PM 位置缓存 |
+| `structure` | object | 可选块路径/节点类型 |
+| `status` | string | `attached` / `moved` / `edited` / `ambiguous` / `orphaned` |
+| `confidence` | number | 0–1 |
+| `updatedAt` | string | ISO-8601 |
+
+**歧义纪律**: `status=ambiguous` 时禁止自动挂 mark；UI 须提示重新挂载。旧读写只认 prefix/text/suffix 仍合法。
 
 ---
 
@@ -96,11 +148,20 @@ v1 读盘器必须 **拒绝** (报损坏):
 
 ---
 
+## 运行时文档身份 (不写进 sidecar 顶层)
+
+| 字段 | 说明 |
+| ---- | ---- |
+| `documentId` | 运行时 UUID；HandleStore / DraftStore 主键。basename 仅作兼容回退 |
+| DraftStore | IndexedDB `Mentor-drafts`：`{ documentId, name, body, annotations, sidecar, updatedAt }` 原子缓存，崩溃恢复正文+批注 |
+
 ## 版本升级路径
 
 - 加字段 → bump `version: "2"`, 老读盘器忽略即可 (但要 declare 兼容性)
 - 改字段语义 (e.g. `resolved` 改成 enum) → bump `version` + 写 migration script
 - 删字段 → 不允许. 改 nullable.
+
+**当前 shipped sidecar `version` 仍为 `"1"`**；可选 thread 字段向后兼容（老读盘器忽略未知字段）。
 
 ---
 

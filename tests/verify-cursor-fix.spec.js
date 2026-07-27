@@ -46,10 +46,14 @@ const URL = URL_BASE + '?v=' + CURRENT_VERSION;
       const me = findMark();
       if (!me) return null;
       const r = me.getBoundingClientRect();
-      me.dispatchEvent(new MouseEvent('mousedown', {
-        bubbles: true, cancelable: true, view: window,
-        clientX: x, clientY: r.top + r.height/2, button: 0,
-      }));
+      const y = r.top + r.height / 2;
+      // Full pointer/mouse cycle — caret is finalized on pointerup settle (not mousedown).
+      const opts = { bubbles: true, cancelable: true, view: window, clientX: x, clientY: y, button: 0 };
+      me.dispatchEvent(new PointerEvent('pointerdown', { ...opts, pointerId: 1, pointerType: 'mouse' }));
+      me.dispatchEvent(new MouseEvent('mousedown', { ...opts, detail: 1 }));
+      me.dispatchEvent(new PointerEvent('pointerup', { ...opts, pointerId: 1, pointerType: 'mouse' }));
+      me.dispatchEvent(new MouseEvent('mouseup', { ...opts, detail: 1 }));
+      me.dispatchEvent(new MouseEvent('click', { ...opts, detail: 1 }));
       return r;
     };
 
@@ -108,13 +112,15 @@ const URL = URL_BASE + '?v=' + CURRENT_VERSION;
     const findMark = () => document.querySelector(`[data-thread-id="${tid}"]`);
     const wait = ms => new Promise(r => setTimeout(r, ms));
 
-    // 点左边
+    // 点左边（完整 pointer 周期）
     const r = findMark().getBoundingClientRect();
-    findMark().dispatchEvent(new MouseEvent('mousedown', {
-      bubbles: true, cancelable: true, view: window,
-      clientX: r.left + 2, clientY: r.top + r.height/2, button: 0,
-    }));
-    await wait(80);
+    const x = r.left + 2, y = r.top + r.height / 2;
+    const opts = { bubbles: true, cancelable: true, view: window, clientX: x, clientY: y, button: 0 };
+    findMark().dispatchEvent(new PointerEvent('pointerdown', { ...opts, pointerId: 1, pointerType: 'mouse' }));
+    findMark().dispatchEvent(new MouseEvent('mousedown', { ...opts, detail: 1 }));
+    findMark().dispatchEvent(new PointerEvent('pointerup', { ...opts, pointerId: 1, pointerType: 'mouse' }));
+    findMark().dispatchEvent(new MouseEvent('mouseup', { ...opts, detail: 1 }));
+    await wait(100);
     const cursorPos = ed.state.selection.from;
     // 插入
     ed.commands.insertContent('【】');

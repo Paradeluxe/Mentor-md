@@ -31,7 +31,7 @@ const BODY_CASES = [
   { id: 'B5', name: '@AI marker variants' },
   { id: 'B6', name: '@AI mid/end/multi' },
   { id: 'B7', name: '@AI + long instruction' },
-  { id: 'B8', name: 'prefix-ai chip' },
+  { id: 'B8', name: 'type switcher AI' },
   { id: 'B9', name: 'markdown-ish body' },
   { id: 'B10', name: 'html-looking body' },
   { id: 'B11', name: 'zwj/rtl/bidi' },

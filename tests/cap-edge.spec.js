@@ -108,7 +108,7 @@ const { chromium } = require('playwright');
     });
     step('T3_can_recover_after_delete', recover.after === 45 && recover.canCreate, recover);
 
-    // === T4: import 超 cap 的 .mentor 应被截断 + 警告 ===
+    // === T4: import 超 cap 时仍无损加载全部批注；上限只限制新建 ===
     await page.evaluate(() => {
       localStorage.setItem('Mentor:maxAnnotations', '50');
     });
@@ -120,12 +120,11 @@ const { chromium } = require('playwright');
     if (capVerify !== 50) console.log('  WARN: cap=' + capVerify + ' (expected 50)');
 
     const importTest = await page.evaluate(async () => {
-      const ed = window.__mdAnnotator.State.editor;
       // loadMarkdownIntoEditor 期望 annotationsData 是 {annotations: [...]} 形状 (sidecar JSON 完整对象)
       // 不用 prefix/suffix — 让 findAnnotationRange P0 精确匹配
       const fakeAnns = [];
       let md = '';
-      for (let i = 0; i < 150; i++) {  // cap=50, 超出 → 应截到 50
+      for (let i = 0; i < 150; i++) {  // cap=50, 超出 → 仍应完整加载 150
         const annText = '[ann' + i + ']';
         md += annText + ' ';
         fakeAnns.push({
@@ -146,19 +145,23 @@ const { chromium } = require('playwright');
       } catch (e) {
         return { error: e.message };
       }
+      const sidecar = window.__mdAnnotator.buildAnnotationsSidecar
+        ? window.__mdAnnotator.buildAnnotationsSidecar()
+        : (window.__mdAnnotator.State.annotations || []).map((a) => ({ threadId: a.threadId }));
       return {
         cap: window.__mdAnnotator.State.maxAnnotations,
         loaded: window.__mdAnnotator.State.annotations.length,
         requested: fakeAnns.length,
+        savedCount: sidecar.length,
         toast: document.querySelector('#toast')?.textContent || '',
         statusText: document.querySelector('#status-right')?.textContent || '',
       };
     });
-    step('T4_import_truncated_to_cap',
-      importTest.cap === 50 && importTest.loaded === 50,
+    step('T4_import_preserves_all_over_cap',
+      importTest.cap === 50 && importTest.loaded === 150 && importTest.savedCount === 150,
       importTest);
     step('T4b_import_warned',
-      importTest.toast.includes('超出上限') || importTest.statusText.includes('150'),
+      importTest.toast.includes('超出') || importTest.statusText.includes('150'),
       { toast: importTest.toast, status: importTest.statusText });
 
     // === T5: import 接近 cap (80%) 时 warn ===

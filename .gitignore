@@ -35,4 +35,17 @@ tmp/
 .env.local
 dist/
 
+# Local session / runtime junk (never commit)
+.mentor-session
+server.log
+*.log
+example.mentor
+app.js.bak*
+app.js.*backup*
+app.js.broken*
+*.bak_pre_*
+
+# Local agent plans / session scratch (may mention protected paper paths)
+.hermes/
+
 # app.bundle.js is committed for offline portable zip (rebuild: python scripts/build-offline.py)

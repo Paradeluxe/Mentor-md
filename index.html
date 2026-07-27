@@ -4,10 +4,10 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Mentor — 像 docx 一样批注 Markdown</title>
-<meta name="build" content="v1.44.8 cache-bust v=160" />
+<meta name="build" content="v1.44.8 cache-bust v=161" />
 <!-- v1.43.37 offline: local fonts + KaTeX (no CDN) -->
 <link rel="stylesheet" href="vendor/fonts/local-fonts.css?v=1" />
-<link rel="stylesheet" href="styles.css?v=160" />
+<link rel="stylesheet" href="styles.css?v=161" />
 <link rel="stylesheet" href="vendor/katex/katex.min.css?v=1" />
 <!-- 字体：系统无衬线 + 等宽（侧栏时间戳、文件名） -->
 <style>
@@ -30,7 +30,7 @@
       <button id="btn-save" title="保存当前 .md 和批注 (Ctrl+S)" class="tb-icon-text"><span class="tb-icon"></span><span>保存</span></button>
       <button id="btn-save-as" title="导出 .mentor 单文件包 (md + 批注 + 图片)" class="tb-icon-text"><span class="tb-icon"></span><span>.mentor</span></button>
       <button id="btn-export-md" title="导出 Markdown" class="tb-icon-text"><span class="tb-icon"></span><span>MD</span></button>
-      <button id="btn-export-docx" title="导出 DOCX" class="tb-icon-text"><span class="tb-icon"></span><span>DOCX</span></button>
+      <button id="btn-export-docx" title="导出 DOCX（仅正文，不含批注）" data-export-mode="body-only" class="tb-icon-text"><span class="tb-icon"></span><span>DOCX</span></button>
       <button id="btn-refs" title="导入引用库：BibTeX / RIS / EndNote / CSL-JSON；只读浏览并插入 citekey" class="tb-icon-text"><span class="tb-icon"></span><span>引用</span></button>
       <input type="file" id="refs-file-input" accept=".bib,.ris,.enw,.xml,.json,.txt" style="display:none">
       <span class="tb-sep"></span>

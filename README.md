@@ -2,7 +2,11 @@
 
 > 像 docx 一样批注 Markdown。
 
-一个 **WYSIWYG Markdown 编辑器**，右侧带 docx 风格批注侧栏，选区级批注、嵌套回复、解决/重新打开、侧车 JSON 存储。**纯前端单页**，无构建步骤，**双击 `index.html` 或起一个静态 server 即可用**。
+一个 **WYSIWYG Markdown 编辑器**（当前 **v1.44.8**），右侧带 docx 风格批注侧栏，选区级批注、嵌套回复、解决/重新打开。
+
+**主路径是 `.mentor` 单文件包**（ZIP：`content.md` + `annotations.json` + 可选 `media/`），像 docx 一样一个文件带走正文、批注与插图。旧的 `.md` + `.annotations.json` 侧车仍可打开；建议另存为 `.mentor`。
+
+**纯前端单页**，离线 bundle（`app.bundle.js` + `vendor/`），**双击 `index.html` 或起静态 server（默认端口 8787）即可用**。
 
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](./LICENSE)
 [![GitHub stars](https://img.shields.io/github/stars/Paradeluxe/Mentor-md.svg)](https://github.com/Paradeluxe/Mentor-md/stargazers)
@@ -16,14 +20,19 @@
 - ✅ **选区级批注** — 拖选任意范围 → 加批注
 - ✅ **嵌套回复**（threaded replies，docx 风格）
 - ✅ **解决 / 重新打开** 批注 toggle
-- ✅ **侧车 JSON** 存储 — 源 `.md` 文件保持干净
-- ✅ **三栏布局** — 文件树 / 编辑器 / 批注面板
-- ✅ **键盘快捷键** — `Ctrl+S` 保存，`Ctrl+B/I` 格式化
-- ✅ **mark 智能锚定** — 光标落在 resolved mark 内自动 pinned 显示
-- ✅ **KaTeX 数学公式** — `$inline$` + `$$block$$`，双向转换 (md → 渲染 → md 源码)
-- ✅ **File System Access API** — Chrome/Edge 一键保存到原位置，无需下载
-- ✅ **IndexedDB 持久化 handle** — 关闭再开自动重连上次文件夹
-- ✅ **零依赖** — CDN ESM，单文件 HTML 即跑
+- ✅ **`.mentor` 主路径** — content.md + annotations.json + media/ 一包保存
+- ✅ **侧车 JSON 兼容** — 旧 `.md` + `.annotations.json` 仍可加载
+- ✅ **三栏布局** — 大纲 / 编辑器 / 批注；窄屏可折叠（`Ctrl+[` / `Ctrl+]`）
+- ✅ **键盘快捷键** — `Ctrl+S` 保存，`Ctrl+B/I` 格式化；大纲/批注 ARIA 可达
+- ✅ **mark 智能锚定** + 增量校验 / DecorationSet 活动高亮
+- ✅ **KaTeX 数学公式** — `$inline$` + `$$block$$`
+- ✅ **File System Access API** — Chrome/Edge 写回原位置
+- ✅ **IndexedDB** — handle（UUID 主键）+ 正文/批注原子草稿崩溃恢复
+- ✅ **DOCX 导出** — **仅正文**（不含 Word 批注）；批注请用 `.mentor`
+- ✅ **离线 bundle** — `npm run build:bundle`；`npm test` 带 pretest bundle 门禁
+- ✅ **模块划分** — `modules/document-session.js` / `io.js` / `annotations.js` / `tabs.js`
+- ✅ **正文引文联动** — 导入 BibTeX / RIS / EndNote / CSL-JSON，只读文献卡片插入不可直接编辑的作者—年份引文字段
+- ✅ **引用库随文档保存** — `.mentor` 可选携带 `references.json` + `references.bib`；精确 APA/CSL 继续使用 Pandoc citeproc
 
 ---
 
@@ -73,6 +82,12 @@ python3 -m http.server 8787
 ---
 
 ## 文件格式
+
+### 引用库与正文引文
+
+工具栏 **引用** 可读取 `.bib`、`.ris`、`.enw`、EndNote `.xml` 和 CSL `.json`。文献卡片只读，作者、标题、年份、期刊和 DOI 不可直接编辑；点击卡片只会在光标处插入 Pandoc citekey。Mentor 正文显示轻量作者—年份字段，保存 Markdown 时仍保持 `[@citekey]`，避免显示文字污染源稿。
+
+`.mentor` 包可选保存 normalized `references.json` 与 canonical `references.bib`。Mentor 内置 DOCX 只保证可读的轻量作者—年份输出；期刊级 APA/CSL 请用 Pandoc citeproc，例如 `pandoc content.md --citeproc --bibliography=references.bib --csl=apa.csl -o output.docx`。
 
 ### `.md` (源文件保持干净)
 
@@ -281,7 +296,7 @@ const unsub2 = ai.onThreadChange(({ threadId, change }) => {
 });
 
 // 写（只能 reply）
-const result = ai.reply(threadId, '回复内容');
+const result = await ai.reply(threadId, '回复内容');
 // → { ok: true, comment: { id, author: 'AI Reviewer', body, createdAt } }
 // → { ok: false, error: 'threadId 必须为非空字符串' }
 // → { ok: false, error: 'body 不能为空' }
@@ -289,6 +304,8 @@ const result = ai.reply(threadId, '回复内容');
 // → { ok: false, error: 'thread 不存在: xxx' }
 // → { ok: false, error: 'thread 已 resolved，无法回复' }
 ```
+
+`ai.reply()` 返回 Promise。批处理脚本应 `await` 每次回复，并在下一条前检查 `result.ok`；不要把多个回复并发写入同一 thread。Mentor 也接受历史数据中的 `author: { id, name }`，`needsReply` 会按 AI 作者 ID/名称识别，不会因为作者对象形式变化而重复回复。
 
 ### Capabilities
 

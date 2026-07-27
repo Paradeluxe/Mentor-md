@@ -2,7 +2,7 @@
 REM Mentor launcher (Windows)
 REM v1.43.20: port 8787 (avoid 8765 clashes) + robust Python discovery + Mentor title check
 
-setlocal EnableExtensions EnableDelayedExpansion
+setlocal EnableExtensions DisableDelayedExpansion
 cd /d "%~dp0"
 
 REM --- port ---
@@ -10,7 +10,7 @@ set "MENTOR_PORT=8787"
 if exist "%~dp0PORT" (
   set /p MENTOR_PORT=<"%~dp0PORT"
 )
-set "MENTOR_PORT=!MENTOR_PORT: =!"
+set "MENTOR_PORT=%MENTOR_PORT: =%"
 
 REM --- find python ---
 set "PYEXE="
@@ -33,26 +33,37 @@ if not defined PYEXE (
   exit /b 1
 )
 
-set "OPEN_FILE=%~1"
-set "OPEN_URL=http://127.0.0.1:!MENTOR_PORT!/index.html"
+set "OPEN_FILE=%~f1"
+set "OPEN_URL=http://127.0.0.1:%MENTOR_PORT%/index.html"
 
-if not "%OPEN_FILE%"=="" (
-  for /f "usebackq delims=" %%A in (`powershell -NoProfile -Command "[uri]::EscapeDataString([string]'%OPEN_FILE%')"`) do (
-    set "OPEN_URL=http://127.0.0.1:!MENTOR_PORT!/index.html?open=%%A"
+if not "%~1"=="" (
+  set "OPEN_TOKEN="
+  if exist "%~dp0.mentor-session" (
+    set /p OPEN_TOKEN=<"%~dp0.mentor-session"
+  )
+  for /f "usebackq delims=" %%A in (`powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\encode-open-path.ps1" -Path "%~f1"`) do (
+    if defined OPEN_TOKEN (
+      set "OPEN_URL=http://127.0.0.1:%MENTOR_PORT%/index.html?open=%%A&token=%OPEN_TOKEN%"
+    ) else (
+      set "OPEN_URL=http://127.0.0.1:%MENTOR_PORT%/index.html?open=%%A"
+    )
   )
 )
 
 REM --- is port listening? ---
-netstat -an | findstr ":!MENTOR_PORT!.*LISTENING" >nul 2>&1
-if !errorlevel! equ 0 (
+netstat -an | findstr ":%MENTOR_PORT%.*LISTENING" >nul 2>&1
+if %errorlevel% equ 0 (
   REM verify it is Mentor (not psyclaw / other)
   set "IS_MENTOR=0"
-  for /f "usebackq delims=" %%T in (`powershell -NoProfile -Command "try { $r=Invoke-WebRequest -UseBasicParsing -TimeoutSec 2 -Uri 'http://127.0.0.1:!MENTOR_PORT!/index.html'; if ($r.Content -match 'Mentor') { 'yes' } else { 'no' } } catch { 'no' }"`) do set "TITLE_CHK=%%T"
+  for /f "usebackq delims=" %%T in (`powershell -NoProfile -Command "try { $r=Invoke-WebRequest -UseBasicParsing -TimeoutSec 2 -Uri 'http://127.0.0.1:%MENTOR_PORT%/index.html'; if ($r.Content -match 'Mentor') { 'yes' } else { 'no' } } catch { 'no' }"`) do set "TITLE_CHK=%%T"
+  setlocal EnableDelayedExpansion
   if /i "!TITLE_CHK!"=="yes" (
     start "" "!OPEN_URL!"
+    endlocal
     goto :end
   )
-  echo [Mentor] Port !MENTOR_PORT! is in use by another app.
+  endlocal
+  echo [Mentor] Port %MENTOR_PORT% is in use by another app.
   echo Close that process or change PORT file, then retry.
   pause
   exit /b 2
@@ -60,9 +71,9 @@ if !errorlevel! equ 0 (
 
 REM start server
 if "%OPEN_FILE%"=="" (
-  start "Mentor Server :!MENTOR_PORT!" /MIN !PYEXE! mentor-server.py --port !MENTOR_PORT!
+  start "Mentor Server :%MENTOR_PORT%" /MIN %PYEXE% mentor-server.py --port %MENTOR_PORT%
 ) else (
-  start "Mentor Server :!MENTOR_PORT!" /MIN !PYEXE! mentor-server.py --port !MENTOR_PORT! --open "%OPEN_FILE%"
+  start "Mentor Server :%MENTOR_PORT%" /MIN %PYEXE% mentor-server.py --port %MENTOR_PORT% --open "%OPEN_FILE%"
 )
 
 :end

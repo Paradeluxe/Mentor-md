@@ -67,21 +67,17 @@ const SAMPLE_ANN = JSON.parse(fs.readFileSync(path.join(ROOT, 'test-data/sample.
   console.log(`  ✓ 编辑器中有 ${markCount} 个高亮 mark (预期 2)`);
   if (markCount !== 2) throw new Error(`mark 数错: ${markCount}`);
 
-  // 默认 filter 是"未解决"，所以 1 个 resolved 被过滤，只显示 1 个未解决的
+  // 默认展示全部，已解决线程仍可直接重新打开。
   let commentCount = await page.locator('.comment-thread').count();
-  console.log(`  ✓ 默认 filter (未解决): 侧栏显示 ${commentCount} 个 (预期 1)`);
-  if (commentCount !== 1) throw new Error(`默认 filter 应显示 1 个，实际 ${commentCount}`);
+  console.log(`  ✓ 默认 filter (全部): 侧栏显示 ${commentCount} 个 (预期 2)`);
+  if (commentCount !== 2) throw new Error(`默认 filter 应显示 2 个，实际 ${commentCount}`);
 
-  // 切到"全部" filter，应该显示 2 个
-  await page.locator('.filter-tab[data-filter-tab="all"]').click();
+  // 切到"未解决" filter，应该隐藏已解决的线程。
+  await page.locator('.filter-tab[data-filter-tab="open"]').click();
   await page.waitForTimeout(150);
   commentCount = await page.locator('.comment-thread').count();
-  console.log(`  ✓ 勾选已解决 filter: 侧栏显示 ${commentCount} 个 (预期 2)`);
-  if (commentCount !== 2) throw new Error(`含已解决 filter 应显示 2 个，实际 ${commentCount}`);
-
-  // 恢复默认 (未解决)
-  await page.locator('.filter-tab[data-filter-tab="open"]').click();
-  await page.waitForTimeout(100);
+  console.log(`  ✓ 未解决 filter: 侧栏显示 ${commentCount} 个 (预期 1)`);
+  if (commentCount !== 1) throw new Error(`未解决 filter 应显示 1 个，实际 ${commentCount}`);
 
   console.log('=== TEST 3: 截图当前状态 ===');
   await page.screenshot({ path: '/tmp/Mentor-test-1-loaded.png', fullPage: false });
@@ -105,6 +101,7 @@ const SAMPLE_ANN = JSON.parse(fs.readFileSync(path.join(ROOT, 'test-data/sample.
   await page.evaluate((threadId) => {
     const ta = document.querySelector(`[data-thread-input="${threadId}"]`);
     ta.value = '这是测试回复';
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
     document.querySelector(`[data-act="submit-reply"][data-thread="${threadId}"]`).click();
   }, newThread.threadId);
   await page.waitForTimeout(200);
@@ -479,15 +476,17 @@ const SAMPLE_ANN = JSON.parse(fs.readFileSync(path.join(ROOT, 'test-data/sample.
   if (!linkHTML.includes('href="https://example.com"')) throw new Error('链接按钮未生效');
   console.log(`  ✓ 链接 HTML 含 href`);
 
-  console.log('=== TEST 28: 图片按钮 (mock prompt) ===');
+  console.log('=== TEST 28: 图片按钮 (file chooser) ===');
   await page.evaluate(() => {
-    window.prompt = () => 'https://example.com/img.png';
     window.__mdAnnotator.State.editor.commands.clearContent();
     window.__mdAnnotator.State.editor.commands.focus('end');
   });
   await page.waitForTimeout(100);
+  const fileChooserPromise = page.waitForEvent('filechooser');
   await page.locator('#format-toolbar button[data-cmd="image"]').click();
-  await page.waitForTimeout(150);
+  const fileChooser = await fileChooserPromise;
+  await fileChooser.setFiles(path.join(ROOT, 'assets/mentor-32.png'));
+  await page.waitForTimeout(250);
   const imgHTML = await page.evaluate(() => window.__mdAnnotator.getEditorHTML());
   if (!imgHTML.includes('<img')) throw new Error('图片按钮未生效');
   console.log(`  ✓ 图片 HTML 含 <img>`);
@@ -589,7 +588,7 @@ const SAMPLE_ANN = JSON.parse(fs.readFileSync(path.join(ROOT, 'test-data/sample.
   console.log(`  ✓ 编辑后 dirty = ${dirtyAfter} (预期 true)`);
   if (!dirtyAfter) throw new Error('编辑后应标记 dirty');
 
-  console.log('=== TEST 34: 浮动批注按钮 (💬) + 选区 ===');
+  console.log('=== TEST 34: 浮动 AI 批注按钮 + 选区 ===');
   // 重置 + 加载 + 模拟选区
   // P-h (06-27): heading 选区已 reject, 改用 paragraph 内容测批注按钮
   await page.evaluate(() => {
@@ -616,12 +615,12 @@ const SAMPLE_ANN = JSON.parse(fs.readFileSync(path.join(ROOT, 'test-data/sample.
   console.log(`  ✓ 浮动批注按钮显示 = ${floatVisible} (预期 true)`);
   if (!floatVisible) throw new Error('浮动批注按钮未出现');
 
-  // 点击浮动按钮 → 创建批注
-  await page.locator('#float-comment-btn button').click();
+  // 点击 AI 浮动按钮 → 创建 AI 批注
+  await page.locator('#float-comment-btn button[data-float-act="ai"]').click();
   await page.waitForTimeout(150);
-  const annCountAfterFloat = await page.evaluate(() => window.__mdAnnotator.getAnnotations().length);
-  console.log(`  ✓ 点击后批注数 = ${annCountAfterFloat} (预期 1)`);
-  if (annCountAfterFloat !== 1) throw new Error('点击浮动按钮未创建批注');
+  const floatThread = await page.evaluate(() => window.__mdAnnotator.getAnnotations()[0]);
+  console.log(`  ✓ 点击后批注类型 = ${floatThread?.threadType} (预期 ai)`);
+  if (!floatThread || floatThread.threadType !== 'ai') throw new Error('点击 AI 浮动按钮未创建 AI 批注');
 
   // ============================================================
   // SECTION B: 文件 IO - picker 错误 + 真写回 + 多文件切换
@@ -1735,7 +1734,13 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
     editor.view.dispatch(editor.state.tr.setSelection(editor.state.selection));
   });
   await page.waitForTimeout(200);
-  await page.locator('#float-comment-btn button').click();
+  await page.locator('#float-comment-btn button[data-float-act="ai"]').click();
+  await page.evaluate(() => {
+    const input = document.querySelector('[data-thread-input]');
+    input.value = '@AI reload persistence';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    document.querySelector('button[data-act="submit-reply"]')?.click();
+  });
   await page.waitForTimeout(800);  // 等 debounce 500ms 完成
 
   const afterCreate = await page.evaluate(() => ({
@@ -1845,7 +1850,7 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
   console.log('  ✓ 点外部后菜单显示数:', menuAfterOutside, '(预期 0)');
   if (menuAfterOutside !== 0) throw new Error('点外部菜单应关闭');
 
-  // 场景 6: 卡片整体可点击跳转 (Word 风格) — 点击卡片 meta 区
+  // 场景 6: 通过 ⋯ 菜单跳转到批注正文
   // sample 文档第 1 个 thread 是 unresolved (TEST 6 显示的) → 用它
   const beforeGoto = await page.evaluate(() => {
     const editor = window.__mdAnnotator.State.editor;
@@ -1855,8 +1860,9 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
     };
   });
   console.log('  ✓ 点击前 activeThreadId:', beforeGoto.activeThreadId?.slice(0, 8) || 'null');
-  // 点击第一个 thread 的引文区 (.comment-quote, 整张卡片任意非交互区都触发跳转)
-  await page.locator('.comment-thread').first().locator('.comment-quote-text').click();
+  await page.locator('.comment-thread').first().hover();
+  await page.locator('.comment-thread').first().locator('.comment-menu-btn').click();
+  await page.locator('.comment-menu:not(.hidden) button[data-act="goto"]').click();
   await page.waitForTimeout(300);
   const afterGoto = await page.evaluate(() => ({
     activeThreadId: window.__mdAnnotator.State.activeThreadId,
@@ -1865,9 +1871,9 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
       to: window.__mdAnnotator.State.editor.state.selection.to,
     },
   }));
-  console.log('  ✓ 点击卡片后 activeThreadId:', afterGoto.activeThreadId?.slice(0, 8));
+  console.log('  ✓ 菜单跳转后 activeThreadId:', afterGoto.activeThreadId?.slice(0, 8));
   console.log('  ✓ 点击后 selection from:', afterGoto.selection.from);
-  if (!afterGoto.activeThreadId) throw new Error('点卡片后 activeThreadId 应被设置');
+  if (!afterGoto.activeThreadId) throw new Error('菜单跳转后 activeThreadId 应被设置');
   if (afterGoto.selection.from === beforeGoto.sel.from) {
     console.log('  ⚠ selection 没变 (可能 selectionUpdate 还没触发, 但 activeThreadId 变了算 OK)');
   }
@@ -1902,7 +1908,7 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
   const resolvedThreadId = resolvedCard.threadId;
   await page.evaluate((tid) => {
     const card = document.querySelector(`.comment-thread[data-thread="${tid}"]`);
-    card.click();
+    card.querySelector('.comment-quote').click();
   }, resolvedThreadId);
   await page.waitForTimeout(200);
   const afterExpand = await page.evaluate((tid) => {
@@ -1916,7 +1922,7 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
   if (afterExpand.isCollapsed) throw new Error('点折叠卡片应展开');
   if (afterExpand.bodyDisplay === 'none') throw new Error('展开后 body-wrap 应可见');
 
-  // 场景 9: 解决一个未解决卡片 → 它应自动折叠 + 徽章出现在 quote 行 (P-card: 徽章在 quote 而非 body)
+  // 场景 9: 解决一个未解决卡片 → 自动折叠，解决操作保持绿色语义
   await page.locator(`.comment-thread[data-thread="${unresolvedCard.threadId}"]`).hover();
   await page.locator(`.comment-thread[data-thread="${unresolvedCard.threadId}"] .comment-menu-btn`).click();
   await page.waitForTimeout(150);
@@ -1925,55 +1931,51 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
   await page.waitForTimeout(300);
   const afterResolve = await page.evaluate((tid) => {
     const card = document.querySelector(`.comment-thread[data-thread="${tid}"]`);
-    const badge = card.querySelector('.comment-resolved-badge');
-    const badgeInQuote = !!card.querySelector('.comment-quote .comment-resolved-badge');
-    const badgeInBody = !!card.querySelector('.comment-body-wrap .comment-resolved-badge');
+    const resolveAction = card.querySelector('.comment-menu button[data-act="resolve"]');
     return {
       isCollapsed: card.classList.contains('is-collapsed'),
       isResolved: card.classList.contains('is-resolved'),
-      hasBadge: !!badge,
-      badgeInQuote,
-      badgeInBody,
-      badgeText: badge?.textContent,
+      hasBadge: !!card.querySelector('.comment-resolved-badge'),
+      resolveColor: resolveAction ? getComputedStyle(resolveAction).color : null,
       bodyDisplay: getComputedStyle(card.querySelector('.comment-body-wrap')).display,
     };
   }, unresolvedCard.threadId);
   console.log('  ✓ 解决后:', JSON.stringify(afterResolve));
   if (!afterResolve.isResolved) throw new Error('点 resolve 后应标 resolved');
   if (!afterResolve.isCollapsed) throw new Error('解决后卡片应自动折叠');
-  if (!afterResolve.hasBadge) throw new Error('应有 ✓ 已解决 徽章');
-  if (!afterResolve.badgeInQuote) throw new Error('徽章应在 quote 行 (折叠时也可见)');
-  if (afterResolve.badgeInBody) throw new Error('徽章不应在 body-wrap 内 (会被折叠隐藏)');
+  if (afterResolve.hasBadge) throw new Error('当前设计不应显示大块已解决徽章');
+  if (afterResolve.resolveColor !== 'rgb(24, 115, 87)') throw new Error(`解决操作应为绿色, 实际 ${afterResolve.resolveColor}`);
   if (afterResolve.bodyDisplay !== 'none') throw new Error('折叠后 body-wrap 应 display:none');
 
-  // === TEST 78: 批注 mark 旁小气泡 (P-mark, CSS 伪元素方案) ===
+  // === TEST 78: 批注 mark 旁小气泡 widget ===
   console.log('\n=== TEST 78: 批注 mark 旁小气泡 (P-mark) ===');
-  // 用 sample.md (2 个批注) 验证 mark 渲染 + CSS 伪元素 ::after
+  // 用 sample.md (2 个批注) 验证每个线程一个可见 widget
   const markState = await page.evaluate(() => {
     const marks = document.querySelectorAll('.annotation-mark');
+    const bubbles = Array.from(document.querySelectorAll('.annotation-bubble'));
+    const firstBubble = bubbles[0];
     return {
       count: marks.length,
+      bubbleCount: bubbles.length,
       first: marks[0] ? {
         content: marks[0].textContent,
         thread: marks[0].dataset.threadId?.slice(0, 8),
-        // 检查 ::after 伪元素是否被定义 (通过 getComputedStyle.content)
-        afterContent: getComputedStyle(marks[0], '::after').content,
-        afterDisplay: getComputedStyle(marks[0], '::after').display,
-        afterBg: getComputedStyle(marks[0], '::after').backgroundColor,
-        afterWidth: getComputedStyle(marks[0], '::after').width,
-        afterHeight: getComputedStyle(marks[0], '::after').height,
+        bubbleThread: firstBubble?.dataset.annotationThreadId?.slice(0, 8),
+        bubbleDisplay: firstBubble ? getComputedStyle(firstBubble).display : null,
+        bubbleWidth: firstBubble ? getComputedStyle(firstBubble).width : null,
+        bubbleHeight: firstBubble ? getComputedStyle(firstBubble).height : null,
       } : null,
     };
   });
   console.log('  ✓ mark 数:', markState.count, '(预期 2 — sample.md 有 2 批注)');
   console.log('  ✓ 第一个 mark:', JSON.stringify(markState.first));
   if (markState.count !== 2) throw new Error(`应有 2 个 mark, 实际 ${markState.count}`);
+  if (markState.bubbleCount !== 2) throw new Error(`应有 2 个 bubble, 实际 ${markState.bubbleCount}`);
   if (!markState.first?.thread) throw new Error('mark 应绑定 threadId');
-  // ::after content 应该含 💬
-  if (!markState.first?.afterContent?.includes('💬')) throw new Error('::after 应含 💬');
-  if (markState.first?.afterDisplay === 'none') throw new Error('::after 不应被 display:none');
-  if (markState.first?.afterWidth !== '16px') throw new Error(`::after width 应 16px, 实际 ${markState.first?.afterWidth}`);
-  if (markState.first?.afterHeight !== '16px') throw new Error(`::after height 应 16px, 实际 ${markState.first?.afterHeight}`);
+  if (!markState.first?.bubbleThread) throw new Error('bubble 应绑定 threadId');
+  if (markState.first?.bubbleDisplay === 'none') throw new Error('bubble 不应被 display:none');
+  if (markState.first?.bubbleWidth !== '14px') throw new Error(`bubble width 应 14px, 实际 ${markState.first?.bubbleWidth}`);
+  if (markState.first?.bubbleHeight !== '14px') throw new Error(`bubble height 应 14px, 实际 ${markState.first?.bubbleHeight}`);
 
   // 场景: mark 进入 active (cursor 落在 mark 内) → CSS ::after 状态变
   // 先激活一个 thread
@@ -2001,12 +2003,12 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
     const active = document.querySelector('.annotation-mark.is-active');
     if (!active) return null;
     return {
-      bg: getComputedStyle(active, '::after').backgroundColor,
-      boxShadow: getComputedStyle(active, '::after').boxShadow,
+      bg: getComputedStyle(active).backgroundColor,
+      boxShadow: getComputedStyle(active).boxShadow,
     };
   });
-  console.log('  ✓ active mark ::after bg:', activeMark?.bg);
-  console.log('  ✓ active mark ::after box-shadow:', activeMark?.boxShadow?.slice(0, 60));
+  console.log('  ✓ active mark bg:', activeMark?.bg);
+  console.log('  ✓ active mark box-shadow:', activeMark?.boxShadow?.slice(0, 60));
   if (!activeMark) throw new Error('应能找到 is-active mark');
 
   // 场景: 解决后 ::after 颜色变绿
@@ -2033,14 +2035,16 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
   await page.waitForTimeout(200);
   const resolvedMark = await page.evaluate(() => {
     const resolved = document.querySelector('.annotation-mark.is-resolved');
+    const threadId = resolved?.dataset.threadId;
+    const bubble = threadId ? document.querySelector(`.annotation-bubble[data-annotation-thread-id="${threadId}"]`) : null;
     if (!resolved) return null;
     return {
-      bg: getComputedStyle(resolved, '::after').backgroundColor,
-      opacity: getComputedStyle(resolved, '::after').opacity,
+      bg: bubble ? getComputedStyle(bubble).backgroundColor : null,
+      opacity: bubble ? getComputedStyle(bubble).opacity : null,
     };
   });
-  console.log('  ✓ resolved mark ::after bg:', resolvedMark?.bg);
-  console.log('  ✓ resolved mark ::after opacity:', resolvedMark?.opacity);
+  console.log('  ✓ resolved bubble bg:', resolvedMark?.bg);
+  console.log('  ✓ resolved bubble opacity:', resolvedMark?.opacity);
   if (!resolvedMark) throw new Error('应能找到 is-resolved mark');
 
   // === TEST 79: mark 永远显示 (v2: All Markup 开关已移除, 验证默认状态) ===
@@ -2150,7 +2154,7 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
     editor.view.dispatch(editor.state.tr.setSelection(editor.state.selection));
   });
   await page.waitForTimeout(200);
-  await page.locator('#float-comment-btn button').click();
+  await page.locator('#float-comment-btn button[data-float-act="ai"]').click();
   await page.waitForTimeout(300);
   // 输入并提交
   const tid = await page.evaluate(() => window.__mdAnnotator.State.annotations[0]?.threadId);
@@ -2214,7 +2218,7 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
     editor.view.dispatch(editor.state.tr.setSelection(editor.state.selection));
   });
   await page.waitForTimeout(200);
-  await page.locator('#float-comment-btn button').click();
+  await page.locator('#float-comment-btn button[data-float-act="ai"]').click();
   await page.waitForTimeout(300);
   await page.evaluate(() => {
     const ta = document.querySelector('[data-thread-input]');
@@ -2286,7 +2290,7 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
   console.log('  ✓ popover hidden:', preCheck.popoverHidden, ', btn hidden:', preCheck.btnHidden, '(均应 true/false)');
   if (preCheck.btnHidden) throw new Error('选区非空时 💬 按钮应显示, 但 hidden');
   if (!preCheck.popoverHidden) throw new Error('选区非空时 popover 应隐藏');
-  await page.locator('#float-comment-btn button').click();
+  await page.locator('#float-comment-btn button[data-float-act="ai"]').click();
   await page.waitForTimeout(300);
   await page.evaluate(() => {
     const ta = document.querySelector('[data-thread-input]');
@@ -2335,7 +2339,7 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
     editor.commands.setTextSelection({ from, to });
   });
   await page.waitForTimeout(200);
-  await page.locator('#float-comment-btn button').click();
+  await page.locator('#float-comment-btn button[data-float-act="ai"]').click();
   await page.waitForTimeout(300);
   await page.evaluate(() => {
     const ta = document.querySelector('[data-thread-input]');
@@ -2371,7 +2375,7 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
     editor.commands.setTextSelection({ from: 2, to: 4 });
   });
   await page.waitForTimeout(200);
-  await page.locator('#float-comment-btn button').click();
+  await page.locator('#float-comment-btn button[data-float-act="ai"]').click();
   await page.waitForTimeout(300);
   await page.evaluate(() => {
     const ta = document.querySelector('[data-thread-input]');
@@ -2401,7 +2405,7 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
     editor.commands.setTextSelection({ from: 4, to: 6 });
   });
   await page.waitForTimeout(200);
-  await page.locator('#float-comment-btn button').click();
+  await page.locator('#float-comment-btn button[data-float-act="ai"]').click();
   await page.waitForTimeout(300);
   await page.evaluate(() => {
     const ta = document.querySelector('[data-thread-input]');
@@ -2438,7 +2442,7 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
     editor.commands.setTextSelection({ from: 2, to: 4 });
   });
   await page.waitForTimeout(200);
-  await page.locator('#float-comment-btn button').click();
+  await page.locator('#float-comment-btn button[data-float-act="ai"]').click();
   await page.waitForTimeout(300);
   await page.evaluate(() => {
     const ta = document.querySelector('[data-thread-input]');
@@ -2462,6 +2466,7 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
     const ann = window.__mdAnnotator.State.annotations[0];
     return {
       fuzzy: ann?.fuzzy,
+      deleted: ann?.deleted,
       invalid: ann?.invalid,
       invalidReason: ann?.invalidReason,
       marksInDoc: document.querySelectorAll('.annotation-mark').length,
@@ -2483,7 +2488,7 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
     editor.commands.setTextSelection({ from: 3, to: 5 });
   });
   await page.waitForTimeout(200);
-  await page.locator('#float-comment-btn button').click();
+  await page.locator('#float-comment-btn button[data-float-act="ai"]').click();
   await page.waitForTimeout(300);
   await page.evaluate(() => {
     const ta = document.querySelector('[data-thread-input]');
@@ -2502,17 +2507,20 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
     const ann = window.__mdAnnotator.State.annotations[0];
     return {
       fuzzy: ann?.fuzzy,
+      deleted: ann?.deleted,
       invalid: ann?.invalid,
       invalidReason: ann?.invalidReason,
       marksInDoc: document.querySelectorAll('.annotation-mark').length,
     };
   });
-  console.log('  删 mark 内文字后:', JSON.stringify(delState), '(fuzzy=true, invalid=true)');
-  if (!delState.fuzzy || !delState.invalid) throw new Error('删 mark 内文字: ann 应标 fuzzy=true, invalid=true');
+  console.log('  删 mark 内文字后:', JSON.stringify(delState), '(deleted=true, invalid=true)');
+  if (!delState.deleted || !delState.invalid || delState.invalidReason !== 'text-deleted') {
+    throw new Error('删 mark 内文字: ann 应标 deleted=true, invalid=true, reason=text-deleted');
+  }
   if (delState.marksInDoc !== 0) throw new Error(`mark 应消失, 实际 ${delState.marksInDoc}`);
 
-  // === TEST 89: Ctrl+Z 撤销 addMark → ann 标 fuzzy (silent fail 修复) ===
-  console.log('\n=== TEST 89: Ctrl+Z 撤销 mark → ann 标 fuzzy ===');
+  // === TEST 89: 文档 undo 不孤立批注 mark ===
+  console.log('\n=== TEST 89: 文档 undo 保持批注一致 ===');
   await page.evaluate((m) => window.__mdAnnotator.loadMarkdownIntoEditor('undo-mark.md', m, null), 'um 段一.');
   await page.waitForTimeout(300);
   await page.evaluate(() => {
@@ -2521,7 +2529,7 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
     editor.commands.setTextSelection({ from: 3, to: 5 });
   });
   await page.waitForTimeout(200);
-  await page.locator('#float-comment-btn button').click();
+  await page.locator('#float-comment-btn button[data-float-act="ai"]').click();
   await page.waitForTimeout(300);
   await page.evaluate(() => {
     const ta = document.querySelector('[data-thread-input]');
@@ -2547,9 +2555,9 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
       marksInDoc: document.querySelectorAll('.annotation-mark').length,
     };
   });
-  console.log('  Tiptap undo 后:', JSON.stringify(undoState), '(fuzzy=true, invalid=true)');
-  if (!undoState.fuzzy || !undoState.invalid) throw new Error('Tiptap undo: ann 应标 fuzzy=true, invalid=true');
-  if (undoState.marksInDoc !== 0) throw new Error(`mark 应消失, 实际 ${undoState.marksInDoc}`);
+  console.log('  Tiptap undo 后:', JSON.stringify(undoState), '(mark 与 ann 应保持有效)');
+  if (undoState.fuzzy || undoState.invalid) throw new Error('Tiptap undo 不应使仍有 mark 的 ann 失效');
+  if (undoState.marksInDoc !== 1) throw new Error(`批注 mark 应保留, 实际 ${undoState.marksInDoc}`);
 
   // === TEST 90: 切文档时 dirty 弹 confirm (D3 docx 一致性) ===
   console.log('\n=== TEST 90: 切文档 dirty 弹 confirm (docx 一致) ===');
@@ -2574,11 +2582,8 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
   console.log('  切到 d3-other.md 后:', JSON.stringify(d3After));
   if (d3After.name !== 'd3-other.md') throw new Error(`D3 fix 失败: 应切到 d3-other.md, 实际 ${d3After.name}`);
 
-  // === TEST 91: 同一位置多次批注 (PM mark 限制 — 预期行为) ===
-  // Word 行为: mark 多重叠加 (XML commentRangeStart w:id 多重), 颜色混合
-  // Mentor 限制: PM mark 单 instance per pos, addMark 覆盖 threadId → 1 mark 渲染
-  // 这是 PM 数据结构限制, 不是 bug. 此测试记录预期行为.
-  console.log('\n=== TEST 91: 同位置多次批注 (PM 限制, 单 mark 渲染) ===');
+  // === TEST 91: 同一位置重复批注复用现有线程 ===
+  console.log('\n=== TEST 91: 同位置重复批注去重 ===');
   await page.evaluate((m) => window.__mdAnnotator.loadMarkdownIntoEditor('d7-test.md', m, null), 'd7 重叠.');
   await page.waitForTimeout(300);
   for (let i = 0; i < 3; i++) {
@@ -2588,7 +2593,7 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
       editor.commands.setTextSelection({ from: 3, to: 5 });
     });
     await page.waitForTimeout(200);
-    await page.locator('#float-comment-btn button').click();
+    await page.locator('#float-comment-btn button[data-float-act="ai"]').click();
     await page.waitForTimeout(300);
     await page.evaluate((idx) => {
       const ta = document.querySelector('[data-thread-input]');
@@ -2601,9 +2606,10 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
     anns: window.__mdAnnotator.State.annotations.length,
     marks: document.querySelectorAll('.annotation-mark').length,
   }));
-  console.log('  d7 3 批注同位置:', JSON.stringify(d7State), '(PM 限制: 1 mark, 3 ann state)');
-  if (d7State.anns !== 3) throw new Error(`ann 应 3 个, 实际 ${d7State.anns}`);
-  // PM 限制导致 mark 只有 1, 这是已知限制, 见 comment
+  console.log('  d7 重复批注同位置:', JSON.stringify(d7State), '(应复用 1 个 thread/mark)');
+  if (d7State.anns !== 1 || d7State.marks !== 1) {
+    throw new Error(`同位置批注应去重为 1 thread/mark, 实际 ${d7State.anns}/${d7State.marks}`);
+  }
 
   // === TEST 92: mark 颜色按 author 分配 (P-D10 docx 一致) ===
   // Word 行为: 8 色按 author 自动分配, 同 author 同色
@@ -2623,7 +2629,7 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
     editor.commands.setTextSelection({ from: 2, to: 4 });
   });
   await page.waitForTimeout(200);
-  await page.locator('#float-comment-btn button').click();
+  await page.locator('#float-comment-btn button[data-float-act="ai"]').click();
   await page.waitForTimeout(300);
   await page.evaluate(() => {
     const ta = document.querySelector('[data-thread-input]');
@@ -2642,7 +2648,7 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
     editor.commands.setTextSelection({ from: 9, to: 11 });
   });
   await page.waitForTimeout(200);
-  await page.locator('#float-comment-btn button').click();
+  await page.locator('#float-comment-btn button[data-float-act="ai"]').click();
   await page.waitForTimeout(300);
   await page.evaluate(() => {
     const ta = document.querySelector('[data-thread-input]');
@@ -2679,7 +2685,7 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
     editor.commands.setTextSelection({ from: 3, to: 4 });
   });
   await page.waitForTimeout(200);
-  await page.locator('#float-comment-btn button').click();
+  await page.locator('#float-comment-btn button[data-float-act="ai"]').click();
   await page.waitForTimeout(300);
   await page.evaluate(() => {
     const ta = document.querySelector('[data-thread-input]');
@@ -2697,21 +2703,23 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
   await page.waitForTimeout(300);
   const d20State = await page.evaluate(() => {
     const a = window.__mdAnnotator.State.annotations[0];
-    const badge = document.querySelector('.comment-resolved-badge')?.textContent?.trim();
+    const card = document.querySelector('.comment-thread.is-resolved');
+    const action = card?.querySelector('.comment-menu button[data-act="resolve"]');
     return {
       resolved: a?.resolved,
       resolvedAt: a?.resolvedAt,
       resolvedBy: a?.resolvedBy,
-      badge,
+      hasResolvedCard: !!card,
+      actionText: action?.textContent?.trim(),
+      actionColor: action ? getComputedStyle(action).color : null,
     };
   });
   console.log('  d20 解决后:', JSON.stringify(d20State));
   if (!d20State.resolved) throw new Error('应 resolved=true');
   if (!d20State.resolvedAt) throw new Error('应记录 resolvedAt (P-D20)');
-  if (!d20State.badge?.includes('已解决')) throw new Error('徽章应包含"已解决"');
-  if (!d20State.badge?.match(/\d{2}-\d{2}|\d{1,2}:\d{2}/)) {
-    throw new Error(`徽章应包含时间: "${d20State.badge}"`);
-  }
+  if (!d20State.hasResolvedCard) throw new Error('应显示绿色 resolved 卡片状态');
+  if (!d20State.actionText?.includes('重新打开')) throw new Error('resolved 操作应显示“重新打开”');
+  if (d20State.actionColor !== 'rgb(24, 115, 87)') throw new Error(`resolved 操作应为绿色, 实际 ${d20State.actionColor}`);
   // Reopen → resolvedAt 保留 (Word 也保留)
   await page.locator(`.comment-thread[data-thread="${tid20}"]`).hover();
   await page.waitForTimeout(200);
@@ -2739,7 +2747,7 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
     editor.commands.setTextSelection({ from: 3, to: 4 });
   });
   await page.waitForTimeout(200);
-  await page.locator('#float-comment-btn button').click();
+  await page.locator('#float-comment-btn button[data-float-act="ai"]').click();
   await page.waitForTimeout(300);
   // 输入 + Cmd+Enter
   await page.evaluate(() => {
@@ -2776,7 +2784,7 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
       editor.commands.setTextSelection({ from: pos, to: pos + 3 });
     }, text);
     await page.waitForTimeout(200);
-    await page.locator('#float-comment-btn button').click();
+    await page.locator('#float-comment-btn button[data-float-act="ai"]').click();
     await page.waitForTimeout(300);
     await page.evaluate((t) => {
       const ta = document.querySelector('[data-thread-input]');
@@ -2809,7 +2817,7 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
       editor.commands.setTextSelection({ from: pos, to: pos + 1 });
     }, t);
     await page.waitForTimeout(200);
-    await page.locator('#float-comment-btn button').click();
+    await page.locator('#float-comment-btn button[data-float-act="ai"]').click();
     await page.waitForTimeout(300);
     await page.evaluate((text) => {
       const ta = document.querySelector('[data-thread-input]');
@@ -2839,7 +2847,7 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
     editor.commands.setTextSelection({ from: 3, to: 4 });
   });
   await page.waitForTimeout(200);
-  await page.locator('#float-comment-btn button').click();
+  await page.locator('#float-comment-btn button[data-float-act="ai"]').click();
   await page.waitForTimeout(300);
   // 输半截草稿
   await page.evaluate(() => {
@@ -2878,28 +2886,34 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
   await page.waitForTimeout(500);
   const f18Cleared = await page.evaluate(() => ({
     draftKeys: Object.keys(window.__mdAnnotator.State.replyDrafts || {}),
+    activeThreadId: window.__mdAnnotator.State.activeThreadId,
+    activeDraft: window.__mdAnnotator.State.replyDrafts?.[window.__mdAnnotator.State.activeThreadId],
     comments: window.__mdAnnotator.State.annotations[0]?.comments?.length,
   }));
   console.log('  提交后:', JSON.stringify(f18Cleared));
-  if (f18Cleared.draftKeys.length !== 0) throw new Error('提交后草稿应清空');
+  if (f18Cleared.activeDraft) throw new Error('提交后当前线程草稿应清空');
   if (f18Cleared.comments !== 1) throw new Error('应提交 1 comment');
 
   // === TEST 98: 侧栏 tab 计数 (3 个 tab 数字说明总批注 + open/resolved 分布) ===
   // v2: 顶部 #comment-count 总数已移除, 改测 3 个 tab 计数累加 = all
   console.log('\n=== TEST 98: tab 计数 (open + resolved = all) ===');
-  await page.evaluate((m) => window.__mdAnnotator.loadMarkdownIntoEditor('g15-test.md', m, null), 'g15 段.');
+  await page.evaluate((m) => window.__mdAnnotator.loadMarkdownIntoEditor('g15-test.md', m, null), 'g15 一段。\n\ng15 二段。\n\ng15 三段。');
   await page.waitForTimeout(300);
   // 加 3 批注
-  for (const t of ['一', '二', '三']) {
-    await page.evaluate((text) => {
+  for (const [idx, t] of ['一', '二', '三'].entries()) {
+    await page.evaluate((textIndex) => {
       const editor = window.__mdAnnotator.State.editor;
-      let pos = -1;
-      editor.state.doc.descendants((n, p) => { if (n.isText && n.text.includes('g15')) { pos = p + 3; return false; }});
+      const positions = [];
+      editor.state.doc.descendants((n, p) => {
+        if (n.isText && n.text.includes('g15')) positions.push(p + 3);
+      });
+      const pos = positions[textIndex];
+      if (typeof pos !== 'number') throw new Error(`g15 测试位置不存在: ${textIndex}`);
       editor.commands.focus(pos);
       editor.commands.setTextSelection({ from: pos, to: pos + 1 });
-    }, t);
+    }, idx);
     await page.waitForTimeout(200);
-    await page.locator('#float-comment-btn button').click();
+    await page.locator('#float-comment-btn button[data-float-act="ai"]').click();
     await page.waitForTimeout(300);
     await page.evaluate(() => {
       const ta = document.querySelector('[data-thread-input]');
@@ -3010,7 +3024,7 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
     editor.commands.setTextSelection({ from: 3, to: 5 });
   });
   await page.waitForTimeout(200);
-  await page.locator('#float-comment-btn button').click();
+  await page.locator('#float-comment-btn button[data-float-act="ai"]').click();
   await page.waitForTimeout(300);
   await page.evaluate(() => {
     const ta = document.querySelector('[data-thread-input]');
@@ -3095,7 +3109,7 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
     editor.commands.setTextSelection({ from: 3, to: 4 });
   });
   await page.waitForTimeout(200);
-  await page.locator('#float-comment-btn button').click();
+  await page.locator('#float-comment-btn button[data-float-act="ai"]').click();
   await page.waitForTimeout(300);
   await page.evaluate(() => {
     const ta = document.querySelector('[data-thread-input]');

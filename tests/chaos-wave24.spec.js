@@ -59,17 +59,24 @@ const tests = {
       fs.writeFileSync(DFC_PAPER + '.mentor', Buffer.from(r, 'base64'));
       await buildCtx.close();
     }
-    // 用 fetch 测 endpoint
+    // 用 fetch 测 endpoint（需 session token + allow-open）
     await page.goto(URL);
     await page.waitForFunction(() => window.__mdAnnotator?.State?.editor, { timeout: 10000 });
-    const r = await page.evaluate(async () => {
+    const mentorPath = 'C:/Users/User/Desktop/dFC/literature/papers/markdown/scholar.Abnormal.dynamic.properties.of.FC.in.dis.md.mentor';
+    const r = await page.evaluate(async (path) => {
       try {
-        const r = await fetch('/open?path=C:/Users/User/Desktop/dFC/literature/papers/markdown/scholar.Abnormal.dynamic.properties.of.FC.in.dis.md.mentor');
+        const s = await fetch('/session').then((x) => x.json());
+        await fetch('/allow-open', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token: s.token, path }),
+        });
+        const r = await fetch('/open?path=' + encodeURIComponent(path) + '&token=' + encodeURIComponent(s.token));
         return { ok: r.ok, status: r.status, size: (await r.blob()).size };
       } catch (e) {
         return { error: e.message };
       }
-    });
+    }, mentorPath);
     if (!r.ok) return { error: `endpoint 失败: ${r.status}`, r };
     return { ok: true, info: r };
   },
@@ -77,7 +84,17 @@ const tests = {
   // 5. ?open= URL 触发自动加载
   async W24_05_url_open_autoload(page) {
     if (!fs.existsSync(DFC_PAPER + '.mentor')) return { skipped: 'mentor 文件不存在' };
-    await page.goto(URL + '&open=' + encodeURIComponent(DFC_PAPER + '.mentor'));
+    await page.goto(URL);
+    const token = await page.evaluate(async (path) => {
+      const s = await fetch('/session').then((x) => x.json());
+      await fetch('/allow-open', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: s.token, path }),
+      });
+      return s.token;
+    }, DFC_PAPER + '.mentor');
+    await page.goto(URL + '&open=' + encodeURIComponent(DFC_PAPER + '.mentor') + '&token=' + encodeURIComponent(token));
     await page.waitForTimeout(2000);
     const state = await page.evaluate(() => ({
       docText: window.__mdAnnotator?.State?.editor?.state?.doc?.textContent,
@@ -103,28 +120,30 @@ const tests = {
     return { ok: true, info: { docLen: (state.docText || '').length } };
   },
 
-  // 7. 错误路径: ?open= 不存在文件
+  // 7. 错误路径: 未授权 / 不存在文件应拒绝
   async W24_07_open_missing_file(page) {
     await page.goto(URL);
     await page.waitForTimeout(1500);
     const r = await page.evaluate(async () => {
-      const r = await fetch('/open?path=C:/nonexistent.mentor');
+      const s = await fetch('/session').then((x) => x.json());
+      const r = await fetch('/open?path=' + encodeURIComponent('C:/nonexistent.mentor') + '&token=' + encodeURIComponent(s.token));
       return { status: r.status, ok: r.ok };
     });
-    if (r.status !== 404) return { error: `应 404, 实际 ${r.status}`, r };
+    // Path not in allowlist → 403 (preferred); missing file after allow would be 404
+    if (r.status !== 403 && r.status !== 404) return { error: `应 403/404, 实际 ${r.status}`, r };
     return { ok: true, info: r };
   },
 
-  // 8. 错误路径: ?open= 非 .mentor 文件
+  // 8. 错误路径: 非 .mentor / 未授权
   async W24_08_open_non_mentor(page) {
     await page.goto(URL);
     await page.waitForTimeout(1500);
-    // 用一个真实存在但不是 .mentor 的文件
     const r = await page.evaluate(async () => {
-      const r = await fetch('/open?path=C:/Users/User/Desktop/dFC/literature/papers/markdown/scholar.Abnormal.dynamic.properties.of.FC.in.dis.md');
+      const s = await fetch('/session').then((x) => x.json());
+      const r = await fetch('/open?path=' + encodeURIComponent('C:/Users/User/Desktop/dFC/literature/papers/markdown/scholar.Abnormal.dynamic.properties.of.FC.in.dis.md') + '&token=' + encodeURIComponent(s.token));
       return { status: r.status, ok: r.ok };
     });
-    if (r.status !== 400) return { error: `应 400, 实际 ${r.status}`, r };
+    if (r.status !== 403 && r.status !== 400) return { error: `应 403/400, 实际 ${r.status}`, r };
     return { ok: true, info: r };
   },
 };
