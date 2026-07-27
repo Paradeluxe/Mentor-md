@@ -56226,6 +56226,76 @@ function setAnnotationAnchorResetMeta(tr2, threads) {
   return tr2.setMeta(annotationAnchorKey, { reset: true, threads: threads || [] });
 }
 
+// modules/cross-tab-sync.js
+var LIVE_SYNC_SCHEMA = 1;
+function hash32(value) {
+  let h = 2166136261;
+  for (const ch of String(value || "")) {
+    h ^= ch.charCodeAt(0);
+    h = Math.imul(h, 16777619);
+  }
+  return (h >>> 0).toString(16).padStart(8, "0");
+}
+function channelNameForDocument(documentKey) {
+  return `mentor-live-v1-${hash32(documentKey)}`;
+}
+function compareLease(a, b) {
+  const at = Number(a?.term || 0);
+  const bt = Number(b?.term || 0);
+  if (at !== bt) return at - bt;
+  return String(a?.ownerId || "").localeCompare(String(b?.ownerId || ""));
+}
+function nextLease(current, ownerId) {
+  return { term: Number(current?.term || 0) + 1, ownerId: String(ownerId) };
+}
+function createEnvelopeGate(documentKey) {
+  let lease = { term: 0, ownerId: "" };
+  let seq = 0;
+  return {
+    accept(message) {
+      if (!message || message.schema !== LIVE_SYNC_SCHEMA) return false;
+      if (message.documentKey !== documentKey) return false;
+      const leaseCmp = compareLease(message.lease, lease);
+      if (leaseCmp < 0) return false;
+      if (leaseCmp > 0) {
+        lease = {
+          term: Number(message.lease?.term || 0),
+          ownerId: String(message.lease?.ownerId || "")
+        };
+        seq = 0;
+      }
+      const nextSeq = Number(message.seq || 0);
+      if (nextSeq <= seq) return false;
+      seq = nextSeq;
+      return true;
+    },
+    state() {
+      return { lease: { ...lease }, seq };
+    }
+  };
+}
+function mapImageSources(value, mapper) {
+  if (Array.isArray(value)) {
+    return value.map((item) => mapImageSources(item, mapper));
+  }
+  if (!value || typeof value !== "object") return value;
+  const out = {};
+  for (const [key, child] of Object.entries(value)) {
+    out[key] = mapImageSources(child, mapper);
+  }
+  if (out.type === "image" && out.attrs && typeof out.attrs.src === "string") {
+    out.attrs = { ...out.attrs, src: mapper(out.attrs.src) };
+  }
+  return out;
+}
+function mediaRevision(mediaFiles) {
+  return Object.entries(mediaFiles || {}).sort(([a], [b]) => a.localeCompare(b)).map(([name, blob]) => {
+    const size = blob && typeof blob.size === "number" ? blob.size : 0;
+    const type = blob && blob.type || "";
+    return `${name}:${size}:${type}`;
+  }).join("|");
+}
+
 // app.js
 var KatexInline = Node2.create({
   name: "katex",
@@ -57461,6 +57531,7 @@ function _doUpdateDocMeta() {
   $("#status-right").textContent = statusRight;
 }
 function markDirty() {
+  if (_liveSync && _liveSync.applying) return;
   if (State2.currentFile) {
     State2.currentFile.dirty = true;
     State2.currentFile.dirtyGen = (State2.currentFile.dirtyGen || 0) + 1;
@@ -57477,6 +57548,10 @@ function markDirty() {
     }
     updateTreeDirtyDots();
     scheduleIdbCacheWrite();
+    try {
+      scheduleLiveSyncPublish();
+    } catch {
+    }
   }
 }
 function resyncImageAnchors(ann, doc5) {
@@ -58484,6 +58559,9 @@ async function writeCurrentToHandle({ reason = "manual", showProgress = false } 
   if (!State2.currentFile || !State2.currentFile.handle) {
     return { ok: false, error: "\u65E0\u6587\u4EF6\u53E5\u67C4" };
   }
+  if (!canWriteLiveDocument()) {
+    return { ok: false, skipped: true, error: "live-follower" };
+  }
   if (State2.readOnlyMode) {
     return { ok: false, error: "\u53EA\u8BFB\u6A21\u5F0F" };
   }
@@ -58623,6 +58701,7 @@ async function writeCurrentToHandle({ reason = "manual", showProgress = false } 
 function startAutosaveTimer() {
   stopAutosaveTimer();
   if (!hasWriteHandle()) return;
+  if (!canWriteLiveDocument()) return;
   _autosaveTimer = setInterval(() => {
     if (State2.currentFile && State2.currentFile.dirty) scheduleAutosaveDebounce();
   }, AUTOSAVE_INTERVAL);
@@ -58640,6 +58719,7 @@ function stopAutosaveTimer() {
 }
 function scheduleAutosaveDebounce() {
   if (!hasWriteHandle()) return;
+  if (!canWriteLiveDocument()) return;
   if (!State2.currentFile || !State2.currentFile.dirty) return;
   if (scheduleAutosaveDebounce._t) clearTimeout(scheduleAutosaveDebounce._t);
   scheduleAutosaveDebounce._t = setTimeout(() => {
@@ -58649,6 +58729,7 @@ function scheduleAutosaveDebounce() {
 }
 async function autosaveNow() {
   if (!hasWriteHandle()) return;
+  if (!canWriteLiveDocument()) return;
   if (!State2.currentFile || !State2.currentFile.dirty) return;
   if (State2.readOnlyMode) return;
   const result = await writeCurrentToHandle({ reason: "autosave", showProgress: false });
@@ -58865,6 +58946,12 @@ function initEditor() {
     content: "",
     onUpdate: ({ editor: editor2, transaction }) => {
       if (transaction?.getMeta("__activeMarkSync") || transaction?.getMeta("__tableDragSelect")) {
+        return;
+      }
+      if (_liveSync && _liveSync.applying) {
+        if (transaction?.docChanged) {
+          scheduleRenderOutline();
+        }
         return;
       }
       if (transaction?.docChanged && transaction?.getMeta("addToHistory") !== false) {
@@ -61818,6 +61905,10 @@ function snapshotActiveTab() {
 function restoreTab(tab) {
   if (!tab || !State2.editor) return false;
   stopAutosaveTimer();
+  try {
+    closeLiveSync();
+  } catch {
+  }
   State2.activeTabId = tab.id;
   State2.mediaUrls = Object.assign({}, tab.mediaUrls || {});
   State2.mediaFiles = Object.assign({}, tab.mediaFiles || {});
@@ -61870,6 +61961,10 @@ function restoreTab(tab) {
   updateDocMeta({ immediate: true });
   setStatus("\u5DF2\u5207\u6362", tab.name || "");
   try {
+    openLiveSyncForCurrentDocument();
+  } catch {
+  }
+  try {
     startAutosaveTimer();
   } catch {
   }
@@ -61879,6 +61974,10 @@ function switchToTab(tabId) {
   if (!tabId || tabId === State2.activeTabId) return false;
   const target = State2.tabs.find((t) => t && t.id === tabId);
   if (!target) return false;
+  try {
+    closeLiveSync();
+  } catch {
+  }
   snapshotActiveTab();
   return restoreTab(target);
 }
@@ -63238,84 +63337,418 @@ function renderFilePaneCurrent() {
   const searchInput = $("#tree-search");
   filterTree(searchInput ? searchInput.value : "");
 }
+var _instanceId = Math.random().toString(36).slice(2, 10);
+var _liveSync = {
+  channel: null,
+  documentKey: null,
+  role: "off",
+  // off | owner | follower
+  lease: { term: 0, ownerId: "" },
+  seq: 0,
+  gate: null,
+  ownerSeenAt: 0,
+  heartbeat: null,
+  electTimer: null,
+  applying: false,
+  publishTimer: null,
+  lastSentMediaRevision: "",
+  lastAppliedRev: "",
+  stateMsgCount: 0,
+  mediaPayloadCount: 0
+};
 var _docChannel = null;
 var _docChannelPath = null;
-var _instanceId = Math.random().toString(36).slice(2, 10);
 var _docPeers = /* @__PURE__ */ new Set();
 var _docHeartbeatTimer = null;
-function _getDocPath() {
-  if (!State2.currentFile) return null;
-  if (State2.currentFile.handle && State2.currentFile.documentId) {
-    return `Mentor:single/${State2.currentFile.documentId}`;
-  }
-  return `Mentor:single/${State2.currentFile.name}`;
+function liveDocumentKey() {
+  const cf = State2.currentFile;
+  if (!cf) return null;
+  if (cf.handle && cf.documentId) return `id:${cf.documentId}`;
+  if (cf.name) return `name:${cf.name}`;
+  if (cf.documentId) return `id:${cf.documentId}`;
+  return State2.activeTabId ? `tab:${State2.activeTabId}` : null;
 }
-function _closeDocChannel() {
-  if (typeof _closeDocChannelFull === "function") return _closeDocChannelFull();
-  if (_docChannel) {
-    try {
-      _docChannel.postMessage({ type: "leave", instanceId: _instanceId });
-    } catch (e) {
-    }
-    _docChannel.close();
-    _docChannel = null;
-    _docChannelPath = null;
-  }
-  _docPeers.clear();
+function canWriteLiveDocument() {
+  return !_liveSync || _liveSync.role === "off" || _liveSync.role === "owner";
 }
-function _openDocChannel() {
-  _closeDocChannel();
-  const path2 = _getDocPath();
-  if (!path2) return;
-  _docChannelPath = path2;
-  _docChannel = new BroadcastChannel("mentor-doc-" + path2.slice(0, 60));
-  _docChannel.onmessage = (e) => {
-    if (e.data.instanceId === _instanceId) return;
-    if (e.data.type === "ping") {
-      const isNewPeer = !_docPeers.has(e.data.instanceId);
-      _docPeers.add(e.data.instanceId);
-      _docChannel.postMessage({ type: "pong", instanceId: _instanceId });
-      if (isNewPeer) _reevaluateReadOnly();
-    } else if (e.data.type === "pong") {
-      const isNewPeer = !_docPeers.has(e.data.instanceId);
-      _docPeers.add(e.data.instanceId);
-      if (isNewPeer) _reevaluateReadOnly();
-    } else if (e.data.type === "leave") {
-      _docPeers.delete(e.data.instanceId);
-      _reevaluateReadOnly();
-    }
+function getLiveSyncState() {
+  return {
+    role: _liveSync.role,
+    documentKey: _liveSync.documentKey,
+    lease: { term: _liveSync.lease.term, ownerId: _liveSync.lease.ownerId },
+    ownerSeenAt: _liveSync.ownerSeenAt,
+    instanceId: _instanceId,
+    stateMsgCount: _liveSync.stateMsgCount,
+    mediaPayloadCount: _liveSync.mediaPayloadCount
   };
-  _docChannel.postMessage({ type: "ping", instanceId: _instanceId });
-  setTimeout(_reevaluateReadOnly, 300);
-  _docHeartbeatTimer = setInterval(() => {
-    if (_docChannel) _docChannel.postMessage({ type: "ping", instanceId: _instanceId });
-  }, 5e3);
 }
-function _reevaluateReadOnly() {
-  const hasPeers = _docPeers.size > 0;
-  if (hasPeers && !State2.readOnlyMode) {
-    State2.readOnlyMode = true;
-    showToast(`\u26A0 \u53E6\u4E00\u6807\u7B7E\u4E5F\u5728\u7F16\u8F91\u6B64\u6587\u4EF6 (${_docPeers.size} \u4E2A), \u5DF2\u542F\u7528\u53EA\u8BFB\u6A21\u5F0F (Ctrl+S \u7981\u7528)`, 6e3);
-  } else if (!hasPeers && State2.readOnlyMode) {
-    State2.readOnlyMode = false;
-    showToast("\u2713 \u6240\u6709\u6807\u7B7E\u90FD\u5DF2\u5173\u95ED, \u5DF2\u6062\u590D\u53EF\u5199\u6A21\u5F0F", 3e3);
+function renderLiveSyncBanner() {
+  const el = document.getElementById("live-sync-banner");
+  const text2 = document.getElementById("live-sync-text");
+  if (!el || !text2) return;
+  if (!_liveSync.documentKey || _liveSync.role === "off") {
+    el.classList.add("hidden");
+    el.dataset.role = "";
+    return;
+  }
+  el.classList.remove("hidden");
+  el.dataset.role = _liveSync.role;
+  text2.textContent = _liveSync.role === "owner" ? "\u6B64\u9875\u9762\u6B63\u5728\u7F16\u8F91 \xB7 \u5176\u4ED6\u9875\u9762\u4F1A\u5B9E\u65F6\u66F4\u65B0" : "\u5B9E\u65F6\u67E5\u770B \xB7 \u4FEE\u6539\u6765\u81EA\u53E6\u4E00\u9875\u9762";
+  const button = el.querySelector('[data-act="live-sync-takeover"]');
+  if (button) button.hidden = _liveSync.role !== "follower";
+}
+function setLiveRole(role) {
+  const prev = _liveSync.role;
+  _liveSync.role = role;
+  State2.readOnlyMode = role === "follower";
+  if (State2.editor) {
+    try {
+      State2.editor.setEditable(role !== "follower");
+    } catch {
+    }
+  }
+  renderLiveSyncBanner();
+  if (role === "owner" && prev !== "owner") {
+    try {
+      startAutosaveTimer();
+    } catch {
+    }
+  } else if (role === "follower") {
+    try {
+      stopAutosaveTimer();
+    } catch {
+    }
   }
 }
-function _closeDocChannelFull() {
-  if (typeof _docHeartbeatTimer !== "undefined" && _docHeartbeatTimer) {
+function acceptLease(lease) {
+  if (!lease) return false;
+  if (compareLease(lease, _liveSync.lease) < 0) return false;
+  _liveSync.lease = {
+    term: Number(lease.term || 0),
+    ownerId: String(lease.ownerId || "")
+  };
+  _liveSync.ownerSeenAt = Date.now();
+  const isOwner = _liveSync.lease.ownerId === _instanceId;
+  setLiveRole(isOwner ? "owner" : "follower");
+  return true;
+}
+function postLive(type, payload = {}) {
+  if (!_liveSync.channel || !_liveSync.documentKey) return;
+  try {
+    _liveSync.channel.postMessage({
+      schema: LIVE_SYNC_SCHEMA,
+      type,
+      documentKey: _liveSync.documentKey,
+      instanceId: _instanceId,
+      lease: { term: _liveSync.lease.term, ownerId: _liveSync.lease.ownerId },
+      seq: ++_liveSync.seq,
+      ...payload
+    });
+  } catch (e) {
+    console.warn("[live-sync] post failed", e);
+  }
+}
+function liveFileState() {
+  return {
+    documentId: State2.currentFile?.documentId || State2.activeTabId,
+    name: State2.currentFile?.name || "untitled.md",
+    dirty: !!(State2.currentFile && State2.currentFile.dirty),
+    dirtyGen: State2.currentFile?.dirtyGen || 0
+  };
+}
+function captureLiveState({ includeMedia = false } = {}) {
+  let pm = { type: "doc", content: [] };
+  try {
+    pm = mapImageSources(State2.editor.getJSON(), mediaPathForSrc);
+  } catch (e) {
+    console.warn("[live-sync] getJSON failed", e);
+  }
+  let annotations = [];
+  try {
+    const side = buildAnnotationsSidecar();
+    annotations = side && Array.isArray(side.annotations) ? side.annotations : State2.annotations || [];
+  } catch {
+    annotations = JSON.parse(JSON.stringify(State2.annotations || []));
+  }
+  const revision = mediaRevision(State2.mediaFiles || {});
+  const changed = revision !== _liveSync.lastSentMediaRevision;
+  if (includeMedia || changed) {
+    _liveSync.lastSentMediaRevision = revision;
+    if (includeMedia || changed) _liveSync.mediaPayloadCount += 1;
+  }
+  const out = {
+    pm,
+    annotations: JSON.parse(JSON.stringify(annotations || [])),
+    references: normalizeReferenceManifest(State2.references || emptyReferenceManifest()),
+    file: liveFileState(),
+    mediaRevision: revision
+  };
+  if (includeMedia || changed) {
+    out.mediaFiles = Object.assign({}, State2.mediaFiles || {});
+  }
+  return out;
+}
+function scheduleLiveSyncPublish({ full = false } = {}) {
+  if (_liveSync.role !== "owner" || _liveSync.applying || !_liveSync.channel) return;
+  clearTimeout(_liveSync.publishTimer);
+  const size = (() => {
+    try {
+      return State2.editor?.state.doc.content.size || 0;
+    } catch {
+      return 0;
+    }
+  })();
+  const delay = size > 1e6 ? 500 : size > 25e4 ? 180 : 60;
+  _liveSync.publishTimer = setTimeout(() => {
+    _liveSync.publishTimer = null;
+    if (_liveSync.role !== "owner" || !_liveSync.channel) return;
+    const state = captureLiveState({ includeMedia: full });
+    _liveSync.stateMsgCount += 1;
+    postLive(full ? "state-full" : "state", { state });
+  }, delay);
+}
+async function applyLiveState(snapshot) {
+  if (!snapshot || _liveSync.role !== "follower" || !State2.editor) return false;
+  const rev = JSON.stringify({
+    pm: snapshot.pm,
+    annotations: snapshot.annotations,
+    references: snapshot.references,
+    file: snapshot.file,
+    mediaRevision: snapshot.mediaRevision
+  });
+  if (rev === _liveSync.lastAppliedRev) return true;
+  _liveSync.lastAppliedRev = rev;
+  const localHandle = State2.currentFile?.handle || null;
+  _liveSync.applying = true;
+  State2._suspendAnnValidate = true;
+  try {
+    if (snapshot.mediaFiles && Object.keys(snapshot.mediaFiles).length) {
+      try {
+        await injectMediaFiles(snapshot.mediaFiles);
+      } catch (e) {
+        console.warn("[live-sync] injectMedia failed", e);
+      }
+    }
+    const hydrated = mapImageSources(snapshot.pm || { type: "doc", content: [] }, (src) => {
+      if (State2.mediaUrls && State2.mediaUrls[src]) return State2.mediaUrls[src];
+      return src;
+    });
+    State2.annotations = [];
+    State2.editor.commands.setContent(hydrated, false);
+    clearPmHistory();
+    resetHistory();
+    State2.annotations = JSON.parse(JSON.stringify(snapshot.annotations || []));
+    try {
+      rebuildAnnotationMarks();
+    } catch (e) {
+      console.warn("[live-sync] rebuild marks", e);
+    }
+    State2.references = normalizeReferenceManifest(snapshot.references || emptyReferenceManifest());
+    try {
+      reconcileCitationNodes();
+    } catch {
+    }
+    State2.currentFile = {
+      documentId: snapshot.file && snapshot.file.documentId || State2.currentFile?.documentId || State2.activeTabId,
+      name: snapshot.file && snapshot.file.name || State2.currentFile?.name || "untitled.md",
+      content: State2.currentFile?.content || "",
+      dirty: !!(snapshot.file && snapshot.file.dirty),
+      dirtyGen: snapshot.file && snapshot.file.dirtyGen || 0,
+      handle: localHandle,
+      annotations: null
+    };
+    if (State2.currentFile.dirty) {
+      $("#dirty-indicator")?.classList.add("is-dirty");
+    } else {
+      $("#dirty-indicator")?.classList.remove("is-dirty");
+    }
+    const nameEl = $("#current-file-name");
+    if (nameEl) nameEl.textContent = State2.currentFile.name;
+    try {
+      renderCommentList();
+    } catch {
+    }
+    try {
+      _renderReferencesPane();
+    } catch {
+    }
+    try {
+      renderOutline();
+    } catch {
+    }
+    try {
+      refreshAnnotationImageDecos();
+    } catch {
+    }
+    try {
+      renderDocTabs();
+    } catch {
+    }
+    try {
+      updateDocMeta({ immediate: true });
+    } catch {
+    }
+  } finally {
+    State2._suspendAnnValidate = false;
+    _liveSync.applying = false;
+  }
+  return true;
+}
+function onLiveMessage(ev) {
+  const msg = ev && ev.data;
+  if (!msg || msg.instanceId === _instanceId) return;
+  if (msg.documentKey !== _liveSync.documentKey) return;
+  if (msg.schema !== LIVE_SYNC_SCHEMA) return;
+  if (msg.type === "leave") {
+    if (msg.lease && msg.lease.ownerId === msg.instanceId) {
+      if (_liveSync.role === "follower") {
+        clearTimeout(_liveSync.electTimer);
+        _liveSync.electTimer = setTimeout(() => {
+          if (_liveSync.role !== "follower") return;
+          if (Date.now() - _liveSync.ownerSeenAt < 200) return;
+          acceptLease(nextLease(_liveSync.lease, _instanceId));
+          postLive("claim");
+          scheduleLiveSyncPublish({ full: true });
+        }, 150);
+      }
+    }
+    return;
+  }
+  if (msg.type === "hello") {
+    if (_liveSync.role === "owner") {
+      postLive("heartbeat");
+      scheduleLiveSyncPublish({ full: true });
+    }
+    return;
+  }
+  if (msg.type === "claim" || msg.type === "heartbeat") {
+    const cmp2 = compareLease(msg.lease, _liveSync.lease);
+    if (cmp2 > 0) {
+      acceptLease(msg.lease);
+      if (_liveSync.role === "follower" && (msg.type === "heartbeat" || msg.type === "claim")) {
+        postLive("state-request");
+      }
+    } else if (cmp2 === 0 && msg.lease && msg.lease.ownerId === _liveSync.lease.ownerId) {
+      _liveSync.ownerSeenAt = Date.now();
+    } else if (cmp2 < 0 && _liveSync.role === "owner") {
+      postLive("heartbeat");
+    }
+    return;
+  }
+  if (msg.type === "state-request") {
+    if (_liveSync.role === "owner") scheduleLiveSyncPublish({ full: true });
+    return;
+  }
+  if (msg.type === "state" || msg.type === "state-full") {
+    if (compareLease(msg.lease, _liveSync.lease) < 0) return;
+    if (compareLease(msg.lease, _liveSync.lease) > 0) acceptLease(msg.lease);
+    if (_liveSync.role !== "follower") return;
+    if (_liveSync.gate && !_liveSync.gate.accept(msg)) return;
+    _liveSync.ownerSeenAt = Date.now();
+    applyLiveState(msg.state).catch((e) => console.warn("[live-sync] apply failed", e));
+  }
+}
+function closeLiveSync() {
+  clearTimeout(_liveSync.publishTimer);
+  _liveSync.publishTimer = null;
+  clearTimeout(_liveSync.electTimer);
+  _liveSync.electTimer = null;
+  if (_liveSync.heartbeat) {
+    clearInterval(_liveSync.heartbeat);
+    _liveSync.heartbeat = null;
+  }
+  if (_docHeartbeatTimer) {
     clearInterval(_docHeartbeatTimer);
     _docHeartbeatTimer = null;
   }
-  if (_docChannel) {
+  if (_liveSync.channel) {
     try {
-      _docChannel.postMessage({ type: "leave", instanceId: _instanceId });
-    } catch (e) {
+      postLive("leave");
+    } catch {
     }
-    _docChannel.close();
-    _docChannel = null;
-    _docChannelPath = null;
+    try {
+      _liveSync.channel.close();
+    } catch {
+    }
   }
+  _liveSync.channel = null;
+  _liveSync.documentKey = null;
+  _liveSync.gate = null;
+  _liveSync.role = "off";
+  _liveSync.lease = { term: 0, ownerId: "" };
+  _liveSync.seq = 0;
+  _liveSync.lastAppliedRev = "";
+  _docChannel = null;
+  _docChannelPath = null;
   _docPeers.clear();
+  State2.readOnlyMode = false;
+  if (State2.editor) {
+    try {
+      State2.editor.setEditable(true);
+    } catch {
+    }
+  }
+  renderLiveSyncBanner();
+}
+function openLiveSyncForCurrentDocument() {
+  closeLiveSync();
+  const documentKey = liveDocumentKey();
+  if (!documentKey || typeof BroadcastChannel === "undefined") {
+    setLiveRole("owner");
+    return;
+  }
+  _liveSync.documentKey = documentKey;
+  _liveSync.channel = new BroadcastChannel(channelNameForDocument(documentKey));
+  _liveSync.gate = createEnvelopeGate(documentKey);
+  _liveSync.channel.onmessage = onLiveMessage;
+  _docChannel = _liveSync.channel;
+  _docChannelPath = documentKey;
+  _liveSync.role = "off";
+  renderLiveSyncBanner();
+  postLive("hello");
+  clearTimeout(_liveSync.electTimer);
+  _liveSync.electTimer = setTimeout(() => {
+    if (_liveSync.role !== "off") return;
+    acceptLease(nextLease(_liveSync.lease, _instanceId));
+    postLive("claim");
+    scheduleLiveSyncPublish({ full: true });
+  }, 250);
+  _liveSync.heartbeat = setInterval(() => {
+    if (!_liveSync.channel) return;
+    if (_liveSync.role === "owner") {
+      postLive("heartbeat");
+    } else if (_liveSync.role === "follower") {
+      if (Date.now() - _liveSync.ownerSeenAt > 3500) {
+        acceptLease(nextLease(_liveSync.lease, _instanceId));
+        postLive("claim");
+        scheduleLiveSyncPublish({ full: true });
+      }
+    } else if (_liveSync.role === "off") {
+      acceptLease(nextLease(_liveSync.lease, _instanceId));
+      postLive("claim");
+    }
+  }, 1e3);
+  _docHeartbeatTimer = _liveSync.heartbeat;
+}
+function takeOverLiveEditing() {
+  if (!_liveSync.channel || _liveSync.role === "owner") return false;
+  acceptLease(nextLease(_liveSync.lease, _instanceId));
+  postLive("claim");
+  scheduleLiveSyncPublish({ full: true });
+  showToast("\u5DF2\u63A5\u7BA1\u7F16\u8F91", 1800);
+  return true;
+}
+function __injectLiveMessageForTest(msg) {
+  onLiveMessage({ data: msg });
+}
+function _getDocPath() {
+  return liveDocumentKey();
+}
+function _openDocChannel() {
+  openLiveSyncForCurrentDocument();
+}
+function _closeDocChannelFull() {
+  closeLiveSync();
 }
 window.addEventListener("beforeunload", _closeDocChannelFull);
 function _validateSidecar(annotations) {
@@ -65275,6 +65708,11 @@ function setupToolbar() {
     syncPaneToggleChips();
   }
   document.addEventListener("click", (e) => {
+    if (e.target.closest('[data-act="live-sync-takeover"]')) {
+      e.preventDefault();
+      takeOverLiveEditing();
+      return;
+    }
     if (e.target.closest('[data-act="toggle-file-pane"]')) {
       toggleFilePane();
     }
@@ -66264,12 +66702,19 @@ window.__mdAnnotator = {
   // 注意: app.js 是 type=module, 模块作用域不能直接被 __mdAnnotator 对象方法访问
   // 用闭包 trick: 通过 import.meta / globalThis 拿不到. 改: 把 diag 暴露在 window._diagTab (module scope)
   _diagTabRef: () => ({
-    hasDocChannel: typeof _docChannel !== "undefined" && _docChannel !== null,
-    docChannelPath: typeof _docChannelPath !== "undefined" ? _docChannelPath : null,
+    hasDocChannel: typeof _liveSync !== "undefined" && _liveSync.channel !== null,
+    docChannelPath: typeof _liveSync !== "undefined" ? _liveSync.documentKey : null,
     instanceId: typeof _instanceId !== "undefined" ? _instanceId : null,
-    peerCount: typeof _docPeers !== "undefined" ? _docPeers.size : 0,
-    peers: typeof _docPeers !== "undefined" ? Array.from(_docPeers) : []
+    peerCount: typeof _liveSync !== "undefined" && _liveSync.role === "follower" ? 1 : 0,
+    peers: typeof _liveSync !== "undefined" && _liveSync.lease.ownerId && _liveSync.lease.ownerId !== _instanceId ? [_liveSync.lease.ownerId] : [],
+    live: typeof getLiveSyncState === "function" ? getLiveSyncState() : null
   }),
+  getLiveSyncState,
+  takeOverLiveEditing,
+  openLiveSyncForCurrentDocument,
+  closeLiveSync,
+  __injectLiveMessageForTest,
+  canWriteLiveDocument,
   __diagMedia: () => {
     const M = window.__mdAnnotator;
     const S2 = M.State;
@@ -66613,11 +67058,12 @@ window.__mdAnnotator = {
   }
 };
 window.__mdAnnotator__diagTab = () => ({
-  hasDocChannel: _docChannel !== null,
-  docChannelPath: _docChannelPath,
+  hasDocChannel: _liveSync.channel !== null,
+  docChannelPath: _liveSync.documentKey,
   instanceId: _instanceId,
-  peerCount: _docPeers.size,
-  peers: Array.from(_docPeers)
+  peerCount: _liveSync.role === "follower" ? 1 : 0,
+  peers: _liveSync.lease.ownerId && _liveSync.lease.ownerId !== _instanceId ? [_liveSync.lease.ownerId] : [],
+  live: getLiveSyncState()
 });
 window.__mdAnnotator__openDocChannel = _openDocChannel;
 window.__mdAnnotator__closeDocChannel = _closeDocChannelFull;

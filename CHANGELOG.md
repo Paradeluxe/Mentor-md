@@ -2,6 +2,30 @@
 
 按时间倒序记录已发布的变化。最新条目在上方。
 
+## v1.44.9 (2026-07-27) — 多页面实时共享
+
+同一台电脑、同一浏览器配置中，多页打开同一文档时：
+
+### 行为
+- **单写者 + 实时镜像**：一页为 owner（可编辑/保存），其他页为 follower（实时查看）
+- owner 的正文、批注、引用、图片变更经 BroadcastChannel 同步到 follower（约 60–500ms 节流）
+- follower 顶部状态条「实时查看」，可点 **接管编辑** 升为 owner；旧 owner 立即降为 follower
+- owner 关闭/崩溃后，剩余页面经心跳超时自动选出新 owner
+- 只有 owner 可以 autosave / Ctrl+S / 写回 handle；follower 写盘被拒绝
+- 不同文档房间隔离；乱序/重复消息不会回滚状态
+- **不是**跨设备或多人网络协作
+
+### 实现
+- `modules/cross-tab-sync.js`：房间名、lease 排序、envelope gate、图片路径可移植、media revision
+- `app.js`：替换旧「双页都只读」peer 检测为 live-sync lease 协议
+- UI：`#live-sync-banner` + 「接管编辑」
+- 测试：`tests/unit-cross-tab-sync.spec.js`、`tests/e2e-cross-tab-live-sync.spec.js`；TEST 108 / chaos W14-03 契约更新
+
+### Cache
+- bump `styles.css?v=` / `app.bundle.js?v=`
+
+---
+
 ## v1.44.8 (2026-07-26) — AI 卡必回 / 人类卡临时 @AI
 
 用户: AI 批注卡无论有没有 @AI 都要回复；人类批注卡才临时检测 @AI。

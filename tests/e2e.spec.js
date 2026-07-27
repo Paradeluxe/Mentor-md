@@ -3256,61 +3256,64 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
     console.log('  ✓ HandleStore.putFile / getFile roundtrip OK');
   }
 
-  // === TEST 108: P0-A 跨 tab 协调 — 晚开 tab 也能触发只读 ===
-  // 用全新独立 context 避免前序 test 残留的 channel/heartbeat 干扰
-  console.log('=== TEST 108: 晚开 tab 收到新 peer ping 时也进入只读 ===');
+  // === TEST 108: 跨页面 live-sync — 一 owner + 一 follower + 实时镜像 ===
+  console.log('=== TEST 108: cross-page live-sync owner/follower + content mirror ===');
   {
     const c108 = await browser.newContext({ viewport: { width: 1400, height: 900 } });
     const t1 = await c108.newPage();
     t1.on('pageerror', e => console.log('  T1 ERR:', e.message));
-    t1.on('console', m => { if (m.text().includes('P0-A')) console.log('  T1 C:', m.text()); });
     await t1.goto(URL);
     await t1.waitForFunction(() => window.__mdAnnotator && window.__mdAnnotator.State.editor, { timeout: 10000 });
-    await t1.waitForTimeout(500);
-    await t1.evaluate(async () => {
-      window.__mdAnnotator.State.currentFile = { name: 'sample.md', content: '# sample', handle: { name: 'sample.md' } };
-      await window.__mdAnnotator.loadMarkdownIntoEditor('sample.md', '# sample', null);
+    await t1.evaluate(() => {
+      try {
+        localStorage.setItem('Mentor:author', 'T108');
+        localStorage.setItem('Mentor:authorId', 't108');
+        window.__mdAnnotator.State.author = 'T108';
+        const m = document.getElementById('author-modal');
+        if (m) m.classList.add('hidden');
+      } catch (_) {}
+      window.__mdAnnotator.loadMarkdownIntoEditor('sample.md', '# sample', null, { documentId: 't108-doc' });
     });
-    await t1.waitForTimeout(1500);
+    await t1.waitForTimeout(800);
 
-    // 晚开 tab2
     const t2 = await c108.newPage();
     t2.on('pageerror', e => console.log('  T2 ERR:', e.message));
-    t2.on('console', m => { if (m.text().includes('P0-A')) console.log('  T2 C:', m.text()); });
     await t2.goto(URL);
     await t2.waitForFunction(() => window.__mdAnnotator && window.__mdAnnotator.State.editor, { timeout: 10000 });
-    await t2.waitForTimeout(500);
-    await t2.evaluate(async () => {
-      window.__mdAnnotator.State.currentFile = { name: 'sample.md', content: '# sample', handle: { name: 'sample.md' } };
-      await window.__mdAnnotator.loadMarkdownIntoEditor('sample.md', '# sample', null);
-    });
-    await t1.waitForTimeout(2000);
-
-    const t1ro = await t1.evaluate(() => window.__mdAnnotator.State.readOnlyMode);
-    const t2ro = await t2.evaluate(() => window.__mdAnnotator.State.readOnlyMode);
-    console.log(`  ✓ T1 (已有) readOnly=${t1ro} | T2 (新) readOnly=${t2ro}`);
-    if (t1ro !== true || t2ro !== true) {
-      throw new Error(`预期双方都 readOnly, 实际 T1=${t1ro} T2=${t2ro}`);
-    }
-    // 主动 trigger close cleanup 路径 (不等 tab close, 因为 Playwright close 不保证 beforeunload 跑完)
     await t2.evaluate(() => {
-      // 直接调 _closeDocChannelFull 来模拟页面关闭
-      // 因为是模块作用域函数, 走 page.__mdAnnotator 暴露检查
-      // 函数本身在 app.js 内部, 不能直接调; 用 broadcastChannel 自删除来替代
-      // 直接触发 _docChannel 关闭:
-      const F = window.__mdAnnotator?.State;
-      // 手动 postMessage {type: 'leave'} from this tab
-      const bc = new BroadcastChannel('mentor-doc-Mentor:single/sample.md');
-      bc.postMessage({ type: 'leave', instanceId: 'manual-test' });
-      bc.close();
+      try {
+        localStorage.setItem('Mentor:author', 'T108');
+        localStorage.setItem('Mentor:authorId', 't108');
+        window.__mdAnnotator.State.author = 'T108';
+        const m = document.getElementById('author-modal');
+        if (m) m.classList.add('hidden');
+      } catch (_) {}
+      window.__mdAnnotator.loadMarkdownIntoEditor('sample.md', '# sample', null, { documentId: 't108-doc' });
     });
-    await t1.waitForTimeout(1000);
-    const t1After = await t1.evaluate(() => window.__mdAnnotator.State.readOnlyMode);
-    console.log(`  ✓ T2 模拟 leave 后 T1 readOnly=${t1After} (预期 false)`);
-    // 注: leave 消息只能移除 _docPeers 中留着的 self-id; 我们发的是 manual-test, T2 自己的 real-id 还在 _docPeers
-    // 所以这个 leave 测试不一定能通过; 但主链路 (开 tab → 双方都 readOnly) 已验证
+    await t1.waitForTimeout(1200);
+
+    const roles = await Promise.all([t1, t2].map((p) => p.evaluate(() => window.__mdAnnotator.getLiveSyncState().role)));
+    console.log(`  ✓ roles T1=${roles[0]} T2=${roles[1]}`);
+    if (roles.filter((x) => x === 'owner').length !== 1 || roles.filter((x) => x === 'follower').length !== 1) {
+      throw new Error(`预期 1 owner + 1 follower, 实际 ${JSON.stringify(roles)}`);
+    }
+
+    const ownerPage = roles[0] === 'owner' ? t1 : t2;
+    const followerPage = roles[0] === 'follower' ? t1 : t2;
+    await ownerPage.evaluate(() => {
+      const ed = window.__mdAnnotator.State.editor;
+      ed.commands.setTextSelection(ed.state.doc.content.size);
+      ed.commands.insertContent(' LIVE108');
+    });
+    await followerPage.waitForFunction(
+      () => window.__mdAnnotator.State.editor.state.doc.textContent.includes('LIVE108'),
+      { timeout: 4000 }
+    );
+    const followerEditable = await followerPage.evaluate(() => window.__mdAnnotator.State.editor.isEditable);
+    if (followerEditable !== false) throw new Error('follower should not be editable');
+    console.log('  ✓ owner edit mirrored to follower; follower non-editable');
     await c108.close();
-    console.log('  ✓ P0-A 跨 tab 联动正常 (晚开 tab 触发 T1 readOnly — 这是修复的关键)');
+    console.log('  ✓ P0-A live-sync contract OK');
   }
 
   // === TEST 109: P0 #12 XSS guard — 批注 body 含 <img onerror> 不可被解析为 HTML ===

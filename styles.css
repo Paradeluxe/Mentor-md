@@ -3281,6 +3281,56 @@ body.refs-pane-collapsed #expand-refs-pane-btn {
 }
 
 
+/* === Cross-page live sync status bar === */
+.live-sync-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 26px;
+  padding: 0 12px;
+  background: var(--panel-2);
+  border-bottom: 1px solid var(--border-warm);
+  color: var(--text-2);
+  font-size: 12px;
+  line-height: 1.3;
+}
+.live-sync-banner.hidden { display: none; }
+.live-sync-banner .live-sync-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-3);
+  flex-shrink: 0;
+}
+.live-sync-banner[data-role="owner"] .live-sync-dot {
+  background: var(--accent);
+}
+.live-sync-banner[data-role="follower"] .live-sync-dot {
+  background: var(--text-3);
+}
+.live-sync-banner #live-sync-text {
+  flex: 1;
+  min-width: 0;
+}
+.live-sync-banner button[data-act="live-sync-takeover"] {
+  flex-shrink: 0;
+  height: 22px;
+  padding: 0 10px;
+  border: 1px solid var(--border-warm);
+  border-radius: var(--radius-sm);
+  background: var(--panel-3);
+  color: var(--text);
+  font: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+.live-sync-banner button[data-act="live-sync-takeover"]:hover {
+  background: var(--panel);
+}
+.live-sync-banner button[data-act="live-sync-takeover"][hidden] {
+  display: none;
+}
+
 /* === v1.43.33 multi-doc tabs — Chrome/Linear 紧凑条 + active 底线 === */
 .doc-tabs {
   display: flex;

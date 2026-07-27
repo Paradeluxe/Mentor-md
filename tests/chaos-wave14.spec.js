@@ -181,56 +181,74 @@ const tests = {
   // 2. Cross-tab BroadcastChannel 同步
   // ============================================================
   async W14_03_cross_tab_same_file(page) {
-      // 模拟 2 个 tab 同时打开同一文件, 测 BroadcastChannel 协调
-      await page.evaluate(async () => {
-        const M = window.__mdAnnotator;
-        M.State.currentFile = { name: 'cross-tab-test.md', content: '', annotations: null, dirty: false };
-        window.__mdAnnotator__openDocChannel();
+      // 模拟 2 个 tab 同时打开同一文件, 测 live-sync owner/follower + content
+      await page.evaluate(() => {
+        try {
+          localStorage.setItem('Mentor:author', 'W14');
+          const m = document.getElementById('author-modal');
+          if (m) m.classList.add('hidden');
+        } catch (_) {}
+        window.__mdAnnotator.loadMarkdownIntoEditor('cross-tab-test.md', '# cross\n', null, { documentId: 'w14-cross' });
       });
-      await page.waitForTimeout(500);  // 等 ping
-      const diag1Before = await page.evaluate(() => window.__mdAnnotator__diagTab());
-      // 开第 2 个 page (同 context 共享 broadcast)
+      await page.waitForTimeout(700);
       const ctx = page.context();
       const page2 = await ctx.newPage();
       await page2.goto(URL + '&cb=' + Date.now());
       await page2.waitForFunction(() => window.__mdAnnotator?.State?.editor, { timeout: 15000 });
-      await page2.evaluate(async () => {
-        const M = window.__mdAnnotator;
-        M.State.currentFile = { name: 'cross-tab-test.md', content: '', annotations: null, dirty: false };
-        window.__mdAnnotator__openDocChannel();
+      await page2.evaluate(() => {
+        try {
+          localStorage.setItem('Mentor:author', 'W14');
+          const m = document.getElementById('author-modal');
+          if (m) m.classList.add('hidden');
+        } catch (_) {}
+        window.__mdAnnotator.loadMarkdownIntoEditor('cross-tab-test.md', '# cross\n', null, { documentId: 'w14-cross' });
       });
-      await page2.waitForTimeout(1500);  // 等 ping/pong (跨 tab 异步, 给足够时间)
-      const diag1After = await page.evaluate(() => window.__mdAnnotator__diagTab());
-      const diag2 = await page2.evaluate(() => window.__mdAnnotator__diagTab());
-      await page2.close();
-      // 期望: tab1 知道 tab2 (peerCount 增加), tab2 知道 tab1
-      if (diag1After.peerCount === 0 && diag2.peerCount === 0) {
-        return { error: 'cross-tab peer 检测失败 (都没看到对方)', diag1Before, diag1After, diag2 };
+      await page2.waitForTimeout(1200);
+      const roles = await Promise.all([page, page2].map((p) => p.evaluate(() => window.__mdAnnotator.getLiveSyncState())));
+      const ownerN = roles.filter((r) => r.role === 'owner').length;
+      const followerN = roles.filter((r) => r.role === 'follower').length;
+      if (ownerN !== 1 || followerN !== 1) {
+        await page2.close();
+        return { error: 'live-sync roles not 1+1', roles };
       }
-      return { ok: true, info: { diag1Before, diag1After, diag2 } };
+      const ownerPage = roles[0].role === 'owner' ? page : page2;
+      const followerPage = roles[0].role === 'follower' ? page : page2;
+      await ownerPage.evaluate(() => {
+        const ed = window.__mdAnnotator.State.editor;
+        ed.commands.setTextSelection(ed.state.doc.content.size);
+        ed.commands.insertContent(' W14LIVE');
+      });
+      await followerPage.waitForFunction(
+        () => window.__mdAnnotator.State.editor.state.doc.textContent.includes('W14LIVE'),
+        { timeout: 4000 }
+      ).catch(() => null);
+      const text = await followerPage.evaluate(() => window.__mdAnnotator.State.editor.state.doc.textContent);
+      await page2.close();
+      if (!text.includes('W14LIVE')) return { error: 'follower did not mirror', text, roles };
+      return { ok: true, info: { roles, text } };
     },
 
       async W14_04_cross_tab_isolation(page) {
-        // 不同文件名 → 不同 channel → 不应互相看到
+        // 不同文件名 → 不同 channel → 不应互相串房
         const ctx = page.context();
         const page2 = await ctx.newPage();
         await page2.goto(URL + '&cb=' + Date.now());
         await page2.waitForFunction(() => window.__mdAnnotator?.State?.editor, { timeout: 10000 });
         await page.evaluate(() => {
-          window.__mdAnnotator.State.currentFile = { name: 'file-a.md', content: '', annotations: null, dirty: false };
-          window.__mdAnnotator__openDocChannel();
+          window.__mdAnnotator.loadMarkdownIntoEditor('file-a.md', '# A\n', null, { documentId: 'w14-a' });
         });
         await page2.evaluate(() => {
-          window.__mdAnnotator.State.currentFile = { name: 'file-b.md', content: '', annotations: null, dirty: false };
-          window.__mdAnnotator__openDocChannel();
+          window.__mdAnnotator.loadMarkdownIntoEditor('file-b.md', '# B\n', null, { documentId: 'w14-b' });
         });
-        await page2.waitForTimeout(500);
-        const r1 = await page.evaluate(() => window.__mdAnnotator__diagTab());
-        const r2 = await page2.evaluate(() => window.__mdAnnotator__diagTab());
+        await page2.waitForTimeout(700);
+        const r1 = await page.evaluate(() => window.__mdAnnotator.getLiveSyncState());
+        const r2 = await page2.evaluate(() => window.__mdAnnotator.getLiveSyncState());
         await page2.close();
-        // 期望: r1 和 r2 channelPath 不同, peer 都是 0 (不同文件不应互相 ping)
-        if (r1.docChannelPath === r2.docChannelPath) {
+        if (r1.documentKey === r2.documentKey) {
           return { error: '不同文件应开不同 channel', r1, r2 };
+        }
+        if (r1.role !== 'owner' || r2.role !== 'owner') {
+          return { error: '不同文件应各自为 owner', r1, r2 };
         }
         return { ok: true, info: { r1, r2 } };
       },

@@ -37,6 +37,9 @@ async function main() {
     assert.ok(schema.includes('imageAnchors') || schema.includes('documentId'), 'SCHEMA missing new fields');
     assert.ok(/\.mentor/.test(readme), 'README missing .mentor');
     assert.ok(/v?1\.(43|44)\b/.test(readme), 'README missing version');
+    assert.ok(readme.includes('实时查看') || readme.includes('实时共享'), 'README missing live-sync');
+    assert.ok(readme.includes('接管编辑'), 'README missing takeover');
+    assert.ok(readme.includes('同一浏览器'), 'README missing same-browser scope');
     ok('schema-readme');
   } catch (e) {
     bad('schema-readme', e);
@@ -49,6 +52,7 @@ async function main() {
       'modules/io.js',
       'modules/annotations.js',
       'modules/tabs.js',
+      'modules/cross-tab-sync.js',
     ]) {
       assert.ok(fs.existsSync(path.join(ROOT, f)), 'missing ' + f);
     }

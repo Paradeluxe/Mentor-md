@@ -2,7 +2,7 @@
 
 > 像 docx 一样批注 Markdown。
 
-一个 **WYSIWYG Markdown 编辑器**（当前 **v1.44.8**），右侧带 docx 风格批注侧栏，选区级批注、嵌套回复、解决/重新打开。
+一个 **WYSIWYG Markdown 编辑器**（当前 **v1.44.9**），右侧带 docx 风格批注侧栏，选区级批注、嵌套回复、解决/重新打开。
 
 **主路径是 `.mentor` 单文件包**（ZIP：`content.md` + `annotations.json` + 可选 `media/`），像 docx 一样一个文件带走正文、批注与插图。旧的 `.md` + `.annotations.json` 侧车仍可打开；建议另存为 `.mentor`。
 
@@ -33,6 +33,7 @@
 - ✅ **模块划分** — `modules/document-session.js` / `io.js` / `annotations.js` / `tabs.js`
 - ✅ **正文引文联动** — 导入 BibTeX / RIS / EndNote / CSL-JSON，只读文献卡片插入不可直接编辑的作者—年份引文字段
 - ✅ **引用库随文档保存** — `.mentor` 可选携带 `references.json` + `references.bib`；精确 APA/CSL 继续使用 Pandoc citeproc
+- ✅ **多页面实时共享** — 同一浏览器配置里多页打开同一文档：一页编辑并保存，其他页实时查看正文/批注/引用/图片；点「接管编辑」切换写入权（不是跨设备或多人网络协作）
 
 ---
 
