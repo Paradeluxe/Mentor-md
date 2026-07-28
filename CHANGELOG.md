@@ -2,6 +2,21 @@
 
 按时间倒序记录已发布的变化。最新条目在上方。
 
+## v1.45.3 (2026-07-28) — structural HTML media hydrate + refs button
+
+### Figures broken in .mentor
+- Root cause: save wrote live blob: URLs into document.html; reopen invalidates them while media/* still in zip
+- Write path: htmlWithMediaPaths (createSaveSnapshot / buildMentorZipBlob / export) blob->media/*
+- Read path: htmlWithBlobUrls media/*->blob; dead blobs recovered by content.md image order
+- Unrecoverable -> markdown fallback so figures still load from media/*
+
+### Literature button
+- Toolbar 文献 no longer disabled with no document or during save/export busy
+- Source view insert [@key] writes into #source-view
+
+### Tests
+- tests/e2e-structural-media-hydrate.spec.js
+
 ## v1.45.2 (2026-07-28) — 工具栏保存/文献/图标流
 
 工具栏按钮语义与保存决策弹窗统一；文献库文案消歧；Lucide 图标补齐。

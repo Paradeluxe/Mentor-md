@@ -72,7 +72,18 @@ const { pathToFileURL } = require('url');
   assert.strictEqual(noDoc.saveAs.disabled, true);
   assert.strictEqual(noDoc.exportMd.disabled, true);
   assert.strictEqual(noDoc.exportDocx.disabled, true);
-  assert.strictEqual(noDoc.references.disabled, true);
+  // Literature pane stays clickable with no document (import/manage library)
+  assert.strictEqual(noDoc.references.disabled, false);
+
+  const busy = getToolbarActionState({
+    hasDocument: true,
+    hasWriteHandle: true,
+    dirty: true,
+    busy: true,
+    referencesOpen: false,
+  });
+  assert.strictEqual(busy.save.disabled, true);
+  assert.strictEqual(busy.references.disabled, false);
 
   console.log('PASS unit-toolbar-actions');
 })().catch((err) => {

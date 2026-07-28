@@ -65,7 +65,9 @@ export function getToolbarActionState(input = {}) {
     },
     references: {
       label: '文献',
-      disabled: !hasDocument || busy,
+      // Always allow opening the library (import / manage) even with no doc
+      // or while a save/export is busy — blocking this felt like a dead button.
+      disabled: false,
       pressed: !!input.referencesOpen,
     },
     undo: {

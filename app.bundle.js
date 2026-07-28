@@ -56510,7 +56510,9 @@ function getToolbarActionState(input = {}) {
     },
     references: {
       label: "\u6587\u732E",
-      disabled: !hasDocument || busy,
+      // Always allow opening the library (import / manage) even with no doc
+      // or while a save/export is busy — blocking this felt like a dead button.
+      disabled: false,
       pressed: !!input.referencesOpen
     },
     undo: {
@@ -58873,8 +58875,9 @@ function createSaveSnapshot() {
   }
   const sourceMarkdown = flushSourceView();
   const currentFile = State2.currentFile;
-  const documentHtml = State2.editor ? State2.editor.getHTML() : "";
-  const mdText = sourceMarkdown !== null ? sourceMarkdown : htmlToMarkdownMedia(documentHtml);
+  const liveHtml = State2.editor ? State2.editor.getHTML() : "";
+  const documentHtml = htmlWithMediaPaths(liveHtml, State2.mediaUrls);
+  const mdText = sourceMarkdown !== null ? sourceMarkdown : htmlToMarkdownMedia(liveHtml);
   const sidecar = {
     version: "1",
     document: currentFile.name,
@@ -61773,6 +61776,59 @@ function htmlToMarkdownMedia(html) {
   }
   return turndown.turndown(html);
 }
+function htmlWithMediaPaths(html, mediaUrls = null) {
+  if (!html || typeof html !== "string") return html || "";
+  const urls = mediaUrls || State2.mediaUrls || {};
+  const reverseMap = {};
+  for (const [path2, blobUrl] of Object.entries(urls)) {
+    if (blobUrl) reverseMap[blobUrl] = path2;
+  }
+  if (!Object.keys(reverseMap).length) return html;
+  return html.replace(/(\ssrc\s*=\s*)("|')(blob:[^"']+)\2/gi, (m, pre, q, blobUrl) => {
+    const path2 = reverseMap[blobUrl];
+    return path2 ? `${pre}${q}${path2}${q}` : m;
+  });
+}
+function htmlWithBlobUrls(html, mediaUrls = null, mdText = "") {
+  if (!html || typeof html !== "string") return html || "";
+  const urls = mediaUrls || State2.mediaUrls || {};
+  let out = html;
+  if (Object.keys(urls).length) {
+    out = out.replace(/(\ssrc\s*=\s*)("|')(media\/[^"']+)\2/gi, (m, pre, q, path2) => {
+      const blobUrl = urls[path2] || urls[path2.replace(/^\.\//, "")];
+      return blobUrl ? `${pre}${q}${blobUrl}${q}` : m;
+    });
+  }
+  const reverseLive = new Set(Object.values(urls || {}).filter(Boolean));
+  const mdPaths = [];
+  if (typeof mdText === "string" && mdText) {
+    const re = /!\[[^\]]*\]\((media\/[^)\s]+)\)/g;
+    let mm;
+    while ((mm = re.exec(mdText)) !== null) mdPaths.push(mm[1]);
+  }
+  let deadIdx = 0;
+  out = out.replace(/(\ssrc\s*=\s*)("|')(blob:[^"']+)\2/gi, (m, pre, q, blobUrl) => {
+    if (reverseLive.has(blobUrl)) return m;
+    while (deadIdx < mdPaths.length) {
+      const pth = mdPaths[deadIdx++];
+      const live = urls[pth];
+      if (live) return `${pre}${q}${live}${q}`;
+    }
+    return m;
+  });
+  return out;
+}
+function structuralHtmlHasUnresolvedBlobs(html, mediaUrls = null) {
+  if (!html || typeof html !== "string") return false;
+  const urls = mediaUrls || State2.mediaUrls || {};
+  const live = new Set(Object.values(urls || {}).filter(Boolean));
+  const re = /\ssrc\s*=\s*("|')(blob:[^"']+)\1/gi;
+  let m;
+  while ((m = re.exec(html)) !== null) {
+    if (!live.has(m[2])) return true;
+  }
+  return false;
+}
 function flushSourceView() {
   const sourceEl = $("#source-view");
   if (State2.renderMode !== "source" || !sourceEl || sourceEl.style.display === "none") return null;
@@ -62996,7 +63052,7 @@ function loadMarkdownIntoEditor(name, content, annotationsData = null, options =
   const structuralHtmlRaw = typeof opts.structuralHtml === "string" ? opts.structuralHtml : null;
   const structuralHtml = structuralHtmlRaw ? sanitizeStructuralHtml(structuralHtmlRaw) : null;
   const archiveVerification = opts.archiveVerification || null;
-  const useStructuralHtml = !!(structuralHtml && archiveVerification && archiveVerification.usable);
+  let useStructuralHtml = !!(structuralHtml && archiveVerification && archiveVerification.usable);
   let preservedTabThreadId = null;
   let preservedTabAnnotations = null;
   if (opts.references !== void 0) {
@@ -63041,12 +63097,30 @@ function loadMarkdownIntoEditor(name, content, annotationsData = null, options =
     annotationsData = preservedTabAnnotations;
   }
   if (draftBody != null) content = draftBody;
-  State2._archiveRestoreMode = useStructuralHtml ? "html" : archiveVerification && archiveVerification.reason ? "markdown-fallback" : "legacy";
+  let useHtml = useStructuralHtml;
+  let structuralReady = structuralHtml;
+  if (useHtml && structuralReady) {
+    structuralReady = htmlWithBlobUrls(structuralReady, State2.mediaUrls, content || "");
+    if (structuralHtmlHasUnresolvedBlobs(structuralReady, State2.mediaUrls)) {
+      console.warn("[mentor-archive] structural html has unresolved blob: image src; falling back to markdown");
+      useHtml = false;
+      State2._archiveRestoreMode = "markdown-fallback-dead-blob";
+    }
+  }
+  if (useHtml) {
+    State2._archiveRestoreMode = "html";
+  } else if (State2._archiveRestoreMode === "markdown-fallback-dead-blob") {
+  } else if (archiveVerification && archiveVerification.reason) {
+    State2._archiveRestoreMode = "markdown-fallback";
+  } else {
+    State2._archiveRestoreMode = "legacy";
+  }
   State2._archiveVerification = archiveVerification || null;
-  if (!useStructuralHtml && archiveVerification && typeof archiveVerification.reason === "string" && archiveVerification.reason.endsWith("-mismatch")) {
+  if (!useHtml && archiveVerification && typeof archiveVerification.reason === "string" && archiveVerification.reason.endsWith("-mismatch")) {
     console.warn("[mentor-archive] ignored stale document.html:", archiveVerification.reason);
   }
-  const html = useStructuralHtml ? structuralHtml : markdownToHtml(content, State2.mediaUrls);
+  const html = useHtml ? structuralReady : markdownToHtml(content, State2.mediaUrls);
+  useStructuralHtml = useHtml;
   State2.annotations = [];
   State2.activeThreadId = null;
   State2._suspendAnnValidate = true;
@@ -64915,7 +64989,7 @@ async function buildMentorZipBlob(mdText, annotations, mediaFiles, references = 
   let documentHtml = null;
   let manifestText = null;
   if (archive && typeof archive.documentHtml === "string") {
-    documentHtml = archive.documentHtml;
+    documentHtml = htmlWithMediaPaths(archive.documentHtml, State2.mediaUrls);
     const archManifest = await createArchiveManifest({ mdText, annotationsText, documentHtml });
     manifestText = JSON.stringify(archManifest, null, 2);
   }
@@ -65354,7 +65428,7 @@ async function tryWriteBackMentor(mdText, sidecar, mentorName) {
     const perm = await ensureWritePermission(handle);
     if (perm === "denied") return { handle: false, error: "\u6743\u9650\u88AB\u62D2" };
     showExportProgress("\u6B63\u5728\u6253\u5305 .mentor\u2026");
-    const blob = await buildMentorZipBlob(mdText, sidecar, State2.mediaFiles, State2.references, { documentHtml: State2.editor ? State2.editor.getHTML() : void 0 });
+    const blob = await buildMentorZipBlob(mdText, sidecar, State2.mediaFiles, State2.references, { documentHtml: State2.editor ? htmlWithMediaPaths(State2.editor.getHTML(), State2.mediaUrls) : void 0 });
     const wr = await writeToHandle(handle, blob);
     if (!wr.ok) {
       hideExportProgress("\u4FDD\u5B58\u5931\u8D25");
@@ -66077,7 +66151,46 @@ function renameCitationKeyInDocument(oldKey, newKey) {
   return changed;
 }
 function insertCitation(key) {
-  if (!State2.editor || !(State2.references.entries || []).some((e) => e.key === key)) return false;
+  if (!(State2.references.entries || []).some((e) => e.key === key)) return false;
+  if (State2.renderMode === "source") {
+    const sourceEl = document.querySelector("#source-view");
+    const token = `[@${key}]`;
+    if (sourceEl) {
+      sourceEl.focus();
+      let inserted = false;
+      try {
+        const sel2 = window.getSelection();
+        if (sel2 && sel2.rangeCount) {
+          const range = sel2.getRangeAt(0);
+          if (sourceEl.contains(range.commonAncestorContainer)) {
+            range.deleteContents();
+            const node = document.createTextNode(token);
+            range.insertNode(node);
+            range.setStartAfter(node);
+            range.collapse(true);
+            sel2.removeAllRanges();
+            sel2.addRange(range);
+            inserted = true;
+          }
+        }
+      } catch (_) {
+      }
+      if (!inserted) {
+        try {
+          inserted = document.execCommand("insertText", false, token);
+        } catch (_) {
+          inserted = false;
+        }
+      }
+      if (!inserted) {
+        sourceEl.innerText = (sourceEl.innerText || "") + token;
+      }
+      sourceEl.dispatchEvent(new Event("input", { bubbles: true }));
+      markDirty();
+      return true;
+    }
+  }
+  if (!State2.editor) return false;
   const sel = State2.editor.state.selection;
   let pos = sel.from, selected = sel.node && sel.node.type && sel.node.type.name === "citation" ? sel.node : null;
   if (!selected) {
@@ -68081,6 +68194,9 @@ window.__mdAnnotator = {
   collectReferencedMediaPaths,
   pruneMediaFiles,
   filterMediaFilesForArchive,
+  htmlWithMediaPaths,
+  htmlWithBlobUrls,
+  structuralHtmlHasUnresolvedBlobs,
   applyImageSrcChange,
   refreshAnnotationImageDecos,
   scrollToThread,
