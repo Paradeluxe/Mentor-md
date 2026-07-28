@@ -30,25 +30,28 @@ ZIP 内 `content.md` + `annotations.json` 同名约定, media/* 子目录按需
 .mentor ZIP
 ├── content.md
 ├── annotations.json
-├── references.json   # 可选 normalized reference manifest v1
+├── references.json   # 可选 normalized reference manifest v2（含 bibliography 配置）
 ├── references.bib    # 可选 canonical BibTeX，供 Pandoc citeproc 使用
 └── media/
 ```
 
-`references.json` 使用独立 `version: "1"`，不得塞进 `annotations.json` 顶层，也不得由 Mentor UI 直接编辑元数据字段。无引用库的旧 `.mentor` 不需要迁移；`annotations.json.version` 仍保持 `"1"`。
+`references.json` 使用独立 `version: "2"`（读端仍兼容 v1：缺 `bibliography` 时补默认）。不得塞进 `annotations.json` 顶层。文献**元数据**可在 Mentor「文献库」侧栏管理；文末 References **列表**为生成字段（`<!-- mentor:bibliography -->`），不可直接逐字编辑。无引用库的旧 `.mentor` 不需要迁移；`annotations.json.version` 仍保持 `"1"`。
 
 `references.json` 最小形状：
 
 ```json
 {
-  "version": "1",
+  "version": "2",
   "source": { "name": "refs.bib", "format": "bibtex" },
   "updatedAt": "2026-07-26T00:00:00.000Z",
+  "bibliography": { "enabled": false, "scope": "cited", "heading": "References" },
   "entries": [
     { "key": "alpha2020", "type": "article", "authors": "Alpha, Ann", "year": "2020", "title": "Title" }
   ]
 }
 ```
+
+正文可用语义标记 `<!-- mentor:bibliography -->` 表示动态文献列表位置（.mentor 保存标记；MD/DOCX 导出时物化为 `# References`）。
 
 任何带 BOM 的 UTF-8 必须先 strip.
 

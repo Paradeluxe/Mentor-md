@@ -106,7 +106,8 @@ const { pathToFileURL } = require('url');
     sourceFormat: 'ris',
     entries: risRows,
   });
-  assert.strictEqual(manifest.version, '1');
+  assert.strictEqual(manifest.version, '2');
+  assert.deepStrictEqual(manifest.bibliography, { enabled: false, scope: 'cited', heading: 'References' });
   assert.strictEqual(manifest.source.name, 'library.ris');
   assert.strictEqual(manifest.source.format, 'ris');
   assert.strictEqual(manifest.entries[0].key, 'gamma2021ris');
@@ -144,11 +145,13 @@ const { pathToFileURL } = require('url');
   assert.strictEqual(normalized.publisher, 'Pub');
 
   const normManifest = refs.normalizeReferenceManifest(manifest);
-  assert.strictEqual(normManifest.version, '1');
+  assert.strictEqual(normManifest.version, '2');
+  assert.deepStrictEqual(normManifest.bibliography, { enabled: false, scope: 'cited', heading: 'References' });
   assert.strictEqual(normManifest.entries.length, manifest.entries.length);
 
   const empty = refs.emptyReferenceManifest();
-  assert.strictEqual(empty.version, '1');
+  assert.strictEqual(empty.version, '2');
+  assert.deepStrictEqual(empty.bibliography, { enabled: false, scope: 'cited', heading: 'References' });
   assert.deepStrictEqual(empty.entries, []);
   assert.strictEqual(empty.source.name, '');
 
@@ -223,6 +226,62 @@ const { pathToFileURL } = require('url');
   );
   assert.strictEqual(refs.renameCitationKey('[@other]', 'old', 'new'), '[@other]');
   assert.strictEqual(refs.renameCitationKey('[@old; @new]', 'old', 'new'), '[@new]');
+
+
+  // ---- Generated bibliography config + selection + model ----
+  const legacy = refs.normalizeReferenceManifest({
+    version: '1',
+    entries: [{ key: 'alpha2020', authors: 'Alpha, A.', year: '2020', title: 'A' }],
+  });
+  assert.deepStrictEqual(legacy.bibliography, {
+    enabled: false,
+    scope: 'cited',
+    heading: 'References',
+  });
+  assert.strictEqual(legacy.version, '2');
+
+  const migrated = refs.normalizeReferenceManifest({
+    version: '2',
+    bibliography: { enabled: true, scope: 'all', heading: 'References' },
+    entries: [],
+  });
+  assert.strictEqual(migrated.bibliography.scope, 'all');
+  assert.strictEqual(migrated.bibliography.enabled, true);
+
+  const bibManifest = refs.createReferenceManifest({
+    bibliography: { enabled: true, scope: 'all', heading: 'References' },
+    entries: [
+      { key: 'b2021', authors: 'Beta, B.', year: '2021', title: 'B' },
+      { key: 'a2020', authors: 'Alpha, A.', year: '2020', title: 'A' },
+      { key: 'unused2019', authors: 'Unused, U.', year: '2019', title: 'U' },
+    ],
+  });
+  assert.deepStrictEqual(
+    refs.selectBibliographyEntries(bibManifest, ['b2021', 'a2020', 'b2021'], { scope: 'cited' }).map(x => x.key),
+    ['b2021', 'a2020']
+  );
+  assert.deepStrictEqual(
+    refs.selectBibliographyEntries(bibManifest, [], { scope: 'all' }).map(x => x.key),
+    ['a2020', 'b2021', 'unused2019']
+  );
+
+  // preserve bibliography through upsert
+  const afterUpsert = refs.upsertReferenceEntry(bibManifest, {
+    key: 'c2022', type: 'article', authors: 'Cee, C.', year: '2022', title: 'C'
+  });
+  assert.strictEqual(afterUpsert.manifest.bibliography.scope, 'all');
+  assert.strictEqual(afterUpsert.manifest.bibliography.enabled, true);
+
+  const model = refs.buildBibliographyModel(bibManifest, ['a2020'], {
+    enabled: true,
+    scope: 'cited',
+    heading: 'References',
+  });
+  assert.deepStrictEqual(model.keys, ['a2020']);
+  assert.strictEqual(model.heading, 'References');
+  assert.ok(model.items[0].plainText.includes('Alpha'));
+  assert.ok(model.items[0].plainText.includes('(2020).'));
+  assert.ok(model.items[0].markdown.includes('Alpha'));
 
   console.log('PASS references module');
 })().catch(err => {

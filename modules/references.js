@@ -481,31 +481,60 @@ export function formatReferenceEntry(entry) {
 }
 
 /**
- * Build a per-document reference manifest: `{ version, source, updatedAt, entries }`.
- * Entries are sorted and normalized so downstream consumers can rely on the schema.
+ * Default bibliography field config (EndNote-style generated list).
+ * enabled=false until user inserts the field or migrates a legacy section.
  */
-export function createReferenceManifest({ sourceName = "", sourceFormat = "", entries = [] } = {}) {
+export const DEFAULT_BIBLIOGRAPHY = Object.freeze({
+  enabled: false,
+  scope: "cited",
+  heading: "References",
+});
+
+/** Normalize bibliography config; unknown scopes fall back to "cited". */
+export function normalizeBibliographyConfig(value = {}) {
+  const src = value || {};
   return {
-    version: "1",
+    enabled: src.enabled === true,
+    scope: src.scope === "all" ? "all" : "cited",
+    heading: String(src.heading || "References").trim() || "References",
+  };
+}
+
+/**
+ * Build a per-document reference manifest:
+ * `{ version, source, updatedAt, bibliography, entries }`.
+ * Entries are sorted and normalized so downstream consumers can rely on the schema.
+ * Version is "2" (bibliography config); v1 readers that ignore unknown fields still work.
+ */
+export function createReferenceManifest({
+  sourceName = "",
+  sourceFormat = "",
+  entries = [],
+  bibliography = null,
+} = {}) {
+  return {
+    version: "2",
     source: { name: String(sourceName || ""), format: String(sourceFormat || "") },
     updatedAt: new Date().toISOString(),
+    bibliography: normalizeBibliographyConfig(bibliography || DEFAULT_BIBLIOGRAPHY),
     entries: sortReferenceEntries(entries).map(normalizeReferenceEntry),
   };
 }
 
 /**
- * Re-shape an existing manifest into the canonical v1 schema without touching
- * the source/updatedAt metadata. Useful when restoring from older `.mentor` files.
+ * Re-shape an existing manifest into the canonical v2 schema without inventing
+ * entries. Useful when restoring from older `.mentor` files (v1 → v2 upgrade).
  */
 export function normalizeReferenceManifest(manifest) {
   const src = manifest || {};
   return {
-    version: "1",
+    version: "2",
     source: {
       name: asString(src.source && src.source.name).trim(),
       format: asString(src.source && src.source.format).trim(),
     },
     updatedAt: asString(src.updatedAt).trim() || new Date(0).toISOString(),
+    bibliography: normalizeBibliographyConfig(src.bibliography),
     entries: sortReferenceEntries((src.entries || []).map(normalizeReferenceEntry)).map(normalizeReferenceEntry),
   };
 }
@@ -515,10 +544,56 @@ export function normalizeReferenceManifest(manifest) {
  */
 export function emptyReferenceManifest() {
   return {
-    version: "1",
+    version: "2",
     source: { name: "", format: "" },
     updatedAt: new Date(0).toISOString(),
+    bibliography: normalizeBibliographyConfig(DEFAULT_BIBLIOGRAPHY),
     entries: [],
+  };
+}
+
+/**
+ * Select entries for a generated bibliography.
+ * - scope=cited: first-citation order, unique keys that exist in the library
+ * - scope=all: full library order (sorted keys via sortReferenceEntries)
+ */
+export function selectBibliographyEntries(manifest, citationKeys = [], config = {}) {
+  const normalized = normalizeReferenceManifest(manifest);
+  const scope = (config && config.scope === "all") ? "all" : "cited";
+  if (scope === "all") return normalized.entries.slice();
+  const byKey = new Map(normalized.entries.map((entry) => [entry.key, entry]));
+  const seen = new Set();
+  const out = [];
+  for (const key of citationKeys || []) {
+    const k = String(key || "").trim();
+    if (!k || seen.has(k)) continue;
+    seen.add(k);
+    const entry = byKey.get(k);
+    if (entry) out.push(entry);
+  }
+  return out;
+}
+
+/**
+ * Canonical bibliography presentation model shared by editor / MD / DOCX.
+ */
+export function buildBibliographyModel(manifest, citationKeys = [], config = {}) {
+  const bibliography = normalizeBibliographyConfig(config || {});
+  const entries = selectBibliographyEntries(manifest, citationKeys, bibliography);
+  return {
+    heading: bibliography.heading,
+    scope: bibliography.scope,
+    keys: entries.map((entry) => entry.key),
+    items: entries.map((entry) => {
+      const rendered = formatReferenceEntry(entry);
+      const plainText = [
+        rendered.authors,
+        rendered.year ? `(${rendered.year}).` : "",
+        rendered.title ? `${rendered.title}.` : "",
+        rendered.journal,
+      ].filter(Boolean).join(" ");
+      return { key: entry.key, plainText, markdown: plainText };
+    }),
   };
 }
 
@@ -638,6 +713,7 @@ export function upsertReferenceEntry(manifest, entry, { originalKey = "" } = {})
     manifest: createReferenceManifest({
       sourceName: current.source.name,
       sourceFormat: current.source.format,
+      bibliography: current.bibliography,
       entries: [...withoutTarget, checked.value],
     }),
     errors: {},
@@ -651,6 +727,7 @@ export function removeReferenceEntry(manifest, key) {
   return createReferenceManifest({
     sourceName: current.source.name,
     sourceFormat: current.source.format,
+    bibliography: current.bibliography,
     entries: current.entries.filter((row) => row.key !== drop),
   });
 }
@@ -684,6 +761,7 @@ export function mergeReferenceEntries(manifest, incoming) {
     manifest: createReferenceManifest({
       sourceName: current.source.name,
       sourceFormat: current.source.format,
+      bibliography: current.bibliography,
       entries: [...byKey.values()],
     }),
     added,
