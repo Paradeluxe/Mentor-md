@@ -2,6 +2,15 @@
 
 按时间倒序记录已发布的变化。最新条目在上方。
 
+## v1.45.4 (2026-07-28) — fix blank gap under tabs with live-sync
+
+### Layout
+- Root cause: `#app` used 4-row grid (`auto auto 1fr auto`) but has 5 children when live-sync banner is visible (toolbar, banner, doc-tabs, main, statusbar). `1fr` landed on `#doc-tabs` → huge empty band under the tab strip; `#main` collapsed.
+- Fix: `#app` is flex column; `#main { flex:1; min-height:0 }` always owns remaining height whether banner is shown or hidden.
+
+### Tests
+- tests/e2e-app-layout-live-sync-banner.spec.js
+
 ## v1.45.3 (2026-07-28) — structural HTML media hydrate + refs button
 
 ### Figures broken in .mentor

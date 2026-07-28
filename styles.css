@@ -256,10 +256,17 @@ code {
 
 /* ============ App layout ============ */
 #app {
-  display: grid;
-  /* v1.43.32: toolbar | doc-tabs | main | statusbar */
-  grid-template-rows: auto auto 1fr auto;
+  /* flex — not fixed 4-row grid. live-sync-banner is an optional 5th child;
+     when it leaves display:none, a 4-track grid reassigns 1fr onto #doc-tabs
+     and leaves a huge blank under the tabs (v1.45.4). */
+  display: flex;
+  flex-direction: column;
   height: 100vh;
+  min-height: 0;
+}
+#main {
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 /* ============ Toolbar (Cursor 化: transparent + 跟 pane-header 统一) ============ */
