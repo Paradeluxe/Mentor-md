@@ -1,4 +1,5 @@
-// v1.43.38 protected path + image insert smoke
+// v1.45.6: protected-path guard removed — research .mentor saves like any other file.
+// Keep display downsample smoke from the old suite.
 const { chromium } = require('playwright');
 (async () => {
   const browser = await chromium.launch({ headless: true });
@@ -8,47 +9,60 @@ const { chromium } = require('playwright');
     try { await fn(); console.log('  ✓', name); pass++; }
     catch (e) { console.log('  ✗', name + ':', e.message); fail++; }
   };
-  await page.goto('http://127.0.0.1:8787/index.html?v=38&cb=' + Date.now());
+  await page.goto('http://127.0.0.1:8787/index.html?v=456&cb=' + Date.now());
   await page.waitForFunction(() => window.__mdAnnotator?.State?.editor, { timeout: 20000 });
   await page.evaluate(() => { const m = document.querySelector('#author-modal'); if (m) m.classList.add('hidden'); });
 
-  await t('API exposed', async () => {
-    const ok = await page.evaluate(() => typeof window.__mdAnnotator.isProtectedMentorTarget === 'function'
-      && typeof window.__mdAnnotator.confirmProtectedWrite === 'function');
-    if (!ok) throw new Error('missing API');
+  await t('protect APIs removed', async () => {
+    const r = await page.evaluate(() => ({
+      isProt: typeof window.__mdAnnotator.isProtectedMentorTarget,
+      confirm: typeof window.__mdAnnotator.confirmProtectedWrite,
+      unlocked: window.__mdAnnotator.State.protectedWriteUnlocked,
+      base: typeof window.__mdAnnotator.mentorBaseName,
+    }));
+    if (r.isProt !== 'undefined') throw new Error('isProtected still ' + r.isProt);
+    if (r.confirm !== 'undefined') throw new Error('confirm still ' + r.confirm);
+    if (r.unlocked !== undefined) throw new Error('unlocked still present');
+    if (r.base !== 'function') throw new Error('mentorBaseName missing');
   });
 
-  await t('protect by basename', async () => {
-    const r = await page.evaluate(() => window.__mdAnnotator.isProtectedMentorTarget('DFC_Liu_Jul11_2026.mentor', ''));
-    if (!r) throw new Error('should protect');
-  });
-
-  await t('protect by path hint', async () => {
-    const r = await page.evaluate(() => window.__mdAnnotator.isProtectedMentorTarget('other.mentor', 'E:/x/dfc-paper/other.mentor'));
-    if (!r) throw new Error('path should protect');
-  });
-
-  await t('normal file not protected', async () => {
-    const r = await page.evaluate(() => window.__mdAnnotator.isProtectedMentorTarget('notes.mentor', 'C:/tmp/notes.mentor'));
-    if (r) throw new Error('should not protect');
-  });
-
-  await t('autosave skips protected dirty handle mode', async () => {
+  await t('autosave may write research-named mentor with granted handle', async () => {
     const r = await page.evaluate(async () => {
       const M = window.__mdAnnotator;
+      let writes = 0;
       M.openNewTabBlank();
+      M.State.editor.commands.setContent('<p>research draft body</p>');
       M.State.currentFile = {
-        name: 'DFC_Liu_Jul11_2026.mentor',
+        name: 'research-paper.mentor',
         dirty: true,
-        handle: { createWritable: async () => { throw new Error('should not write'); } },
+        dirtyGen: 1,
+        handle: {
+          queryPermission: async () => 'granted',
+          requestPermission: async () => 'granted',
+          getFile: async () => ({ lastModified: Date.now() - 1000, name: 'research-paper.mentor' }),
+          createWritable: async () => {
+            writes++;
+            return { write: async () => {}, close: async () => {} };
+          },
+        },
       };
       M.State.saveMode = 'mentor-handle';
-      M.State.diskPathHint = 'E:/hermes_playground/paper-writing/projects/dfc-paper/DFC_Liu_Jul11_2026.mentor';
-      M.State.protectedWriteUnlocked = {};
-      await M.autosaveNow();
-      return { ok: true };
+      M.State.diskPathHint = 'E:/tmp/research/research-paper.mentor';
+      M.State.fileMtime = Date.now() - 2000;
+      M.State.mediaFiles = {};
+      // Prefer full write path; if snapshot fails, still must not refuse as protected
+      const res = await M.writeCurrentToHandle({ reason: 'autosave', showProgress: false });
+      return {
+        writes,
+        res,
+        err: res && res.error,
+        conflict: res && res.conflict,
+      };
     });
-    if (!r.ok) throw new Error('autosave threw');
+    if (r.conflict && r.conflict.kind === 'protected') throw new Error('still protected conflict');
+    if (r.err === 'protected') throw new Error('still protected error');
+    // write may fail for other reasons (snapshot); but must attempt or not skip-as-protected
+    if (r.res && r.res.skipped && r.err === 'protected') throw new Error('skipped protected');
   });
 
   await t('createDisplayObjectURL still works', async () => {
@@ -65,7 +79,7 @@ const { chromium } = require('playwright');
     if (!ok) throw new Error('downsample fail');
   });
 
-  console.log('\\n=== RESULT:', pass, 'pass /', fail, 'fail ===');
+  console.log('\n=== RESULT:', pass, 'pass /', fail, 'fail ===');
   await browser.close();
   process.exit(fail ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });

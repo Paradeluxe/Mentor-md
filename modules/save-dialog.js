@@ -23,19 +23,6 @@ export function buildSaveDialogModel(input = {}) {
           { label: '风险', value: '覆盖磁盘上的外部修改' },
         ],
       };
-    case 'protected':
-      return {
-        title: '此文档受保护',
-        message: '为避免覆盖研究原稿，Mentor 已阻止直接写回。',
-        primaryLabel: '另存副本',
-        secondaryLabel: '',
-        cancelLabel: '取消',
-        severity: 'warning',
-        details: [
-          { label: '文件', value: fileName },
-          { label: '建议', value: '另存为 .mentor 副本，不改原文件' },
-        ],
-      };
     case 'anchor-audit':
       return {
         title: '批注位置需要检查',

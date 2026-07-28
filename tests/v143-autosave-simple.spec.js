@@ -62,7 +62,6 @@ const { chromium } = require('playwright');
       let writes = 0;
       M.State.saveMode = 'mentor-handle';
       M.State.diskPathHint = '';
-      M.State.protectedWriteUnlocked = {};
       M.State.mediaFiles = {};
       M.State.currentFile = {
         name: 'notes.mentor',
@@ -141,6 +140,8 @@ const { chromium } = require('playwright');
       M.State.saveMode = 'mentor-handle';
       M.State.diskPathHint = '';
       M.State.mediaFiles = {};
+      M.State.fileMtime = null;
+      M.State.readOnlyMode = false;
       M.State.currentFile = {
         name: 'race.mentor',
         dirty: true,
@@ -234,30 +235,6 @@ const { chromium } = require('playwright');
     if (!r.dirty) throw new Error('should stay dirty');
   });
 
-  await t('protected path: autosave skips write', async () => {
-    const r = await page.evaluate(async () => {
-      const M = window.__mdAnnotator;
-      let writes = 0;
-      M.State.saveMode = 'mentor-handle';
-      M.State.diskPathHint = 'E:/hermes_playground/paper-writing/projects/dfc-paper/DFC_Liu_Jul11_2026.mentor';
-      M.State.protectedWriteUnlocked = {};
-      M.State.currentFile = {
-        name: 'DFC_Liu_Jul11_2026.mentor',
-        dirty: true,
-        dirtyGen: 1,
-        handle: {
-          queryPermission: async () => 'granted',
-          createWritable: async () => {
-            writes++;
-            return { write: async () => {}, close: async () => {} };
-          },
-        },
-      };
-      await M.autosaveNow();
-      return { writes };
-    });
-    if (r.writes !== 0) throw new Error('protected wrote');
-  });
 
   console.log('\n=== RESULT:', pass, 'pass /', fail, 'fail ===');
   await browser.close();

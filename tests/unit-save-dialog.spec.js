@@ -31,10 +31,6 @@ const { pathToFileURL } = require('url');
     '仍然覆盖'
   );
   assert.strictEqual(
-    buildSaveDialogModel({ kind: 'protected' }).primaryLabel,
-    '另存副本'
-  );
-  assert.strictEqual(
     buildSaveDialogModel({ kind: 'anchor-audit', issueCount: 2 }).primaryLabel,
     '查看问题'
   );

@@ -2,6 +2,18 @@
 
 按时间倒序记录已发布的变化。最新条目在上方。
 
+## v1.45.6 (2026-07-28) — remove protected-document write guard
+
+### Behavior
+- Removed "受保护文档" special-case for research .mentor paths/names.
+- Save / autosave / tryWriteBackMentor treat all documents the same (handle permission + external-modified still apply).
+- Removed protect APIs: isProtectedMentorTarget, confirmProtectedWrite, protectedWriteUnlocked, save-dialog kind protected.
+
+### Tests
+- tests/v143-protected-path.spec.js rewritten (API gone + downsample smoke)
+- chaos-wave-extreme WAVE A rewritten
+- unit-save-dialog / autosave-simple drop protect assertions
+
 ## v1.45.5 (2026-07-28) — save clears dirty after download
 
 ### Save false-failure

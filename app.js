@@ -402,35 +402,13 @@ var State = {
   tabs: [],
   // [{ id, name, html, annotations, dirty, handle, saveMode, mediaUrls, mediaFiles, ... }]
   activeTabId: null,
-  // v1.43.38: 磁盘路径提示 (来自 ?open= 或 handle 名) + 受保护路径写盘解锁
-  diskPathHint: "",
-  protectedWriteUnlocked: {}
-  // { [basename]: true } session 内用户确认后可写回
+  // 磁盘路径提示 (来自 ?open= 或 handle 名)。v1.45.6: 取消「受保护文档」写盘拦截。
+  diskPathHint: ""
 };
-var PROTECTED_MENTOR_NAME_RE = /^(DFC_Liu_Jul11_2026\.mentor)$/i;
-var PROTECTED_PATH_RE = /dfc-paper|paper-writing[\\/]+projects/i;
 function mentorBaseName(nameOrPath) {
   if (!nameOrPath) return "";
   const s = String(nameOrPath);
   return s.split("\\").pop().split("/").pop() || s;
-}
-function isProtectedMentorTarget(name, pathHint) {
-  const base2 = mentorBaseName(name || State.currentFile && State.currentFile.name || "");
-  const hint = pathHint || State.diskPathHint || "";
-  if (base2 && PROTECTED_MENTOR_NAME_RE.test(base2)) return true;
-  if (hint && PROTECTED_PATH_RE.test(hint)) return true;
-  if (base2 && /DFC_.*\.mentor$/i.test(base2) && /dfc|paper/i.test(hint || base2)) return true;
-  return false;
-}
-function confirmProtectedWrite(reason) {
-  const name = State.currentFile && State.currentFile.name || mentorBaseName(State.diskPathHint) || "\u53D7\u4FDD\u62A4\u6587\u4EF6";
-  const base2 = mentorBaseName(name);
-  if (!isProtectedMentorTarget(name, State.diskPathHint)) return true;
-  if (State.protectedWriteUnlocked[base2]) return true;
-  const msg = "\u53D7\u4FDD\u62A4\u7684\u7814\u7A76\u7A3F\u8DEF\u5F84\n\n" + name + (State.diskPathHint ? "\n" + State.diskPathHint : "") + "\n\n\u5199\u56DE\u4F1A\u8986\u76D6\u78C1\u76D8\u4E0A\u7684 .mentor\uFF08\u66FE\u53D1\u751F content \u88AB\u62B9\u6210 stub \u4E8B\u6545\uFF09\u3002\n\u786E\u8BA4\u8981" + (reason || "\u4FDD\u5B58") + "\u5199\u56DE\u539F\u4F4D\u7F6E\uFF1F\n\n\u53D6\u6D88 \u2192 \u53EF\u6539\u7528\u300C.mentor\u300D\u53E6\u5B58\u4E3A\u526F\u672C";
-  const ok = window.confirm(msg);
-  if (ok) State.protectedWriteUnlocked[base2] = true;
-  return ok;
 }
 // modules/io.js — UUID primary key HandleStore + serial queues
 var HandleStore = createHandleStore();
@@ -2649,19 +2627,6 @@ async function writeCurrentToHandle({ reason = "manual", showProgress = false, f
   if (State.readOnlyMode) {
     return { ok: false, error: "\u53EA\u8BFB\u6A21\u5F0F" };
   }
-  if (isProtectedMentorTarget(State.currentFile.name, State.diskPathHint)) {
-    if (reason === "autosave") {
-      return { ok: false, skipped: true, error: "protected" };
-    }
-    const baseProt = mentorBaseName(State.currentFile.name);
-    if (!State.protectedWriteUnlocked[baseProt]) {
-      return {
-        ok: false,
-        conflict: { kind: "protected", fileName: State.currentFile.name },
-        error: "protected"
-      };
-    }
-  }
   let snapshot;
     try {
       snapshot = createSaveSnapshot();
@@ -2837,11 +2802,7 @@ async function autosaveNow() {
     return;
   }
   if (result.skipped) {
-    if (result.error === "protected" && !autosaveNow._protectedToast) {
-      autosaveNow._protectedToast = true;
-      showToast("\u53D7\u4FDD\u62A4\u6587\u7A3F: \u81EA\u52A8\u4FDD\u5B58\u5DF2\u5173\u95ED \u2014 \u7528\u300C\u4FDD\u5B58\u300D\u4F1A\u518D\u786E\u8BA4", 3500);
-      setStatus("\u81EA\u52A8\u4FDD\u5B58\u5DF2\u8DF3\u8FC7", "\u53D7\u4FDD\u62A4\u8DEF\u5F84 " + mentorBaseName(State.currentFile.name));
-    } else if (result.error === "external-modified" && !autosaveNow._externalToast) {
+    if (result.error === "external-modified" && !autosaveNow._externalToast) {
       autosaveNow._externalToast = true;
       showToast(
         "\u78C1\u76D8\u4E0A\u7684\u6587\u4EF6\u5DF2\u88AB\u5916\u90E8\u4FEE\u6539\uFF0C\u81EA\u52A8\u4FDD\u5B58\u5DF2\u6682\u505C\u3002\u8BF7\u91CD\u65B0\u6253\u5F00\u78C1\u76D8\u7248\uFF08\u52FF\u5728\u65E7\u7F13\u51B2\u4E0A Ctrl+S \u8986\u76D6\uFF09\uFF0C\u6216\u53E6\u5B58\u526F\u672C\u3002",
@@ -7935,9 +7896,6 @@ async function openFromMentorHandle(fileHandle, options = {}) {
     archiveVerification: archive && archive.verification || null
   });
   if (!State.diskPathHint) State.diskPathHint = file.name;
-  if (isProtectedMentorTarget(file.name, State.diskPathHint)) {
-    showToast("\u53D7\u4FDD\u62A4\u6587\u7A3F: \u5DF2\u7981\u7528\u81EA\u52A8\u4FDD\u5B58", 3e3);
-  }
   const mediaCount = Object.keys(mediaFiles || {}).length;
   const blobUrlCount = (mdText.match(/!\[[^\]]*\]\(blob:[^)]+\)/g) || []).length;
   if (mediaCount === 0 && blobUrlCount > 0) {
@@ -9106,14 +9064,6 @@ async function runManualSave() {
     if (hasWriteHandle()) {
       const showProgress = isMentorPackMode();
       let result = await writeCurrentToHandle({ reason: "manual", showProgress });
-      if (result.conflict?.kind === "protected") {
-        const choice = await openSaveDialog(buildSaveDialogModel({ kind: "protected", fileName: State.currentFile.name }));
-        if (choice === "primary") {
-          const snap = createSaveSnapshot();
-          return await downloadMentorSnapshot(snap, { markCleanOnSuccess: false });
-        }
-        return { ok: false, cancelled: true };
-      }
       if (result.conflict?.kind === "external-modified") {
         const choice = await openSaveDialog(buildSaveDialogModel({
           kind: "external-modified",
@@ -9225,9 +9175,6 @@ async function saveCurrent() {
 async function tryWriteBackMentor(mdText, sidecar, mentorName) {
   if (!(State.saveMode === "mentor-handle" && State.currentFile && State.currentFile.handle)) {
     return { handle: false };
-  }
-  if (!confirmProtectedWrite("\u4FDD\u5B58")) {
-    return { handle: false, error: "\u5DF2\u53D6\u6D88\u5199\u56DE\u53D7\u4FDD\u62A4\u8DEF\u5F84 (\u53EF\u53E6\u5B58\u4E3A\u526F\u672C)" };
   }
   try {
     const handle = State.currentFile.handle;
@@ -11814,12 +11761,7 @@ async function _handleUrlOpen() {
         State.diskPathHint = openPath;
         await openFromMentorFile(file);
         opened = true;
-        if (isProtectedMentorTarget(baseName, openPath)) {
-          showToast("\u5DF2\u6253\u5F00\u53D7\u4FDD\u62A4\u6587\u7A3F \xB7 \u81EA\u52A8\u4FDD\u5B58\u5173\u95ED", 3e3);
-          setStatus("\u53D7\u4FDD\u62A4\u8DEF\u5F84", baseName + " \u2014 \u4FDD\u5B58\u4F1A\u786E\u8BA4\u5199\u56DE");
-        } else {
-          showToast("\u5DF2\u6253\u5F00 " + baseName, 2500);
-        }
+        showToast("\u5DF2\u6253\u5F00 " + baseName, 2500);
       } else {
         console.warn("[?open] openFromMentorFile \u4E0D\u53EF\u7528\u6216 editor \u672A\u5C31\u7EEA");
         showToast("\u5E94\u7528\u672A\u5C31\u7EEA, \u8BF7\u7A0D\u540E\u624B\u52A8\u6253\u5F00\u6587\u4EF6", 4e3);
@@ -11924,8 +11866,6 @@ window.__mdAnnotator = {
   createDisplayObjectURL,
   injectMediaFiles,
   DISPLAY_MAX_EDGE,
-  isProtectedMentorTarget,
-  confirmProtectedWrite,
   mentorBaseName,
   renderDocTabs,
   prepareOpenDocument,

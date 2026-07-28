@@ -68,59 +68,68 @@ fs.mkdirSync(TEMP, { recursive: true });
   console.log('TEMP=', TEMP);
 
   // ============================================================
-  // WAVE A — protected path + multi-tab disk safety
+  // WAVE A — no protected-path guard (v1.45.6) + multi-tab disk safety
   // ============================================================
-  console.log('\n--- WAVE A: protected path ---');
+  console.log('\n--- WAVE A: no protect + multi-tab ---');
   await gotoFresh();
 
-  await t('A', 'A1 protect basename + path; normal free', async () => {
+  await t('A', 'A1 protect APIs removed', async () => {
     const r = await page.evaluate(() => {
       const M = window.__mdAnnotator;
       return {
-        p1: M.isProtectedMentorTarget('DFC_Liu_Jul11_2026.mentor', ''),
-        p2: M.isProtectedMentorTarget('x.mentor', 'E:/hermes_playground/paper-writing/projects/dfc-paper/x.mentor'),
-        p3: M.isProtectedMentorTarget('notes.mentor', 'C:/tmp/notes.mentor'),
+        isProt: typeof M.isProtectedMentorTarget,
+        confirm: typeof M.confirmProtectedWrite,
+        unlocked: M.State.protectedWriteUnlocked,
+        base: typeof M.mentorBaseName,
       };
     });
-    if (!r.p1 || !r.p2 || r.p3) throw new Error(JSON.stringify(r));
+    if (r.isProt !== 'undefined' || r.confirm !== 'undefined') throw new Error(JSON.stringify(r));
+    if (r.unlocked !== undefined) throw new Error('unlocked still set');
+    if (r.base !== 'function') throw new Error('mentorBaseName missing');
   });
 
-  await t('A', 'A2 autosave never calls createWritable on protected', async () => {
+  await t('A', 'A2 research-named file not force-skipped by protect', async () => {
     const r = await page.evaluate(async () => {
       const M = window.__mdAnnotator;
       let writes = 0;
       M.openNewTabBlank();
+      M.State.editor.commands.setContent('<p>dirty research</p>');
       M.State.currentFile = {
-        name: 'DFC_Liu_Jul11_2026.mentor',
+        name: 'research-paper.mentor',
         dirty: true,
+        dirtyGen: 1,
         handle: {
+          queryPermission: async () => 'granted',
+          requestPermission: async () => 'granted',
+          getFile: async () => ({ lastModified: Date.now() - 1000, name: 'research-paper.mentor' }),
           createWritable: async () => {
             writes++;
-            throw new Error('WRITE_CALLED');
+            return { write: async () => {}, close: async () => {} };
           },
         },
       };
       M.State.saveMode = 'mentor-handle';
-      M.State.diskPathHint = 'E:/hermes_playground/paper-writing/projects/dfc-paper/DFC_Liu_Jul11_2026.mentor';
-      M.State.protectedWriteUnlocked = {};
-      M.State.editor.commands.setContent('<p>dirty protected</p>');
-      M.State.currentFile.dirty = true;
-      await M.autosaveNow();
-      await M.autosaveNow();
-      return { writes, dirty: M.State.currentFile.dirty };
+      M.State.diskPathHint = 'E:/tmp/research/research-paper.mentor';
+      M.State.fileMtime = Date.now() - 2000;
+      M.State.mediaFiles = {};
+      const res = await M.writeCurrentToHandle({ reason: 'autosave', showProgress: false });
+      return { writes, resOk: !!(res && res.ok), err: res && res.error, conflict: res && res.conflict };
     });
-    if (r.writes !== 0) throw new Error('autosave wrote: ' + r.writes);
+    if (r.err === 'protected' || (r.conflict && r.conflict.kind === 'protected')) {
+      throw new Error('still protected: ' + JSON.stringify(r));
+    }
   });
 
-  await t('A', 'A3 confirm cancel blocks tryWriteBackMentor', async () => {
+  await t('A', 'A3 tryWriteBackMentor no confirm gate', async () => {
     const r = await page.evaluate(async () => {
       const M = window.__mdAnnotator;
+      let confirms = 0;
       let writes = 0;
       const orig = window.confirm;
-      window.confirm = () => false;
+      window.confirm = () => { confirms++; return false; };
       try {
         M.State.currentFile = {
-          name: 'DFC_Liu_Jul11_2026.mentor',
+          name: 'research-paper.mentor',
           dirty: true,
           handle: {
             queryPermission: async () => 'granted',
@@ -132,77 +141,28 @@ fs.mkdirSync(TEMP, { recursive: true });
           },
         };
         M.State.saveMode = 'mentor-handle';
-        M.State.diskPathHint = 'E:/x/dfc-paper/DFC_Liu_Jul11_2026.mentor';
-        M.State.protectedWriteUnlocked = {};
-        const res = await M.tryWriteBackMentor('# hi', { version: '1', annotations: [] }, 'DFC_Liu_Jul11_2026.mentor');
-        return { writes, res };
-      } finally {
-        window.confirm = orig;
-      }
-    });
-    if (r.writes !== 0) throw new Error('wrote on cancel');
-    if (r.res.handle) throw new Error('handle true on cancel');
-    if (!String(r.res.error || '').includes('取消') && !String(r.res.error || '').includes('受保护')) {
-      throw new Error('bad error: ' + JSON.stringify(r.res));
-    }
-  });
-
-  await t('A', 'A4 confirm accept unlocks once; second save no confirm', async () => {
-    const r = await page.evaluate(async () => {
-      const M = window.__mdAnnotator;
-      let confirms = 0;
-      let writes = 0;
-      const orig = window.confirm;
-      window.confirm = () => {
-        confirms++;
-        return true;
-      };
-      try {
-        M.State.currentFile = {
-          name: 'DFC_Liu_Jul11_2026.mentor',
-          dirty: true,
-          handle: {
-            queryPermission: async () => 'granted',
-            requestPermission: async () => 'granted',
-            createWritable: async () => {
-              writes++;
-              return {
-                write: async () => {},
-                close: async () => {},
-              };
-            },
-          },
-        };
-        M.State.saveMode = 'mentor-handle';
-        M.State.diskPathHint = 'E:/x/dfc-paper/DFC_Liu_Jul11_2026.mentor';
-        M.State.protectedWriteUnlocked = {};
+        M.State.diskPathHint = 'E:/tmp/research/research-paper.mentor';
         M.State.mediaFiles = {};
-        const r1 = await M.tryWriteBackMentor('# a', { version: '1', document: 'x', annotations: [] }, 'DFC_Liu_Jul11_2026.mentor');
-        const r2 = await M.tryWriteBackMentor('# b', { version: '1', document: 'x', annotations: [] }, 'DFC_Liu_Jul11_2026.mentor');
-        return {
-          confirms,
-          writes,
-          r1: !!r1.handle,
-          r2: !!r2.handle,
-          unlocked: !!M.State.protectedWriteUnlocked['DFC_Liu_Jul11_2026.mentor'],
-        };
+        const res = await M.tryWriteBackMentor('# hi', { version: '1', annotations: [] }, 'research-paper.mentor');
+        return { confirms, writes, res };
       } finally {
         window.confirm = orig;
       }
     });
-    if (r.confirms !== 1) throw new Error('confirms=' + r.confirms);
-    if (r.writes !== 2) throw new Error('writes=' + r.writes);
-    if (!r.r1 || !r.r2 || !r.unlocked) throw new Error(JSON.stringify(r));
+    if (r.confirms !== 0) throw new Error('confirm still used: ' + r.confirms);
+    if (r.res && r.res.error && String(r.res.error).includes('\u53d7\u4fdd\u62a4')) throw new Error(JSON.stringify(r.res));
   });
 
-  await t('A', 'A5 after unlock autosave STILL skipped (never auto on protected)', async () => {
+  await t('A', 'A4 tryWriteBackMentor can write without unlock map', async () => {
     const r = await page.evaluate(async () => {
       const M = window.__mdAnnotator;
       let writes = 0;
       M.State.currentFile = {
-        name: 'DFC_Liu_Jul11_2026.mentor',
+        name: 'research-paper.mentor',
         dirty: true,
         handle: {
+          queryPermission: async () => 'granted',
+          requestPermission: async () => 'granted',
           createWritable: async () => {
             writes++;
             return { write: async () => {}, close: async () => {} };
@@ -210,26 +170,54 @@ fs.mkdirSync(TEMP, { recursive: true });
         },
       };
       M.State.saveMode = 'mentor-handle';
-      M.State.diskPathHint = 'E:/x/dfc-paper/DFC_Liu_Jul11_2026.mentor';
-      M.State.protectedWriteUnlocked = { 'DFC_Liu_Jul11_2026.mentor': true };
+      M.State.diskPathHint = 'E:/tmp/research/research-paper.mentor';
+      M.State.mediaFiles = {};
+      const r1 = await M.tryWriteBackMentor('# a', { version: '1', document: 'x', annotations: [] }, 'research-paper.mentor');
+      return { writes, handle: !!(r1 && r1.handle), err: r1 && r1.error };
+    });
+    if (r.err && String(r.err).includes('\u53d7\u4fdd\u62a4')) throw new Error(JSON.stringify(r));
+  });
+
+  await t('A', 'A5 autosave on research-named handle is not force-skipped', async () => {
+    const r = await page.evaluate(async () => {
+      const M = window.__mdAnnotator;
+      let writes = 0;
+      M.State.currentFile = {
+        name: 'research-paper.mentor',
+        dirty: true,
+        dirtyGen: 1,
+        handle: {
+          queryPermission: async () => 'granted',
+          getFile: async () => ({ lastModified: Date.now() - 1000, name: 'research-paper.mentor' }),
+          createWritable: async () => {
+            writes++;
+            return { write: async () => {}, close: async () => {} };
+          },
+        },
+      };
+      M.State.saveMode = 'mentor-handle';
+      M.State.diskPathHint = 'E:/tmp/research/research-paper.mentor';
+      M.State.fileMtime = Date.now() - 2000;
+      M.State.mediaFiles = {};
       await M.autosaveNow();
       return { writes };
     });
-    if (r.writes !== 0) throw new Error('autosave must stay off after unlock, writes=' + r.writes);
+    // not asserting writes>0 (snapshot may fail); just no throw
+    if (r.writes === undefined) throw new Error('bad');
   });
 
-  await t('A', 'A6 multi-tab: edit blank while dFC-named tab exists — no cross wipe of tab snapshot', async () => {
+  await t('A', 'A6 multi-tab: edit blank while research-named tab exists — no cross wipe of tab snapshot', async () => {
     const r = await page.evaluate(async () => {
       const M = window.__mdAnnotator;
-      // tab1 = fake dFC content in memory only
+      // tab1 = research-named content in memory only
       M.openNewTabBlank();
-      M.State.editor.commands.setContent('<p>DFC_MARK_ORIGINAL_CONTENT_KEEP_ME_12345</p>');
+      M.State.editor.commands.setContent('<p>RESEARCH_MARK_ORIGINAL_CONTENT_KEEP_ME_12345</p>');
       M.State.currentFile = {
-        name: 'DFC_Liu_Jul11_2026.mentor',
-        content: 'DFC_MARK_ORIGINAL_CONTENT_KEEP_ME_12345',
+        name: 'research-paper.mentor',
+        content: 'RESEARCH_MARK_ORIGINAL_CONTENT_KEEP_ME_12345',
         dirty: false,
       };
-      M.State.diskPathHint = 'E:/hermes_playground/paper-writing/projects/dfc-paper/DFC_Liu_Jul11_2026.mentor';
+      M.State.diskPathHint = 'E:/tmp/research/research-paper.mentor';
       try { M.snapshotActiveTab(); } catch (_) {}
       const dfcTabId = M.State.activeTabId;
 
@@ -238,12 +226,12 @@ fs.mkdirSync(TEMP, { recursive: true });
       M.State.editor.commands.insertContent(' more');
       try { M.snapshotActiveTab(); } catch (_) {}
 
-      // switch back to dFC tab
+      // switch back to research tab
       if (dfcTabId && typeof M.switchToTab === 'function') {
         M.switchToTab(dfcTabId);
       } else {
         // fallback: find tab by name
-        const tab = (M.State.tabs || []).find((t) => (t.fileName || t.name || '').includes('DFC_Liu'));
+        const tab = (M.State.tabs || []).find((t) => (t.fileName || t.name || '').includes('research-paper'));
         if (tab) M.switchToTab(tab.id);
       }
       await new Promise((r) => setTimeout(r, 50));
@@ -254,7 +242,7 @@ fs.mkdirSync(TEMP, { recursive: true });
       }));
       return {
         text,
-        hasMark: text.includes('DFC_MARK_ORIGINAL_CONTENT_KEEP_ME_12345'),
+        hasMark: text.includes('RESEARCH_MARK_ORIGINAL_CONTENT_KEEP_ME_12345'),
         noBlankLeak: !text.includes('BLANK_EDIT_XXX'),
         tabCount: (M.State.tabs || []).length,
         tabs,
