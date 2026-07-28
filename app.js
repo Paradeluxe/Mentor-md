@@ -37,6 +37,10 @@ import {
   createAnnotationStore
 } from './modules/io.js';
 import {
+  singleNewlinesToParagraphBreaks,
+  unwrapSoleImageParagraphs
+} from './modules/markdown-normalize.js';
+import {
   deepCloneAnnotations as deepCloneAnnotationsPure,
   computeInverseAnnPatch,
   applyAnnPatch,
@@ -5639,6 +5643,11 @@ async function injectMediaFiles(mediaFiles) {
 }
 function markdownToHtml(mdText, mediaUrls) {
   let text2 = mdText;
+  // Body rule: a single newline between prose lines is a full paragraph break
+  // (not a soft same-paragraph join). Fenced code + pipe tables are preserved.
+  try {
+    text2 = singleNewlinesToParagraphBreaks(text2);
+  } catch (_) {}
   // Absorb "Author et al. [-@key]" → "[-@key]" so the citation atom can show
   // the full narrative label "Author et al. (year)" without duplicated prose.
   try {
@@ -5662,6 +5671,10 @@ function markdownToHtml(mdText, mediaUrls) {
     });
   }
   let html = md.render(text2 || "");
+  // Block images: bare <img> so TipTap ImageBlock is a direct child
+  try {
+    html = unwrapSoleImageParagraphs(html);
+  } catch (_) {}
   if (hadBibMarker) {
     const section = '<section data-mentor-bibliography="true"></section>';
     html = html

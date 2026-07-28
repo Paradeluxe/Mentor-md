@@ -54916,6 +54916,53 @@ function createAnnotationStore(idbFactory = globalThis.indexedDB) {
   return store;
 }
 
+// modules/markdown-normalize.js
+function isFenceLine(line) {
+  return /^\s*```/.test(line);
+}
+function isTableRowLine(line) {
+  return /^\s*\|/.test(line);
+}
+function isBlockquoteLine(line) {
+  return /^\s*>/.test(line);
+}
+function singleNewlinesToParagraphBreaks(markdown) {
+  const src = String(markdown ?? "");
+  if (!src) return src;
+  const normalized = src.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  const lines = normalized.split("\n");
+  const out = [];
+  let inFence = false;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    let justClosedFence = false;
+    if (isFenceLine(line)) {
+      const wasIn = inFence;
+      inFence = !inFence;
+      out.push(line);
+      justClosedFence = wasIn && !inFence;
+      if (!justClosedFence) {
+        continue;
+      }
+    } else {
+      out.push(line);
+    }
+    if (i >= lines.length - 1) break;
+    const next2 = lines[i + 1];
+    if (inFence) continue;
+    if (line === "" || next2 === "") continue;
+    if (isTableRowLine(line) && isTableRowLine(next2)) continue;
+    if (isBlockquoteLine(line) && isBlockquoteLine(next2)) continue;
+    out.push("");
+  }
+  return out.join("\n").replace(/\n{3,}/g, "\n\n");
+}
+function unwrapSoleImageParagraphs(html) {
+  const src = String(html ?? "");
+  if (!src.includes("<img")) return src;
+  return src.replace(/<p>\s*(<img\b[^>]*>)\s*<\/p>/gi, "$1");
+}
+
 // modules/annotations.js
 var activeHighlightKey = new PluginKey("active-annotation-highlight");
 function deepCloneAnnotations(arr) {
@@ -62227,6 +62274,10 @@ async function injectMediaFiles(mediaFiles) {
 function markdownToHtml(mdText, mediaUrls) {
   let text2 = mdText;
   try {
+    text2 = singleNewlinesToParagraphBreaks(text2);
+  } catch (_) {
+  }
+  try {
     if (State2 && State2.references && (State2.references.entries || []).length) {
       text2 = stripNarrativeAuthorBeforeSuppressCitations(text2, State2.references);
     }
@@ -62249,6 +62300,10 @@ ${BIB_PLACEHOLDER}
     });
   }
   let html = md.render(text2 || "");
+  try {
+    html = unwrapSoleImageParagraphs(html);
+  } catch (_) {
+  }
   if (hadBibMarker) {
     const section = '<section data-mentor-bibliography="true"></section>';
     html = html.replace(new RegExp(`<p>\\s*${BIB_PLACEHOLDER}\\s*</p>`, "g"), section).replace(new RegExp(BIB_PLACEHOLDER, "g"), section);
