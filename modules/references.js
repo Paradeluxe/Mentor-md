@@ -790,3 +790,169 @@ export function renameCitationKey(raw, oldKey, newKey) {
     });
   return serializeCitationSyntax(parsed);
 }
+
+
+// ============================================================================
+// Generated bibliography marker / legacy migration / MD materialize
+// ============================================================================
+
+export const BIBLIOGRAPHY_MARKER = "<!-- mentor:bibliography -->";
+
+/**
+ * Split a top-level "# References" section from markdown.
+ * Stops at the next top-level heading. Returns null when absent.
+ */
+export function splitLegacyReferencesSection(markdown) {
+  const text = String(markdown || "");
+  const re = /^#\s+References\s*$/m;
+  const m = re.exec(text);
+  if (!m) return null;
+  const start = m.index;
+  const afterHeading = start + m[0].length;
+  const rest = text.slice(afterHeading);
+  const next = rest.search(/^#\s+\S/m);
+  const end = next === -1 ? text.length : afterHeading + next;
+  const body = text.slice(afterHeading, end);
+  const paragraphs = body
+    .split(/\n\s*\n/)
+    .map((p) => p.replace(/^\s+|\s+$/g, ""))
+    .filter(Boolean)
+    .filter((p) => !/^#\s+/.test(p) && !/^\|/.test(p)); // skip nested headings / tables
+  return {
+    before: text.slice(0, start).replace(/\s+$/, ""),
+    heading: "References",
+    body,
+    paragraphs,
+    after: text.slice(end).replace(/^\s+/, ""),
+    start,
+    end,
+  };
+}
+
+/** Loose fingerprint for matching handwritten APA lines to library entries. */
+export function referenceFingerprint(entry) {
+  const src = normalizeReferenceEntry(entry || {});
+  return [src.authors, src.year, src.title, src.doi]
+    .map((value) => String(value || "").toLowerCase().replace(/\W+/g, ""))
+    .join("|");
+}
+
+function paragraphFingerprint(paragraph) {
+  return String(paragraph || "").toLowerCase().replace(/\W+/g, "");
+}
+
+/**
+ * Plan lossless conversion of a handwritten # References block into a
+ * semantic bibliography marker. Never mutates disk — returns a report.
+ *
+ * safe only when every legacy paragraph maps uniquely and counts match.
+ * On safe=true, markdown has the marker; config defaults to scope=all so
+ * unused library entries remain visible after migration.
+ */
+export function planLegacyBibliographyMigration(markdown, manifest) {
+  const md = String(markdown || "");
+  const library = normalizeReferenceManifest(manifest);
+  const split = splitLegacyReferencesSection(md);
+  if (!split) {
+    return {
+      safe: false,
+      reason: "no-references-section",
+      originalCount: 0,
+      generatedCount: 0,
+      missing: [],
+      ambiguous: [],
+      markdown: md,
+      config: normalizeBibliographyConfig({ enabled: false, scope: "all", heading: "References" }),
+    };
+  }
+  const originalCount = split.paragraphs.length;
+  const byFp = new Map();
+  for (const entry of library.entries) {
+    const fp = referenceFingerprint(entry);
+    if (!fp.replace(/\|/g, "")) continue;
+    if (!byFp.has(fp)) byFp.set(fp, []);
+    byFp.get(fp).push(entry);
+  }
+  const matched = [];
+  const missing = [];
+  const ambiguous = [];
+  for (const para of split.paragraphs) {
+    const pfp = paragraphFingerprint(para);
+    // Prefer exact fingerprint containment / equality on authors+year+title tokens
+    let hits = [];
+    for (const entry of library.entries) {
+      const a = String(entry.authors || "").toLowerCase().replace(/\W+/g, "");
+      const y = String(entry.year || "").toLowerCase().replace(/\W+/g, "");
+      const ti = String(entry.title || "").toLowerCase().replace(/\W+/g, "");
+      if (!a || !y) continue;
+      if (pfp.includes(a) && pfp.includes(y) && (!ti || pfp.includes(ti.slice(0, Math.min(24, ti.length))))) {
+        hits.push(entry);
+      }
+    }
+    // de-dupe
+    const seen = new Set();
+    hits = hits.filter((e) => (seen.has(e.key) ? false : (seen.add(e.key), true)));
+    if (hits.length === 1) matched.push(hits[0]);
+    else if (hits.length === 0) missing.push(para);
+    else ambiguous.push({ paragraph: para, keys: hits.map((h) => h.key) });
+  }
+  const generatedCount = matched.length;
+  const safe =
+    originalCount > 0 &&
+    missing.length === 0 &&
+    ambiguous.length === 0 &&
+    generatedCount === originalCount;
+  const config = normalizeBibliographyConfig({
+    enabled: true,
+    scope: "all",
+    heading: split.heading || "References",
+  });
+  if (!safe) {
+    return {
+      safe: false,
+      reason: "mismatch",
+      originalCount,
+      generatedCount,
+      missing,
+      ambiguous,
+      matchedKeys: matched.map((m) => m.key),
+      markdown: md,
+      config,
+    };
+  }
+  const pieces = [];
+  if (split.before) pieces.push(split.before);
+  pieces.push(BIBLIOGRAPHY_MARKER);
+  if (split.after) pieces.push(split.after);
+  const nextMd = pieces.join("\n\n").replace(/\n{3,}/g, "\n\n").trim() + "\n";
+  return {
+    safe: true,
+    reason: "ok",
+    originalCount,
+    generatedCount,
+    missing: [],
+    ambiguous: [],
+    matchedKeys: matched.map((m) => m.key),
+    markdown: nextMd,
+    config,
+  };
+}
+
+/**
+ * Replace semantic bibliography marker with a readable # References block
+ * for Markdown export. Does not touch handwritten sections without a marker.
+ */
+export function materializeBibliographyMarkdown(markdown, model) {
+  const md = String(markdown || "");
+  if (!md.includes(BIBLIOGRAPHY_MARKER)) return md;
+  const m = model || { heading: "References", items: [] };
+  const heading = m.heading || "References";
+  const lines = [`# ${heading}`, ""];
+  for (const item of m.items || []) {
+    lines.push(item.markdown || item.plainText || "");
+    lines.push("");
+  }
+  const rendered = lines.join("\n").replace(/\n+$/, "");
+  // Replace first marker only
+  return md.replace(BIBLIOGRAPHY_MARKER, rendered);
+}
