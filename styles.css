@@ -2984,8 +2984,14 @@ body.refs-pane-collapsed #expand-refs-pane-btn {
 }
 .comment-reply-form textarea {
   width: 100%;
-  min-height: 52px;
-  resize: vertical;
+  /* one-line default; grows with content (JS autosize + field-sizing fallback) */
+  min-height: calc(1.5em + 18px);
+  max-height: 160px;
+  height: auto;
+  field-sizing: content;
+  resize: none;
+  overflow-x: hidden;
+  overflow-y: hidden;
   padding: 9px 11px;
   border: none;
   border-radius: 8px;

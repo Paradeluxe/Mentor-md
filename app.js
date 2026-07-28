@@ -5202,7 +5202,7 @@ function renderCommentList() {
               - \u9996\u6761\u5DF2\u5199: placeholder "\u56DE\u590D..." (\u540E\u7EED\u8FFD\u52A0)
             -->
             <div class="comment-reply-form">
-              <textarea data-thread-input="${safeThreadId}" placeholder="${escapeHtml(markerPlaceholder(threadType, !!first3.body))}" autocomplete="off"></textarea>
+              <textarea data-thread-input="${safeThreadId}" rows="1" placeholder="${escapeHtml(markerPlaceholder(threadType, !!first3.body))}" autocomplete="off"></textarea>
               <!-- Mode locked at create (float). No in-card type switch. -->
               <div class="form-actions">
                 <button class="comment-resolve-btn ${thread.resolved ? "is-resolved" : ""}" data-act="resolve" data-thread="${safeThreadId}" title="${thread.resolved ? "\u91CD\u65B0\u6253\u5F00\u6B64\u6279\u6CE8" : "\u6807\u8BB0\u4E3A\u5DF2\u89E3\u51B3"}" aria-label="${thread.resolved ? "\u91CD\u65B0\u6253\u5F00" : "\u6807\u8BB0\u4E3A\u5DF2\u89E3\u51B3"}">${thread.resolved ? "\u91CD\u5F00" : "\u89E3\u51B3"}</button>
@@ -5275,24 +5275,39 @@ function renderCommentList() {
     list.appendChild(foot);
   }
   list.querySelectorAll("[data-thread-input]").forEach((ta2) => {
-    const tid = ta2.getAttribute("data-thread-input");
-    if (State.replyDrafts[tid] && !ta2.value) {
-      ta2.value = State.replyDrafts[tid];
-    }
-    const _initBtn = list.querySelector(`[data-act="submit-reply"][data-thread="${tid}"]`);
-    if (_initBtn) _initBtn.disabled = !ta2.value.trim();
-    ta2.addEventListener("input", () => {
-      State.replyDrafts[tid] = ta2.value;
-      const btn = list.querySelector(`[data-act="submit-reply"][data-thread="${tid}"]`);
-      if (btn) btn.disabled = !ta2.value.trim();
-    });
-    ta2.addEventListener("keydown", (e) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
-        e.preventDefault();
-        if (ta2.value.trim()) addReply(tid, ta2.value);
+      const tid = ta2.getAttribute("data-thread-input");
+      if (State.replyDrafts[tid] && !ta2.value) {
+        ta2.value = State.replyDrafts[tid];
       }
+      const _initBtn = list.querySelector(`[data-act="submit-reply"][data-thread="${tid}"]`);
+      if (_initBtn) _initBtn.disabled = !ta2.value.trim();
+      // One-line default; grow with content (docs-style compose box)
+      const autosize = () => {
+        try {
+          ta2.style.height = "0px";
+          const maxH = 160;
+          const next = Math.min(Math.max(ta2.scrollHeight, 0), maxH);
+          ta2.style.height = `${next}px`;
+          ta2.style.overflowY = ta2.scrollHeight > maxH + 1 ? "auto" : "hidden";
+        } catch (_) {}
+      };
+      autosize();
+      ta2.addEventListener("input", () => {
+        State.replyDrafts[tid] = ta2.value;
+        const btn = list.querySelector(`[data-act="submit-reply"][data-thread="${tid}"]`);
+        if (btn) btn.disabled = !ta2.value.trim();
+        autosize();
+      });
+      ta2.addEventListener("focus", () => {
+        autosize();
+      });
+      ta2.addEventListener("keydown", (e) => {
+        if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+          e.preventDefault();
+          if (ta2.value.trim()) addReply(tid, ta2.value);
+        }
+      });
     });
-  });
   list.querySelectorAll('[data-act="submit-reply"]').forEach((btn) => {
     btn.addEventListener("click", () => {
       const tid = btn.dataset.thread;
