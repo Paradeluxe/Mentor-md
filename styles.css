@@ -2932,6 +2932,30 @@ body.refs-pane-collapsed #expand-refs-pane-btn {
     0 0 0 1.5px rgba(255, 255, 255, 0.9),
     0 1px 2px rgba(38, 37, 30, 0.12);
 }
+/* AI Reviewer: same Lucide bot as float AI button */
+.comment-avatar.is-ai-bot {
+  background: var(--ai-solid);
+  color: #fff;
+  font-size: 0;
+  box-shadow:
+    0 0 0 1.5px color-mix(in srgb, var(--ai) 35%, white),
+    0 1px 2px color-mix(in srgb, var(--ai-solid) 28%, transparent);
+}
+.comment-avatar.is-ai-bot::before {
+  content: "";
+  display: block;
+  width: 14px;
+  height: 14px;
+  background-color: currentColor;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  mask-position: center;
+  -webkit-mask-size: contain;
+  mask-size: contain;
+  -webkit-mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M12 8V4H8'/><rect width='16' height='12' x='4' y='8' rx='2'/><path d='M2 14h2'/><path d='M20 14h2'/><path d='M15 13v2'/><path d='M9 13v2'/></svg>");
+  mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M12 8V4H8'/><rect width='16' height='12' x='4' y='8' rx='2'/><path d='M2 14h2'/><path d='M20 14h2'/><path d='M15 13v2'/><path d='M9 13v2'/></svg>");
+}
 .comment-author {
   font-weight: 650;
   color: var(--text);

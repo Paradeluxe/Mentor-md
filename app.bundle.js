@@ -61829,6 +61829,13 @@ function renderCommentList() {
     return authorColorIndex(normalized.id || normalized.name || fallback);
   };
   const avatar = (name) => (name || "\u533F").trim().charAt(0).toUpperCase() || "?";
+  const avatarSpan = (author, colorSlot) => {
+    if (isAiAuthor(author)) {
+      return `<span class="comment-avatar is-ai-bot" title="AI Reviewer" aria-label="AI Reviewer"></span>`;
+    }
+    const slot = colorSlot != null ? colorSlot : avatarColor(author, "");
+    return `<span class="comment-avatar" data-author-color="${slot}">${escapeHtml(avatar(authorName(author)))}</span>`;
+  };
   list.innerHTML = visibleThreads.map((thread, idx) => {
     const first3 = thread.comments?.[0] || {
       author: currentAuthorPayload(),
@@ -61881,18 +61888,18 @@ function renderCommentList() {
         <div class="comment-body-wrap">
           <div class="comment-item">
             <div class="comment-meta">
-              <span class="comment-avatar" data-author-color="${annotationAuthorColor(thread)}">${escapeHtml(avatar(authorName(first3.author)))}</span>
-              <span class="comment-author">${escapeHtml(authorName(first3.author))}</span>
-              <span class="comment-time" title="${escapeHtml(first3.createdAt || "")}">${escapeHtml(formatTime(first3.createdAt))}</span>
-            </div>
-            ${first3.body ? `<div class="comment-body">${escapeHtml(first3.body)}</div>` : ""}
-            ${replies.map((r) => `
-              <div class="comment-reply">
-                <div class="comment-meta">
-                  <span class="comment-avatar" data-author-color="${avatarColor(r.author, thread.threadId)}">${escapeHtml(avatar(authorName(r.author)))}</span>
-                  <span class="comment-author">${escapeHtml(authorName(r.author))}</span>
-                  <span class="comment-time" title="${escapeHtml(r.createdAt || "")}">${escapeHtml(formatTime(r.createdAt))}</span>
-                </div>
+                          ${avatarSpan(first3.author, annotationAuthorColor(thread))}
+                          <span class="comment-author">${escapeHtml(authorName(first3.author))}</span>
+                          <span class="comment-time" title="${escapeHtml(first3.createdAt || "")}">${escapeHtml(formatTime(first3.createdAt))}</span>
+                        </div>
+                        ${first3.body ? `<div class="comment-body">${escapeHtml(first3.body)}</div>` : ""}
+                        ${replies.map((r) => `
+                          <div class="comment-reply">
+                            <div class="comment-meta">
+                              ${avatarSpan(r.author, avatarColor(r.author, thread.threadId))}
+                              <span class="comment-author">${escapeHtml(authorName(r.author))}</span>
+                              <span class="comment-time" title="${escapeHtml(r.createdAt || "")}">${escapeHtml(formatTime(r.createdAt))}</span>
+                            </div>
                 <div class="comment-body">${escapeHtml(r.body)}</div>
               </div>
             `).join("")}
