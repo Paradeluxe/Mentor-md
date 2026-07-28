@@ -7,7 +7,7 @@
 <meta name="build" content="v1.45.7 cache-bust v=171" />
 <!-- v1.43.37 offline: local fonts + KaTeX (no CDN) -->
 <link rel="stylesheet" href="vendor/fonts/local-fonts.css?v=1" />
-<link rel="stylesheet" href="styles.css?v=176" />
+<link rel="stylesheet" href="styles.css?v=177" />
 <link rel="stylesheet" href="vendor/katex/katex.min.css?v=1" />
 <!-- 字体：系统无衬线 + 等宽（侧栏时间戳、文件名） -->
 <style>
@@ -124,7 +124,8 @@
 
     <!-- 文件栏收起时, 浮起 "展开" 按钮 -->
     <button id="expand-file-pane-btn" class="expand-pane-btn hidden" data-act="toggle-file-pane" title="展开文件栏 (Ctrl+[)" aria-label="展开">›</button>
-    <button id="expand-refs-pane-btn" class="expand-pane-btn hidden" data-act="toggle-refs-pane" title="展开引用栏" aria-label="展开">‹</button>
+        <button id="expand-comment-pane-btn" class="expand-pane-btn expand-comment-pane hidden" data-act="toggle-comment-pane" title="展开批注栏 (Ctrl+])" aria-label="展开批注栏">‹</button>
+        <button id="expand-refs-pane-btn" class="expand-pane-btn hidden" data-act="toggle-refs-pane" title="展开引用栏" aria-label="展开">‹</button>
 
     <!-- 浮起"展开"按钮已移除: 大纲栏始终显示,不需要展开按钮 -->
 
@@ -158,19 +159,20 @@
     </section>
 
     <!-- 右：批注面板 -->
-    <aside id="comment-pane">
-      <div class="pane-resizer" data-pane-resize="comment" title="拖动调整批注栏宽度"></div>
-      <div class="pane-header">
-        <!-- v2: 去掉左侧"批注 2" 标题, 3 个 tab 数字本身已说明分布 -->
-        <div class="filters">
-          <div class="filter-tabs" role="tablist">
-            <button class="filter-tab is-active" data-filter-tab="all" title="所有批注 (Word 风格 All tab)">全部 <span class="filter-tab-count" data-count-for="all">0</span></button>
-            <button class="filter-tab" data-filter-tab="open" title="未解决">未解决 <span class="filter-tab-count" data-count-for="open">0</span></button>
-            <button class="filter-tab" data-filter-tab="resolved" title="已解决">已解决 <span class="filter-tab-count" data-count-for="resolved">0</span></button>
+        <aside id="comment-pane">
+          <div class="pane-resizer" data-pane-resize="comment" title="拖动调整批注栏宽度"></div>
+          <div class="pane-header">
+            <!-- v2: 去掉左侧"批注 2" 标题, 3 个 tab 数字本身已说明分布 -->
+            <div class="filters">
+              <div class="filter-tabs" role="tablist">
+                <button class="filter-tab is-active" data-filter-tab="all" title="所有批注 (Word 风格 All tab)">全部 <span class="filter-tab-count" data-count-for="all">0</span></button>
+                <button class="filter-tab" data-filter-tab="open" title="未解决">未解决 <span class="filter-tab-count" data-count-for="open">0</span></button>
+                <button class="filter-tab" data-filter-tab="resolved" title="已解决">已解决 <span class="filter-tab-count" data-count-for="resolved">0</span></button>
+              </div>
+            </div>
+            <button type="button" class="pane-collapse-btn" data-act="toggle-comment-pane" title="收起批注栏 (Ctrl+])" aria-label="收起批注栏">›</button>
           </div>
-        </div>
-      </div>
-      <div id="comment-list"></div>
+          <div id="comment-list"></div>
       <!-- v1.43 / v1.43.20: 空态引导 — cold/doc/filter 由 syncCommentEmptyPresentation 分型 -->
                   <div id="comment-empty" class="empty-hint" data-empty-mode="cold">
                     <div class="empty-hint-icon" aria-hidden="true">
@@ -323,7 +325,7 @@
 
 <!-- v1.43.37 offline: bundled app (esbuild) + local icons; no esm.sh -->
 <script src="icons.js?v=4"></script>
-<script type="module" src="app.bundle.js?v=176"></script>
+<script type="module" src="app.bundle.js?v=177"></script>
 <!-- 帮助 popover (浮在 body 顶层, 位置由 JS 动态计算) -->
 <div id="help-popover" class="help-popover hidden" role="tooltip">
   <div class="help-popover-arrow"></div>
