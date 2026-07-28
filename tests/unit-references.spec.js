@@ -91,16 +91,46 @@ const { pathToFileURL } = require('url');
   assert.deepStrictEqual(missing.missingKeys, ['ghost']);
 
   // 3+ author et al. format
-  const threeMap = new Map([
-    ['multi2025', { key: 'multi2025', authors: 'Aaa, One; Bbb, Two; Ccc, Three', year: '2025' }],
-  ]);
-  const threeLabel = refs.formatCitationLabel(
-    refs.parseCitationSyntax('[@multi2025]'),
-    threeMap
-  );
-  assert.strictEqual(threeLabel.text, '(Aaa et al., 2025)');
+    const threeMap = new Map([
+      ['multi2025', { key: 'multi2025', authors: 'Aaa, One; Bbb, Two; Ccc, Three', year: '2025' }],
+    ]);
+    const threeLabel = refs.formatCitationLabel(
+      refs.parseCitationSyntax('[@multi2025]'),
+      threeMap
+    );
+    assert.strictEqual(threeLabel.text, '(Aaa et al., 2025)');
 
-  // ---- Task 2: reference manifest + canonical BibTeX ----
+    // Pure suppress-author → full narrative atom (Author et al. (year))
+    const narr = refs.formatCitationLabel(
+      refs.parseCitationSyntax('[-@multi2025]'),
+      threeMap
+    );
+    assert.strictEqual(narr.text, 'Aaa et al. (2025)');
+
+    const twoMap = new Map([
+      ['duo2019', { key: 'duo2019', authors: 'Morcom, A.; Johnson, W.', year: '2019' }],
+    ]);
+    assert.strictEqual(
+      refs.formatCitationLabel(refs.parseCitationSyntax('[-@duo2019]'), twoMap).text,
+      'Morcom & Johnson (2019)'
+    );
+
+    // Strip handwritten "Author et al." before [-@key]
+        const stripped = refs.stripNarrativeAuthorBeforeSuppressCitations(
+          'Aaa et al. [-@multi2025] found that X. Morcom and Johnson [-@duo2019] too.',
+          [threeMap.get('multi2025'), twoMap.get('duo2019')]
+        );
+        assert.strictEqual(
+          stripped,
+          '[-@multi2025] found that X. [-@duo2019] too.'
+        );
+    // Do not strip before parenthetical [@key]
+    assert.strictEqual(
+      refs.stripNarrativeAuthorBeforeSuppressCitations('Aaa et al. [@multi2025]', [threeMap.get('multi2025')]),
+      'Aaa et al. [@multi2025]'
+    );
+
+    // ---- Task 2: reference manifest + canonical BibTeX ----
   const manifest = refs.createReferenceManifest({
     sourceName: 'library.ris',
     sourceFormat: 'ris',

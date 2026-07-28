@@ -64,6 +64,9 @@ import {
   parseCitationSyntax,
   serializeCitationSyntax,
   formatCitationLabel,
+  stripNarrativeAuthorBeforeSuppressCitations,
+  narrativePrefixMatches,
+  formatAuthorPart,
   normalizeReferenceManifest,
   emptyReferenceManifest,
   createReferenceManifest,
@@ -84,7 +87,7 @@ import {
   planLegacyBibliographyMigration,
   splitLegacyReferencesSection
 } from './modules/references.js';
-import {
+
   findOccurrences,
   scoreCandidate,
   resolveAnchor,
@@ -246,13 +249,20 @@ var CitationTextNormalizer = Extension.create({
         if (!transactions.some((tr) => tr.docChanged) || transactions.some((tr) => tr.getMeta("citation-normalized"))) return null;
         const targets = [];
         newState.doc.descendants((node, pos) => {
-          if (node.isText && /\[-?@[\w:.\/-]+/.test(node.text || "")) targets.push({ node, pos });
+          if (node.isText && /\[-?@[\w:.\-\/]+/.test(node.text || "")) targets.push({ node, pos });
         });
         if (!targets.length) return null;
         let tr = newState.tr;
         for (const { node, pos } of targets.reverse()) {
-          const parts = (node.text || "").split(/(\[(?:-?@[\w:.\/-]+(?:\s*,\s*[^;\]]+)?)(?:\s*;\s*-?@[\w:.\/-]+(?:\s*,\s*[^;\]]+)?)*\])/g);
-          if (parts.length < 2) continue;
+          let text = node.text || "";
+          // Strip narrative author prefixes before suppress cites inside this text node
+          try {
+            if (State.references && (State.references.entries || []).length) {
+              text = stripNarrativeAuthorBeforeSuppressCitations(text, State.references);
+            }
+          } catch (_) {}
+          const parts = text.split(/(\[(?:-?@[\w:.\-\/]+(?:\s*,\s*[^;\]]+)?)(?:\s*;\s*-?@[\w:.\-\/]+(?:\s*,\s*[^;\]]+)?)*\])/g);
+          if (parts.length < 2 && text === (node.text || "")) continue;
           const nodes = parts.filter(Boolean).map((part) => {
             if (!/^\[-?@/.test(part)) return newState.schema.text(part, node.marks);
             const info = (!State.references || !(State.references.entries || []).length)
@@ -5629,6 +5639,13 @@ async function injectMediaFiles(mediaFiles) {
 }
 function markdownToHtml(mdText, mediaUrls) {
   let text2 = mdText;
+  // Absorb "Author et al. [-@key]" → "[-@key]" so the citation atom can show
+  // the full narrative label "Author et al. (year)" without duplicated prose.
+  try {
+    if (State && State.references && (State.references.entries || []).length) {
+      text2 = stripNarrativeAuthorBeforeSuppressCitations(text2, State.references);
+    }
+  } catch (_) {}
   // markdown-it runs with html:false, so we cannot inject raw <section> before
   // render. Swap the semantic marker for a plain placeholder that survives as
   // text/paragraph content, then re-inject the section after render.
@@ -10278,7 +10295,45 @@ function reconcileCitationNodes() {
   const hasLibrary = !!(State.references && (State.references.entries || []).length);
   const entryMap = new Map((State.references.entries || []).map((e) => [e.key, e]));
   let tr = State.editor.state.tr, changed = false;
-  State.editor.state.doc.descendants((node, pos) => {
+
+  // 1) Absorb leftover handwritten "Author et al." text sitting just before a
+  // suppress-author citation atom (narrative form).
+  if (hasLibrary) {
+    const ops = [];
+    State.editor.state.doc.descendants((node, pos) => {
+      if (!node.type || node.type.name !== "citation") return;
+      let parsed;
+      try { parsed = parseCitationSyntax(node.attrs.raw); } catch (_) { return; }
+      if (!parsed.items || parsed.items.length !== 1 || !parsed.items[0].suppressAuthor) return;
+      const entry = entryMap.get(parsed.items[0].key);
+      if (!entry) return;
+      const $pos = State.editor.state.doc.resolve(pos);
+      const idx = $pos.index();
+      if (idx <= 0) return;
+      const prev = $pos.parent.child(idx - 1);
+      if (!prev || !prev.isText) return;
+      const combined = `${prev.text || ""}${node.attrs.raw}`;
+      const stripped = stripNarrativeAuthorBeforeSuppressCitations(combined, State.references);
+      if (!stripped.endsWith(node.attrs.raw)) return;
+      const newBefore = stripped.slice(0, stripped.length - node.attrs.raw.length);
+      if (newBefore === (prev.text || "")) return;
+      const prevPos = pos - prev.nodeSize;
+      ops.push({ prevPos, prevEnd: pos, newBefore, marks: prev.marks });
+    });
+    // Apply from back so positions stay valid
+    ops.sort((a, b) => b.prevPos - a.prevPos).forEach((op) => {
+      const nodes = op.newBefore
+        ? [State.editor.state.schema.text(op.newBefore, op.marks)]
+        : [];
+      tr = tr.replaceWith(op.prevPos, op.prevEnd, nodes);
+      changed = true;
+    });
+  }
+
+  // 2) Refresh labels/keys/missing on every citation atom
+  // Re-scan on (possibly updated) tr.doc
+  const doc2 = tr.doc;
+  doc2.descendants((node, pos) => {
     if (!node.type || node.type.name !== "citation") return;
     try {
       const parsed = parseCitationSyntax(node.attrs.raw);

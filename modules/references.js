@@ -372,17 +372,7 @@ function formatSingleItem(item, entry) {
   if (item.suppressAuthor) {
     return year ? (item.suffix ? `${year}, ${item.suffix}` : `${year}`) : (item.suffix || "");
   }
-  const list = splitAuthors(entry && entry.authors);
-  let authorPart = "";
-  if (list.length === 0) {
-    authorPart = "";
-  } else if (list.length === 1) {
-    authorPart = authorSurname(list[0]);
-  } else if (list.length === 2) {
-    authorPart = `${authorSurname(list[0])} & ${authorSurname(list[1])}`;
-  } else {
-    authorPart = `${authorSurname(list[0])} et al.`;
-  }
+  const authorPart = formatAuthorPart(entry);
   const pieces = [];
   if (authorPart) pieces.push(authorPart);
   if (year) pieces.push(year);
@@ -391,11 +381,145 @@ function formatSingleItem(item, entry) {
   return head;
 }
 
+/** Author phrase for narrative cites: "Smith", "Smith & Jones", "Smith et al." */
+export function formatAuthorPart(entry) {
+  const list = splitAuthors(entry && entry.authors);
+  if (list.length === 0) return "";
+  if (list.length === 1) return authorSurname(list[0]);
+  if (list.length === 2) return `${authorSurname(list[0])} & ${authorSurname(list[1])}`;
+  return `${authorSurname(list[0])} et al.`;
+}
+
+/**
+ * Candidate plain-text prefixes that authors often write before `[-@key]`
+ * (so the editor can absorb them into the citation atom).
+ */
+export function narrativeAuthorPrefixes(entry) {
+  const list = splitAuthors(entry && entry.authors);
+  if (!list.length) return [];
+  const s = list.map(authorSurname).filter(Boolean);
+  if (!s.length) return [];
+  const out = new Set();
+  if (s.length === 1) {
+    out.add(s[0]);
+  } else if (s.length === 2) {
+    out.add(`${s[0]} & ${s[1]}`);
+    out.add(`${s[0]} and ${s[1]}`);
+    out.add(`${s[0]} And ${s[1]}`);
+    out.add(`${s[0]} et al.`);
+    out.add(`${s[0]} et al`);
+  } else {
+    out.add(`${s[0]} et al.`);
+    out.add(`${s[0]} et al`);
+    out.add(`${s[0]} et al.,`);
+  }
+  return [...out];
+}
+
+function normalizeNarrativePrefix(text) {
+  return String(text || "")
+    .toLowerCase()
+    .replace(/\u00a0/g, " ")
+    .replace(/\s+/g, " ")
+    .replace(/\s*,\s*$/, "")
+    .replace(/\.$/, "")
+    .trim();
+}
+
+/** True if `text` is (or ends with) a known narrative author prefix for entry. */
+export function narrativePrefixMatches(text, entry) {
+  const t = normalizeNarrativePrefix(text);
+  if (!t) return false;
+  for (const pref of narrativeAuthorPrefixes(entry)) {
+    const p = normalizeNarrativePrefix(pref);
+    if (!p) continue;
+    if (t === p || t.endsWith(" " + p) || t.endsWith(p)) return true;
+  }
+  return false;
+}
+
+/**
+ * Strip handwritten author phrases immediately before pure suppress-author
+ * citations (`[-@key]`). Display will re-expand them as narrative labels
+ * `Author et al. (year)` so the atom covers the full cite.
+ */
+export function stripNarrativeAuthorBeforeSuppressCitations(markdown, entriesOrManifest) {
+  const md = String(markdown || "");
+  if (!md.includes("[-@")) return md;
+  let entries = [];
+  if (Array.isArray(entriesOrManifest)) entries = entriesOrManifest;
+  else if (entriesOrManifest && Array.isArray(entriesOrManifest.entries)) entries = entriesOrManifest.entries;
+  const entryMap = new Map(entries.map((e) => [e && e.key, e]));
+  if (!entryMap.size) return md;
+
+  const citeRe = /\[-(?:@[^\]]+)\]/g;
+  let out = "";
+  let last = 0;
+  let m;
+  while ((m = citeRe.exec(md)) !== null) {
+    const cite = m[0];
+    const citeStart = m.index;
+    let before = md.slice(last, citeStart);
+    const parsed = parseCitationSyntax(cite);
+    const ok =
+      parsed.items.length === 1 &&
+      parsed.items.every((it) => it.suppressAuthor) &&
+      entryMap.get(parsed.items[0].key);
+    if (ok) {
+      const entry = entryMap.get(parsed.items[0].key);
+      const nl = before.lastIndexOf("\n");
+      const lineHead = nl >= 0 ? before.slice(0, nl + 1) : "";
+      const lineTail = nl >= 0 ? before.slice(nl + 1) : before;
+      const tailR = lineTail.replace(/[ \t]+$/g, "");
+      const trailWs = lineTail.slice(tailR.length);
+      // Try longest prefix first
+      const prefs = narrativeAuthorPrefixes(entry)
+        .slice()
+        .sort((a, b) => normalizeNarrativePrefix(b).length - normalizeNarrativePrefix(a).length);
+      let stripped = null;
+      for (const pref of prefs) {
+        const needle = normalizeNarrativePrefix(pref);
+        if (!needle) continue;
+        // Walk back from end of tailR to see if it ends with needle (punct-tolerant)
+        // Build normalized form of a candidate suffix window
+        for (let start = 0; start < tailR.length; start++) {
+          if (start > 0 && !/[\s({[]/.test(tailR[start - 1])) continue;
+          const slice = tailR.slice(start);
+          const nSlice = normalizeNarrativePrefix(slice);
+          if (nSlice === needle) {
+            // ensure only optional . , spaces after the author words in original —
+            // normalizeNarrativePrefix already dropped trailing punct, so whole slice is the prefix
+            stripped = tailR.slice(0, start);
+            break;
+          }
+        }
+        if (stripped !== null) break;
+      }
+      if (stripped !== null) {
+        const needSpace = stripped.length > 0 && !/[\s({[]$/.test(stripped);
+        before = lineHead + stripped + (needSpace ? " " : "");
+      } else {
+        before = lineHead + tailR + trailWs;
+      }
+    }
+    out += before + cite;
+    last = citeStart + cite.length;
+  }
+  out += md.slice(last);
+  return out;
+}
+
 /**
  * Render an author-year display label from a parsed citation AST and an entry map.
  * Returns `{ text, missingKeys }`. If every key in the citation is missing from the
  * map, the label falls back to a visible "missing" marker so the body node never
  * silently loses a reference.
+ *
+ * Forms:
+ * - Parenthetical `[@key]` → `(Author, year)` / `(Author et al., year)`
+ * - Narrative suppress `[-@key]` (all items suppress) → `Author et al. (year)`
+ *   so the atom covers the full spoken form (not year-only).
+ * - Mixed suppress + non-suppress stays parenthetical with year-only suppress parts.
  */
 export function formatCitationLabel(parsed, entryMap) {
   const items = (parsed && parsed.items) || [];
@@ -409,7 +533,7 @@ export function formatCitationLabel(parsed, entryMap) {
   for (const item of items) {
     const entry = map.get(item.key);
     if (entry) {
-      present.push({ item, text: formatSingleItem(item, entry) });
+      present.push({ item, entry, text: formatSingleItem(item, entry) });
     } else {
       missing.push(item.key);
     }
@@ -418,6 +542,23 @@ export function formatCitationLabel(parsed, entryMap) {
     const raw = parsed && parsed.raw ? String(parsed.raw) : `[@${missing.join("; ")}]`;
     return { text: `[缺失：@${missing.join("; ")}]`, missingKeys: missing };
   }
+
+  const allSuppress = present.every((p) => p.item.suppressAuthor);
+  if (allSuppress) {
+    // Narrative: Author et al. (year[, suffix])
+    const parts = present.map(({ item, entry }) => {
+      const authorPart = formatAuthorPart(entry);
+      const year = entry && entry.year ? entry.year : "";
+      const yearBit = year
+        ? (item.suffix ? `${year}, ${item.suffix}` : year)
+        : (item.suffix || "");
+      if (authorPart && yearBit) return `${authorPart} (${yearBit})`;
+      if (yearBit) return `(${yearBit})`;
+      return authorPart || "";
+    }).filter(Boolean);
+    return { text: parts.join("; "), missingKeys: missing };
+  }
+
   const body = present.map(p => p.text).filter(Boolean).join("; ");
   return { text: `(${body})`, missingKeys: missing };
 }

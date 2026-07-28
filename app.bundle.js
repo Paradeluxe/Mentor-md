@@ -55535,23 +55535,98 @@ function formatSingleItem(item, entry) {
   if (item.suppressAuthor) {
     return year ? item.suffix ? `${year}, ${item.suffix}` : `${year}` : item.suffix || "";
   }
-  const list = splitAuthors(entry && entry.authors);
-  let authorPart = "";
-  if (list.length === 0) {
-    authorPart = "";
-  } else if (list.length === 1) {
-    authorPart = authorSurname(list[0]);
-  } else if (list.length === 2) {
-    authorPart = `${authorSurname(list[0])} & ${authorSurname(list[1])}`;
-  } else {
-    authorPart = `${authorSurname(list[0])} et al.`;
-  }
+  const authorPart = formatAuthorPart(entry);
   const pieces = [];
   if (authorPart) pieces.push(authorPart);
   if (year) pieces.push(year);
   let head = pieces.join(", ");
   if (item.suffix) head = head ? `${head}, ${item.suffix}` : item.suffix;
   return head;
+}
+function formatAuthorPart(entry) {
+  const list = splitAuthors(entry && entry.authors);
+  if (list.length === 0) return "";
+  if (list.length === 1) return authorSurname(list[0]);
+  if (list.length === 2) return `${authorSurname(list[0])} & ${authorSurname(list[1])}`;
+  return `${authorSurname(list[0])} et al.`;
+}
+function narrativeAuthorPrefixes(entry) {
+  const list = splitAuthors(entry && entry.authors);
+  if (!list.length) return [];
+  const s = list.map(authorSurname).filter(Boolean);
+  if (!s.length) return [];
+  const out = /* @__PURE__ */ new Set();
+  if (s.length === 1) {
+    out.add(s[0]);
+  } else if (s.length === 2) {
+    out.add(`${s[0]} & ${s[1]}`);
+    out.add(`${s[0]} and ${s[1]}`);
+    out.add(`${s[0]} And ${s[1]}`);
+    out.add(`${s[0]} et al.`);
+    out.add(`${s[0]} et al`);
+  } else {
+    out.add(`${s[0]} et al.`);
+    out.add(`${s[0]} et al`);
+    out.add(`${s[0]} et al.,`);
+  }
+  return [...out];
+}
+function normalizeNarrativePrefix(text2) {
+  return String(text2 || "").toLowerCase().replace(/\u00a0/g, " ").replace(/\s+/g, " ").replace(/\s*,\s*$/, "").replace(/\.$/, "").trim();
+}
+function stripNarrativeAuthorBeforeSuppressCitations(markdown, entriesOrManifest) {
+  const md2 = String(markdown || "");
+  if (!md2.includes("[-@")) return md2;
+  let entries = [];
+  if (Array.isArray(entriesOrManifest)) entries = entriesOrManifest;
+  else if (entriesOrManifest && Array.isArray(entriesOrManifest.entries)) entries = entriesOrManifest.entries;
+  const entryMap = new Map(entries.map((e) => [e && e.key, e]));
+  if (!entryMap.size) return md2;
+  const citeRe = /\[-(?:@[^\]]+)\]/g;
+  let out = "";
+  let last = 0;
+  let m;
+  while ((m = citeRe.exec(md2)) !== null) {
+    const cite = m[0];
+    const citeStart = m.index;
+    let before = md2.slice(last, citeStart);
+    const parsed = parseCitationSyntax(cite);
+    const ok = parsed.items.length === 1 && parsed.items.every((it) => it.suppressAuthor) && entryMap.get(parsed.items[0].key);
+    if (ok) {
+      const entry = entryMap.get(parsed.items[0].key);
+      const nl = before.lastIndexOf("\n");
+      const lineHead = nl >= 0 ? before.slice(0, nl + 1) : "";
+      const lineTail = nl >= 0 ? before.slice(nl + 1) : before;
+      const tailR = lineTail.replace(/[ \t]+$/g, "");
+      const trailWs = lineTail.slice(tailR.length);
+      const prefs = narrativeAuthorPrefixes(entry).slice().sort((a, b) => normalizeNarrativePrefix(b).length - normalizeNarrativePrefix(a).length);
+      let stripped = null;
+      for (const pref of prefs) {
+        const needle = normalizeNarrativePrefix(pref);
+        if (!needle) continue;
+        for (let start = 0; start < tailR.length; start++) {
+          if (start > 0 && !/[\s({[]/.test(tailR[start - 1])) continue;
+          const slice2 = tailR.slice(start);
+          const nSlice = normalizeNarrativePrefix(slice2);
+          if (nSlice === needle) {
+            stripped = tailR.slice(0, start);
+            break;
+          }
+        }
+        if (stripped !== null) break;
+      }
+      if (stripped !== null) {
+        const needSpace = stripped.length > 0 && !/[\s({[]$/.test(stripped);
+        before = lineHead + stripped + (needSpace ? " " : "");
+      } else {
+        before = lineHead + tailR + trailWs;
+      }
+    }
+    out += before + cite;
+    last = citeStart + cite.length;
+  }
+  out += md2.slice(last);
+  return out;
 }
 function formatCitationLabel(parsed, entryMap) {
   const items = parsed && parsed.items || [];
@@ -55565,7 +55640,7 @@ function formatCitationLabel(parsed, entryMap) {
   for (const item of items) {
     const entry = map2.get(item.key);
     if (entry) {
-      present.push({ item, text: formatSingleItem(item, entry) });
+      present.push({ item, entry, text: formatSingleItem(item, entry) });
     } else {
       missing.push(item.key);
     }
@@ -55573,6 +55648,18 @@ function formatCitationLabel(parsed, entryMap) {
   if (present.length === 0) {
     const raw = parsed && parsed.raw ? String(parsed.raw) : `[@${missing.join("; ")}]`;
     return { text: `[\u7F3A\u5931\uFF1A@${missing.join("; ")}]`, missingKeys: missing };
+  }
+  const allSuppress = present.every((p) => p.item.suppressAuthor);
+  if (allSuppress) {
+    const parts = present.map(({ item, entry }) => {
+      const authorPart = formatAuthorPart(entry);
+      const year = entry && entry.year ? entry.year : "";
+      const yearBit = year ? item.suffix ? `${year}, ${item.suffix}` : year : item.suffix || "";
+      if (authorPart && yearBit) return `${authorPart} (${yearBit})`;
+      if (yearBit) return `(${yearBit})`;
+      return authorPart || "";
+    }).filter(Boolean);
+    return { text: parts.join("; "), missingKeys: missing };
   }
   const body = present.map((p) => p.text).filter(Boolean).join("; ");
   return { text: `(${body})`, missingKeys: missing };
@@ -56912,13 +56999,20 @@ var CitationTextNormalizer = Extension.create({
         if (!transactions.some((tr3) => tr3.docChanged) || transactions.some((tr3) => tr3.getMeta("citation-normalized"))) return null;
         const targets = [];
         newState.doc.descendants((node, pos) => {
-          if (node.isText && /\[-?@[\w:.\/-]+/.test(node.text || "")) targets.push({ node, pos });
+          if (node.isText && /\[-?@[\w:.\-\/]+/.test(node.text || "")) targets.push({ node, pos });
         });
         if (!targets.length) return null;
         let tr2 = newState.tr;
         for (const { node, pos } of targets.reverse()) {
-          const parts = (node.text || "").split(/(\[(?:-?@[\w:.\/-]+(?:\s*,\s*[^;\]]+)?)(?:\s*;\s*-?@[\w:.\/-]+(?:\s*,\s*[^;\]]+)?)*\])/g);
-          if (parts.length < 2) continue;
+          let text2 = node.text || "";
+          try {
+            if (State2.references && (State2.references.entries || []).length) {
+              text2 = stripNarrativeAuthorBeforeSuppressCitations(text2, State2.references);
+            }
+          } catch (_) {
+          }
+          const parts = text2.split(/(\[(?:-?@[\w:.\-\/]+(?:\s*,\s*[^;\]]+)?)(?:\s*;\s*-?@[\w:.\-\/]+(?:\s*,\s*[^;\]]+)?)*\])/g);
+          if (parts.length < 2 && text2 === (node.text || "")) continue;
           const nodes = parts.filter(Boolean).map((part) => {
             if (!/^\[-?@/.test(part)) return newState.schema.text(part, node.marks);
             const info = !State2.references || !(State2.references.entries || []).length ? { label: part, keys: parseCitationSyntax(part).items.map((item) => item.key), missingKeys: [] } : buildCitationLabel(part, State2.references);
@@ -62132,6 +62226,12 @@ async function injectMediaFiles(mediaFiles) {
 }
 function markdownToHtml(mdText, mediaUrls) {
   let text2 = mdText;
+  try {
+    if (State2 && State2.references && (State2.references.entries || []).length) {
+      text2 = stripNarrativeAuthorBeforeSuppressCitations(text2, State2.references);
+    }
+  } catch (_) {
+  }
   const BIB_PLACEHOLDER = "MENTOR_BIBLIOGRAPHY_FIELD_PLACEHOLDER";
   let hadBibMarker = false;
   if (text2 && typeof text2 === "string" && text2.indexOf(BIBLIOGRAPHY_MARKER) !== -1) {
@@ -66670,7 +66770,40 @@ function reconcileCitationNodes() {
   const hasLibrary = !!(State2.references && (State2.references.entries || []).length);
   const entryMap = new Map((State2.references.entries || []).map((e) => [e.key, e]));
   let tr2 = State2.editor.state.tr, changed = false;
-  State2.editor.state.doc.descendants((node, pos) => {
+  if (hasLibrary) {
+    const ops = [];
+    State2.editor.state.doc.descendants((node, pos) => {
+      if (!node.type || node.type.name !== "citation") return;
+      let parsed;
+      try {
+        parsed = parseCitationSyntax(node.attrs.raw);
+      } catch (_) {
+        return;
+      }
+      if (!parsed.items || parsed.items.length !== 1 || !parsed.items[0].suppressAuthor) return;
+      const entry = entryMap.get(parsed.items[0].key);
+      if (!entry) return;
+      const $pos = State2.editor.state.doc.resolve(pos);
+      const idx = $pos.index();
+      if (idx <= 0) return;
+      const prev = $pos.parent.child(idx - 1);
+      if (!prev || !prev.isText) return;
+      const combined = `${prev.text || ""}${node.attrs.raw}`;
+      const stripped = stripNarrativeAuthorBeforeSuppressCitations(combined, State2.references);
+      if (!stripped.endsWith(node.attrs.raw)) return;
+      const newBefore = stripped.slice(0, stripped.length - node.attrs.raw.length);
+      if (newBefore === (prev.text || "")) return;
+      const prevPos = pos - prev.nodeSize;
+      ops.push({ prevPos, prevEnd: pos, newBefore, marks: prev.marks });
+    });
+    ops.sort((a, b) => b.prevPos - a.prevPos).forEach((op2) => {
+      const nodes = op2.newBefore ? [State2.editor.state.schema.text(op2.newBefore, op2.marks)] : [];
+      tr2 = tr2.replaceWith(op2.prevPos, op2.prevEnd, nodes);
+      changed = true;
+    });
+  }
+  const doc22 = tr2.doc;
+  doc22.descendants((node, pos) => {
     if (!node.type || node.type.name !== "citation") return;
     try {
       const parsed = parseCitationSyntax(node.attrs.raw);
