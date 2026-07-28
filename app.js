@@ -87,7 +87,7 @@ import {
   planLegacyBibliographyMigration,
   splitLegacyReferencesSection
 } from './modules/references.js';
-
+import {
   findOccurrences,
   scoreCandidate,
   resolveAnchor,
