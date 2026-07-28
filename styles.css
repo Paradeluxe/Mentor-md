@@ -1554,25 +1554,17 @@ body.comment-pane-collapsed #expand-comment-pane-btn {
 .tiptap pre code br.ProseMirror-trailingBreak { display: none; }
 .tiptap a { color: var(--accent-hover); text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--accent-hover) 38%, transparent); text-underline-offset: 2px; }
 .tiptap a:hover { color: var(--accent-solid); text-decoration-color: currentColor; }
-/* v1.43.27: 给图片上下加点边距 (原 0 → 8px), 让前后"空隙"是 ~16px 的可点击区域
-   → gapcursor 在图片前后真正可触发 (ProseMirror gap cursor 需要一段"非节点像素"才会出现)
-   注意: margin 只在 block image (ImageBlock) 上加; 老的 inline image / 用户加的 <img> 不动
-*/
+/* v1.43.27 / v1.45.8: block image spacing.
+   Only margin the img itself. Previous rule also set margin on adjacent p/h
+   (p:has(+img), img+p, …) which *added* to img margin → looked like a full blank line. */
 .tiptap img { max-width: 100%; border-radius: 6px; vertical-align: baseline; }
-/* ProseMirror 直接产出的 image (block atom) — 用 > p + img 和 > img + p 选前后空隙
-   注: 编辑器里 image 是 block 直接子 (跟在 <p> 后面), 所以用 .tiptap > img */
-.tiptap > img,
-.tiptap > p + img,
-.tiptap > img + p,
-.tiptap > img + h1,
-.tiptap > img + h2,
-.tiptap > img + h3,
-.tiptap > p:has(+ img),
-.tiptap > h1:has(+ img),
-.tiptap > h2:has(+ img),
-.tiptap > h3:has(+ img) {
-  /* v1.43.34: 上下 18px — 图前/后可点空隙更大 */
-  margin: 18px 0;
+.tiptap > img {
+  margin-top: 12px;
+  margin-bottom: 8px;
+}
+/* Caption under figure: keep tight (override default p+p 15px feel) */
+.tiptap > img + p {
+  margin-top: 6px;
 }
 .tiptap hr { border: none; border-top: 1px solid var(--border-warm); margin: 1.5em 0; }
 /* v1.43.27: gapcursor — PM 自带插件但默认 CSS 不画光标 (要由调用方实现)
