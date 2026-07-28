@@ -57934,11 +57934,20 @@ var AnnotationMark = Mark2.create({
         renderHTML: (attrs) => attrs.active ? { "data-active": "true" } : {}
       },
       // P-D10: mark 颜色按 author 分配 (Word 8 色自动)
-      // 8 色循环分配, 同 author 同色, 用 inline style 设置 background
+      // 8 色循环分配, 同 author 同色 — human 批注用; AI/review 由 data-thread-type 覆盖为模式色
       authorColor: {
         default: 0,
         parseHTML: (el) => parseInt(el.getAttribute("data-author-color") || "0", 10),
         renderHTML: (attrs) => ({ "data-author-color": String(attrs.authorColor || 0) })
+      },
+      // Mode identity on the mark so body highlight matches card rail (AI cyan / review violet)
+      threadType: {
+        default: null,
+        parseHTML: (el) => {
+          const t = el.getAttribute("data-thread-type");
+          return t === "ai" || t === "review" ? t : null;
+        },
+        renderHTML: (attrs) => attrs.threadType === "ai" || attrs.threadType === "review" ? { "data-thread-type": attrs.threadType } : {}
       }
     };
   },
@@ -57948,8 +57957,10 @@ var AnnotationMark = Mark2.create({
   renderHTML({ HTMLAttributes, node }) {
     const resolved = HTMLAttributes["data-resolved"] === "true" || node?.attrs?.resolved === true;
     const active = HTMLAttributes["data-active"] === "true" || node?.attrs?.active === true;
+    const t = HTMLAttributes["data-thread-type"] || node?.attrs?.threadType || null;
+    const modeCls = t === "ai" ? " is-ai" : t === "review" ? " is-review" : "";
     return ["span", {
-      class: `annotation-mark${resolved ? " is-resolved" : ""}${active ? " is-active" : ""}`,
+      class: `annotation-mark${resolved ? " is-resolved" : ""}${active ? " is-active" : ""}${modeCls}`,
       ...HTMLAttributes
     }, 0];
   }
@@ -57982,9 +57993,11 @@ var AnnotationBubblePlugin = new Plugin({
             try {
               decorations.push(Decoration.widget(pos, () => {
                 const el = document.createElement("span");
-                el.className = `annotation-bubble${annMark.attrs.resolved ? " is-resolved" : ""}`;
+                const tt2 = annMark.attrs.threadType;
+                el.className = `annotation-bubble${annMark.attrs.resolved ? " is-resolved" : ""}${tt2 === "ai" ? " is-ai" : tt2 === "review" ? " is-review" : ""}`;
                 el.setAttribute("data-annotation-thread-id", String(threadId));
                 el.setAttribute("data-author-color", String(annMark.attrs.authorColor || 0));
+                if (tt2 === "ai" || tt2 === "review") el.setAttribute("data-thread-type", tt2);
                 el.setAttribute("aria-hidden", "true");
                 return el;
               }, { side: -1, ignoreSelection: true, stopEvent: () => true }));
@@ -58937,11 +58950,12 @@ function _validateMarksAfterEdit(editor2, opts) {
       let any = false;
       for (const r of pendingRemarks) {
         if (r.from < 0 || r.to > editor2.state.doc.content.size || r.from >= r.to) continue;
-        tr2 = tr2.addMark(r.from, r.to, markType.create({
+        const _thr = State2.annotations.find((a) => a && a.threadId === r.threadId);
+        tr2 = tr2.addMark(r.from, r.to, markType.create(annotationMarkAttrs(_thr, {
           threadId: r.threadId,
           resolved: !!r.resolved,
           authorColor: r.authorColor
-        }));
+        })));
         any = true;
       }
       if (any) {
@@ -60598,6 +60612,10 @@ function applyThreadType(threadId, type) {
   }
   markDirty();
   try {
+    if (typeof syncAnnotationMarkModeAttrs === "function") syncAnnotationMarkModeAttrs(threadId);
+  } catch (_) {
+  }
+  try {
     if (typeof refreshAnnotationImageDecos === "function") refreshAnnotationImageDecos();
   } catch (_) {
   }
@@ -61304,14 +61322,56 @@ function annotationAuthorColor(thread) {
   const firstAuthorId = thread && thread.comments?.[0]?.author?.id;
   return authorColorIndex(firstAuthorId || thread?.threadId || "");
 }
+function annotationMarkAttrs(thread, extra = {}) {
+  const tid = extra.threadId != null ? extra.threadId : thread && thread.threadId;
+  let tt2 = extra.threadType !== void 0 ? extra.threadType : thread ? threadTypeOf(thread) : null;
+  if (tt2 !== "ai" && tt2 !== "review") tt2 = null;
+  const resolved = extra.resolved != null ? !!extra.resolved : !!(thread && thread.resolved);
+  const authorColor = extra.authorColor != null ? extra.authorColor : annotationAuthorColor(thread);
+  const out = {
+    threadId: tid || null,
+    resolved,
+    authorColor: Number.isInteger(Number(authorColor)) ? Number(authorColor) : 0,
+    threadType: tt2
+  };
+  if (extra.active != null) out.active = !!extra.active;
+  return out;
+}
+function syncAnnotationMarkModeAttrs(threadIdFilter = null) {
+  const ed = State2.editor;
+  if (!ed) return;
+  const markType = ed.schema.marks.annotation;
+  if (!markType) return;
+  const patches = [];
+  ed.state.doc.descendants((node, pos) => {
+    if (!node.isText) return;
+    for (const mark of node.marks) {
+      if (mark.type !== markType) continue;
+      const tid = mark.attrs.threadId;
+      if (!tid) continue;
+      if (threadIdFilter && tid !== threadIdFilter) continue;
+      const thr = State2.annotations.find((a) => a && a.threadId === tid);
+      if (!thr) continue;
+      const next2 = annotationMarkAttrs(thr, { active: !!mark.attrs.active });
+      const same = mark.attrs.threadType === next2.threadType && !!mark.attrs.resolved === !!next2.resolved && Number(mark.attrs.authorColor || 0) === Number(next2.authorColor || 0);
+      if (same) continue;
+      patches.push({ from: pos, to: pos + node.nodeSize, mark, next: next2 });
+    }
+  });
+  if (!patches.length) return;
+  let tr2 = ed.state.tr;
+  for (const p of patches) {
+    tr2 = tr2.removeMark(p.from, p.to, p.mark);
+    tr2 = tr2.addMark(p.from, p.to, markType.create(p.next));
+  }
+  tr2.setMeta("addToHistory", false);
+  tr2.setMeta("__activeMarkSync", true);
+  ed.view.dispatch(tr2);
+}
 function applyAnnotationMark(threadId, from2, to) {
   const tr2 = State2.editor.state.tr;
   const thread = State2.annotations.find((item) => item && item.threadId === threadId);
-  tr2.addMark(from2, to, State2.editor.schema.marks.annotation.create({
-    threadId,
-    resolved: false,
-    authorColor: annotationAuthorColor(thread)
-  }));
+  tr2.addMark(from2, to, State2.editor.schema.marks.annotation.create(annotationMarkAttrs(thread, { threadId, resolved: false })));
   tr2.setMeta("addToHistory", false);
   tr2.setMeta("__activeMarkSync", true);
   State2.editor.view.dispatch(tr2);
@@ -61319,11 +61379,7 @@ function applyAnnotationMark(threadId, from2, to) {
 function applyAnnotationMarksMultiCell(threadId, ranges) {
   const tr2 = State2.editor.state.tr;
   const thread = State2.annotations.find((item) => item && item.threadId === threadId);
-  const mark = State2.editor.schema.marks.annotation.create({
-    threadId,
-    resolved: false,
-    authorColor: annotationAuthorColor(thread)
-  });
+  const mark = State2.editor.schema.marks.annotation.create(annotationMarkAttrs(thread, { threadId, resolved: false }));
   for (const r of ranges) {
     tr2.addMark(r.from, r.to, mark);
   }
@@ -61408,11 +61464,7 @@ function handleCreateMultiParagraphAnnotation(from2, to, opts = {}) {
   thread.authorColor = authorColorIndex(State2.authorId || threadId);
   State2.annotations.push(thread);
   const tr2 = ed.state.tr;
-  const mark = ed.schema.marks.annotation.create({
-    threadId,
-    resolved: false,
-    authorColor: annotationAuthorColor(thread)
-  });
+  const mark = ed.schema.marks.annotation.create(annotationMarkAttrs(thread, { threadId, resolved: false }));
   for (const r of ranges) {
     if (r.from < r.to) {
       tr2.addMark(r.from, r.to, mark);
@@ -61560,11 +61612,7 @@ function applyReattach() {
   for (let i = toRemove.length - 1; i >= 0; i--) {
     tr2.removeMark(toRemove[i].from, toRemove[i].to, toRemove[i].mark);
   }
-  tr2.addMark(sel.from, sel.to, markType.create({
-    threadId: tid,
-    resolved: thread.resolved,
-    authorColor: annotationAuthorColor(thread)
-  }));
+  tr2.addMark(sel.from, sel.to, markType.create(annotationMarkAttrs(thread, { threadId: tid })));
   tr2.setMeta("addToHistory", false);
   tr2.setMeta("__activeMarkSync", true);
   ed.view.dispatch(tr2);
@@ -62540,12 +62588,12 @@ function flushSourceView() {
       }
       const found2 = findAnnotationRange(editor2.state.doc, ann);
       if (found2 && typeof found2.from === "number" && typeof found2.to === "number" && found2.from < found2.to) {
-        tr2.addMark(found2.from, found2.to, markType.create({
+        tr2.addMark(found2.from, found2.to, markType.create(annotationMarkAttrs(ann, {
           threadId: snap.threadId,
           resolved: snap.resolved,
           authorColor: snap.authorColor,
           active: false
-        }));
+        })));
         syncThreadAnchorEvidence(ann, editor2.state.doc, found2, {
           exact: ann.text,
           status: found2.fuzzy ? "edited" : "attached",
@@ -63035,7 +63083,8 @@ function rebuildAnnotationMarks(markSnapshot) {
     if (thr && isMarklessImageAnn(thr) && (!Array.isArray(thr.ranges) || thr.ranges.length === 0)) {
       return false;
     }
-    const attrs = { threadId, resolved: !!resolved };
+    const thrForMark = State2.annotations.find((x) => x && x.threadId === threadId);
+    const attrs = annotationMarkAttrs(thrForMark, { threadId, resolved: !!resolved });
     tr2 = tr2.addMark(from2, to, markType.create(attrs));
     seen.add(`${threadId}:${from2}-${to}`);
     rebuilt.push({ threadId, from: from2, to });
@@ -63117,6 +63166,10 @@ function rebuildAnnotationMarks(markSnapshot) {
     refreshAnnotationImageDecos();
   } catch (e) {
     console.warn("[rebuildAnnotationMarks] image deco", e);
+  }
+  try {
+    syncAnnotationMarkModeAttrs();
+  } catch (_) {
   }
   return rebuilt;
 }
@@ -64061,11 +64114,7 @@ function loadMarkdownIntoEditor(name, content, annotationsData = null, options =
             tr2.addMark(
               thread.range.from,
               thread.range.to,
-              State2.editor.schema.marks.annotation.create({
-                threadId: ann.threadId,
-                resolved: ann.resolved,
-                authorColor: annotationAuthorColor(thread)
-              })
+              State2.editor.schema.marks.annotation.create(annotationMarkAttrs(thread))
             );
             tr2.setMeta("addToHistory", false);
             tr2.setMeta("__activeMarkSync", true);
@@ -64130,11 +64179,7 @@ function loadMarkdownIntoEditor(name, content, annotationsData = null, options =
         });
         State2.annotations.push(thread);
         const tr2 = State2.editor.state.tr;
-        const mark = State2.editor.schema.marks.annotation.create({
-          threadId: ann.threadId,
-          resolved: ann.resolved,
-          authorColor: annotationAuthorColor(thread)
-        });
+        const mark = State2.editor.schema.marks.annotation.create(annotationMarkAttrs(thread));
         for (const r of resolvedTextRanges) tr2.addMark(r.from, r.to, mark);
         tr2.setMeta("addToHistory", false);
         tr2.setMeta("__activeMarkSync", true);
@@ -64206,11 +64251,7 @@ function loadMarkdownIntoEditor(name, content, annotationsData = null, options =
           tr2.addMark(
             positions.from,
             positions.to,
-            State2.editor.schema.marks.annotation.create({
-              threadId: ann.threadId,
-              resolved: ann.resolved,
-              authorColor: annotationAuthorColor(thread)
-            })
+            State2.editor.schema.marks.annotation.create(annotationMarkAttrs(thread))
           );
           tr2.setMeta("addToHistory", false);
           tr2.setMeta("__activeMarkSync", true);
@@ -64289,6 +64330,10 @@ function loadMarkdownIntoEditor(name, content, annotationsData = null, options =
   } catch {
   }
   renderCommentList();
+  try {
+    syncAnnotationMarkModeAttrs();
+  } catch (_) {
+  }
   refreshAnnotationImageDecos();
   renderOutline();
   setStatus("\u5DF2\u52A0\u8F7D", "");
@@ -68988,6 +69033,8 @@ window.__mdAnnotator = {
   bodyHasAiMarker,
   ensureAiMarker,
   ensureMarker,
+  annotationMarkAttrs,
+  syncAnnotationMarkModeAttrs,
   isAiCard,
   humanCommentIsWork,
   threadNeedsAiReply,

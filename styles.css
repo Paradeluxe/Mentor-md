@@ -1681,6 +1681,28 @@ body.comment-pane-collapsed #expand-comment-pane-btn {
 .tiptap .annotation-mark[data-author-color="6"] { --annotation-bg: var(--author-6-surface); --annotation-line: var(--author-6); }
 .tiptap .annotation-mark[data-author-color="7"] { --annotation-bg: var(--author-7-surface); --annotation-line: var(--author-7); }
 
+/* Mode layer wins over author tint — body mark matches card rail / badge / float */
+.tiptap .annotation-mark[data-thread-type="ai"],
+.tiptap .annotation-mark.is-ai {
+  --annotation-bg: var(--surface-ai);
+  --annotation-line: var(--ai);
+}
+.tiptap .annotation-mark[data-thread-type="review"],
+.tiptap .annotation-mark.is-review {
+  --annotation-bg: var(--surface-review);
+  --annotation-line: var(--review);
+}
+.tiptap .annotation-mark[data-thread-type="ai"]:hover,
+.tiptap .annotation-mark.is-ai:hover {
+  background: color-mix(in srgb, var(--surface-ai) 72%, #fff);
+  border-bottom-color: var(--ai);
+}
+.tiptap .annotation-mark[data-thread-type="review"]:hover,
+.tiptap .annotation-mark.is-review:hover {
+  background: color-mix(in srgb, var(--surface-review) 72%, #fff);
+  border-bottom-color: var(--review);
+}
+
 .tiptap .annotation-mark:hover {
   background: color-mix(in srgb, var(--annotation-bg) 78%, #fff);
   border-bottom-color: var(--annotation-line);
@@ -1747,7 +1769,7 @@ body.comment-pane-collapsed #expand-comment-pane-btn {
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--annotation-state-color) 12%, transparent);
 }
 
-/* 每个线程仅一个 widget 气泡；颜色跟随作者，resolved 固定为绿色。 */
+/* 每个线程仅一个 widget 气泡；human=作者色，AI/review=模式色，resolved=灰/绿克制。 */
 .tiptap .annotation-bubble {
   --annotation-anchor-color: var(--author-0);
   display: inline-block;
@@ -1767,7 +1789,14 @@ body.comment-pane-collapsed #expand-comment-pane-btn {
 .tiptap .annotation-bubble[data-author-color="5"] { --annotation-anchor-color: var(--author-5); }
 .tiptap .annotation-bubble[data-author-color="6"] { --annotation-anchor-color: var(--author-6); }
 .tiptap .annotation-bubble[data-author-color="7"] { --annotation-anchor-color: var(--author-7); }
-.tiptap .annotation-bubble.is-resolved { --annotation-anchor-color: var(--success); opacity: 0.75; }
+.tiptap .annotation-bubble[data-thread-type="ai"],
+.tiptap .annotation-bubble.is-ai { --annotation-anchor-color: var(--ai); }
+.tiptap .annotation-bubble[data-thread-type="review"],
+.tiptap .annotation-bubble.is-review { --annotation-anchor-color: var(--review); }
+.tiptap .annotation-bubble.is-resolved {
+  --annotation-anchor-color: color-mix(in srgb, var(--text-2) 55%, transparent);
+  opacity: 0.75;
+}
 
 /* 空编辑器提示 */
 .empty-hint {

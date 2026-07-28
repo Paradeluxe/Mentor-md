@@ -62,28 +62,56 @@ function contrast(rgbA, rgbB) {
         return thread;
       };
       const enableSubmit = (threadId, value) => {
-        // Prefer State draft then re-render so button is live-enabled (input-only can race DOM replace).
-        M.State.replyDrafts[threadId] = value;
-        M.State.expandedThreadIds[threadId] = true;
-        M.renderCommentList();
-        const input = document.querySelector(`[data-thread-input="${threadId}"]`);
-        if (!input) throw new Error(`Missing input for ${threadId}`);
-        input.value = value;
-        input.dispatchEvent(new Event('input', { bubbles: true }));
-      };
+              // Prefer State draft then re-render so button is live-enabled (input-only can race DOM replace).
+              M.State.replyDrafts[threadId] = value;
+              M.State.expandedThreadIds[threadId] = true;
+              M.renderCommentList();
+              const input = document.querySelector(`[data-thread-input="${threadId}"]`);
+              if (!input) throw new Error(`Missing input for ${threadId}`);
+              input.value = value;
+              input.dispatchEvent(new Event('input', { bubbles: true }));
+              const btn = document.querySelector(`[data-act="submit-reply"][data-thread="${threadId}"]`);
+              if (btn) btn.disabled = !String(value || '').trim();
+            };
       const markColor = (threadId) => document.querySelector(`[data-thread-id="${threadId}"]`)?.getAttribute('data-author-color');
-      const style = (selector, property) => {
-        const element = document.querySelector(selector);
-        return element ? window.getComputedStyle(element)[property] : null;
-      };
-      const card = (threadId) => document.querySelector(`[data-thread="${threadId}"]`);
+            const style = (selector, property) => {
+              const element = document.querySelector(selector);
+              return element ? window.getComputedStyle(element)[property] : null;
+            };
+            const card = (threadId) => document.querySelector(`[data-thread="${threadId}"]`);
+            const solidOf = (threadId) => {
+              const c = card(threadId);
+              if (!c) return null;
+              const d = document.createElement('span');
+              d.style.background = 'var(--thread-solid)';
+              d.style.position = 'absolute';
+              d.style.width = '1px';
+              d.style.height = '1px';
+              c.appendChild(d);
+              const bg = window.getComputedStyle(d).backgroundColor;
+              d.remove();
+              return bg;
+            };
 
       const ai = create('AI target text', 'ai');
       const human = create('Human target text', null);
+      try { M.syncAnnotationMarkModeAttrs && M.syncAnnotationMarkModeAttrs(); } catch (_) {}
       M.State.activeThreadId = ai.threadId;
       M.highlightActiveMark();
       M.renderCommentList();
       await wait(80);
+      const aiMarkEl = document.querySelector(`.annotation-mark[data-thread-id="${ai.threadId}"]`);
+      const humanMarkEl = document.querySelector(`.annotation-mark[data-thread-id="${human.threadId}"]`);
+      if (!aiMarkEl || aiMarkEl.getAttribute('data-thread-type') !== 'ai') {
+        throw new Error('AI body mark missing data-thread-type=ai: ' + (aiMarkEl && aiMarkEl.outerHTML));
+      }
+      if (humanMarkEl && humanMarkEl.getAttribute('data-thread-type')) {
+        throw new Error('Human mark should not carry mode thread-type');
+      }
+      const aiMarkBg = window.getComputedStyle(aiMarkEl).backgroundColor;
+      const aiCardRail = window.getComputedStyle(card(ai.threadId)).getPropertyValue('--thread-accent').trim();
+      // store for later report
+      window.__modeColorProbe = { aiMarkBg, aiCardRail, aiLine: aiMarkEl.style.getPropertyValue('--annotation-line') };
       enableSubmit(ai.threadId, '@AI make this clearer');
       enableSubmit(human.threadId, '人工改表述');
 
@@ -92,11 +120,13 @@ function contrast(rgbA, rgbB) {
       const open = {
         aiCardType: card(ai.threadId)?.dataset.threadType,
         humanCardType: card(human.threadId)?.dataset.threadType || '',
+        aiMarkType: document.querySelector(`.annotation-mark[data-thread-id="${ai.threadId}"]`)?.getAttribute('data-thread-type'),
+        humanMarkType: document.querySelector(`.annotation-mark[data-thread-id="${human.threadId}"]`)?.getAttribute('data-thread-type') || '',
         aiIsActive: card(ai.threadId)?.classList.contains('is-active'),
-        aiSubmit: style(`[data-thread="${ai.threadId}"] button.primary`, 'backgroundColor'),
-        humanSubmit: style(`[data-thread="${human.threadId}"] button.primary`, 'backgroundColor'),
-        floatAi: style('#float-comment-btn .float-ai-btn', 'backgroundColor'),
-        floatHuman: style('#float-comment-btn .float-comment-act', 'backgroundColor'),
+        aiSubmit: solidOf(ai.threadId) || style(`[data-thread="${ai.threadId}"] button.primary`, 'backgroundColor'),
+                humanSubmit: solidOf(human.threadId) || style(`[data-thread="${human.threadId}"] button.primary`, 'backgroundColor'),
+                floatAi: style('#float-comment-btn .float-ai-btn', 'backgroundColor'),
+                floatHuman: style('#float-comment-btn .float-comment-act', 'backgroundColor'),
         floatReviewMissing: !document.querySelector('#float-comment-btn .float-review-btn'),
         bubbleVisible: Array.from(document.querySelectorAll('.annotation-bubble')).some((bubble) => bubble.getBoundingClientRect().width > 0),
         bubbleColor: style(`[data-annotation-thread-id="${ai.threadId}"]`, 'backgroundColor'),
@@ -107,38 +137,40 @@ function contrast(rgbA, rgbB) {
       };
 
       // type switch must not change authorColor; human→ai→human tracks mode solid
-      const authorBeforeSwitch = human.authorColor;
-      M.applyThreadType(human.threadId, 'ai');
-      await wait(40);
-      enableSubmit(human.threadId, '@AI after switch');
+            // drafts no longer auto-get @AI — mode is threadType only
+            const authorBeforeSwitch = human.authorColor;
+            M.applyThreadType(human.threadId, 'ai');
+            await wait(40);
+            enableSubmit(human.threadId, 'after switch instruction');
       const afterToAi = {
-        type: card(human.threadId)?.dataset.threadType,
-        author: human.authorColor,
-        submit: style(`[data-thread="${human.threadId}"] button.primary`, 'backgroundColor'),
-      };
-      M.applyThreadType(human.threadId, null);
-      await wait(40);
-      enableSubmit(human.threadId, 'back to human');
-      const afterToHuman = {
-        type: card(human.threadId)?.dataset.threadType || '',
-        author: human.authorColor,
-        submit: style(`[data-thread="${human.threadId}"] button.primary`, 'backgroundColor'),
-      };
+              type: card(human.threadId)?.dataset.threadType,
+              author: human.authorColor,
+              submit: solidOf(human.threadId),
+            };
+            M.applyThreadType(human.threadId, null);
+            await wait(40);
+            enableSubmit(human.threadId, 'back to human');
+            const afterToHuman = {
+              type: card(human.threadId)?.dataset.threadType || '',
+              author: human.authorColor,
+              submit: solidOf(human.threadId),
+            };
 
-      // legacy review display still paints review solid (no float)
-      const legacy = M.createTestAnnotation('Human target text');
-      legacy.threadType = 'review';
-      if (legacy.comments && legacy.comments[0]) {
-        legacy.comments[0].body = '@REVIEW legacy check';
-      }
-      M.renderCommentList();
-      await wait(40);
-      enableSubmit(legacy.threadId, '@REVIEW legacy check');
-      const legacyOpen = {
-        type: card(legacy.threadId)?.dataset.threadType,
-        isReview: card(legacy.threadId)?.classList.contains('is-review'),
-        submit: style(`[data-thread="${legacy.threadId}"] button.primary`, 'backgroundColor'),
-      };
+            // legacy review display still paints review solid (no float)
+            const legacy = M.createTestAnnotation('Human target text');
+            legacy.threadType = 'review';
+            if (legacy.comments && legacy.comments[0]) {
+              legacy.comments[0].body = '@REVIEW legacy check';
+            }
+            try { M.syncAnnotationMarkModeAttrs && M.syncAnnotationMarkModeAttrs(legacy.threadId); } catch (_) {}
+            M.renderCommentList();
+            await wait(40);
+            enableSubmit(legacy.threadId, '@REVIEW legacy check');
+            const legacyOpen = {
+              type: card(legacy.threadId)?.dataset.threadType,
+              isReview: card(legacy.threadId)?.classList.contains('is-review'),
+              submit: solidOf(legacy.threadId),
+            };
 
       const light = {
         theme: M.getTheme(),
@@ -238,15 +270,21 @@ function contrast(rgbA, rgbB) {
 
     assert(report.beforeColor !== null, `Missing author color: ${JSON.stringify(report)}`);
     assert(report.open.aiCardType === 'ai', `AI card type wrong: ${JSON.stringify(report.open)}`);
-    assert(!report.open.humanCardType || report.open.humanCardType === '', `Human card type wrong: ${JSON.stringify(report.open)}`);
+
+    assert(report.open.aiMarkType === 'ai', 'AI body mark carries data-thread-type=ai');
+    assert(!report.open.humanMarkType, 'human body mark has no mode type');    assert(!report.open.humanCardType || report.open.humanCardType === '', `Human card type wrong: ${JSON.stringify(report.open)}`);
     assert(report.open.aiIsActive, `AI card should be active: ${JSON.stringify(report.open)}`);
     assert(report.open.floatReviewMissing, `float-review-btn still present: ${JSON.stringify(report.open)}`);
     assert(report.open.aiSubmit === report.open.floatAi, `AI button/card color diverged: ${JSON.stringify(report.open)}`);
-    assert(report.open.humanSubmit === report.open.floatHuman, `Human button/card color diverged: ${JSON.stringify(report.open)}`);
-    assert(report.open.humanSubmit !== report.open.aiSubmit, `Human and AI solids must differ: ${JSON.stringify(report.open)}`);
-    assert(report.open.bubbleVisible, `Annotation bubble is not visible: ${JSON.stringify(report.open)}`);
-    assert(report.open.avatarSlot === report.beforeColor, `Avatar and mark author slots diverged: ${JSON.stringify(report.open)}`);
-    assert(report.open.avatarColor === report.open.bubbleColor, `Author identity colors diverged: ${JSON.stringify(report.open)}`);
+        assert(report.open.humanSubmit === report.open.floatHuman, `Human button/card color diverged: ${JSON.stringify(report.open)}`);
+        assert(report.open.humanSubmit !== report.open.aiSubmit, `Human and AI solids must differ: ${JSON.stringify(report.open)}`);
+        assert(report.open.bubbleVisible, `Annotation bubble is not visible: ${JSON.stringify(report.open)}`);
+        assert(report.open.avatarSlot === report.beforeColor, `Avatar and mark author slots diverged: ${JSON.stringify(report.open)}`);
+        // AI: bubble follows mode (cyan); avatar stays author — must NOT force equality
+        assert(report.open.bubbleColor === report.open.floatAi || report.open.bubbleColor === report.open.aiSubmit,
+          `AI bubble should match mode solid, not author: ${JSON.stringify(report.open)}`);
+        assert(report.open.avatarColor !== report.open.bubbleColor,
+          `AI avatar (author) should differ from bubble (mode): ${JSON.stringify(report.open)}`);
 
     assert(report.afterToAi.type === 'ai', `Switch to AI failed: ${JSON.stringify(report.afterToAi)}`);
     assert(report.afterToAi.author === report.authorBeforeSwitch, `Type switch changed authorColor: ${JSON.stringify(report)}`);

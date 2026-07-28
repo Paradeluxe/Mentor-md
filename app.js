@@ -1115,72 +1115,88 @@ var AnnotationMark = Mark.create({
         renderHTML: (attrs) => attrs.active ? { "data-active": "true" } : {}
       },
       // P-D10: mark 颜色按 author 分配 (Word 8 色自动)
-      // 8 色循环分配, 同 author 同色, 用 inline style 设置 background
-      authorColor: {
-        default: 0,
-        parseHTML: (el) => parseInt(el.getAttribute("data-author-color") || "0", 10),
-        renderHTML: (attrs) => ({ "data-author-color": String(attrs.authorColor || 0) })
-      }
-    };
-  },
-  parseHTML() {
-    return [{ tag: "span[data-thread-id]" }];
-  },
-  renderHTML({ HTMLAttributes, node }) {
-    const resolved = HTMLAttributes["data-resolved"] === "true" || node?.attrs?.resolved === true;
-    const active = HTMLAttributes["data-active"] === "true" || node?.attrs?.active === true;
-    return ["span", {
-      class: `annotation-mark${resolved ? " is-resolved" : ""}${active ? " is-active" : ""}`,
-      ...HTMLAttributes
-    }, 0];
-  }
-});
-var annotationBubbleKey = new PluginKey("annotation-bubble");
-var AnnotationBubblePlugin = new Plugin({
-  key: annotationBubbleKey,
-  // mark + 气泡永远显示 (无开关). 保留 plugin state init 仅为向后兼容 setMeta 调用.
-  state: {
-    init() {
-      return {};
-    },
-    apply(tr2, prev) {
-      return prev;
-    }
-  },
-  props: {
-    decorations(state) {
-      const { doc: doc5 } = state;
-      const decorations = [];
-      const seenThreads = /* @__PURE__ */ new Set();
-      try {
-        doc5.descendants((node, pos) => {
-          if (!node.isText) return;
-          const annMarks = node.marks.filter((m) => m.type.name === "annotation");
-          for (const annMark of annMarks) {
-            const threadId = annMark.attrs.threadId;
-            if (!threadId || seenThreads.has(threadId)) continue;
-            seenThreads.add(threadId);
-            try {
-              decorations.push(Decoration.widget(pos, () => {
-                const el = document.createElement("span");
-                el.className = `annotation-bubble${annMark.attrs.resolved ? " is-resolved" : ""}`;
-                el.setAttribute("data-annotation-thread-id", String(threadId));
-                el.setAttribute("data-author-color", String(annMark.attrs.authorColor || 0));
-                el.setAttribute("aria-hidden", "true");
-                return el;
-              }, { side: -1, ignoreSelection: true, stopEvent: () => true }));
-            } catch (err) {
-              console.warn("[AnnotationBubble] widget 创建失败:", err);
+            // 8 色循环分配, 同 author 同色 — human 批注用; AI/review 由 data-thread-type 覆盖为模式色
+            authorColor: {
+              default: 0,
+              parseHTML: (el) => parseInt(el.getAttribute("data-author-color") || "0", 10),
+              renderHTML: (attrs) => ({ "data-author-color": String(attrs.authorColor || 0) })
+            },
+            // Mode identity on the mark so body highlight matches card rail (AI cyan / review violet)
+            threadType: {
+              default: null,
+              parseHTML: (el) => {
+                const t = el.getAttribute("data-thread-type");
+                return t === "ai" || t === "review" ? t : null;
+              },
+              renderHTML: (attrs) =>
+                attrs.threadType === "ai" || attrs.threadType === "review"
+                  ? { "data-thread-type": attrs.threadType }
+                  : {}
             }
+          };
+        },
+        parseHTML() {
+          return [{ tag: "span[data-thread-id]" }];
+        },
+        renderHTML({ HTMLAttributes, node }) {
+          const resolved = HTMLAttributes["data-resolved"] === "true" || node?.attrs?.resolved === true;
+          const active = HTMLAttributes["data-active"] === "true" || node?.attrs?.active === true;
+          const t = HTMLAttributes["data-thread-type"] || node?.attrs?.threadType || null;
+          const modeCls = t === "ai" ? " is-ai" : t === "review" ? " is-review" : "";
+          return ["span", {
+            class: `annotation-mark${resolved ? " is-resolved" : ""}${active ? " is-active" : ""}${modeCls}`,
+            ...HTMLAttributes
+          }, 0];
+        }
+      });
+      var annotationBubbleKey = new PluginKey("annotation-bubble");
+      var AnnotationBubblePlugin = new Plugin({
+        key: annotationBubbleKey,
+        // mark + 气泡永远显示 (无开关). 保留 plugin state init 仅为向后兼容 setMeta 调用.
+        state: {
+          init() {
+            return {};
+          },
+          apply(tr2, prev) {
+            return prev;
           }
-        });
-      } catch (err) {
-        console.warn("[AnnotationBubble] descendants \u5931\u8D25:", err);
-      }
-      return DecorationSet.create(doc5, decorations);
-    }
-  }
-});
+        },
+        props: {
+          decorations(state) {
+            const { doc: doc5 } = state;
+            const decorations = [];
+            const seenThreads = /* @__PURE__ */ new Set();
+            try {
+              doc5.descendants((node, pos) => {
+                if (!node.isText) return;
+                const annMarks = node.marks.filter((m) => m.type.name === "annotation");
+                for (const annMark of annMarks) {
+                  const threadId = annMark.attrs.threadId;
+                  if (!threadId || seenThreads.has(threadId)) continue;
+                  seenThreads.add(threadId);
+                  try {
+                    decorations.push(Decoration.widget(pos, () => {
+                      const el = document.createElement("span");
+                      const tt = annMark.attrs.threadType;
+                      el.className = `annotation-bubble${annMark.attrs.resolved ? " is-resolved" : ""}${tt === "ai" ? " is-ai" : tt === "review" ? " is-review" : ""}`;
+                      el.setAttribute("data-annotation-thread-id", String(threadId));
+                      el.setAttribute("data-author-color", String(annMark.attrs.authorColor || 0));
+                      if (tt === "ai" || tt === "review") el.setAttribute("data-thread-type", tt);
+                      el.setAttribute("aria-hidden", "true");
+                      return el;
+                    }, { side: -1, ignoreSelection: true, stopEvent: () => true }));
+                  } catch (err) {
+                    console.warn("[AnnotationBubble] widget 创建失败:", err);
+                  }
+                }
+              });
+            } catch (err) {
+              console.warn("[AnnotationBubble] descendants \u5931\u8D25:", err);
+            }
+            return DecorationSet.create(doc5, decorations);
+          }
+        }
+      });
 var AnnotationBubbleExtension = Extension.create({
   name: "annotation-bubble",
   addProseMirrorPlugins() {
@@ -2171,11 +2187,12 @@ function _validateMarksAfterEdit(editor2, opts) {
       let any = false;
       for (const r of pendingRemarks) {
         if (r.from < 0 || r.to > editor2.state.doc.content.size || r.from >= r.to) continue;
-        tr2 = tr2.addMark(r.from, r.to, markType.create({
+        const _thr = State.annotations.find((a) => a && a.threadId === r.threadId);
+        tr2 = tr2.addMark(r.from, r.to, markType.create(annotationMarkAttrs(_thr, {
           threadId: r.threadId,
           resolved: !!r.resolved,
           authorColor: r.authorColor
-        }));
+        })));
         any = true;
       }
       if (any) {
@@ -3929,6 +3946,9 @@ function applyThreadType(threadId, type) {
   }
   markDirty();
   try {
+    if (typeof syncAnnotationMarkModeAttrs === "function") syncAnnotationMarkModeAttrs(threadId);
+  } catch (_) {}
+  try {
     if (typeof refreshAnnotationImageDecos === "function") refreshAnnotationImageDecos();
   } catch (_) {}
   try {
@@ -4665,14 +4685,71 @@ function annotationAuthorColor(thread) {
   const firstAuthorId = thread && thread.comments?.[0]?.author?.id;
   return authorColorIndex(firstAuthorId || thread?.threadId || "");
 }
+/**
+ * Single source for annotation mark attrs.
+ * Human: authorColor drives body tint. AI/review: threadType drives body tint (CSS),
+ * matching card rail / badge / float — authorColor still stored for avatars.
+ */
+function annotationMarkAttrs(thread, extra = {}) {
+  const tid = extra.threadId != null ? extra.threadId : thread && thread.threadId;
+  let tt = extra.threadType !== undefined
+    ? extra.threadType
+    : thread
+      ? threadTypeOf(thread)
+      : null;
+  if (tt !== "ai" && tt !== "review") tt = null;
+  const resolved = extra.resolved != null ? !!extra.resolved : !!(thread && thread.resolved);
+  const authorColor = extra.authorColor != null
+    ? extra.authorColor
+    : annotationAuthorColor(thread);
+  const out = {
+    threadId: tid || null,
+    resolved,
+    authorColor: Number.isInteger(Number(authorColor)) ? Number(authorColor) : 0,
+    threadType: tt
+  };
+  if (extra.active != null) out.active = !!extra.active;
+  return out;
+}
+/** Rewrite live marks so data-thread-type / resolved match State.annotations (mode color parity). */
+function syncAnnotationMarkModeAttrs(threadIdFilter = null) {
+  const ed = State.editor;
+  if (!ed) return;
+  const markType = ed.schema.marks.annotation;
+  if (!markType) return;
+  const patches = [];
+  ed.state.doc.descendants((node, pos) => {
+    if (!node.isText) return;
+    for (const mark of node.marks) {
+      if (mark.type !== markType) continue;
+      const tid = mark.attrs.threadId;
+      if (!tid) continue;
+      if (threadIdFilter && tid !== threadIdFilter) continue;
+      const thr = State.annotations.find((a) => a && a.threadId === tid);
+      if (!thr) continue;
+      const next = annotationMarkAttrs(thr, { active: !!mark.attrs.active });
+      const same =
+        mark.attrs.threadType === next.threadType &&
+        !!mark.attrs.resolved === !!next.resolved &&
+        Number(mark.attrs.authorColor || 0) === Number(next.authorColor || 0);
+      if (same) continue;
+      patches.push({ from: pos, to: pos + node.nodeSize, mark, next });
+    }
+  });
+  if (!patches.length) return;
+  let tr2 = ed.state.tr;
+  for (const p of patches) {
+    tr2 = tr2.removeMark(p.from, p.to, p.mark);
+    tr2 = tr2.addMark(p.from, p.to, markType.create(p.next));
+  }
+  tr2.setMeta("addToHistory", false);
+  tr2.setMeta("__activeMarkSync", true);
+  ed.view.dispatch(tr2);
+}
 function applyAnnotationMark(threadId, from2, to) {
   const tr2 = State.editor.state.tr;
   const thread = State.annotations.find((item) => item && item.threadId === threadId);
-  tr2.addMark(from2, to, State.editor.schema.marks.annotation.create({
-    threadId,
-    resolved: false,
-    authorColor: annotationAuthorColor(thread)
-  }));
+  tr2.addMark(from2, to, State.editor.schema.marks.annotation.create(annotationMarkAttrs(thread, { threadId, resolved: false })));
   tr2.setMeta("addToHistory", false);
   tr2.setMeta("__activeMarkSync", true);
   State.editor.view.dispatch(tr2);
@@ -4680,11 +4757,7 @@ function applyAnnotationMark(threadId, from2, to) {
 function applyAnnotationMarksMultiCell(threadId, ranges) {
   const tr2 = State.editor.state.tr;
   const thread = State.annotations.find((item) => item && item.threadId === threadId);
-  const mark = State.editor.schema.marks.annotation.create({
-    threadId,
-    resolved: false,
-    authorColor: annotationAuthorColor(thread)
-  });
+  const mark = State.editor.schema.marks.annotation.create(annotationMarkAttrs(thread, { threadId, resolved: false }));
   for (const r of ranges) {
     tr2.addMark(r.from, r.to, mark);
   }
@@ -4769,11 +4842,7 @@ function handleCreateMultiParagraphAnnotation(from2, to, opts = {}) {
   thread.authorColor = authorColorIndex(State.authorId || threadId);
   State.annotations.push(thread);
   const tr2 = ed.state.tr;
-  const mark = ed.schema.marks.annotation.create({
-    threadId,
-    resolved: false,
-    authorColor: annotationAuthorColor(thread)
-  });
+  const mark = ed.schema.marks.annotation.create(annotationMarkAttrs(thread, { threadId, resolved: false }));
   for (const r of ranges) {
     if (r.from < r.to) {
       tr2.addMark(r.from, r.to, mark);
@@ -4921,11 +4990,7 @@ function applyReattach() {
   for (let i = toRemove.length - 1; i >= 0; i--) {
     tr2.removeMark(toRemove[i].from, toRemove[i].to, toRemove[i].mark);
   }
-  tr2.addMark(sel.from, sel.to, markType.create({
-    threadId: tid,
-    resolved: thread.resolved,
-    authorColor: annotationAuthorColor(thread)
-  }));
+  tr2.addMark(sel.from, sel.to, markType.create(annotationMarkAttrs(thread, { threadId: tid })));
   tr2.setMeta("addToHistory", false);
   tr2.setMeta("__activeMarkSync", true);
   ed.view.dispatch(tr2);
@@ -5914,12 +5979,12 @@ function flushSourceView() {
       }
       const found2 = findAnnotationRange(editor2.state.doc, ann);
       if (found2 && typeof found2.from === "number" && typeof found2.to === "number" && found2.from < found2.to) {
-        tr2.addMark(found2.from, found2.to, markType.create({
+        tr2.addMark(found2.from, found2.to, markType.create(annotationMarkAttrs(ann, {
           threadId: snap.threadId,
           resolved: snap.resolved,
           authorColor: snap.authorColor,
           active: false
-        }));
+        })));
         syncThreadAnchorEvidence(ann, editor2.state.doc, found2, {
           exact: ann.text,
           status: found2.fuzzy ? "edited" : "attached",
@@ -6426,7 +6491,8 @@ function rebuildAnnotationMarks(markSnapshot) {
     if (thr && isMarklessImageAnn(thr) && (!Array.isArray(thr.ranges) || thr.ranges.length === 0)) {
       return false;
     }
-    const attrs = { threadId, resolved: !!resolved };
+    const thrForMark = State.annotations.find((x) => x && x.threadId === threadId);
+    const attrs = annotationMarkAttrs(thrForMark, { threadId, resolved: !!resolved });
     tr2 = tr2.addMark(from2, to, markType.create(attrs));
     seen.add(`${threadId}:${from2}-${to}`);
     rebuilt.push({ threadId, from: from2, to });
@@ -6509,6 +6575,7 @@ function rebuildAnnotationMarks(markSnapshot) {
   } catch (e) {
     console.warn("[rebuildAnnotationMarks] image deco", e);
   }
+  try { syncAnnotationMarkModeAttrs(); } catch (_) {}
   return rebuilt;
 }
 function updateHistoryButtons() {
@@ -7511,11 +7578,7 @@ function loadMarkdownIntoEditor(name, content, annotationsData = null, options =
             tr2.addMark(
               thread.range.from,
               thread.range.to,
-              State.editor.schema.marks.annotation.create({
-                threadId: ann.threadId,
-                resolved: ann.resolved,
-                authorColor: annotationAuthorColor(thread)
-              })
+              State.editor.schema.marks.annotation.create(annotationMarkAttrs(thread))
             );
             tr2.setMeta("addToHistory", false);
             tr2.setMeta("__activeMarkSync", true);
@@ -7578,11 +7641,7 @@ function loadMarkdownIntoEditor(name, content, annotationsData = null, options =
         });
         State.annotations.push(thread);
         const tr2 = State.editor.state.tr;
-        const mark = State.editor.schema.marks.annotation.create({
-          threadId: ann.threadId,
-          resolved: ann.resolved,
-          authorColor: annotationAuthorColor(thread)
-        });
+        const mark = State.editor.schema.marks.annotation.create(annotationMarkAttrs(thread));
         for (const r of resolvedTextRanges) tr2.addMark(r.from, r.to, mark);
         tr2.setMeta("addToHistory", false);
         tr2.setMeta("__activeMarkSync", true);
@@ -7653,11 +7712,7 @@ function loadMarkdownIntoEditor(name, content, annotationsData = null, options =
                 tr2.addMark(
                   positions.from,
                   positions.to,
-                  State.editor.schema.marks.annotation.create({
-                    threadId: ann.threadId,
-                    resolved: ann.resolved,
-                    authorColor: annotationAuthorColor(thread)
-                  })
+                  State.editor.schema.marks.annotation.create(annotationMarkAttrs(thread))
                 );
                 tr2.setMeta("addToHistory", false);
                 tr2.setMeta("__activeMarkSync", true);
@@ -7740,23 +7795,24 @@ function loadMarkdownIntoEditor(name, content, annotationsData = null, options =
   } catch {
   }
   renderCommentList();
-  refreshAnnotationImageDecos();
-  renderOutline();
-  setStatus("\u5DF2\u52A0\u8F7D", "");
-  updateDocMeta({ immediate: true });
-  if (typeof _openDocChannel === "function") _openDocChannel();
-  if (State.currentFile && State.currentFile.handle && typeof State.currentFile.handle.getFile === "function") {
-    State.currentFile.handle.getFile().then((f) => {
-      State.fileMtime = f.lastModified;
-    }).catch(() => {
-    });
-  } else {
-    State.fileMtime = null;
-  }
-  if (!State.activeTabId) State.activeTabId = genTabId();
-  // Snapshot AFTER handle/saveMode are on State so tab switch keeps write-back
-  snapshotActiveTab();
-  renderDocTabs();
+    try { syncAnnotationMarkModeAttrs(); } catch (_) {}
+    refreshAnnotationImageDecos();
+    renderOutline();
+    setStatus("\u5DF2\u52A0\u8F7D", "");
+    updateDocMeta({ immediate: true });
+    if (typeof _openDocChannel === "function") _openDocChannel();
+    if (State.currentFile && State.currentFile.handle && typeof State.currentFile.handle.getFile === "function") {
+      State.currentFile.handle.getFile().then((f) => {
+        State.fileMtime = f.lastModified;
+      }).catch(() => {
+      });
+    } else {
+      State.fileMtime = null;
+    }
+    if (!State.activeTabId) State.activeTabId = genTabId();
+    // Snapshot AFTER handle/saveMode are on State so tab switch keeps write-back
+    snapshotActiveTab();
+    renderDocTabs();
 }
 function findAnnotationRange(doc5, annotation) {
   _anchorResolveCallCount++;
@@ -12473,6 +12529,8 @@ window.__mdAnnotator = {
   bodyHasAiMarker,
   ensureAiMarker,
   ensureMarker,
+  annotationMarkAttrs,
+  syncAnnotationMarkModeAttrs,
   isAiCard,
   humanCommentIsWork,
   threadNeedsAiReply,

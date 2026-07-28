@@ -212,31 +212,32 @@ const { chromium } = require('playwright');
         threadTypeAi,
         threadTypeH,
         hasAi: /^@AI\b/i.test(draftAi),
-        noReviewAi: !/@REVIEW\b/i.test(draftAi),
-        stacked,
-        humanNoMarkers: !/@AI\b/i.test(draftH) && !/@REVIEW\b/i.test(draftH),
-        authorStable: authorBefore === authorAfter,
-        aiStillAi: thrA.threadType === 'ai',
-      };
-    });
-    if (
-      r.aiCreateType !== 'ai' ||
-      !r.aiStillAi ||
-      !r.noHumanBadge ||
-      !r.aiBadge ||
-      !r.noSwitcherH ||
-      !r.noSwitcherA ||
-      !r.hasAi ||
-      !r.noReviewAi ||
-      r.stacked ||
-      r.threadTypeAi !== 'ai' ||
-      (r.threadTypeH != null && r.threadTypeH !== '') ||
-      !r.humanNoMarkers ||
-      !r.authorStable
-    ) {
-      throw new Error(JSON.stringify(r));
-    }
-  });
+                noAiOnModeSwitch: !/@AI\b/i.test(draftAi),
+                noReviewAi: !/@REVIEW\b/i.test(draftAi),
+                stacked,
+                humanNoMarkers: !/@AI\b/i.test(draftH) && !/@REVIEW\b/i.test(draftH),
+                authorStable: authorBefore === authorAfter,
+                aiStillAi: thrA.threadType === 'ai',
+              };
+            });
+            if (
+              r.aiCreateType !== 'ai' ||
+              !r.aiStillAi ||
+              !r.noHumanBadge ||
+              !r.aiBadge ||
+              !r.noSwitcherH ||
+              !r.noSwitcherA ||
+              !r.noAiOnModeSwitch ||
+              !r.noReviewAi ||
+              r.stacked ||
+              r.threadTypeAi !== 'ai' ||
+              (r.threadTypeH != null && r.threadTypeH !== '') ||
+              !r.humanNoMarkers ||
+              !r.authorStable
+            ) {
+              throw new Error(JSON.stringify(r));
+            }
+          });
 
 
   await t('legacy @REVIEW body still loads as review display', async () => {
