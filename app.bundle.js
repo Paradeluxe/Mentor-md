@@ -60525,7 +60525,7 @@ var MENTION_TYPES = {
     prefix: "@AI ",
     label: "AI\u8C03\u6574",
     shortLabel: "AI\u8C03\u6574",
-    title: "AI\u8C03\u6574\uFF1A\u5EFA AI \u4EFB\u52A1\u6279\u6CE8\uFF08\u4FDD\u5B58\u540E\u53EF\u7531 /fix-mentor \u7B49\u52A9\u624B\u5904\u7406\uFF09",
+    title: "AI\u8C03\u6574\uFF1A\u5EFA AI \u6A21\u5F0F\u6279\u6CE8\uFF08\u84DD\u8272\u8EAB\u4EFD\uFF1B\u4FDD\u5B58\u540E\u53EF\u7531 /fix-mentor \u5904\u7406\uFF0C\u4E0D\u9700\u6B63\u6587\u5199 @AI\uFF09",
     shortcut: "Ctrl+Alt+I",
     placeholder: "\u544A\u8BC9 AI \u6539\u4EC0\u4E48 / \u95EE\u4EC0\u4E48\u2026"
   },
@@ -60573,9 +60573,7 @@ function markerPlaceholder(type, isReply) {
 }
 function seedDraft(threadId, type) {
   if (!threadId) return;
-  if (type && MENTION_TYPES[type]) {
-    State2.replyDrafts[threadId] = MENTION_TYPES[type].prefix;
-  } else if (State2.replyDrafts[threadId] == null) {
+  if (State2.replyDrafts[threadId] == null) {
     State2.replyDrafts[threadId] = "";
   }
 }
@@ -60589,11 +60587,11 @@ function applyThreadType(threadId, type) {
     const taLive = document.querySelector(`[data-thread-input="${threadId}"]`);
     draft = taLive ? taLive.value : "";
   }
-  draft = next2 ? ensureMarker(draft, next2) : stripMarkers(draft);
+  draft = stripMarkers(draft);
   State2.replyDrafts[threadId] = draft;
   if (Array.isArray(thread.comments) && thread.comments[0] && String(thread.comments[0].body || "").trim()) {
     const body0 = thread.comments[0].body;
-    const rewritten = next2 ? ensureMarker(body0, next2) : stripMarkers(body0);
+    const rewritten = stripMarkers(body0);
     if (rewritten !== body0) {
       thread.comments[0] = { ...thread.comments[0], body: rewritten };
     }
@@ -60629,8 +60627,6 @@ function focusThreadInput(threadId, { type = void 0 } = {}) {
       let v;
       if (State2.replyDrafts[threadId] != null) {
         v = State2.replyDrafts[threadId];
-      } else if (type && MENTION_TYPES[type]) {
-        v = MENTION_TYPES[type].prefix;
       } else {
         v = ta2.value || "";
       }
@@ -60646,6 +60642,10 @@ function focusThreadInput(threadId, { type = void 0 } = {}) {
       }
       const btn = document.querySelector(`[data-act="submit-reply"][data-thread="${threadId}"]`);
       if (btn) btn.disabled = !ta2.value.trim();
+      try {
+        ta2.dispatchEvent(new Event("input", { bubbles: true }));
+      } catch (_) {
+      }
     } else {
       ta2.focus();
     }

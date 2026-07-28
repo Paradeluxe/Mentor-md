@@ -1097,10 +1097,12 @@ body.comment-pane-collapsed #expand-comment-pane-btn {
 .annotation-active-deco[data-thread-type="review"] {
   --active-mode: var(--review);
 }
-/* Resolved active: green wins over mode */
+/* Resolved active deco: muted gray, not green mode flash */
 .annotation-mark.is-resolved .annotation-active-deco,
 .annotation-active-deco.is-resolved {
-  --active-mode: var(--success);
+  --active-mode: color-mix(in srgb, var(--text-2) 70%, transparent);
+  background: color-mix(in srgb, var(--text-2) 18%, transparent);
+  box-shadow: none;
 }
 /* Pointer Events primary interactions */
 .pane-resizer {
@@ -1690,12 +1692,25 @@ body.comment-pane-collapsed #expand-comment-pane-btn {
   border-bottom-color: var(--annotation-line);
   box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--annotation-line) 70%, transparent);
 }
+/* Resolved body: gray wash only — no dashed green underline */
 .tiptap .annotation-mark.is-resolved {
-  background: var(--resolved-soft);
-  border-bottom-color: var(--success);
+  --annotation-bg: color-mix(in srgb, var(--text-2) 14%, transparent);
+  --annotation-line: transparent;
+  background: color-mix(in srgb, var(--text-2) 14%, transparent);
+  border-bottom-color: transparent;
+  border-bottom-style: solid;
   box-shadow: none;
-  opacity: 0.75;
-  border-style: dashed;
+  opacity: 1;
+  color: inherit;
+}
+.tiptap .annotation-mark.is-resolved:hover {
+  background: color-mix(in srgb, var(--text-2) 20%, transparent);
+  opacity: 1;
+}
+.tiptap .annotation-mark.is-resolved.is-active {
+  background: color-mix(in srgb, var(--text-2) 22%, transparent);
+  border-bottom-color: transparent;
+  box-shadow: none;
 }
 
 .tiptap img.annotation-image[data-thread-type="ai"],
@@ -1712,9 +1727,10 @@ body.comment-pane-collapsed #expand-comment-pane-btn {
 
 .tiptap img.annotation-image.is-resolved,
 .ProseMirror img.annotation-image.is-resolved {
-  --annotation-state-color: var(--success);
-  border-bottom: 1px dashed var(--success);
-  opacity: 0.75;
+  --annotation-state-color: color-mix(in srgb, var(--text-2) 55%, transparent);
+  border-bottom: 2px solid color-mix(in srgb, var(--text-2) 35%, transparent);
+  opacity: 0.85;
+  filter: grayscale(0.35);
 }
 .tiptap img.annotation-image.is-resolved.is-active,
 .ProseMirror img.annotation-image.is-resolved.is-active {
@@ -2448,15 +2464,17 @@ body.refs-pane-collapsed #expand-refs-pane-btn {
     0 3px 12px color-mix(in srgb, var(--success) 7%, transparent);
   background: var(--surface-resolved);
 }
-/* 已解决 mark — 绿色虚线标识 */
+/* 已解决 mark — 灰色底，不用虚线 */
 .tiptap .annotation-mark.is-resolved {
-  background: color-mix(in srgb, var(--success) 8%, transparent);
-  border-bottom: 1px dashed var(--success);
-  opacity: 0.7;
+  background: color-mix(in srgb, var(--text-2) 14%, transparent);
+  border-bottom: none;
+  border-bottom-color: transparent;
+  opacity: 1;
+  box-shadow: none;
 }
 .tiptap .annotation-mark.is-resolved:hover {
-  background: color-mix(in srgb, var(--success) 15%, transparent);
-  opacity: 0.95;
+  background: color-mix(in srgb, var(--text-2) 20%, transparent);
+  opacity: 1;
 }
 /* 已解决卡片 — 弱化但不画删除线 */
 .comment-thread.is-resolved {

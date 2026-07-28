@@ -49,41 +49,44 @@ const { chromium } = require('playwright');
     }
   });
 
-  await t('AI selection seeds @AI draft', async () => {
-    const r = await page.evaluate(() => {
-      const M = window.__mdAnnotator;
-      M.loadMarkdownIntoEditor(
-        'ai-btn-test.md',
-        '# Title\n\nHello world unique phrase for AI button.\n',
-        null
-      );
-      const doc = M.State.editor.state.doc;
-      let from = -1, to = -1;
-      doc.descendants((node, pos) => {
-        if (node.isText && node.text.includes('unique phrase')) {
-          const i = node.text.indexOf('unique phrase');
-          from = pos + i;
-          to = from + 'unique phrase'.length;
-        }
+  await t('AI selection is mode card without default @AI draft', async () => {
+      const r = await page.evaluate(() => {
+        const M = window.__mdAnnotator;
+        M.loadMarkdownIntoEditor(
+          'ai-btn-test.md',
+          '# Title\n\nHello world unique phrase for AI button.\n',
+          null
+        );
+        const doc = M.State.editor.state.doc;
+        let from = -1, to = -1;
+        doc.descendants((node, pos) => {
+          if (node.isText && node.text.includes('unique phrase')) {
+            const i = node.text.indexOf('unique phrase');
+            from = pos + i;
+            to = from + 'unique phrase'.length;
+          }
+        });
+        if (from < 0) return { err: 'range not found' };
+        M.State.editor.commands.setTextSelection({ from, to });
+        M.createAnnotationFromSelection({ type: 'ai' });
+        const tid = M.State.activeThreadId;
+        const draft = M.State.replyDrafts[tid] || '';
+        const ta = document.querySelector(`[data-thread-input="${tid}"]`);
+        const thread = M.State.annotations.find((item) => item.threadId === tid);
+        const card = document.querySelector(`[data-thread="${tid}"]`);
+        return {
+          tid: !!tid,
+          draft,
+          taVal: ta && ta.value,
+          threadType: thread && thread.threadType,
+          noMarker: !/@AI\b/i.test(draft) && !/@AI\b/i.test((ta && ta.value) || ''),
+          isAiCard: !!(card && card.classList.contains('is-ai')),
+          ph: ta ? ta.placeholder : '',
+        };
       });
-      if (from < 0) return { err: 'range not found' };
-      M.State.editor.commands.setTextSelection({ from, to });
-      M.createAnnotationFromSelection({ type: 'ai' });
-      const tid = M.State.activeThreadId;
-      const draft = M.State.replyDrafts[tid];
-      const ta = document.querySelector(`[data-thread-input="${tid}"]`);
-      const thread = M.State.annotations.find((item) => item.threadId === tid);
-      return {
-        tid: !!tid,
-        draft,
-        taVal: ta && ta.value,
-        threadType: thread && thread.threadType,
-        hasMarker: /@AI\b/i.test(draft || '') && /@AI\b/i.test((ta && ta.value) || ''),
-      };
+      if (r.err) throw new Error(r.err);
+      if (!r.noMarker || r.threadType !== 'ai' || !r.isAiCard) throw new Error(JSON.stringify(r));
     });
-    if (r.err) throw new Error(r.err);
-    if (!r.hasMarker || r.threadType !== 'ai') throw new Error(JSON.stringify(r));
-  });
 
   await t('create type review is coerced to human (no @REVIEW)', async () => {
     const r = await page.evaluate(() => {

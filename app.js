@@ -3823,13 +3823,17 @@ function setupPaneResizer() {
 }
 /** Marker types for fix-mentor /mentor_io annotation classification.
  *  UI create/switch: only human (null) | ai. review is legacy parse/display only.
- *  Prefixes are automatic tags — not "run AI" actions. */
+ *
+ *  Mode identity = threadType (AI card = cyan). Body `@AI` / `@REVIEW` are
+ *  optional invoke markers for fix-mentor on **human** cards — never auto-seeded
+ *  into AI-mode drafts or forced onto AI-card comment bodies.
+ */
 var MENTION_TYPES = {
   ai: {
     prefix: "@AI ",
     label: "AI\u8C03\u6574",
     shortLabel: "AI\u8C03\u6574",
-    title: "AI\u8C03\u6574\uFF1A\u5EFA AI \u4EFB\u52A1\u6279\u6CE8\uFF08\u4FDD\u5B58\u540E\u53EF\u7531 /fix-mentor \u7B49\u52A9\u624B\u5904\u7406\uFF09",
+    title: "AI\u8C03\u6574\uFF1A\u5EFA AI \u6A21\u5F0F\u6279\u6CE8\uFF08\u84DD\u8272\u8EAB\u4EFD\uFF1B\u4FDD\u5B58\u540E\u53EF\u7531 /fix-mentor \u5904\u7406\uFF0C\u4E0D\u9700\u6B63\u6587\u5199 @AI\uFF09",
     shortcut: "Ctrl+Alt+I",
     placeholder: "\u544A\u8BC9 AI \u6539\u4EC0\u4E48 / \u95EE\u4EC0\u4E48\u2026"
   },
@@ -3865,7 +3869,10 @@ function stripMarkers(body) {
   } while (t !== prev);
   return t;
 }
-/** Force body to exactly one type prefix (or none). Never stacks markers. */
+/**
+ * Optional: force a leading marker on body text (human-card invoke path).
+ * AI mode cards must NOT use this for drafts — identity is threadType only.
+ */
 function ensureMarker(body, type) {
   if (!type || !MENTION_TYPES[type]) return stripMarkers(body);
   const cfg = MENTION_TYPES[type];
@@ -3883,17 +3890,21 @@ function typeLabel(type) {
   if (type === "review") return "\u5BA1\u9605"; // legacy display
   return "\u4EBA\u7C7B\u8C03\u6574";
 }
+/**
+ * Seed empty draft for new threads. AI mode = empty (no default @AI).
+ * @AI remains a manual invoke token on human cards only.
+ */
 function seedDraft(threadId, type) {
   if (!threadId) return;
-  if (type && MENTION_TYPES[type]) {
-    State.replyDrafts[threadId] = MENTION_TYPES[type].prefix;
-  } else if (State.replyDrafts[threadId] == null) {
+  // Always start empty — including AI mode. Do not prefill "@AI ".
+  if (State.replyDrafts[threadId] == null) {
     State.replyDrafts[threadId] = "";
   }
 }
 /**
  * Programmatic type change only (human | ai). No in-card UI — mode locked at float create.
- * Updates threadType, rewrite draft prefix, normalize first comment marker when present.
+ * Updates threadType. Does NOT force @AI onto bodies — AI identity is the card mode.
+ * Strips leftover @AI/@REVIEW when switching modes so markers stay opt-in.
  */
 function applyThreadType(threadId, type) {
   // Accepts ai | human(null). "review" and anything else → human.
@@ -3906,11 +3917,12 @@ function applyThreadType(threadId, type) {
     const taLive = document.querySelector(`[data-thread-input="${threadId}"]`);
     draft = taLive ? taLive.value : "";
   }
-  draft = next ? ensureMarker(draft, next) : stripMarkers(draft);
+  // Never auto-prefix; strip markers so AI card stays clean and human→AI doesn't keep stale @AI
+  draft = stripMarkers(draft);
   State.replyDrafts[threadId] = draft;
   if (Array.isArray(thread.comments) && thread.comments[0] && String(thread.comments[0].body || "").trim()) {
     const body0 = thread.comments[0].body;
-    const rewritten = next ? ensureMarker(body0, next) : stripMarkers(body0);
+    const rewritten = stripMarkers(body0);
     if (rewritten !== body0) {
       thread.comments[0] = { ...thread.comments[0], body: rewritten };
     }
@@ -3942,11 +3954,10 @@ function focusThreadInput(threadId, { type = undefined } = {}) {
       let v;
       if (State.replyDrafts[threadId] != null) {
         v = State.replyDrafts[threadId];
-      } else if (type && MENTION_TYPES[type]) {
-        v = MENTION_TYPES[type].prefix;
       } else {
         v = ta2.value || "";
       }
+      // Never inject @AI / @REVIEW into the box — mode is threadType / blue card only.
       ta2.value = v;
       const thr = State.annotations.find((t) => t && t.threadId === threadId);
       const hasBody = !!(thr && Array.isArray(thr.comments) && thr.comments[0] && String(thr.comments[0].body || "").trim());
@@ -3959,6 +3970,10 @@ function focusThreadInput(threadId, { type = undefined } = {}) {
       }
       const btn = document.querySelector(`[data-act="submit-reply"][data-thread="${threadId}"]`);
       if (btn) btn.disabled = !ta2.value.trim();
+      // keep one-line autosize in sync if present
+      try {
+        ta2.dispatchEvent(new Event("input", { bubbles: true }));
+      } catch (_) {}
     } else {
       ta2.focus();
     }
