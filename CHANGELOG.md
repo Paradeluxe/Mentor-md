@@ -2,6 +2,15 @@
 
 按时间倒序记录已发布的变化。最新条目在上方。
 
+## v1.45.9 (2026-07-28) — comment replies flat (no indent)
+
+### UI
+- 批注卡第 2 条起回复不再左缩进 / 左 rail / 缩小头像 /「回复 」前缀
+- 与根评同列时间线，仅 `border-top` 分隔；正文宽度与根评对齐
+
+### Cache
+- styles.css `?v=184`
+
 ## v1.45.6 (2026-07-28) — remove protected-document write guard
 
 ### Behavior

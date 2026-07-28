@@ -2987,38 +2987,23 @@ body.refs-pane-collapsed #expand-refs-pane-btn {
   letter-spacing: 0.005em;
 }
 
-/* Reply — 左 rail 层次, 无重边框 */
+/* Reply — flat timeline (同列, 无缩进/无左 rail); 仅顶部分隔 */
 .comment-reply {
-  padding: 8px 0 6px 12px;
-  margin: 2px 0 0 34px;
-  border-left: 2px solid color-mix(in srgb, var(--text) 8%, transparent);
+  padding: 10px 0 6px;
+  margin: 0;
+  border-left: none;
+  border-top: 1px solid var(--border-warm);
   position: relative;
   background: transparent;
 }
 .comment-reply + .comment-reply {
   margin-top: 0;
-  border-top: none;
-  padding-top: 8px;
 }
-.comment-reply .comment-avatar {
-  width: 22px;
-  height: 22px;
-  font-size: 9.5px;
-}
-.comment-reply .comment-author { font-size: 12.5px; }
-.comment-reply .comment-author::before {
-  content: "回复 ";
-  font-size: 10.5px;
-  color: var(--text-3);
-  font-weight: 400;
-  font-style: normal;
-}
+/* avatar / author / body 与根评同规格 — 不再缩小或「回复 」前缀 */
 .comment-reply .comment-body {
-  padding-left: 30px;
-  font-size: 12.5px;
-  line-height: 1.5;
+  padding-left: 34px;
 }
-.comment-reply .comment-meta { margin-bottom: 4px; gap: 6px; min-height: 22px; }
+.comment-reply .comment-meta { margin-bottom: 6px; gap: 8px; min-height: 26px; }
 
 /* Reply-toggle details — "↳ 回复" expander */
 .comment-thread .reply-toggle {
