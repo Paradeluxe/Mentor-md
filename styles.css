@@ -1081,11 +1081,26 @@ body.comment-pane-collapsed #expand-comment-pane-btn {
     touch-action: manipulation;
   }
 }
-/* Active annotation highlight via DecorationSet (not mark rewrite) */
+/* Active annotation highlight via DecorationSet (not mark rewrite).
+   Mode layer (not author layer): human=orange accent, AI=cyan, review=violet. */
 .annotation-active-deco {
-  background: color-mix(in srgb, var(--accent, #f54e00) 22%, transparent);
+  --active-mode: var(--accent);
+  background: color-mix(in srgb, var(--active-mode) 22%, transparent);
   border-radius: 2px;
-  box-shadow: inset 0 -2px 0 color-mix(in srgb, var(--accent, #f54e00) 55%, transparent);
+  box-shadow: inset 0 -2px 0 color-mix(in srgb, var(--active-mode) 55%, transparent);
+}
+.annotation-active-deco.is-ai,
+.annotation-active-deco[data-thread-type="ai"] {
+  --active-mode: var(--ai);
+}
+.annotation-active-deco.is-review,
+.annotation-active-deco[data-thread-type="review"] {
+  --active-mode: var(--review);
+}
+/* Resolved active: green wins over mode */
+.annotation-mark.is-resolved .annotation-active-deco,
+.annotation-active-deco.is-resolved {
+  --active-mode: var(--success);
 }
 /* Pointer Events primary interactions */
 .pane-resizer {
@@ -1669,9 +1684,11 @@ body.comment-pane-collapsed #expand-comment-pane-btn {
   border-bottom-color: var(--annotation-line);
 }
 .tiptap .annotation-mark.is-active {
+  /* Keep author surface; mode underline is carried by .annotation-active-deco
+     so AI stays cyan and is not forced to orange --accent. */
   background: var(--annotation-bg);
-  border-bottom-color: var(--accent);
-  box-shadow: inset 0 -2px 0 var(--accent);
+  border-bottom-color: var(--annotation-line);
+  box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--annotation-line) 70%, transparent);
 }
 .tiptap .annotation-mark.is-resolved {
   background: var(--resolved-soft);

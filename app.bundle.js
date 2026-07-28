@@ -55094,7 +55094,7 @@ function scanAnnotationMarksInRanges(doc5, markType, ranges, pad2 = 32) {
   finalizeText();
   return { threadFound, threadCurrentText, threadMarkRange, textCount, incremental: !!(ranges && ranges.length) };
 }
-function createActiveHighlightPlugin(getActiveThreadId) {
+function createActiveHighlightPlugin(getActiveThreadId, getThreadType) {
   return new Plugin({
     key: activeHighlightKey,
     state: {
@@ -55114,7 +55114,12 @@ function createActiveHighlightPlugin(getActiveThreadId) {
         if (tr2.docChanged || meta && Object.prototype.hasOwnProperty.call(meta, "threadId")) {
           return {
             threadId,
-            decos: buildActiveDecos(newState.doc, threadId, newState.schema.marks.annotation)
+            decos: buildActiveDecos(
+              newState.doc,
+              threadId,
+              newState.schema.marks.annotation,
+              getThreadType
+            )
           };
         }
         return prev;
@@ -55128,21 +55133,31 @@ function createActiveHighlightPlugin(getActiveThreadId) {
     }
   });
 }
-function buildActiveDecos(doc5, threadId, markType) {
+function buildActiveDecos(doc5, threadId, markType, getThreadType) {
   if (!threadId || !markType) return DecorationSet.empty;
+  let mode = null;
+  try {
+    if (typeof getThreadType === "function") {
+      mode = getThreadType(threadId) || null;
+    }
+  } catch (_) {
+    mode = null;
+  }
+  if (mode !== "ai" && mode !== "review") mode = null;
+  const modeClass = mode === "ai" ? " is-ai" : mode === "review" ? " is-review" : " is-human";
   const decos = [];
   doc5.descendants((node, pos) => {
     if (!node.isText) return;
     for (const m of node.marks) {
       if (m.type === markType && m.attrs.threadId === threadId) {
-        decos.push(
-          Decoration.inline(pos, pos + node.nodeSize, {
-            // Do NOT reuse .annotation-mark — that class is for real Mark DOM
-            // and e2e counts .annotation-mark nodes. Use a distinct deco class.
-            class: "annotation-active-deco",
-            "data-active-deco": "true"
-          })
-        );
+        const attrs = {
+          // Do NOT reuse .annotation-mark — that class is for real Mark DOM
+          // and e2e counts .annotation-mark nodes. Use a distinct deco class.
+          class: `annotation-active-deco${modeClass}`,
+          "data-active-deco": "true"
+        };
+        if (mode) attrs["data-thread-type"] = mode;
+        decos.push(Decoration.inline(pos, pos + node.nodeSize, attrs));
       }
     }
   });
@@ -57995,7 +58010,17 @@ var ActiveHighlightExtension = Extension.create({
   name: "active-annotation-highlight",
   addProseMirrorPlugins() {
     return [
-      createActiveHighlightPlugin(() => State2.activeThreadId)
+      createActiveHighlightPlugin(
+        () => State2.activeThreadId,
+        (tid) => {
+          try {
+            const thr = (State2.annotations || []).find((a) => a && a.threadId === tid);
+            return thr ? threadTypeOf(thr) : null;
+          } catch (_) {
+            return null;
+          }
+        }
+      )
     ];
   }
 });

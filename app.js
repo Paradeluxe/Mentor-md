@@ -1191,7 +1191,17 @@ var ActiveHighlightExtension = Extension.create({
   name: "active-annotation-highlight",
   addProseMirrorPlugins() {
     return [
-      createActiveHighlightPlugin(() => State.activeThreadId)
+      createActiveHighlightPlugin(
+        () => State.activeThreadId,
+        (tid) => {
+          try {
+            const thr = (State.annotations || []).find((a) => a && a.threadId === tid);
+            return thr ? threadTypeOf(thr) : null;
+          } catch (_) {
+            return null;
+          }
+        }
+      )
     ];
   }
 });
