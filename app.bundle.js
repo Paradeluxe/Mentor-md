@@ -58843,12 +58843,12 @@ function exportAnchorDiagnosis() {
     }
   };
 }
-function createSaveSnapshot() {
+function createSaveSnapshot(options = {}) {
   if (!State2.currentFile) throw new Error("\u672A\u6253\u5F00\u6587\u6863");
   try {
     const audit = collectLiveAnnotationAudit();
     State2._lastAnchorAudit = audit;
-    if (audit && !audit.healthy) {
+    if (!options.skipHardAudit && audit && !audit.healthy) {
       const hardCodes = /* @__PURE__ */ new Set([
         "duplicate-threadId",
         "duplicate-mark",
@@ -59066,7 +59066,12 @@ async function writeCurrentToHandle({ reason = "manual", showProgress = false, f
   try {
     snapshot = createSaveSnapshot();
   } catch (e) {
-    return { ok: false, error: e && e.message ? e.message : String(e) };
+    return {
+      ok: false,
+      error: e && e.message ? e.message : String(e),
+      code: e && e.code || void 0,
+      audit: e && e.audit || void 0
+    };
   }
   const handle = snapshot.handle;
   if (!handle) return { ok: false, error: "\u65E0\u6587\u4EF6\u53E5\u67C4" };
@@ -59442,16 +59447,17 @@ function initEditor() {
         }
         return;
       }
-      if (transaction?.docChanged && transaction?.getMeta("addToHistory") !== false) {
+      if (!transaction?.docChanged) {
+        return;
+      }
+      if (transaction?.getMeta("addToHistory") !== false) {
         State2.history.lastOp = "pm";
       }
       markDirty();
       scheduleAutosaveDebounce();
-      if (transaction?.docChanged) {
-        const cr = collectChangedRanges(transaction);
-        if (cr) State2._lastChangedRanges = cr;
-        scheduleValidateMarks(editor2, { render: true, transaction, changedRanges: cr });
-      }
+      const cr = collectChangedRanges(transaction);
+      if (cr) State2._lastChangedRanges = cr;
+      scheduleValidateMarks(editor2, { render: true, transaction, changedRanges: cr });
       scheduleRenderOutline();
     },
     onSelectionUpdate: ({ editor: editor2 }) => {
@@ -64250,7 +64256,10 @@ function setLiveRole(role) {
   State2.readOnlyMode = role === "follower";
   if (State2.editor) {
     try {
-      State2.editor.setEditable(role !== "follower");
+      const wantEditable = role !== "follower";
+      if (State2.editor.isEditable !== wantEditable) {
+        State2.editor.setEditable(wantEditable);
+      }
     } catch {
     }
   }
@@ -64535,7 +64544,9 @@ function closeLiveSync() {
   State2.readOnlyMode = false;
   if (State2.editor) {
     try {
-      State2.editor.setEditable(true);
+      if (State2.editor.isEditable !== true) {
+        State2.editor.setEditable(true);
+      }
     } catch {
     }
   }
@@ -65355,17 +65366,18 @@ async function runManualSave() {
         }
         return { ok: false, cancelled: true };
       }
-      if (result.error && /ANNOTATION_ANCHOR_AUDIT_FAILED|批注/.test(String(result.error))) {
-        const choice2 = await openSaveDialog(buildSaveDialogModel({ kind: "anchor-audit", fileName: State2.currentFile.name, issueCount: 1 }));
+      if (result.error && /ANNOTATION_ANCHOR_AUDIT_FAILED|批注锚点/.test(String(result.error))) {
+        const issueCount = (State2._lastAnchorAudit && State2._lastAnchorAudit.errors || []).length || 1;
+        const choice2 = await openSaveDialog(buildSaveDialogModel({ kind: "anchor-audit", fileName: State2.currentFile.name, issueCount }));
         if (choice2 === "secondary") {
           try {
-            const snap = createSaveSnapshot();
+            const snap = createSaveSnapshot({ skipHardAudit: true });
             return await downloadMentorSnapshot(snap, { markCleanOnSuccess: false });
           } catch (e2) {
             showToast("\u65E0\u6CD5\u53E6\u5B58: " + (e2.message || e2), 4e3);
           }
         }
-        return { ok: false, error: result.error };
+        return { ok: false, error: result.error, code: "ANNOTATION_ANCHOR_AUDIT_FAILED" };
       }
       if (result.error) {
         showToast("\u4FDD\u5B58\u5931\u8D25: " + result.error);
@@ -65378,10 +65390,19 @@ async function runManualSave() {
       snapshot = createSaveSnapshot();
     } catch (e) {
       const msg = e && e.message ? e.message : String(e);
-      if (/ANNOTATION_ANCHOR_AUDIT_FAILED/.test(msg)) {
-        const choice2 = await openSaveDialog(buildSaveDialogModel({ kind: "anchor-audit", fileName: State2.currentFile?.name, issueCount: 1 }));
-        if (choice2 === "secondary") showToast("\u8BCA\u65AD\u526F\u672C\u6682\u4E0D\u53EF\u7528: \u8BF7\u5148\u4FEE\u590D\u6279\u6CE8\u4F4D\u7F6E", 4e3);
-        return { ok: false, error: msg };
+      const isAudit = e && e.code === "ANNOTATION_ANCHOR_AUDIT_FAILED" || /ANNOTATION_ANCHOR_AUDIT_FAILED|批注锚点/.test(msg);
+      if (isAudit) {
+        const issueCount = e && e.audit && e.audit.length || (State2._lastAnchorAudit && State2._lastAnchorAudit.errors || []).length || 1;
+        const choice2 = await openSaveDialog(buildSaveDialogModel({ kind: "anchor-audit", fileName: State2.currentFile?.name, issueCount }));
+        if (choice2 === "secondary") {
+          try {
+            const snap = createSaveSnapshot({ skipHardAudit: true });
+            return await downloadMentorSnapshot(snap, { markCleanOnSuccess: false });
+          } catch (e2) {
+            showToast("\u65E0\u6CD5\u53E6\u5B58\u8BCA\u65AD\u526F\u672C: " + (e2.message || e2), 4e3);
+          }
+        }
+        return { ok: false, error: msg, code: "ANNOTATION_ANCHOR_AUDIT_FAILED" };
       }
       showToast("\u4FDD\u5B58\u5931\u8D25: " + msg, 4e3);
       return { ok: false, error: msg };

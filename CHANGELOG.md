@@ -2,6 +2,20 @@
 
 按时间倒序记录已发布的变化。最新条目在上方。
 
+## v1.45.5 (2026-07-28) — save clears dirty after download
+
+### Save false-failure
+- Symptom: toast shows「已保存」but dirty indicator stays; user thinks save failed.
+- Root cause: TipTap `onUpdate` called `markDirty()` on non-doc transactions (e.g. `setEditable` from live-sync `setLiveRole` during zip build). That bumped `dirtyGen` mid-save so `markClean` was skipped.
+- Fix: `onUpdate` only marks dirty when `transaction.docChanged`; `setLiveRole`/`closeLiveSync` skip no-op `setEditable`.
+
+### Anchor-audit save path
+- No-handle audit failures now open the dialog (match `e.code` / Chinese message), not only toast.
+- Diagnostic「另存副本」uses `createSaveSnapshot({ skipHardAudit: true })` so secondary download works.
+
+### Tests
+- tests/e2e-save-clears-dirty.spec.js
+
 ## v1.45.4 (2026-07-28) — fix blank gap under tabs with live-sync
 
 ### Layout

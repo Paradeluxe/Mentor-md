@@ -2416,13 +2416,14 @@ function exportAnchorDiagnosis() {
     }
   };
 }
-function createSaveSnapshot() {
+function createSaveSnapshot(options = {}) {
   if (!State.currentFile) throw new Error("\u672A\u6253\u5F00\u6587\u6863");
   // Hard-block structurally inconsistent archives before write
+  // skipHardAudit: diagnostic / 另存副本 only — never use for in-place write-back.
   try {
     const audit = collectLiveAnnotationAudit();
     State._lastAnchorAudit = audit;
-    if (audit && !audit.healthy) {
+    if (!options.skipHardAudit && audit && !audit.healthy) {
       const hardCodes = new Set([
         "duplicate-threadId",
         "duplicate-mark",
@@ -2662,11 +2663,16 @@ async function writeCurrentToHandle({ reason = "manual", showProgress = false, f
     }
   }
   let snapshot;
-  try {
-    snapshot = createSaveSnapshot();
-  } catch (e) {
-    return { ok: false, error: e && e.message ? e.message : String(e) };
-  }
+    try {
+      snapshot = createSaveSnapshot();
+    } catch (e) {
+      return {
+        ok: false,
+        error: e && e.message ? e.message : String(e),
+        code: e && e.code || undefined,
+        audit: e && e.audit || undefined
+      };
+    }
   const handle = snapshot.handle;
   if (!handle) return { ok: false, error: "\u65E0\u6587\u4EF6\u53E5\u67C4" };
   // Permission: background autosave must already be granted (no user gesture).
@@ -3037,28 +3043,32 @@ function initEditor() {
           ],
     content: "",
     onUpdate: ({ editor: editor2, transaction }) => {
-      if (transaction?.getMeta("__activeMarkSync") || transaction?.getMeta("__tableDragSelect")) {
-        return;
-      }
-      // Cross-page apply: do not dirty / autosave / history from remote setContent
-      if (_liveSync && _liveSync.applying) {
-        if (transaction?.docChanged) {
+          if (transaction?.getMeta("__activeMarkSync") || transaction?.getMeta("__tableDragSelect")) {
+            return;
+          }
+          // Cross-page apply: do not dirty / autosave / history from remote setContent
+          if (_liveSync && _liveSync.applying) {
+            if (transaction?.docChanged) {
+              scheduleRenderOutline();
+            }
+            return;
+          }
+          // TipTap also emits onUpdate for non-doc changes (e.g. setEditable from live-sync
+          // setLiveRole). Those must NOT markDirty — otherwise dirtyGen bumps mid-save and
+          // markClean is skipped → user sees toast「已保存」但脏点仍在，像保存失败。
+          if (!transaction?.docChanged) {
+            return;
+          }
+          if (transaction?.getMeta("addToHistory") !== false) {
+            State.history.lastOp = "pm";
+          }
+          markDirty();
+          scheduleAutosaveDebounce();
+          const cr = collectChangedRanges(transaction);
+          if (cr) State._lastChangedRanges = cr;
+          scheduleValidateMarks(editor2, { render: true, transaction, changedRanges: cr });
           scheduleRenderOutline();
-        }
-        return;
-      }
-      if (transaction?.docChanged && transaction?.getMeta("addToHistory") !== false) {
-        State.history.lastOp = "pm";
-      }
-      markDirty();
-      scheduleAutosaveDebounce();
-      if (transaction?.docChanged) {
-        const cr = collectChangedRanges(transaction);
-        if (cr) State._lastChangedRanges = cr;
-        scheduleValidateMarks(editor2, { render: true, transaction, changedRanges: cr });
-      }
-      scheduleRenderOutline();
-    },
+        },
     onSelectionUpdate: ({ editor: editor2 }) => {
       handleSelectionChange();
       updateTableControls();
@@ -8033,7 +8043,11 @@ function setLiveRole(role) {
   State.readOnlyMode = role === "follower";
   if (State.editor) {
     try {
-      State.editor.setEditable(role !== "follower");
+      const wantEditable = role !== "follower";
+      // Avoid no-op setEditable → TipTap onUpdate → false markDirty (breaks save markClean).
+      if (State.editor.isEditable !== wantEditable) {
+        State.editor.setEditable(wantEditable);
+      }
     } catch {
     }
   }
@@ -8332,7 +8346,9 @@ function closeLiveSync() {
   State.readOnlyMode = false;
   if (State.editor) {
     try {
-      State.editor.setEditable(true);
+      if (State.editor.isEditable !== true) {
+        State.editor.setEditable(true);
+      }
     } catch {
     }
   }
@@ -9131,18 +9147,19 @@ async function runManualSave() {
         }
         return { ok: false, cancelled: true };
       }
-      if (result.error && /ANNOTATION_ANCHOR_AUDIT_FAILED|批注/.test(String(result.error))) {
-        const choice = await openSaveDialog(buildSaveDialogModel({ kind: "anchor-audit", fileName: State.currentFile.name, issueCount: 1 }));
-        if (choice === "secondary") {
-          try {
-            const snap = createSaveSnapshot(); // may throw again
-            return await downloadMentorSnapshot(snap, { markCleanOnSuccess: false });
-          } catch (e2) {
-            showToast("无法另存: " + (e2.message || e2), 4000);
-          }
-        }
-        return { ok: false, error: result.error };
-      }
+      if (result.error && /ANNOTATION_ANCHOR_AUDIT_FAILED|批注锚点/.test(String(result.error))) {
+              const issueCount = (State._lastAnchorAudit && State._lastAnchorAudit.errors || []).length || 1;
+              const choice = await openSaveDialog(buildSaveDialogModel({ kind: "anchor-audit", fileName: State.currentFile.name, issueCount }));
+              if (choice === "secondary") {
+                try {
+                  const snap = createSaveSnapshot({ skipHardAudit: true });
+                  return await downloadMentorSnapshot(snap, { markCleanOnSuccess: false });
+                } catch (e2) {
+                  showToast("无法另存: " + (e2.message || e2), 4000);
+                }
+              }
+              return { ok: false, error: result.error, code: "ANNOTATION_ANCHOR_AUDIT_FAILED" };
+            }
       if (result.error) {
         showToast("保存失败: " + result.error);
         setStatus("保存失败", result.error);
@@ -9151,19 +9168,28 @@ async function runManualSave() {
     }
 
     // No write handle: explain + recommend .mentor
-    let snapshot;
-    try {
-      snapshot = createSaveSnapshot();
-    } catch (e) {
-      const msg = e && e.message ? e.message : String(e);
-      if (/ANNOTATION_ANCHOR_AUDIT_FAILED/.test(msg)) {
-        const choice = await openSaveDialog(buildSaveDialogModel({ kind: "anchor-audit", fileName: State.currentFile?.name, issueCount: 1 }));
-        if (choice === "secondary") showToast("诊断副本暂不可用: 请先修复批注位置", 4000);
-        return { ok: false, error: msg };
-      }
-      showToast("保存失败: " + msg, 4000);
-      return { ok: false, error: msg };
-    }
+        let snapshot;
+        try {
+          snapshot = createSaveSnapshot();
+        } catch (e) {
+          const msg = e && e.message ? e.message : String(e);
+          const isAudit = (e && e.code === "ANNOTATION_ANCHOR_AUDIT_FAILED") || /ANNOTATION_ANCHOR_AUDIT_FAILED|批注锚点/.test(msg);
+          if (isAudit) {
+            const issueCount = (e && e.audit && e.audit.length) || (State._lastAnchorAudit && State._lastAnchorAudit.errors || []).length || 1;
+            const choice = await openSaveDialog(buildSaveDialogModel({ kind: "anchor-audit", fileName: State.currentFile?.name, issueCount }));
+            if (choice === "secondary") {
+              try {
+                const snap = createSaveSnapshot({ skipHardAudit: true });
+                return await downloadMentorSnapshot(snap, { markCleanOnSuccess: false });
+              } catch (e2) {
+                showToast("无法另存诊断副本: " + (e2.message || e2), 4000);
+              }
+            }
+            return { ok: false, error: msg, code: "ANNOTATION_ANCHOR_AUDIT_FAILED" };
+          }
+          showToast("保存失败: " + msg, 4000);
+          return { ok: false, error: msg };
+        }
     const model = buildSaveDialogModel({
       kind: "no-handle",
       fileName: snapshot.name,
