@@ -6051,7 +6051,15 @@ function renderOutline() {
   const items = [];
   editor2.state.doc.descendants((node, pos) => {
     if (node.type.name === "heading" && node.attrs.level >= 1 && node.attrs.level <= 3) {
-      items.push({ level: node.attrs.level, text: node.textContent || "", pos });
+      items.push({ level: node.attrs.level, text: node.textContent || "", pos, kind: "heading" });
+    } else if (node.type.name === "bibliography") {
+      // Same as a normal H1 in the outline — field is non-editable but navigable.
+      items.push({
+        level: 1,
+        text: (node.attrs && node.attrs.heading) || "References",
+        pos,
+        kind: "bibliography"
+      });
     }
   });
   if (items.length === 0) {
@@ -6060,14 +6068,23 @@ function renderOutline() {
   }
   const rows = items;
   pane.innerHTML = rows.map(
-    (it) => `<div class="outline-item outline-h${it.level}" role="treeitem" tabindex="0" data-pos="${it.pos}" title="${escapeHtml(it.text)}"><span class="outline-text">${escapeHtml(it.text) || "(\u65E0\u6807\u9898)"}</span></div>`
+    (it) => `<div class="outline-item outline-h${it.level}" role="treeitem" tabindex="0" data-pos="${it.pos}" data-kind="${it.kind || "heading"}" title="${escapeHtml(it.text)}"><span class="outline-text">${escapeHtml(it.text) || "(\u65E0\u6807\u9898)"}</span></div>`
   ).join("");
   const jumpOutline = (el) => {
     const pos = parseInt(el.dataset.pos, 10);
     if (Number.isNaN(pos)) return;
     try {
-      const $pos = editor2.state.doc.resolve(pos + 1);
-      editor2.chain().focus().setTextSelection($pos.pos).run();
+      const kind = el.dataset.kind || "heading";
+      if (kind === "bibliography") {
+        // Atom node: NodeSelection + scroll into view
+        try { editor2.chain().focus().setNodeSelection(pos).run(); } catch (_) {
+          editor2.commands.focus();
+          editor2.commands.setNodeSelection(pos);
+        }
+      } else {
+        const $pos = editor2.state.doc.resolve(pos + 1);
+        editor2.chain().focus().setTextSelection($pos.pos).run();
+      }
       const dom = editor2.view.nodeDOM(pos);
       if (dom && dom.scrollIntoView) dom.scrollIntoView({ behavior: "smooth", block: "start" });
     } catch (e) {
