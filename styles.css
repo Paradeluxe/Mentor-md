@@ -256,9 +256,8 @@ code {
 
 /* ============ App layout ============ */
 #app {
-  /* flex — not fixed 4-row grid. live-sync-banner is an optional 5th child;
-     when it leaves display:none, a 4-track grid reassigns 1fr onto #doc-tabs
-     and leaves a huge blank under the tabs (v1.45.4). */
+  /* flex column: toolbar → doc-tabs → main → statusbar.
+     live-sync lives inside #statusbar (not a full-width row). */
   display: flex;
   flex-direction: column;
   height: 100vh;
@@ -415,7 +414,28 @@ code {
 
 /* (legacy format masks removed → v1.43.34) */
 
-#title-group { margin-left: auto; font-size: 12.5px; color: var(--text-2); display: flex; align-items: center; gap: 6px; position: relative; }
+#title-group {
+  margin-left: auto;
+  font-size: 12.5px;
+  color: var(--text-2);
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  position: sticky;
+  right: 0;
+  z-index: 2;
+  flex-shrink: 0;
+  padding-left: 10px;
+  background: var(--chrome);
+}
+/* Beat `#toolbar [data-toolbar-group] + [data-toolbar-group]` (margin-left:2px) */
+#toolbar [data-toolbar-group] + [data-toolbar-group="title"],
+#toolbar > #title-group {
+  margin-left: auto;
+  border-left: none;
+  padding-left: 10px;
+}
 /* v1.43.24: 顶栏文件列表（替代 current-file-name 纯文本 + 侧栏最近文件） */
 .file-list-wrap {
   position: relative;
@@ -3208,6 +3228,7 @@ body.refs-pane-collapsed #expand-refs-pane-btn {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 10px;
   padding: 4px 12px;
   min-height: 26px;
   background: var(--chrome);
@@ -3215,6 +3236,101 @@ body.refs-pane-collapsed #expand-refs-pane-btn {
   font-size: 11px;
   color: var(--text-3);
   letter-spacing: 0.01px;
+}
+#statusbar #status-left {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#statusbar #status-right {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
+}
+#statusbar #export-progress {
+  flex-shrink: 0;
+}
+
+/* Live-sync: compact chip inside statusbar (not a full-width row) */
+#statusbar .live-sync-banner {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  padding: 0 4px;
+  margin: 0;
+  background: transparent;
+  border: none;
+  color: var(--text-2);
+  font-size: 11px;
+  line-height: 1.3;
+  justify-content: center;
+}
+#statusbar .live-sync-banner.hidden { display: none !important; }
+#statusbar .live-sync-banner #live-sync-text {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#statusbar .live-sync-banner button[data-act="live-sync-takeover"] {
+  height: 20px;
+  padding: 0 8px;
+  font-size: 11px;
+}
+
+/* Legacy class hooks (banner may still be queried by id) */
+.live-sync-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-2);
+  font-size: 12px;
+  line-height: 1.3;
+}
+.live-sync-banner.hidden { display: none; }
+.live-sync-banner .live-sync-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-3);
+  flex-shrink: 0;
+}
+.live-sync-banner[data-role="owner"] .live-sync-dot {
+  background: var(--accent);
+}
+.live-sync-banner[data-role="follower"] .live-sync-dot {
+  background: var(--text-3);
+}
+.live-sync-banner #live-sync-text {
+  flex: 1;
+  min-width: 0;
+}
+.live-sync-banner button[data-act="live-sync-takeover"] {
+  flex-shrink: 0;
+  height: 22px;
+  padding: 0 10px;
+  border: 1px solid var(--border-warm);
+  border-radius: var(--radius-sm);
+  background: var(--panel-3);
+  color: var(--text);
+  font: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+.live-sync-banner button[data-act="live-sync-takeover"]:hover {
+  background: var(--panel);
+}
+.live-sync-banner button[data-act="live-sync-takeover"][hidden] {
+  display: none;
 }
 
 /* ============ Modal (统一视觉: 与 help popover 共享 design tokens) ============ */
@@ -3507,55 +3623,7 @@ body.refs-pane-collapsed #expand-refs-pane-btn {
 }
 
 
-/* === Cross-page live sync status bar === */
-.live-sync-banner {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 26px;
-  padding: 0 12px;
-  background: var(--panel-2);
-  border-bottom: 1px solid var(--border-warm);
-  color: var(--text-2);
-  font-size: 12px;
-  line-height: 1.3;
-}
-.live-sync-banner.hidden { display: none; }
-.live-sync-banner .live-sync-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--text-3);
-  flex-shrink: 0;
-}
-.live-sync-banner[data-role="owner"] .live-sync-dot {
-  background: var(--accent);
-}
-.live-sync-banner[data-role="follower"] .live-sync-dot {
-  background: var(--text-3);
-}
-.live-sync-banner #live-sync-text {
-  flex: 1;
-  min-width: 0;
-}
-.live-sync-banner button[data-act="live-sync-takeover"] {
-  flex-shrink: 0;
-  height: 22px;
-  padding: 0 10px;
-  border: 1px solid var(--border-warm);
-  border-radius: var(--radius-sm);
-  background: var(--panel-3);
-  color: var(--text);
-  font: inherit;
-  font-size: 11.5px;
-  cursor: pointer;
-}
-.live-sync-banner button[data-act="live-sync-takeover"]:hover {
-  background: var(--panel);
-}
-.live-sync-banner button[data-act="live-sync-takeover"][hidden] {
-  display: none;
-}
+/* === Cross-page live sync status (styles live under #statusbar) === */
 
 /* === v1.43.33 multi-doc tabs — Chrome/Linear 紧凑条 + active 底线 === */
 .doc-tabs {

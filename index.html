@@ -7,7 +7,7 @@
 <meta name="build" content="v1.45.7 cache-bust v=171" />
 <!-- v1.43.37 offline: local fonts + KaTeX (no CDN) -->
 <link rel="stylesheet" href="vendor/fonts/local-fonts.css?v=1" />
-<link rel="stylesheet" href="styles.css?v=177" />
+<link rel="stylesheet" href="styles.css?v=178" />
 <link rel="stylesheet" href="vendor/katex/katex.min.css?v=1" />
 <!-- 字体：系统无衬线 + 等宽（侧栏时间戳、文件名） -->
 <style>
@@ -98,16 +98,11 @@
         </div>
   </header>
 
-  <!-- v1.43.31: 多文档标签栏 -->
-  <div id="live-sync-banner" class="live-sync-banner hidden" role="status" aria-live="polite">
-    <span class="live-sync-dot" aria-hidden="true"></span>
-    <span id="live-sync-text"></span>
-    <button type="button" data-act="live-sync-takeover">接管编辑</button>
-  </div>
-  <div id="doc-tabs" class="doc-tabs" role="tablist" aria-label="打开的文档"></div>
+    <!-- v1.43.31: 多文档标签栏 -->
+    <div id="doc-tabs" class="doc-tabs" role="tablist" aria-label="打开的文档"></div>
 
-  <!-- Main 3-pane layout -->
-  <main id="main">
+    <!-- Main 3-pane layout -->
+    <main id="main">
     <!-- 左：大纲视图（根据当前文档 H1/H2/H3 自动生成） -->
     <aside id="file-pane">
       <div class="pane-resizer" data-pane-resize="outline" title="拖动调整大纲栏宽度"></div>
@@ -225,12 +220,17 @@
   </main>
 
   <!-- 状态栏 -->
-  <footer id="statusbar">
-      <span id="status-left">就绪</span>
-      <span id="export-progress" class="export-progress hidden" aria-live="polite" aria-busy="false"></span>
-      <span id="status-right"></span>
-    </footer>
-</div>
+    <footer id="statusbar">
+        <span id="status-left">就绪</span>
+        <div id="live-sync-banner" class="live-sync-banner hidden" role="status" aria-live="polite">
+          <span class="live-sync-dot" aria-hidden="true"></span>
+          <span id="live-sync-text"></span>
+          <button type="button" data-act="live-sync-takeover">接管编辑</button>
+        </div>
+        <span id="export-progress" class="export-progress hidden" aria-live="polite" aria-busy="false"></span>
+        <span id="status-right"></span>
+      </footer>
+  </div>
 
 <!-- 浮动"作者"输入框 (首次使用 / 修改作者) -->
 <div id="author-modal" class="modal hidden">
@@ -325,7 +325,7 @@
 
 <!-- v1.43.37 offline: bundled app (esbuild) + local icons; no esm.sh -->
 <script src="icons.js?v=4"></script>
-<script type="module" src="app.bundle.js?v=177"></script>
+<script type="module" src="app.bundle.js?v=178"></script>
 <!-- 帮助 popover (浮在 body 顶层, 位置由 JS 动态计算) -->
 <div id="help-popover" class="help-popover hidden" role="tooltip">
   <div class="help-popover-arrow"></div>
