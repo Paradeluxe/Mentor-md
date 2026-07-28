@@ -4,10 +4,10 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Mentor — 像 docx 一样批注 Markdown</title>
-<meta name="build" content="v1.45.6 cache-bust v=170" />
+<meta name="build" content="v1.45.7 cache-bust v=171" />
 <!-- v1.43.37 offline: local fonts + KaTeX (no CDN) -->
 <link rel="stylesheet" href="vendor/fonts/local-fonts.css?v=1" />
-<link rel="stylesheet" href="styles.css?v=170" />
+<link rel="stylesheet" href="styles.css?v=171" />
 <link rel="stylesheet" href="vendor/katex/katex.min.css?v=1" />
 <!-- 字体：系统无衬线 + 等宽（侧栏时间戳、文件名） -->
 <style>
@@ -202,6 +202,16 @@
         <button type="button" id="refs-import-btn" class="refs-action-btn"><span class="refs-action-icon" aria-hidden="true"></span><span>导入文献</span></button>
         <button type="button" id="refs-export-btn" class="refs-action-btn"><span class="refs-action-icon" aria-hidden="true"></span><span>导出 BibTeX</span></button>
       </div>
+      <div class="refs-bibliography" aria-label="受控文献列表操作">
+        <button type="button" id="refs-bibliography-toggle" class="refs-action-btn refs-bib-toggle" data-enabled="false" title="在文档末尾插入受控文献列表字段（条目来自文献库）"><span class="refs-action-icon" aria-hidden="true"></span><span class="refs-bib-label">插入文献列表</span></button>
+        <label class="refs-bib-scope-wrap" for="refs-bibliography-scope">范围
+          <select id="refs-bibliography-scope" class="refs-bib-scope" aria-label="文献列表范围">
+            <option value="cited">仅引用</option>
+            <option value="all">全部文献库</option>
+          </select>
+        </label>
+        <button type="button" id="refs-convert-legacy-btn" class="refs-action-btn refs-bib-convert" title="将手写的 # References 段转换为受控文献列表（unsafe 时禁用）">转换手写 References…</button>
+      </div>
       <div class="refs-search-wrap">
         <input type="search" id="refs-search" placeholder="按 citekey / 作者 / 标题过滤…" aria-label="过滤文献">
       </div>
@@ -313,7 +323,7 @@
 
 <!-- v1.43.37 offline: bundled app (esbuild) + local icons; no esm.sh -->
 <script src="icons.js?v=4"></script>
-<script type="module" src="app.bundle.js?v=170"></script>
+<script type="module" src="app.bundle.js?v=171"></script>
 <!-- 帮助 popover (浮在 body 顶层, 位置由 JS 动态计算) -->
 <div id="help-popover" class="help-popover hidden" role="tooltip">
   <div class="help-popover-arrow"></div>

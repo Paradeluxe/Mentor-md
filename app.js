@@ -67,6 +67,7 @@ import {
   normalizeReferenceManifest,
   emptyReferenceManifest,
   createReferenceManifest,
+  normalizeBibliographyConfig,
   serializeReferenceBibTeX,
   formatReferenceEntry,
   normalizeReferenceEntry,
@@ -75,7 +76,13 @@ import {
   upsertReferenceEntry,
   removeReferenceEntry,
   mergeReferenceEntries,
-  renameCitationKey
+  renameCitationKey,
+  BIBLIOGRAPHY_MARKER,
+  selectBibliographyEntries,
+  buildBibliographyModel,
+  materializeBibliographyMarkdown,
+  planLegacyBibliographyMigration,
+  splitLegacyReferencesSection
 } from './modules/references.js';
 import {
   findOccurrences,
@@ -325,6 +332,264 @@ var CitationNode = Node.create({
     }, label];
   }
 });
+
+// v1.45.7+: BibliographyNode — EndNote-style generated references block.
+// Semantically a non-editable atom that lives at one fixed position in the
+// document. On the wire it serializes back to a `<!-- mentor:bibliography -->`
+// marker; in the WYSIWYG view the heading + entries are read from the
+// reference library via `buildBibliographyModel`.
+var BibliographyNode = Node.create({
+  name: "bibliography",
+  group: "block",
+  atom: true,
+  selectable: true,
+  draggable: false,
+  addAttributes() {
+    return {
+      heading: { default: "References" },
+      scope: { default: "cited" },
+      items: {
+        default: [],
+        parseHTML: (el) => {
+          try {
+            const raw = el.getAttribute("data-bibliography-items") || "[]";
+            const arr = JSON.parse(raw);
+            return Array.isArray(arr) ? arr : [];
+          } catch (e) { return []; }
+        },
+        renderHTML: (attrs) => ({ "data-bibliography-items": JSON.stringify(attrs.items || []) })
+      },
+      keys: {
+        default: [],
+        parseHTML: (el) => {
+          try {
+            const raw = el.getAttribute("data-bibliography-keys") || "[]";
+            const arr = JSON.parse(raw);
+            return Array.isArray(arr) ? arr : [];
+          } catch (e) { return []; }
+        },
+        renderHTML: (attrs) => ({ "data-bibliography-keys": JSON.stringify(attrs.keys || []) })
+      },
+      enabled: { default: false, renderHTML: (attrs) => ({}) }
+    };
+  },
+  parseHTML() {
+    return [{
+      tag: "section[data-mentor-bibliography]",
+      getAttrs: (node) => ({
+        heading: node.getAttribute("data-bibliography-heading") || "References",
+        scope: node.getAttribute("data-bibliography-scope") || "cited",
+        items: (() => {
+          try {
+            const arr = JSON.parse(node.getAttribute("data-bibliography-items") || "[]");
+            return Array.isArray(arr) ? arr : [];
+          } catch (e) { return []; }
+        })(),
+        keys: (() => {
+          try {
+            const arr = JSON.parse(node.getAttribute("data-bibliography-keys") || "[]");
+            return Array.isArray(arr) ? arr : [];
+          } catch (e) { return []; }
+        })()
+      })
+    }];
+  },
+  renderHTML({ node }) {
+    const attrs = node.attrs || {};
+    const heading = attrs.heading || "References";
+    const items = Array.isArray(attrs.items) ? attrs.items : [];
+    const entryXml = items.map((item) => {
+      const txt = (item && (item.markdown || item.plainText)) || "";
+      return ["p", {
+        class: "mentor-bibliography-entry",
+        "data-key": (item && item.key) || ""
+      }, txt];
+    });
+    return ["section", {
+      class: "mentor-bibliography",
+      "data-mentor-bibliography": "true",
+      "data-bibliography-heading": heading,
+      "data-bibliography-scope": attrs.scope || "cited",
+      "data-bibliography-keys": JSON.stringify(attrs.keys || []),
+      "data-bibliography-items": JSON.stringify(items),
+      contenteditable: "false"
+    }, ["h1", { class: "mentor-bibliography-heading" }, heading], ...entryXml];
+  }
+});
+
+// Helper: read citation keys (first occurrence order) across the document.
+function _collectCitationKeys(doc) {
+  const keys = [];
+  const seen = new Set();
+  doc.descendants((node) => {
+    if (!node || !node.type || node.type.name !== "citation") return;
+    for (const k of (node.attrs && node.attrs.keys) || []) {
+      if (!k || seen.has(k)) continue;
+      seen.add(k);
+      keys.push(k);
+    }
+  });
+  return keys;
+}
+// HTML-side helper used by DOCX & export where we have a raw HTML string,
+// not a live PM doc.
+function _collectCitationKeysFromHtml(html) {
+  const re = /data-citation-raw="([^"]+)"/g;
+  const seen = new Set();
+  const keys = [];
+  let m;
+  while ((m = re.exec(String(html || ""))) !== null) {
+    try {
+      const raw = m[1];
+      const items = parseCitationSyntax(raw).items || [];
+      for (const it of items) {
+        if (it && it.key && !seen.has(it.key)) { seen.add(it.key); keys.push(it.key); }
+      }
+    } catch (e) {}
+  }
+  return keys;
+}
+
+// Update existing BibliographyNode attrs in-place. Never inserts new ones —
+// user must click "插入文献列表" for the first install. Never rewrites library.
+function reconcileBibliographyNode() {
+  if (!State.editor) return null;
+  const editor2 = State.editor;
+  const refConfig = normalizeBibliographyConfig(
+    (State.references && State.references.bibliography) || { enabled: false, scope: "cited", heading: "References" }
+  );
+  if (!refConfig.enabled) return null;
+  const keys = _collectCitationKeys(editor2.state.doc);
+  const model = buildBibliographyModel(State.references || emptyReferenceManifest(), keys, refConfig);
+  let tr = editor2.state.tr;
+  let updated = false;
+  let count = 0;
+  editor2.state.doc.descendants((node, pos) => {
+    if (!node.type || node.type.name !== "bibliography") return;
+    count += 1;
+    const attrs = { ...node.attrs, heading: model.heading, scope: model.scope, keys: model.keys, items: model.items };
+    if (JSON.stringify(attrs) !== JSON.stringify(node.attrs)) {
+      tr = tr.setNodeMarkup(pos, undefined, attrs);
+      updated = true;
+    }
+  });
+  if (updated) {
+    tr.setMeta("addToHistory", false);
+    tr.setMeta("__bibliographyRecon", true);
+    try { editor2.view.dispatch(tr); } catch (e) { /* best-effort */ }
+  }
+  return { updated, count, model };
+}
+
+function insertBibliographyField() {
+  if (!State.editor) return false;
+  const editor2 = State.editor;
+  const refConfig = normalizeBibliographyConfig(
+    (State.references && State.references.bibliography) || { enabled: false, scope: "cited", heading: "References" }
+  );
+  // Reject when an enabled bibliography atom is already present
+  let existing = 0;
+  editor2.state.doc.descendants((node) => {
+    if (node.type && node.type.name === "bibliography" && (node.attrs.enabled || refConfig.enabled)) existing += 1;
+  });
+  if (existing > 0) return false;
+  const newConfig = normalizeBibliographyConfig({ ...refConfig, enabled: true });
+  State.references = createReferenceManifest({
+    sourceName: (State.references && State.references.source && State.references.source.name) || "",
+    sourceFormat: (State.references && State.references.source && State.references.source.format) || "",
+    entries: (State.references && State.references.entries) || [],
+    bibliography: newConfig
+  });
+  const model = buildBibliographyModel(State.references, _collectCitationKeys(editor2.state.doc), newConfig);
+  const attrs = { heading: model.heading, scope: model.scope, keys: model.keys, items: model.items, enabled: true };
+  let placed = false;
+  const emptySelection =
+    editor2.state.selection && editor2.state.selection.from === editor2.state.selection.to;
+  if (emptySelection) {
+    // Find last heading boundary; if no headings, append to end of doc
+    let appendPos = editor2.state.doc.content.size;
+    editor2.state.doc.descendants((node, pos) => {
+      if (node.type && node.type.name === "heading" && pos >= 0) appendPos = pos;
+    });
+    try {
+      const tr = editor2.state.tr.insert(appendPos, editor2.schema.nodes.bibliography.create(attrs));
+      tr.setMeta("addToHistory", true);
+      editor2.view.dispatch(tr);
+      placed = true;
+    } catch (e) { placed = false; }
+  }
+  if (!placed) {
+    try {
+      editor2.chain().focus().insertContent({ type: "bibliography", attrs }).run();
+      placed = true;
+    } catch (e) { placed = false; }
+  }
+  if (placed) {
+    markDirty();
+    scheduleIdbCacheWrite();
+    try { if (typeof snapshotActiveTab === "function") snapshotActiveTab(); } catch (_) {}
+  }
+  return placed;
+}
+
+function removeBibliographyField({ confirm = true } = {}) {
+  if (!State.editor) return false;
+  const editor2 = State.editor;
+  let count = 0;
+  editor2.state.doc.descendants((node) => {
+    if (node.type && node.type.name === "bibliography") count += 1;
+  });
+  if (count === 0) return false;
+  if (confirm) {
+    let proceed = true;
+    try { proceed = typeof window.confirm === "function" ? window.confirm("确定移除文献列表？只移除显示区，正文引用与文献库不变。") : true; } catch (_) { proceed = true; }
+    if (!proceed) return false;
+  }
+  const refConfig = normalizeBibliographyConfig(
+    (State.references && State.references.bibliography) || { enabled: false, scope: "cited", heading: "References" }
+  );
+  const newConfig = normalizeBibliographyConfig({ ...refConfig, enabled: false });
+  State.references = createReferenceManifest({
+    sourceName: (State.references && State.references.source && State.references.source.name) || "",
+    sourceFormat: (State.references && State.references.source && State.references.source.format) || "",
+    entries: (State.references && State.references.entries) || [],
+    bibliography: newConfig
+  });
+  let tr = editor2.state.tr;
+    const kills = [];
+    editor2.state.doc.descendants((node, pos) => {
+      if (node.type && node.type.name === "bibliography") kills.push({ pos, size: node.nodeSize });
+    });
+    // delete from back so earlier positions stay valid; use full nodeSize
+    kills.sort((a, b) => b.pos - a.pos).forEach((k) => { tr = tr.delete(k.pos, k.pos + k.size); });
+    tr.setMeta("addToHistory", true);
+    tr.setMeta("__bibliographyRecon", true);
+    editor2.view.dispatch(tr);
+  markDirty();
+  scheduleIdbCacheWrite();
+  try { if (typeof snapshotActiveTab === "function") snapshotActiveTab(); } catch (_) {}
+  return true;
+}
+
+function setBibliographyScope(scope) {
+  const target = scope === "all" ? "all" : "cited";
+  const refConfig = normalizeBibliographyConfig(
+    (State.references && State.references.bibliography) || { enabled: false, scope: "cited", heading: "References" }
+  );
+  const newConfig = normalizeBibliographyConfig({ ...refConfig, scope: target });
+  State.references = createReferenceManifest({
+    sourceName: (State.references && State.references.source && State.references.source.name) || "",
+    sourceFormat: (State.references && State.references.source && State.references.source.format) || "",
+    entries: (State.references && State.references.entries) || [],
+    bibliography: newConfig
+  });
+  reconcileBibliographyNode();
+  markDirty();
+  scheduleIdbCacheWrite();
+  try { if (typeof snapshotActiveTab === "function") snapshotActiveTab(); } catch (_) {}
+  return newConfig.scope;
+}
+
 var State = {
   editor: null,
   currentFile: null,
@@ -337,10 +602,12 @@ var State = {
   // 用户唯一 ID, 永不改变
   author: localStorage.getItem("Mentor:author") || "",
   // 显示名, 可改
-  // v1.43.51+: 当前文档的参考引用库. v0 manifest 形状:
-  //   { version, source: {name, format}, updatedAt, entries: [...] }
-  // 为空时正文 citation 显示原文 `[@key]`；非空时按 author-year 格式.
-  references: { version: "1", source: { name: "", format: "" }, entries: [] },
+  // v1.43.51+: 当前文档的参考引用库. v2 manifest 形状:
+  //   { version: "2", source: {name, format}, updatedAt,
+  //     bibliography: {enabled, scope, heading}, entries: [...] }
+  // bibliography 默认 cited scope: 仅显示正文中引用过的条目；
+  // scope=all 走完整文献库。enabled=false 时不渲染 References 区块。
+  references: createReferenceManifest({ sourceName: "", sourceFormat: "", entries: [], bibliography: { enabled: false, scope: "cited", heading: "References" } }),
   // v2-resolve-btn: 默认 filter "all" — 用户解决批注后, 卡片仍可见才能点 "重新打开" 入口
   filterOpen: true,
   commentListLimit: 60,
@@ -745,6 +1012,15 @@ turndown.addRule("mentor-citation", {
     return node.nodeName === "SPAN" && node.hasAttribute("data-citation-raw");
   },
   replacement: (_content, node) => node.getAttribute("data-citation-raw") || "[]"
+});
+// v1.45.7+: Bibliography atom — turn the section back into the semantic
+// marker so the markdown source-of-truth remains the marker, not APA text.
+turndown.addRule("mentor-bibliography", {
+  filter: (node) => {
+    if (!node || !node.getAttribute) return false;
+    return node.nodeName === "SECTION" && node.getAttribute("data-mentor-bibliography") === "true";
+  },
+  replacement: () => `\n\n${BIBLIOGRAPHY_MARKER}\n\n`
 });
 turndown.addRule("gfm-table", {
   filter: "table",
@@ -2995,6 +3271,7 @@ function initEditor() {
       Subscript,
       CitationTextNormalizer,
       CitationNode,
+      BibliographyNode,
       AnnotationMark,
             AnnotationBubbleExtension,
             ActiveHighlightExtension,
@@ -3059,6 +3336,7 @@ function initEditor() {
           const r = _setContentOrig(normalizedContent, emitUpdate, parseOptions);
           try {
             reconcileCitationNodes();
+            reconcileBibliographyNode();
             if (State._suspendAnnValidate) return r;
             if (State.annotations && State.annotations.length) {
               scheduleValidateMarks(ed, { immediate: true, phase: "full" });
@@ -5351,13 +5629,29 @@ async function injectMediaFiles(mediaFiles) {
 }
 function markdownToHtml(mdText, mediaUrls) {
   let text2 = mdText;
+  // markdown-it runs with html:false, so we cannot inject raw <section> before
+  // render. Swap the semantic marker for a plain placeholder that survives as
+  // text/paragraph content, then re-inject the section after render.
+  const BIB_PLACEHOLDER = "MENTOR_BIBLIOGRAPHY_FIELD_PLACEHOLDER";
+  let hadBibMarker = false;
+  if (text2 && typeof text2 === "string" && text2.indexOf(BIBLIOGRAPHY_MARKER) !== -1) {
+    hadBibMarker = true;
+    text2 = text2.replace(/[ \t]*<!--\s*mentor:bibliography\s*-->[ \t]*\n?/g, `\n\n${BIB_PLACEHOLDER}\n\n`);
+  }
   if (mediaUrls && Object.keys(mediaUrls).length > 0) {
     text2 = text2.replace(/!\[([^\]]*)\]\((media\/[^)\s]+)\)/g, (m, alt, src) => {
       const blobUrl = mediaUrls[src];
       return blobUrl ? `![${alt}](${blobUrl})` : m;
     });
   }
-  return md.render(text2);
+  let html = md.render(text2 || "");
+  if (hadBibMarker) {
+    const section = '<section data-mentor-bibliography="true"></section>';
+    html = html
+      .replace(new RegExp(`<p>\\s*${BIB_PLACEHOLDER}\\s*</p>`, "g"), section)
+      .replace(new RegExp(BIB_PLACEHOLDER, "g"), section);
+  }
+  return html;
 }
 function collectKeptMediaUrls({ exceptTabId = null, includeState = true } = {}) {
   const keep = /* @__PURE__ */ new Set();
@@ -5480,7 +5774,35 @@ function structuralHtmlHasUnresolvedBlobs(html, mediaUrls = null) {
 function flushSourceView() {
   const sourceEl = $("#source-view");
   if (State.renderMode !== "source" || !sourceEl || sourceEl.style.display === "none") return null;
-  const markdown = sourceEl.innerText;
+  // Rebuild markdown with bibliography chips → semantic marker (never chip label text).
+  let markdown = "";
+  try {
+    const parts = [];
+    const walk = (node) => {
+      if (!node) return;
+      if (node.nodeType === 1) {
+        if (node.classList && node.classList.contains("source-bibliography-marker")) {
+          parts.push(BIBLIOGRAPHY_MARKER);
+          return; // skip chip descendants (label text)
+        }
+        if (node.tagName === "BR") {
+          parts.push("\n");
+          return;
+        }
+        for (const child of node.childNodes) walk(child);
+        return;
+      }
+      if (node.nodeType === 3) parts.push(node.nodeValue || "");
+    };
+    walk(sourceEl);
+    markdown = parts.join("");
+  } catch (_) {
+    markdown = sourceEl.innerText || "";
+  }
+  if (!markdown.includes(BIBLIOGRAPHY_MARKER) && sourceEl.querySelector(".source-bibliography-marker")) {
+    // Fallback: replace chip labels in innerText
+    markdown = (sourceEl.innerText || "").split("References（由文献库生成）").join(BIBLIOGRAPHY_MARKER);
+  }
   const editor2 = State.editor;
   const markSnapshots = [];
   editor2.state.doc.descendants((node) => {
@@ -5496,12 +5818,14 @@ function flushSourceView() {
     });
   });
   State._suspendAnnValidate = true;
-  try {
-    State.editor.commands.setContent(markdownToHtml(markdown, State.mediaUrls), false);
-  } finally {
-    State._suspendAnnValidate = false;
-  }
-  if (markSnapshots.length > 0) {
+    try {
+      State.editor.commands.setContent(markdownToHtml(markdown, State.mediaUrls), false);
+    } finally {
+      State._suspendAnnValidate = false;
+    }
+    try { reconcileCitationNodes(); } catch (_) {}
+    try { reconcileBibliographyNode(); } catch (_) {}
+    if (markSnapshots.length > 0) {
     const tr2 = editor2.state.tr;
     const markType = editor2.schema.marks.annotation;
     const failedThreadIds = /* @__PURE__ */ new Set();
@@ -5592,30 +5916,50 @@ function setRenderMode(mode) {
     } catch (e) {
     }
     const html = State.editor.getHTML();
-    const md2 = htmlToMarkdown(html);
-    if (!sourceEl) {
-      sourceEl = document.createElement("pre");
-      sourceEl.id = "source-view";
-      sourceEl.className = "source-view";
-      sourceEl.setAttribute("spellcheck", "false");
-      sourceEl.setAttribute("tabindex", "0");
-      sourceEl.setAttribute("contenteditable", "true");
-      sourceEl.addEventListener("input", () => {
-        if (!State.currentFile) return;
-        State.currentFile.content = sourceEl.innerText;
-        markDirty();
-        State.savedSelection = null;
-      });
-      editorPane.appendChild(sourceEl);
-    }
-    sourceEl.innerHTML = highlightSelectionInSource(md2, State.savedSelection?.text);
-    tiptapEl.style.display = "none";
-    sourceEl.style.display = "block";
-    btn.dataset.mode = "source";
-    btn.title = "\u5207\u6362\u4E3A\u6E32\u67D3\u89C6\u56FE";
-    btn.querySelector("span:last-child").textContent = "\u6E32\u67D3";
-    const selInfo = State.savedSelection ? `\u5DF2\u5207\u6362 (${md2.length} \u5B57\u7B26, \u9009\u533A\u9AD8\u4EAE: ${State.savedSelection.text.length} \u5B57)` : `\u5DF2\u5207\u6362 (${md2.length} \u5B57\u7B26)`;
-    setStatus("\u6E90\u7801\u6A21\u5F0F", selInfo);
+        const md2 = htmlToMarkdown(html);
+        if (!sourceEl) {
+          sourceEl = document.createElement("pre");
+          sourceEl.id = "source-view";
+          sourceEl.className = "source-view";
+          sourceEl.setAttribute("spellcheck", "false");
+          sourceEl.setAttribute("tabindex", "0");
+          sourceEl.setAttribute("contenteditable", "true");
+          sourceEl.addEventListener("input", () => {
+            if (!State.currentFile) return;
+            // Prefer chip-aware reconstruction when possible
+            try {
+              const parts = [];
+              const walk = (node) => {
+                if (!node) return;
+                if (node.nodeType === 1 && node.classList && node.classList.contains("source-bibliography-marker")) {
+                  parts.push({ type: "chip" });
+                  return;
+                }
+                if (node.nodeType === 3) { parts.push({ type: "text", value: node.nodeValue || "" }); return; }
+                if (node.childNodes) for (const c of node.childNodes) walk(c);
+              };
+              walk(sourceEl);
+              if (parts.some((p) => p.type === "chip")) {
+                State.currentFile.content = parts.map((p) => p.type === "chip" ? BIBLIOGRAPHY_MARKER : p.value).join("");
+              } else {
+                State.currentFile.content = sourceEl.innerText;
+              }
+            } catch (_) {
+              State.currentFile.content = sourceEl.innerText;
+            }
+            markDirty();
+            State.savedSelection = null;
+          });
+          editorPane.appendChild(sourceEl);
+        }
+        sourceEl.innerHTML = highlightSelectionInSource(md2, State.savedSelection?.text);
+        tiptapEl.style.display = "none";
+        sourceEl.style.display = "block";
+        btn.dataset.mode = "source";
+        btn.title = "\u5207\u6362\u4E3A\u6E32\u67D3\u89C6\u56FE";
+        btn.querySelector("span:last-child").textContent = "\u6E32\u67D3";
+        const selInfo = State.savedSelection ? `\u5DF2\u5207\u6362 (${md2.length} \u5B57\u7B26, \u9009\u533A\u9AD8\u4EAE: ${State.savedSelection.text.length} \u5B57)` : `\u5DF2\u5207\u6362 (${md2.length} \u5B57\u7B26)`;
+        setStatus("\u6E90\u7801\u6A21\u5F0F", selInfo);
   } else {
     let savedText = null;
     if (sourceEl) {
@@ -5664,12 +6008,19 @@ function setRenderMode(mode) {
   }
 }
 function highlightSelectionInSource(md2, selectedText) {
-  const escaped = md2.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  if (!selectedText || !selectedText.trim()) return escaped;
-  const needle = selectedText.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  const idx = escaped.indexOf(needle);
-  if (idx === -1) return escaped;
-  return escaped.slice(0, idx) + '<mark class="source-selection">' + escaped.slice(idx, idx + needle.length) + "</mark>" + escaped.slice(idx + needle.length);
+  // Escape first, then inject protected bibliography chip (after escape so markup stays live).
+  const chip = '<span class="source-bibliography-marker" contenteditable="false" data-source-token="bibliography">References（由文献库生成）</span>';
+  const token = "\u0000BIBMARK\u0000";
+  const withToken = String(md2 || "").split(BIBLIOGRAPHY_MARKER).join(token);
+  let escaped = withToken.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  if (selectedText && selectedText.trim()) {
+    const needle = selectedText.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    const idx = escaped.indexOf(needle);
+    if (idx !== -1) {
+      escaped = escaped.slice(0, idx) + '<mark class="source-selection">' + escaped.slice(idx, idx + needle.length) + "</mark>" + escaped.slice(idx + needle.length);
+    }
+  }
+  return escaped.split(token).join(chip);
 }
 function updateToggleBtnIcon() {
   const btn = $("#btn-toggle-render");
@@ -6839,11 +7190,12 @@ function loadMarkdownIntoEditor(name, content, annotationsData = null, options =
   State._suspendAnnValidate = true;
   try {
     State.editor.commands.setContent(html, false);
-  } finally {
-    State._suspendAnnValidate = false;
-  }
-  reconcileCitationNodes();
-  if (State.renderMode === "source") {
+      } finally {
+        State._suspendAnnValidate = false;
+      }
+      reconcileCitationNodes();
+      try { reconcileBibliographyNode(); } catch (_) {}
+      if (State.renderMode === "source") {
     const md2 = useStructuralHtml ? (content || htmlToMarkdown(html)) : htmlToMarkdown(html);
     sourceEl.innerText = md2;
   }
@@ -9263,7 +9615,16 @@ function exportMd() {
     return;
   }
   const html = State.editor.getHTML();
-  const mdText = htmlToMarkdown(html);
+  let mdText = htmlToMarkdown(html);
+  // v1.45.7+: when semantic BIBLIOGRAPHY marker is present, materialize a
+  // readable # References block for export (one-shot, single replacement).
+  if (mdText.indexOf(BIBLIOGRAPHY_MARKER) !== -1) {
+    const refConfig = normalizeBibliographyConfig(
+      (State.references && State.references.bibliography) || { enabled: true, scope: "cited", heading: "References" }
+    );
+    const model = buildBibliographyModel(State.references || emptyReferenceManifest(), _collectCitationKeys(State.editor.state.doc), refConfig);
+    mdText = materializeBibliographyMarkdown(mdText, model);
+  }
   const baseName = (State.currentFile.name || "untitled").replace(/\.(md|markdown|mentor)$/i, "");
   const blob = new Blob([mdText], { type: "text/markdown;charset=utf-8" });
   downloadBlob(`${baseName}.md`, blob);
@@ -9470,6 +9831,33 @@ async function buildDocxBlob(html, mediaFiles) {
       await inlineImage(b);
     }
   }
+  // v1.45.7+: look for a BibliographyNode position via [data-mentor-bibliography]
+  const bibliographyPositions = [];
+  for (let i = 0; i < flatBlocks.length; i++) {
+    if (flatBlocks[i].getAttribute && flatBlocks[i].getAttribute("data-mentor-bibliography") === "true") {
+      bibliographyPositions.push(i);
+    }
+  }
+  const bibliographyModel = bibliographyPositions.length
+    ? buildBibliographyModel(
+        State.references || emptyReferenceManifest(),
+        _collectCitationKeysFromHtml(html || ""),
+        normalizeBibliographyConfig(
+          (State.references && State.references.bibliography) || { enabled: true, scope: "cited", heading: "References" }
+        )
+      )
+    : null;
+  function emitBibliographyHeading(label) {
+    return makePara(makeRun(label || "References"), { style: "Heading1" });
+  }
+  function emitBibliographyEntries(items) {
+    let x = "";
+    for (const it of items || []) {
+      const line = (it && (it.markdown || it.plainText)) || "";
+      x += makePara(makeRun(line));
+    }
+    return x;
+  }
   for (const b of flatBlocks) {
     if (b.tagName === "IMG") {
       const info = imageMap.get(b.getAttribute("src"));
@@ -9499,20 +9887,29 @@ async function buildDocxBlob(html, mediaFiles) {
       bodyXml += `<w:p>${runXml}</w:p>`;
       continue;
     }
+    if (bibliographyPositions.includes(flatBlocks.indexOf(b))) {
+      bodyXml += emitBibliographyHeading(bibliographyModel && bibliographyModel.heading);
+      bodyXml += emitBibliographyEntries(bibliographyModel && bibliographyModel.items);
+    }
     bodyXml += processBlock(b);
   }
-  const cited = new Set();
-  const sourceForCites = String(html || "");
-  for (const entry of State.references.entries || []) {
-    if (sourceForCites.includes(`@${entry.key}`)) cited.add(entry.key);
-  }
-  if (cited.size) {
-    bodyXml += makePara(makeRun("References"), { style: "Heading1" });
+  // v1.45.7+: only emit a fallback References block at end-of-doc when no
+  // bibliography atom present AND the doc currently has handwritten ## References
+  // (kicked off by 'cited' count heuristic for legacy parity).
+  if (bibliographyPositions.length === 0) {
+    const cited = new Set();
+    const sourceForCites = String(html || "");
     for (const entry of State.references.entries || []) {
-      if (!cited.has(entry.key)) continue;
-      const rendered = formatReferenceEntry(entry);
-      const line = [rendered.authors, rendered.year ? `(${rendered.year}).` : "", rendered.title ? `${rendered.title}.` : "", rendered.journal].filter(Boolean).join(" ");
-      bodyXml += makePara(makeRun(line));
+      if (sourceForCites.includes(`@${entry.key}`)) cited.add(entry.key);
+    }
+    if (cited.size) {
+      bodyXml += makePara(makeRun("References"), { style: "Heading1" });
+      for (const entry of State.references.entries || []) {
+        if (!cited.has(entry.key)) continue;
+        const rendered = formatReferenceEntry(entry);
+        const line = [rendered.authors, rendered.year ? `(${rendered.year}).` : "", rendered.title ? `${rendered.title}.` : "", rendered.journal].filter(Boolean).join(" ");
+        bodyXml += makePara(makeRun(line));
+      }
     }
   }
   const rels = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -9849,7 +10246,10 @@ function getCitationUsages() {
 }
 function commitReferenceManifest(next, { reconcile = true } = {}) {
   State.references = normalizeReferenceManifest(next || emptyReferenceManifest());
-  if (reconcile) reconcileCitationNodes();
+  if (reconcile) {
+    reconcileCitationNodes();
+    reconcileBibliographyNode();
+  }
   else _renderReferencesPane();
   markDirty();
   scheduleIdbCacheWrite();
@@ -9955,7 +10355,7 @@ function insertCitation(key) {
     const raw = `[@${key}]`, info = buildCitationLabel(raw, State.references);
     State.editor.chain().focus().insertContent({ type: "citation", attrs: { raw, keys: info.keys, label: info.label, missingKeys: info.missingKeys } }).run();
   }
-  markDirty(); reconcileCitationNodes(); return true;
+  markDirty(); reconcileCitationNodes(); reconcileBibliographyNode(); return true;
 }
 function focusCitationByKey(key) {
   _setReferencesPaneOpen(true); _renderReferencesPane();
@@ -10122,6 +10522,9 @@ function initReferencesPane() {
   const form = document.querySelector("#reference-editor-form");
   const cancelBtn = document.querySelector("#reference-cancel");
   if (!button || !input || !pane || !main || !list) return;
+  const bibToggle = pane.querySelector("#refs-bibliography-toggle");
+  const bibScope = pane.querySelector("#refs-bibliography-scope");
+  const convertLegacyBtn = pane.querySelector("#refs-convert-legacy-btn");
   let query = "";
   const setOpen = (open) => {
     pane.classList.toggle("hidden", !open);
@@ -10129,6 +10532,32 @@ function initReferencesPane() {
     document.body.classList.toggle("refs-pane-collapsed", !open);
     expand?.classList.toggle("hidden", open || !(State.references.entries || []).length);
     try { syncToolbarActionState(); } catch {}
+  };
+  const renderBibControls = () => {
+    const cfg = normalizeBibliographyConfig(
+      (State.references && State.references.bibliography) || { enabled: false, scope: "cited", heading: "References" }
+    );
+    if (bibScope) bibScope.value = cfg.scope;
+    if (bibToggle) {
+      bibToggle.dataset.enabled = cfg.enabled ? "true" : "false";
+      const labelEl = bibToggle.querySelector(".refs-bib-label");
+      if (labelEl) labelEl.textContent = cfg.enabled ? "移除文献列表" : "插入文献列表";
+      bibToggle.title = cfg.enabled
+        ? "移除显示区（仅 atom），正文引用与文献库不变"
+        : "在文档末尾插入文献列表字段（引用条目来自文献库）";
+    }
+    if (convertLegacyBtn) {
+      const md = (State.currentFile && typeof State.currentFile.content === "string") ? State.currentFile.content : "";
+      const plan = planLegacyBibliographyMigration(md, State.references);
+      const safe = plan && plan.safe;
+      const noSection = plan && plan.reason === "no-references-section";
+      convertLegacyBtn.disabled = !!noSection;
+      convertLegacyBtn.title = safe
+        ? `可无损转换 ${plan.originalCount} 条；将使用 scope=all`
+        : (noSection
+          ? "当前文档无手写 # References 段"
+          : `不安全转换：原始 ${plan.originalCount || 0} 条 vs 仅匹配 ${plan.generatedCount || 0} 条`);
+    }
   };
   const render = () => {
     const entries = State.references.entries || [];
@@ -10146,6 +10575,7 @@ function initReferencesPane() {
       list.innerHTML = `<div class="refs-empty">${entries.length ? "没有匹配的引用" : "点「添加」新建，或「导入」.bib / .ris / .enw / .xml / .json（支持 Zotero 单条导出）"}</div>`;
       return;
     }
+    try { renderBibControls(); } catch (_) {}
     list.innerHTML = rows.map((entry) => {
       const key = escapeHtml(entry.key);
       const meta = [entry.year, entry.journal].filter(Boolean).join(" · ");
@@ -10199,6 +10629,60 @@ function initReferencesPane() {
       if (deleteReferenceEntry(del.dataset.key)) showToast(`已删除 @${del.dataset.key}`, 1400);
     }
   });
+  bibToggle?.addEventListener("click", () => {
+    const cfg = normalizeBibliographyConfig(
+      (State.references && State.references.bibliography) || { enabled: false, scope: "cited", heading: "References" }
+    );
+    if (cfg.enabled) {
+      const ok = removeBibliographyField({ confirm: true });
+      if (ok) showToast("已移除文献列表", 1400);
+    } else {
+      const ok = insertBibliographyField();
+      if (ok) showToast("已插入文献列表", 1400);
+      else showToast("当前无法插入文献列表", 1500);
+    }
+    render();
+  });
+  bibScope?.addEventListener("change", () => {
+    const next = setBibliographyScope(bibScope.value);
+    showToast(next === "all" ? "文献列表：全部文献库" : "文献列表：仅引用条目", 1400);
+    render();
+  });
+  convertLegacyBtn?.addEventListener("click", () => {
+    const md = (State.currentFile && typeof State.currentFile.content === "string") ? State.currentFile.content : "";
+    const plan = planLegacyBibliographyMigration(md, State.references);
+    if (!plan.safe) {
+      const msg = plan.reason === "no-references-section"
+        ? "未检测到 # References 段"
+        : `不安全转换：原 ${plan.originalCount} 条 vs 匹配 ${plan.generatedCount} 条` +
+          (plan.missing && plan.missing.length ? "；缺失 " + plan.missing.length + " 条" : "") +
+          (plan.ambiguous && plan.ambiguous.length ? "；歧义 " + plan.ambiguous.length + " 条" : "");
+      showToast(msg, 4e3);
+      return;
+    }
+    const proceed = typeof window.confirm === "function"
+      ? window.confirm(`将 ${plan.originalCount} 条手写引用转换为受控文献列表（scope=all）。此操作会重写正文，确认？`)
+      : true;
+    if (!proceed) return;
+    State.references = createReferenceManifest({
+      sourceName: (State.references && State.references.source && State.references.source.name) || "",
+      sourceFormat: (State.references && State.references.source && State.references.source.format) || "",
+      entries: (State.references && State.references.entries) || [],
+      bibliography: plan.config
+    });
+    if (State.currentFile) State.currentFile.content = plan.markdown;
+    const html2 = markdownToHtml(plan.markdown, State.mediaUrls);
+    State._suspendAnnValidate = true;
+    try {
+      State.editor?.commands.setContent(html2, false);
+    } finally {
+      State._suspendAnnValidate = false;
+    }
+    markDirty();
+    scheduleIdbCacheWrite();
+    render();
+    showToast("已转换为受控文献列表", 1800);
+  });
   document.querySelector("#editor")?.addEventListener("click", (event) => {
     const atom = event.target.closest(".mentor-citation");
     if (atom) {
@@ -10233,6 +10717,7 @@ function initReferencesPane() {
   });
   setOpen(false);
   render();
+  try { renderBibControls(); } catch (_) {}
 }
 function showExportProgress(label) {
   setStatus(label || "\u5BFC\u51FA\u4E2D\u2026", "\u8BF7\u7A0D\u5019");
@@ -11826,6 +12311,21 @@ window.__mdAnnotator = {
   focusCitationByKey,
   getCitationUsages,
   reconcileCitationNodes,
+  reconcileBibliographyNode,
+  insertBibliographyField,
+  removeBibliographyField,
+  setBibliographyScope,
+  materializeBibliographyMarkdown,
+  planLegacyBibliographyMigration,
+    BIBLIOGRAPHY_MARKER,
+    buildBibliographyModel,
+    createReferenceManifest,
+    normalizeBibliographyConfig,
+    normalizeReferenceManifest,
+    emptyReferenceManifest,
+    bibliographySourceMarkerHtml() {
+    return `<span class="source-bibliography-marker" contenteditable="false" data-source-token="bibliography">References（由文献库生成）</span>`;
+  },
   get references() { return normalizeReferenceManifest(State.references); },
   addReferenceEntry,
   updateReferenceEntry,

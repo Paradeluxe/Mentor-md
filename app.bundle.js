@@ -55624,32 +55624,88 @@ function formatReferenceEntry(entry) {
     label: label.text
   };
 }
-function createReferenceManifest({ sourceName = "", sourceFormat = "", entries = [] } = {}) {
+var DEFAULT_BIBLIOGRAPHY = Object.freeze({
+  enabled: false,
+  scope: "cited",
+  heading: "References"
+});
+function normalizeBibliographyConfig(value = {}) {
+  const src = value || {};
   return {
-    version: "1",
+    enabled: src.enabled === true,
+    scope: src.scope === "all" ? "all" : "cited",
+    heading: String(src.heading || "References").trim() || "References"
+  };
+}
+function createReferenceManifest({
+  sourceName = "",
+  sourceFormat = "",
+  entries = [],
+  bibliography = null
+} = {}) {
+  return {
+    version: "2",
     source: { name: String(sourceName || ""), format: String(sourceFormat || "") },
     updatedAt: (/* @__PURE__ */ new Date()).toISOString(),
+    bibliography: normalizeBibliographyConfig(bibliography || DEFAULT_BIBLIOGRAPHY),
     entries: sortReferenceEntries(entries).map(normalizeReferenceEntry)
   };
 }
 function normalizeReferenceManifest(manifest) {
   const src = manifest || {};
   return {
-    version: "1",
+    version: "2",
     source: {
       name: asString(src.source && src.source.name).trim(),
       format: asString(src.source && src.source.format).trim()
     },
     updatedAt: asString(src.updatedAt).trim() || (/* @__PURE__ */ new Date(0)).toISOString(),
+    bibliography: normalizeBibliographyConfig(src.bibliography),
     entries: sortReferenceEntries((src.entries || []).map(normalizeReferenceEntry)).map(normalizeReferenceEntry)
   };
 }
 function emptyReferenceManifest() {
   return {
-    version: "1",
+    version: "2",
     source: { name: "", format: "" },
     updatedAt: (/* @__PURE__ */ new Date(0)).toISOString(),
+    bibliography: normalizeBibliographyConfig(DEFAULT_BIBLIOGRAPHY),
     entries: []
+  };
+}
+function selectBibliographyEntries(manifest, citationKeys = [], config = {}) {
+  const normalized = normalizeReferenceManifest(manifest);
+  const scope = config && config.scope === "all" ? "all" : "cited";
+  if (scope === "all") return normalized.entries.slice();
+  const byKey = new Map(normalized.entries.map((entry) => [entry.key, entry]));
+  const seen = /* @__PURE__ */ new Set();
+  const out = [];
+  for (const key of citationKeys || []) {
+    const k = String(key || "").trim();
+    if (!k || seen.has(k)) continue;
+    seen.add(k);
+    const entry = byKey.get(k);
+    if (entry) out.push(entry);
+  }
+  return out;
+}
+function buildBibliographyModel(manifest, citationKeys = [], config = {}) {
+  const bibliography = normalizeBibliographyConfig(config || {});
+  const entries = selectBibliographyEntries(manifest, citationKeys, bibliography);
+  return {
+    heading: bibliography.heading,
+    scope: bibliography.scope,
+    keys: entries.map((entry) => entry.key),
+    items: entries.map((entry) => {
+      const rendered = formatReferenceEntry(entry);
+      const plainText = [
+        rendered.authors,
+        rendered.year ? `(${rendered.year}).` : "",
+        rendered.title ? `${rendered.title}.` : "",
+        rendered.journal
+      ].filter(Boolean).join(" ");
+      return { key: entry.key, plainText, markdown: plainText };
+    })
   };
 }
 var BIBTEX_TYPE_MAP = {
@@ -55752,6 +55808,7 @@ function upsertReferenceEntry(manifest, entry, { originalKey = "" } = {}) {
     manifest: createReferenceManifest({
       sourceName: current.source.name,
       sourceFormat: current.source.format,
+      bibliography: current.bibliography,
       entries: [...withoutTarget, checked.value]
     }),
     errors: {}
@@ -55763,6 +55820,7 @@ function removeReferenceEntry(manifest, key) {
   return createReferenceManifest({
     sourceName: current.source.name,
     sourceFormat: current.source.format,
+    bibliography: current.bibliography,
     entries: current.entries.filter((row) => row.key !== drop)
   });
 }
@@ -55790,6 +55848,7 @@ function mergeReferenceEntries(manifest, incoming) {
     manifest: createReferenceManifest({
       sourceName: current.source.name,
       sourceFormat: current.source.format,
+      bibliography: current.bibliography,
       entries: [...byKey.values()]
     }),
     added,
@@ -55810,6 +55869,131 @@ function renameCitationKey(raw, oldKey, newKey) {
     return true;
   });
   return serializeCitationSyntax(parsed);
+}
+var BIBLIOGRAPHY_MARKER = "<!-- mentor:bibliography -->";
+function splitLegacyReferencesSection(markdown) {
+  const text2 = String(markdown || "");
+  const re = /^#\s+References\s*$/m;
+  const m = re.exec(text2);
+  if (!m) return null;
+  const start = m.index;
+  const afterHeading = start + m[0].length;
+  const rest = text2.slice(afterHeading);
+  const next2 = rest.search(/^#\s+\S/m);
+  const end = next2 === -1 ? text2.length : afterHeading + next2;
+  const body = text2.slice(afterHeading, end);
+  const paragraphs = body.split(/\n\s*\n/).map((p) => p.replace(/^\s+|\s+$/g, "")).filter(Boolean).filter((p) => !/^#\s+/.test(p) && !/^\|/.test(p));
+  return {
+    before: text2.slice(0, start).replace(/\s+$/, ""),
+    heading: "References",
+    body,
+    paragraphs,
+    after: text2.slice(end).replace(/^\s+/, ""),
+    start,
+    end
+  };
+}
+function referenceFingerprint(entry) {
+  const src = normalizeReferenceEntry(entry || {});
+  return [src.authors, src.year, src.title, src.doi].map((value) => String(value || "").toLowerCase().replace(/\W+/g, "")).join("|");
+}
+function paragraphFingerprint(paragraph) {
+  return String(paragraph || "").toLowerCase().replace(/\W+/g, "");
+}
+function planLegacyBibliographyMigration(markdown, manifest) {
+  const md2 = String(markdown || "");
+  const library = normalizeReferenceManifest(manifest);
+  const split2 = splitLegacyReferencesSection(md2);
+  if (!split2) {
+    return {
+      safe: false,
+      reason: "no-references-section",
+      originalCount: 0,
+      generatedCount: 0,
+      missing: [],
+      ambiguous: [],
+      markdown: md2,
+      config: normalizeBibliographyConfig({ enabled: false, scope: "all", heading: "References" })
+    };
+  }
+  const originalCount = split2.paragraphs.length;
+  const byFp = /* @__PURE__ */ new Map();
+  for (const entry of library.entries) {
+    const fp = referenceFingerprint(entry);
+    if (!fp.replace(/\|/g, "")) continue;
+    if (!byFp.has(fp)) byFp.set(fp, []);
+    byFp.get(fp).push(entry);
+  }
+  const matched = [];
+  const missing = [];
+  const ambiguous = [];
+  for (const para of split2.paragraphs) {
+    const pfp = paragraphFingerprint(para);
+    let hits = [];
+    for (const entry of library.entries) {
+      const a = String(entry.authors || "").toLowerCase().replace(/\W+/g, "");
+      const y = String(entry.year || "").toLowerCase().replace(/\W+/g, "");
+      const ti = String(entry.title || "").toLowerCase().replace(/\W+/g, "");
+      if (!a || !y) continue;
+      if (pfp.includes(a) && pfp.includes(y) && (!ti || pfp.includes(ti.slice(0, Math.min(24, ti.length))))) {
+        hits.push(entry);
+      }
+    }
+    const seen = /* @__PURE__ */ new Set();
+    hits = hits.filter((e) => seen.has(e.key) ? false : (seen.add(e.key), true));
+    if (hits.length === 1) matched.push(hits[0]);
+    else if (hits.length === 0) missing.push(para);
+    else ambiguous.push({ paragraph: para, keys: hits.map((h) => h.key) });
+  }
+  const generatedCount = matched.length;
+  const safe = originalCount > 0 && missing.length === 0 && ambiguous.length === 0 && generatedCount === originalCount;
+  const config = normalizeBibliographyConfig({
+    enabled: true,
+    scope: "all",
+    heading: split2.heading || "References"
+  });
+  if (!safe) {
+    return {
+      safe: false,
+      reason: "mismatch",
+      originalCount,
+      generatedCount,
+      missing,
+      ambiguous,
+      matchedKeys: matched.map((m) => m.key),
+      markdown: md2,
+      config
+    };
+  }
+  const pieces = [];
+  if (split2.before) pieces.push(split2.before);
+  pieces.push(BIBLIOGRAPHY_MARKER);
+  if (split2.after) pieces.push(split2.after);
+  const nextMd = pieces.join("\n\n").replace(/\n{3,}/g, "\n\n").trim() + "\n";
+  return {
+    safe: true,
+    reason: "ok",
+    originalCount,
+    generatedCount,
+    missing: [],
+    ambiguous: [],
+    matchedKeys: matched.map((m) => m.key),
+    markdown: nextMd,
+    config
+  };
+}
+function materializeBibliographyMarkdown(markdown, model) {
+  const md2 = String(markdown || "");
+  if (!md2.includes(BIBLIOGRAPHY_MARKER)) return md2;
+  const m = model || { heading: "References", items: [] };
+  const heading = m.heading || "References";
+  const lines = [`# ${heading}`, ""];
+  for (const item of m.items || []) {
+    lines.push(item.markdown || item.plainText || "");
+    lines.push("");
+  }
+  const rendered = lines.join("\n").replace(/\n+$/, "");
+  return md2.replace(BIBLIOGRAPHY_MARKER, rendered);
 }
 
 // modules/annotation-anchor.js
@@ -56822,6 +57006,277 @@ var CitationNode = Node2.create({
     }, label];
   }
 });
+var BibliographyNode = Node2.create({
+  name: "bibliography",
+  group: "block",
+  atom: true,
+  selectable: true,
+  draggable: false,
+  addAttributes() {
+    return {
+      heading: { default: "References" },
+      scope: { default: "cited" },
+      items: {
+        default: [],
+        parseHTML: (el) => {
+          try {
+            const raw = el.getAttribute("data-bibliography-items") || "[]";
+            const arr = JSON.parse(raw);
+            return Array.isArray(arr) ? arr : [];
+          } catch (e) {
+            return [];
+          }
+        },
+        renderHTML: (attrs) => ({ "data-bibliography-items": JSON.stringify(attrs.items || []) })
+      },
+      keys: {
+        default: [],
+        parseHTML: (el) => {
+          try {
+            const raw = el.getAttribute("data-bibliography-keys") || "[]";
+            const arr = JSON.parse(raw);
+            return Array.isArray(arr) ? arr : [];
+          } catch (e) {
+            return [];
+          }
+        },
+        renderHTML: (attrs) => ({ "data-bibliography-keys": JSON.stringify(attrs.keys || []) })
+      },
+      enabled: { default: false, renderHTML: (attrs) => ({}) }
+    };
+  },
+  parseHTML() {
+    return [{
+      tag: "section[data-mentor-bibliography]",
+      getAttrs: (node) => ({
+        heading: node.getAttribute("data-bibliography-heading") || "References",
+        scope: node.getAttribute("data-bibliography-scope") || "cited",
+        items: (() => {
+          try {
+            const arr = JSON.parse(node.getAttribute("data-bibliography-items") || "[]");
+            return Array.isArray(arr) ? arr : [];
+          } catch (e) {
+            return [];
+          }
+        })(),
+        keys: (() => {
+          try {
+            const arr = JSON.parse(node.getAttribute("data-bibliography-keys") || "[]");
+            return Array.isArray(arr) ? arr : [];
+          } catch (e) {
+            return [];
+          }
+        })()
+      })
+    }];
+  },
+  renderHTML({ node }) {
+    const attrs = node.attrs || {};
+    const heading = attrs.heading || "References";
+    const items = Array.isArray(attrs.items) ? attrs.items : [];
+    const entryXml = items.map((item) => {
+      const txt = item && (item.markdown || item.plainText) || "";
+      return ["p", {
+        class: "mentor-bibliography-entry",
+        "data-key": item && item.key || ""
+      }, txt];
+    });
+    return ["section", {
+      class: "mentor-bibliography",
+      "data-mentor-bibliography": "true",
+      "data-bibliography-heading": heading,
+      "data-bibliography-scope": attrs.scope || "cited",
+      "data-bibliography-keys": JSON.stringify(attrs.keys || []),
+      "data-bibliography-items": JSON.stringify(items),
+      contenteditable: "false"
+    }, ["h1", { class: "mentor-bibliography-heading" }, heading], ...entryXml];
+  }
+});
+function _collectCitationKeys(doc5) {
+  const keys3 = [];
+  const seen = /* @__PURE__ */ new Set();
+  doc5.descendants((node) => {
+    if (!node || !node.type || node.type.name !== "citation") return;
+    for (const k of node.attrs && node.attrs.keys || []) {
+      if (!k || seen.has(k)) continue;
+      seen.add(k);
+      keys3.push(k);
+    }
+  });
+  return keys3;
+}
+function _collectCitationKeysFromHtml(html) {
+  const re = /data-citation-raw="([^"]+)"/g;
+  const seen = /* @__PURE__ */ new Set();
+  const keys3 = [];
+  let m;
+  while ((m = re.exec(String(html || ""))) !== null) {
+    try {
+      const raw = m[1];
+      const items = parseCitationSyntax(raw).items || [];
+      for (const it of items) {
+        if (it && it.key && !seen.has(it.key)) {
+          seen.add(it.key);
+          keys3.push(it.key);
+        }
+      }
+    } catch (e) {
+    }
+  }
+  return keys3;
+}
+function reconcileBibliographyNode() {
+  if (!State2.editor) return null;
+  const editor2 = State2.editor;
+  const refConfig = normalizeBibliographyConfig(
+    State2.references && State2.references.bibliography || { enabled: false, scope: "cited", heading: "References" }
+  );
+  if (!refConfig.enabled) return null;
+  const keys3 = _collectCitationKeys(editor2.state.doc);
+  const model = buildBibliographyModel(State2.references || emptyReferenceManifest(), keys3, refConfig);
+  let tr2 = editor2.state.tr;
+  let updated = false;
+  let count = 0;
+  editor2.state.doc.descendants((node, pos) => {
+    if (!node.type || node.type.name !== "bibliography") return;
+    count += 1;
+    const attrs = { ...node.attrs, heading: model.heading, scope: model.scope, keys: model.keys, items: model.items };
+    if (JSON.stringify(attrs) !== JSON.stringify(node.attrs)) {
+      tr2 = tr2.setNodeMarkup(pos, void 0, attrs);
+      updated = true;
+    }
+  });
+  if (updated) {
+    tr2.setMeta("addToHistory", false);
+    tr2.setMeta("__bibliographyRecon", true);
+    try {
+      editor2.view.dispatch(tr2);
+    } catch (e) {
+    }
+  }
+  return { updated, count, model };
+}
+function insertBibliographyField() {
+  if (!State2.editor) return false;
+  const editor2 = State2.editor;
+  const refConfig = normalizeBibliographyConfig(
+    State2.references && State2.references.bibliography || { enabled: false, scope: "cited", heading: "References" }
+  );
+  let existing = 0;
+  editor2.state.doc.descendants((node) => {
+    if (node.type && node.type.name === "bibliography" && (node.attrs.enabled || refConfig.enabled)) existing += 1;
+  });
+  if (existing > 0) return false;
+  const newConfig = normalizeBibliographyConfig({ ...refConfig, enabled: true });
+  State2.references = createReferenceManifest({
+    sourceName: State2.references && State2.references.source && State2.references.source.name || "",
+    sourceFormat: State2.references && State2.references.source && State2.references.source.format || "",
+    entries: State2.references && State2.references.entries || [],
+    bibliography: newConfig
+  });
+  const model = buildBibliographyModel(State2.references, _collectCitationKeys(editor2.state.doc), newConfig);
+  const attrs = { heading: model.heading, scope: model.scope, keys: model.keys, items: model.items, enabled: true };
+  let placed = false;
+  const emptySelection = editor2.state.selection && editor2.state.selection.from === editor2.state.selection.to;
+  if (emptySelection) {
+    let appendPos = editor2.state.doc.content.size;
+    editor2.state.doc.descendants((node, pos) => {
+      if (node.type && node.type.name === "heading" && pos >= 0) appendPos = pos;
+    });
+    try {
+      const tr2 = editor2.state.tr.insert(appendPos, editor2.schema.nodes.bibliography.create(attrs));
+      tr2.setMeta("addToHistory", true);
+      editor2.view.dispatch(tr2);
+      placed = true;
+    } catch (e) {
+      placed = false;
+    }
+  }
+  if (!placed) {
+    try {
+      editor2.chain().focus().insertContent({ type: "bibliography", attrs }).run();
+      placed = true;
+    } catch (e) {
+      placed = false;
+    }
+  }
+  if (placed) {
+    markDirty();
+    scheduleIdbCacheWrite();
+    try {
+      if (typeof snapshotActiveTab === "function") snapshotActiveTab();
+    } catch (_) {
+    }
+  }
+  return placed;
+}
+function removeBibliographyField({ confirm: confirm2 = true } = {}) {
+  if (!State2.editor) return false;
+  const editor2 = State2.editor;
+  let count = 0;
+  editor2.state.doc.descendants((node) => {
+    if (node.type && node.type.name === "bibliography") count += 1;
+  });
+  if (count === 0) return false;
+  if (confirm2) {
+    let proceed = true;
+    try {
+      proceed = typeof window.confirm === "function" ? window.confirm("\u786E\u5B9A\u79FB\u9664\u6587\u732E\u5217\u8868\uFF1F\u53EA\u79FB\u9664\u663E\u793A\u533A\uFF0C\u6B63\u6587\u5F15\u7528\u4E0E\u6587\u732E\u5E93\u4E0D\u53D8\u3002") : true;
+    } catch (_) {
+      proceed = true;
+    }
+    if (!proceed) return false;
+  }
+  const refConfig = normalizeBibliographyConfig(
+    State2.references && State2.references.bibliography || { enabled: false, scope: "cited", heading: "References" }
+  );
+  const newConfig = normalizeBibliographyConfig({ ...refConfig, enabled: false });
+  State2.references = createReferenceManifest({
+    sourceName: State2.references && State2.references.source && State2.references.source.name || "",
+    sourceFormat: State2.references && State2.references.source && State2.references.source.format || "",
+    entries: State2.references && State2.references.entries || [],
+    bibliography: newConfig
+  });
+  let tr2 = editor2.state.tr;
+  const kills = [];
+  editor2.state.doc.descendants((node, pos) => {
+    if (node.type && node.type.name === "bibliography") kills.push({ pos, size: node.nodeSize });
+  });
+  kills.sort((a, b) => b.pos - a.pos).forEach((k) => {
+    tr2 = tr2.delete(k.pos, k.pos + k.size);
+  });
+  tr2.setMeta("addToHistory", true);
+  tr2.setMeta("__bibliographyRecon", true);
+  editor2.view.dispatch(tr2);
+  markDirty();
+  scheduleIdbCacheWrite();
+  try {
+    if (typeof snapshotActiveTab === "function") snapshotActiveTab();
+  } catch (_) {
+  }
+  return true;
+}
+function setBibliographyScope(scope) {
+  const target = scope === "all" ? "all" : "cited";
+  const refConfig = normalizeBibliographyConfig(
+    State2.references && State2.references.bibliography || { enabled: false, scope: "cited", heading: "References" }
+  );
+  const newConfig = normalizeBibliographyConfig({ ...refConfig, scope: target });
+  State2.references = createReferenceManifest({
+    sourceName: State2.references && State2.references.source && State2.references.source.name || "",
+    sourceFormat: State2.references && State2.references.source && State2.references.source.format || "",
+    entries: State2.references && State2.references.entries || [],
+    bibliography: newConfig
+  });
+  reconcileBibliographyNode();
+  markDirty();
+  scheduleIdbCacheWrite();
+  try {
+    if (typeof snapshotActiveTab === "function") snapshotActiveTab();
+  } catch (_) {
+  }
+  return newConfig.scope;
+}
 var State2 = {
   editor: null,
   currentFile: null,
@@ -56834,10 +57289,12 @@ var State2 = {
   // 用户唯一 ID, 永不改变
   author: localStorage.getItem("Mentor:author") || "",
   // 显示名, 可改
-  // v1.43.51+: 当前文档的参考引用库. v0 manifest 形状:
-  //   { version, source: {name, format}, updatedAt, entries: [...] }
-  // 为空时正文 citation 显示原文 `[@key]`；非空时按 author-year 格式.
-  references: { version: "1", source: { name: "", format: "" }, entries: [] },
+  // v1.43.51+: 当前文档的参考引用库. v2 manifest 形状:
+  //   { version: "2", source: {name, format}, updatedAt,
+  //     bibliography: {enabled, scope, heading}, entries: [...] }
+  // bibliography 默认 cited scope: 仅显示正文中引用过的条目；
+  // scope=all 走完整文献库。enabled=false 时不渲染 References 区块。
+  references: createReferenceManifest({ sourceName: "", sourceFormat: "", entries: [], bibliography: { enabled: false, scope: "cited", heading: "References" } }),
   // v2-resolve-btn: 默认 filter "all" — 用户解决批注后, 卡片仍可见才能点 "重新打开" 入口
   filterOpen: true,
   commentListLimit: 60,
@@ -57230,6 +57687,17 @@ turndown.addRule("mentor-citation", {
     return node.nodeName === "SPAN" && node.hasAttribute("data-citation-raw");
   },
   replacement: (_content, node) => node.getAttribute("data-citation-raw") || "[]"
+});
+turndown.addRule("mentor-bibliography", {
+  filter: (node) => {
+    if (!node || !node.getAttribute) return false;
+    return node.nodeName === "SECTION" && node.getAttribute("data-mentor-bibliography") === "true";
+  },
+  replacement: () => `
+
+${BIBLIOGRAPHY_MARKER}
+
+`
 });
 turndown.addRule("gfm-table", {
   filter: "table",
@@ -59377,6 +59845,7 @@ function initEditor() {
       Subscript,
       CitationTextNormalizer,
       CitationNode,
+      BibliographyNode,
       AnnotationMark,
       AnnotationBubbleExtension,
       ActiveHighlightExtension,
@@ -59437,6 +59906,7 @@ function initEditor() {
       const r = _setContentOrig(normalizedContent, emitUpdate, parseOptions);
       try {
         reconcileCitationNodes();
+        reconcileBibliographyNode();
         if (State2._suspendAnnValidate) return r;
         if (State2.annotations && State2.annotations.length) {
           scheduleValidateMarks(ed, { immediate: true, phase: "full" });
@@ -61662,13 +62132,28 @@ async function injectMediaFiles(mediaFiles) {
 }
 function markdownToHtml(mdText, mediaUrls) {
   let text2 = mdText;
+  const BIB_PLACEHOLDER = "MENTOR_BIBLIOGRAPHY_FIELD_PLACEHOLDER";
+  let hadBibMarker = false;
+  if (text2 && typeof text2 === "string" && text2.indexOf(BIBLIOGRAPHY_MARKER) !== -1) {
+    hadBibMarker = true;
+    text2 = text2.replace(/[ \t]*<!--\s*mentor:bibliography\s*-->[ \t]*\n?/g, `
+
+${BIB_PLACEHOLDER}
+
+`);
+  }
   if (mediaUrls && Object.keys(mediaUrls).length > 0) {
     text2 = text2.replace(/!\[([^\]]*)\]\((media\/[^)\s]+)\)/g, (m, alt, src) => {
       const blobUrl = mediaUrls[src];
       return blobUrl ? `![${alt}](${blobUrl})` : m;
     });
   }
-  return md.render(text2);
+  let html = md.render(text2 || "");
+  if (hadBibMarker) {
+    const section = '<section data-mentor-bibliography="true"></section>';
+    html = html.replace(new RegExp(`<p>\\s*${BIB_PLACEHOLDER}\\s*</p>`, "g"), section).replace(new RegExp(BIB_PLACEHOLDER, "g"), section);
+  }
+  return html;
 }
 function collectKeptMediaUrls({ exceptTabId = null, includeState = true } = {}) {
   const keep = /* @__PURE__ */ new Set();
@@ -61786,7 +62271,33 @@ function structuralHtmlHasUnresolvedBlobs(html, mediaUrls = null) {
 function flushSourceView() {
   const sourceEl = $("#source-view");
   if (State2.renderMode !== "source" || !sourceEl || sourceEl.style.display === "none") return null;
-  const markdown = sourceEl.innerText;
+  let markdown = "";
+  try {
+    const parts = [];
+    const walk = (node) => {
+      if (!node) return;
+      if (node.nodeType === 1) {
+        if (node.classList && node.classList.contains("source-bibliography-marker")) {
+          parts.push(BIBLIOGRAPHY_MARKER);
+          return;
+        }
+        if (node.tagName === "BR") {
+          parts.push("\n");
+          return;
+        }
+        for (const child of node.childNodes) walk(child);
+        return;
+      }
+      if (node.nodeType === 3) parts.push(node.nodeValue || "");
+    };
+    walk(sourceEl);
+    markdown = parts.join("");
+  } catch (_) {
+    markdown = sourceEl.innerText || "";
+  }
+  if (!markdown.includes(BIBLIOGRAPHY_MARKER) && sourceEl.querySelector(".source-bibliography-marker")) {
+    markdown = (sourceEl.innerText || "").split("References\uFF08\u7531\u6587\u732E\u5E93\u751F\u6210\uFF09").join(BIBLIOGRAPHY_MARKER);
+  }
   const editor2 = State2.editor;
   const markSnapshots = [];
   editor2.state.doc.descendants((node) => {
@@ -61806,6 +62317,14 @@ function flushSourceView() {
     State2.editor.commands.setContent(markdownToHtml(markdown, State2.mediaUrls), false);
   } finally {
     State2._suspendAnnValidate = false;
+  }
+  try {
+    reconcileCitationNodes();
+  } catch (_) {
+  }
+  try {
+    reconcileBibliographyNode();
+  } catch (_) {
   }
   if (markSnapshots.length > 0) {
     const tr2 = editor2.state.tr;
@@ -61907,7 +62426,29 @@ function setRenderMode(mode) {
       sourceEl.setAttribute("contenteditable", "true");
       sourceEl.addEventListener("input", () => {
         if (!State2.currentFile) return;
-        State2.currentFile.content = sourceEl.innerText;
+        try {
+          const parts = [];
+          const walk = (node) => {
+            if (!node) return;
+            if (node.nodeType === 1 && node.classList && node.classList.contains("source-bibliography-marker")) {
+              parts.push({ type: "chip" });
+              return;
+            }
+            if (node.nodeType === 3) {
+              parts.push({ type: "text", value: node.nodeValue || "" });
+              return;
+            }
+            if (node.childNodes) for (const c of node.childNodes) walk(c);
+          };
+          walk(sourceEl);
+          if (parts.some((p) => p.type === "chip")) {
+            State2.currentFile.content = parts.map((p) => p.type === "chip" ? BIBLIOGRAPHY_MARKER : p.value).join("");
+          } else {
+            State2.currentFile.content = sourceEl.innerText;
+          }
+        } catch (_) {
+          State2.currentFile.content = sourceEl.innerText;
+        }
         markDirty();
         State2.savedSelection = null;
       });
@@ -61968,12 +62509,18 @@ function setRenderMode(mode) {
   }
 }
 function highlightSelectionInSource(md2, selectedText) {
-  const escaped = md2.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  if (!selectedText || !selectedText.trim()) return escaped;
-  const needle = selectedText.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  const idx = escaped.indexOf(needle);
-  if (idx === -1) return escaped;
-  return escaped.slice(0, idx) + '<mark class="source-selection">' + escaped.slice(idx, idx + needle.length) + "</mark>" + escaped.slice(idx + needle.length);
+  const chip = '<span class="source-bibliography-marker" contenteditable="false" data-source-token="bibliography">References\uFF08\u7531\u6587\u732E\u5E93\u751F\u6210\uFF09</span>';
+  const token = "\0BIBMARK\0";
+  const withToken = String(md2 || "").split(BIBLIOGRAPHY_MARKER).join(token);
+  let escaped = withToken.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  if (selectedText && selectedText.trim()) {
+    const needle = selectedText.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    const idx = escaped.indexOf(needle);
+    if (idx !== -1) {
+      escaped = escaped.slice(0, idx) + '<mark class="source-selection">' + escaped.slice(idx, idx + needle.length) + "</mark>" + escaped.slice(idx + needle.length);
+    }
+  }
+  return escaped.split(token).join(chip);
 }
 function updateToggleBtnIcon() {
   const btn = $("#btn-toggle-render");
@@ -63084,6 +63631,10 @@ function loadMarkdownIntoEditor(name, content, annotationsData = null, options =
     State2._suspendAnnValidate = false;
   }
   reconcileCitationNodes();
+  try {
+    reconcileBibliographyNode();
+  } catch (_) {
+  }
   if (State2.renderMode === "source") {
     const md2 = useStructuralHtml ? content || htmlToMarkdown(html) : htmlToMarkdown(html);
     sourceEl.innerText = md2;
@@ -65464,7 +66015,14 @@ function exportMd() {
     return;
   }
   const html = State2.editor.getHTML();
-  const mdText = htmlToMarkdown(html);
+  let mdText = htmlToMarkdown(html);
+  if (mdText.indexOf(BIBLIOGRAPHY_MARKER) !== -1) {
+    const refConfig = normalizeBibliographyConfig(
+      State2.references && State2.references.bibliography || { enabled: true, scope: "cited", heading: "References" }
+    );
+    const model = buildBibliographyModel(State2.references || emptyReferenceManifest(), _collectCitationKeys(State2.editor.state.doc), refConfig);
+    mdText = materializeBibliographyMarkdown(mdText, model);
+  }
   const baseName = (State2.currentFile.name || "untitled").replace(/\.(md|markdown|mentor)$/i, "");
   const blob = new Blob([mdText], { type: "text/markdown;charset=utf-8" });
   downloadBlob(`${baseName}.md`, blob);
@@ -65670,6 +66228,30 @@ async function buildDocxBlob(html, mediaFiles) {
       await inlineImage(b);
     }
   }
+  const bibliographyPositions = [];
+  for (let i = 0; i < flatBlocks.length; i++) {
+    if (flatBlocks[i].getAttribute && flatBlocks[i].getAttribute("data-mentor-bibliography") === "true") {
+      bibliographyPositions.push(i);
+    }
+  }
+  const bibliographyModel = bibliographyPositions.length ? buildBibliographyModel(
+    State2.references || emptyReferenceManifest(),
+    _collectCitationKeysFromHtml(html || ""),
+    normalizeBibliographyConfig(
+      State2.references && State2.references.bibliography || { enabled: true, scope: "cited", heading: "References" }
+    )
+  ) : null;
+  function emitBibliographyHeading(label) {
+    return makePara(makeRun(label || "References"), { style: "Heading1" });
+  }
+  function emitBibliographyEntries(items) {
+    let x = "";
+    for (const it of items || []) {
+      const line = it && (it.markdown || it.plainText) || "";
+      x += makePara(makeRun(line));
+    }
+    return x;
+  }
   for (const b of flatBlocks) {
     if (b.tagName === "IMG") {
       const info = imageMap.get(b.getAttribute("src"));
@@ -65699,20 +66281,26 @@ async function buildDocxBlob(html, mediaFiles) {
       bodyXml += `<w:p>${runXml}</w:p>`;
       continue;
     }
+    if (bibliographyPositions.includes(flatBlocks.indexOf(b))) {
+      bodyXml += emitBibliographyHeading(bibliographyModel && bibliographyModel.heading);
+      bodyXml += emitBibliographyEntries(bibliographyModel && bibliographyModel.items);
+    }
     bodyXml += processBlock(b);
   }
-  const cited = /* @__PURE__ */ new Set();
-  const sourceForCites = String(html || "");
-  for (const entry of State2.references.entries || []) {
-    if (sourceForCites.includes(`@${entry.key}`)) cited.add(entry.key);
-  }
-  if (cited.size) {
-    bodyXml += makePara(makeRun("References"), { style: "Heading1" });
+  if (bibliographyPositions.length === 0) {
+    const cited = /* @__PURE__ */ new Set();
+    const sourceForCites = String(html || "");
     for (const entry of State2.references.entries || []) {
-      if (!cited.has(entry.key)) continue;
-      const rendered = formatReferenceEntry(entry);
-      const line = [rendered.authors, rendered.year ? `(${rendered.year}).` : "", rendered.title ? `${rendered.title}.` : "", rendered.journal].filter(Boolean).join(" ");
-      bodyXml += makePara(makeRun(line));
+      if (sourceForCites.includes(`@${entry.key}`)) cited.add(entry.key);
+    }
+    if (cited.size) {
+      bodyXml += makePara(makeRun("References"), { style: "Heading1" });
+      for (const entry of State2.references.entries || []) {
+        if (!cited.has(entry.key)) continue;
+        const rendered = formatReferenceEntry(entry);
+        const line = [rendered.authors, rendered.year ? `(${rendered.year}).` : "", rendered.title ? `${rendered.title}.` : "", rendered.journal].filter(Boolean).join(" ");
+        bodyXml += makePara(makeRun(line));
+      }
     }
   }
   const rels = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -66045,8 +66633,10 @@ function getCitationUsages() {
 }
 function commitReferenceManifest(next2, { reconcile = true } = {}) {
   State2.references = normalizeReferenceManifest(next2 || emptyReferenceManifest());
-  if (reconcile) reconcileCitationNodes();
-  else _renderReferencesPane();
+  if (reconcile) {
+    reconcileCitationNodes();
+    reconcileBibliographyNode();
+  } else _renderReferencesPane();
   markDirty();
   scheduleIdbCacheWrite();
   try {
@@ -66173,6 +66763,7 @@ function insertCitation(key) {
   }
   markDirty();
   reconcileCitationNodes();
+  reconcileBibliographyNode();
   return true;
 }
 function focusCitationByKey(key) {
@@ -66355,6 +66946,9 @@ function initReferencesPane() {
   const form = document.querySelector("#reference-editor-form");
   const cancelBtn = document.querySelector("#reference-cancel");
   if (!button || !input || !pane || !main2 || !list) return;
+  const bibToggle = pane.querySelector("#refs-bibliography-toggle");
+  const bibScope = pane.querySelector("#refs-bibliography-scope");
+  const convertLegacyBtn = pane.querySelector("#refs-convert-legacy-btn");
   let query = "";
   const setOpen = (open2) => {
     pane.classList.toggle("hidden", !open2);
@@ -66364,6 +66958,26 @@ function initReferencesPane() {
     try {
       syncToolbarActionState();
     } catch {
+    }
+  };
+  const renderBibControls = () => {
+    const cfg = normalizeBibliographyConfig(
+      State2.references && State2.references.bibliography || { enabled: false, scope: "cited", heading: "References" }
+    );
+    if (bibScope) bibScope.value = cfg.scope;
+    if (bibToggle) {
+      bibToggle.dataset.enabled = cfg.enabled ? "true" : "false";
+      const labelEl = bibToggle.querySelector(".refs-bib-label");
+      if (labelEl) labelEl.textContent = cfg.enabled ? "\u79FB\u9664\u6587\u732E\u5217\u8868" : "\u63D2\u5165\u6587\u732E\u5217\u8868";
+      bibToggle.title = cfg.enabled ? "\u79FB\u9664\u663E\u793A\u533A\uFF08\u4EC5 atom\uFF09\uFF0C\u6B63\u6587\u5F15\u7528\u4E0E\u6587\u732E\u5E93\u4E0D\u53D8" : "\u5728\u6587\u6863\u672B\u5C3E\u63D2\u5165\u6587\u732E\u5217\u8868\u5B57\u6BB5\uFF08\u5F15\u7528\u6761\u76EE\u6765\u81EA\u6587\u732E\u5E93\uFF09";
+    }
+    if (convertLegacyBtn) {
+      const md2 = State2.currentFile && typeof State2.currentFile.content === "string" ? State2.currentFile.content : "";
+      const plan = planLegacyBibliographyMigration(md2, State2.references);
+      const safe = plan && plan.safe;
+      const noSection = plan && plan.reason === "no-references-section";
+      convertLegacyBtn.disabled = !!noSection;
+      convertLegacyBtn.title = safe ? `\u53EF\u65E0\u635F\u8F6C\u6362 ${plan.originalCount} \u6761\uFF1B\u5C06\u4F7F\u7528 scope=all` : noSection ? "\u5F53\u524D\u6587\u6863\u65E0\u624B\u5199 # References \u6BB5" : `\u4E0D\u5B89\u5168\u8F6C\u6362\uFF1A\u539F\u59CB ${plan.originalCount || 0} \u6761 vs \u4EC5\u5339\u914D ${plan.generatedCount || 0} \u6761`;
     }
   };
   const render3 = () => {
@@ -66385,6 +66999,10 @@ function initReferencesPane() {
     if (!rows.length) {
       list.innerHTML = `<div class="refs-empty">${entries.length ? "\u6CA1\u6709\u5339\u914D\u7684\u5F15\u7528" : "\u70B9\u300C\u6DFB\u52A0\u300D\u65B0\u5EFA\uFF0C\u6216\u300C\u5BFC\u5165\u300D.bib / .ris / .enw / .xml / .json\uFF08\u652F\u6301 Zotero \u5355\u6761\u5BFC\u51FA\uFF09"}</div>`;
       return;
+    }
+    try {
+      renderBibControls();
+    } catch (_) {
     }
     list.innerHTML = rows.map((entry) => {
       const key = escapeHtml(entry.key);
@@ -66448,6 +67066,54 @@ function initReferencesPane() {
       if (deleteReferenceEntry(del2.dataset.key)) showToast(`\u5DF2\u5220\u9664 @${del2.dataset.key}`, 1400);
     }
   });
+  bibToggle?.addEventListener("click", () => {
+    const cfg = normalizeBibliographyConfig(
+      State2.references && State2.references.bibliography || { enabled: false, scope: "cited", heading: "References" }
+    );
+    if (cfg.enabled) {
+      const ok = removeBibliographyField({ confirm: true });
+      if (ok) showToast("\u5DF2\u79FB\u9664\u6587\u732E\u5217\u8868", 1400);
+    } else {
+      const ok = insertBibliographyField();
+      if (ok) showToast("\u5DF2\u63D2\u5165\u6587\u732E\u5217\u8868", 1400);
+      else showToast("\u5F53\u524D\u65E0\u6CD5\u63D2\u5165\u6587\u732E\u5217\u8868", 1500);
+    }
+    render3();
+  });
+  bibScope?.addEventListener("change", () => {
+    const next2 = setBibliographyScope(bibScope.value);
+    showToast(next2 === "all" ? "\u6587\u732E\u5217\u8868\uFF1A\u5168\u90E8\u6587\u732E\u5E93" : "\u6587\u732E\u5217\u8868\uFF1A\u4EC5\u5F15\u7528\u6761\u76EE", 1400);
+    render3();
+  });
+  convertLegacyBtn?.addEventListener("click", () => {
+    const md2 = State2.currentFile && typeof State2.currentFile.content === "string" ? State2.currentFile.content : "";
+    const plan = planLegacyBibliographyMigration(md2, State2.references);
+    if (!plan.safe) {
+      const msg = plan.reason === "no-references-section" ? "\u672A\u68C0\u6D4B\u5230 # References \u6BB5" : `\u4E0D\u5B89\u5168\u8F6C\u6362\uFF1A\u539F ${plan.originalCount} \u6761 vs \u5339\u914D ${plan.generatedCount} \u6761` + (plan.missing && plan.missing.length ? "\uFF1B\u7F3A\u5931 " + plan.missing.length + " \u6761" : "") + (plan.ambiguous && plan.ambiguous.length ? "\uFF1B\u6B67\u4E49 " + plan.ambiguous.length + " \u6761" : "");
+      showToast(msg, 4e3);
+      return;
+    }
+    const proceed = typeof window.confirm === "function" ? window.confirm(`\u5C06 ${plan.originalCount} \u6761\u624B\u5199\u5F15\u7528\u8F6C\u6362\u4E3A\u53D7\u63A7\u6587\u732E\u5217\u8868\uFF08scope=all\uFF09\u3002\u6B64\u64CD\u4F5C\u4F1A\u91CD\u5199\u6B63\u6587\uFF0C\u786E\u8BA4\uFF1F`) : true;
+    if (!proceed) return;
+    State2.references = createReferenceManifest({
+      sourceName: State2.references && State2.references.source && State2.references.source.name || "",
+      sourceFormat: State2.references && State2.references.source && State2.references.source.format || "",
+      entries: State2.references && State2.references.entries || [],
+      bibliography: plan.config
+    });
+    if (State2.currentFile) State2.currentFile.content = plan.markdown;
+    const html2 = markdownToHtml(plan.markdown, State2.mediaUrls);
+    State2._suspendAnnValidate = true;
+    try {
+      State2.editor?.commands.setContent(html2, false);
+    } finally {
+      State2._suspendAnnValidate = false;
+    }
+    markDirty();
+    scheduleIdbCacheWrite();
+    render3();
+    showToast("\u5DF2\u8F6C\u6362\u4E3A\u53D7\u63A7\u6587\u732E\u5217\u8868", 1800);
+  });
   document.querySelector("#editor")?.addEventListener("click", (event) => {
     const atom = event.target.closest(".mentor-citation");
     if (atom) {
@@ -66486,6 +67152,10 @@ function initReferencesPane() {
   });
   setOpen(false);
   render3();
+  try {
+    renderBibControls();
+  } catch (_) {
+  }
 }
 function showExportProgress(label) {
   setStatus(label || "\u5BFC\u51FA\u4E2D\u2026", "\u8BF7\u7A0D\u5019");
@@ -68034,6 +68704,21 @@ window.__mdAnnotator = {
   focusCitationByKey,
   getCitationUsages,
   reconcileCitationNodes,
+  reconcileBibliographyNode,
+  insertBibliographyField,
+  removeBibliographyField,
+  setBibliographyScope,
+  materializeBibliographyMarkdown,
+  planLegacyBibliographyMigration,
+  BIBLIOGRAPHY_MARKER,
+  buildBibliographyModel,
+  createReferenceManifest,
+  normalizeBibliographyConfig,
+  normalizeReferenceManifest,
+  emptyReferenceManifest,
+  bibliographySourceMarkerHtml() {
+    return `<span class="source-bibliography-marker" contenteditable="false" data-source-token="bibliography">References\uFF08\u7531\u6587\u732E\u5E93\u751F\u6210\uFF09</span>`;
+  },
   get references() {
     return normalizeReferenceManifest(State2.references);
   },
