@@ -68171,16 +68171,6 @@ function setupToolbar() {
     updateToggleBtnIcon();
   });
   updateToggleBtnIcon();
-  {
-    const btnComment = document.getElementById("btn-comment");
-    if (btnComment) {
-      btnComment.addEventListener("mousedown", (e) => e.preventDefault());
-      btnComment.addEventListener("click", (e) => {
-        e.preventDefault();
-        triggerCommentCreate();
-      });
-    }
-  }
   function syncPaneControls(kind, open2) {
     const action = kind === "outline" ? "toggle-file-pane" : "toggle-comment-pane";
     const label = kind === "outline" ? "\u5927\u7EB2\u680F" : "\u6279\u6CE8\u680F";

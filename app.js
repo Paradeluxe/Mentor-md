@@ -11601,17 +11601,6 @@ function setupToolbar() {
     updateToggleBtnIcon();
   });
   updateToggleBtnIcon();
-  // 顶栏「批注」按钮 — 等价于 Ctrl+Alt+M (选区时创建, 无选区 toast 提示)
-  {
-    const btnComment = document.getElementById("btn-comment");
-    if (btnComment) {
-      btnComment.addEventListener("mousedown", (e) => e.preventDefault()); // 不抢选区
-      btnComment.addEventListener("click", (e) => {
-        e.preventDefault();
-        triggerCommentCreate();
-      });
-    }
-  }
   function syncPaneControls(kind, open) {
     const action = kind === 'outline' ? 'toggle-file-pane' : 'toggle-comment-pane';
     const label = kind === 'outline' ? '大纲栏' : '批注栏';

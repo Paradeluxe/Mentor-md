@@ -7,7 +7,7 @@
 <meta name="build" content="v1.45.9 cache-bust v=185" />
 <!-- v1.43.37 offline: local fonts + KaTeX (no CDN) -->
 <link rel="stylesheet" href="vendor/fonts/local-fonts.css?v=1" />
-<link rel="stylesheet" href="styles.css?v=186" />
+<link rel="stylesheet" href="styles.css?v=187" />
 <link rel="stylesheet" href="vendor/katex/katex.min.css?v=1" />
 <!-- 字体：系统无衬线 + 等宽（侧栏时间戳、文件名） -->
 <style>
@@ -48,9 +48,6 @@
     <div class="tb-group" data-toolbar-group="view">
       <button id="btn-toggle-render" title="切换源码/渲染视图" class="tb-icon-text tb-toggle" data-mode="rendered" aria-pressed="false"><span class="tb-icon"></span><span class="tb-label">源码</span></button>
       <button id="btn-toggle-comment-pane" title="显示/隐藏 批注栏 (Ctrl+])" class="tb-icon-text tb-pane-toggle" data-act="toggle-comment-pane" aria-keyshortcuts="Control+] Meta+]" aria-pressed="true" aria-label="批注栏"><span class="tb-icon"></span><span class="tb-label">批注栏</span></button>
-    </div>
-    <div class="tb-group" data-toolbar-group="comment">
-      <button id="btn-comment" title="批注（Ctrl+Alt+M）；需要 AI 时在内容中写 @AI" class="tb-icon-text" aria-keyshortcuts="Control+Alt+M Meta+Alt+M"><span class="tb-icon"></span><span class="tb-label">批注</span></button>
     </div>
     <div class="tb-group" id="format-toolbar" data-toolbar-group="format">
       <button data-cmd="bold" title="加粗 (Ctrl+B)" class="tb-format" aria-label="加粗"></button>
@@ -326,7 +323,7 @@
 
 <!-- v1.43.37 offline: bundled app (esbuild) + local icons; no esm.sh -->
 <script src="icons.js?v=184"></script>
-<script type="module" src="app.bundle.js?v=186"></script>
+<script type="module" src="app.bundle.js?v=187"></script>
 <!-- 帮助 popover (浮在 body 顶层, 位置由 JS 动态计算) -->
 <div id="help-popover" class="help-popover hidden" role="tooltip">
   <div class="help-popover-arrow"></div>
