@@ -68187,6 +68187,10 @@ function setupToolbar() {
     document.querySelectorAll(`[data-act="${action}"]`).forEach((btn) => {
       btn.setAttribute("aria-expanded", open2 ? "true" : "false");
       const inPane = Boolean(btn.closest("aside"));
+      if (btn.classList.contains("tb-pane-toggle")) {
+        btn.setAttribute("aria-pressed", open2 ? "true" : "false");
+        return;
+      }
       btn.setAttribute("aria-label", `${inPane ? "\u6536\u8D77" : "\u5C55\u5F00"}${label}`);
     });
   }

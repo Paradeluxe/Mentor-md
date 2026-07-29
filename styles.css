@@ -371,12 +371,14 @@ code {
 #btn-save[data-dirty="true"] { color: var(--accent); }
 #btn-save[data-dirty="true"] .tb-icon { color: var(--accent); }
 #btn-refs[aria-pressed="true"],
-#btn-toggle-render[aria-pressed="true"] {
+#btn-toggle-render[aria-pressed="true"],
+#btn-toggle-comment-pane[aria-pressed="true"] {
   background: var(--accent-soft);
   color: var(--accent);
 }
 #btn-refs[aria-pressed="true"] .tb-icon,
-#btn-toggle-render[aria-pressed="true"] .tb-icon { color: var(--accent); }
+#btn-toggle-render[aria-pressed="true"] .tb-icon,
+#btn-toggle-comment-pane[aria-pressed="true"] .tb-icon { color: var(--accent); }
 .tb-icon-text[aria-busy="true"] { opacity: 0.7; cursor: progress; }
 
 /* (legacy toolbar masks removed → v1.43.34 block at end) */
@@ -3842,8 +3844,14 @@ body.refs-pane-collapsed #expand-refs-pane-btn {
 
 /* 批注按钮 icon: lucide message-square (与 #float-comment-btn 一致) */
 #btn-comment .tb-icon::before {
-  -webkit-mask-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww%2Ew3%2Eorg%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%27M21%2015a2%202%200%200%201-2%202H7l-4%204V5a2%202%200%200%201%202-2h14a2%202%200%200%201%202%202z%27%2F%3E%3C%2Fsvg%3E");
-  mask-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww%2Ew3%2Eorg%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%27M21%2015a2%202%200%200%201-2%202H7l-4%204V5a2%202%200%200%201%202-2h14a2%202%200%200%201%202%202z%27%2F%3E%3C%2Fsvg%3E");
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3%2Eorg%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%27M21%2015a2%202%200%200%201-2%202H7l-4%204V5a2%202%200%200%201%202-2h14a2%202%200%200%201%202%202z%27%2F%3E%3C%2Fsvg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3%2Eorg%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%27M21%2015a2%202%200%200%201-2%202H7l-4%204V5a2%202%200%200%201%202-2h14a2%202%200%200%201%202%202z%27%2F%3E%3C%2Fsvg%3E");
+}
+
+/* 批注栏开关按钮: lucide panel-right (栏显隐 toggle) */
+#btn-toggle-comment-pane .tb-icon::before {
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Crect%20x%3D%273%27%20y%3D%273%27%20width%3D%2718%27%20height%3D%2718%27%20rx%3D%272%27%2F%3E%3Cpath%20d%3D%27M15%203v18%27%2F%3E%3C%2Fsvg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Crect%20x%3D%273%27%20y%3D%273%27%20width%3D%2718%27%20height%3D%2718%27%20rx%3D%272%27%2F%3E%3Cpath%20d%3D%27M15%203v18%27%2F%3E%3C%2Fsvg%3E");
 }
 
 #btn-undo .tb-icon::before {

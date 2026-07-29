@@ -11618,6 +11618,11 @@ function setupToolbar() {
     document.querySelectorAll(`[data-act="${action}"]`).forEach((btn) => {
       btn.setAttribute('aria-expanded', open ? 'true' : 'false');
       const inPane = Boolean(btn.closest('aside'));
+      // 顶栏 toggle 按钮: aria-pressed 跟随栏可见状态; aria-label 固定(不加 展开收起 前缀)
+      if (btn.classList.contains('tb-pane-toggle')) {
+        btn.setAttribute('aria-pressed', open ? 'true' : 'false');
+        return;
+      }
       btn.setAttribute('aria-label', `${inPane ? '收起' : '展开'}${label}`);
     });
   }
