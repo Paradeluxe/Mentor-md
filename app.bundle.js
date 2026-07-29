@@ -60732,6 +60732,17 @@ function createAnnotationFromSelection(opts = {}) {
   }
   return createAnnotationThread(from2, to, text2, imageAnchors.length ? { imageAnchors, type } : { type });
 }
+function triggerCommentCreate() {
+  const sel = State2.editor && State2.editor.state.selection;
+  if (!sel || sel.empty || sel.from === sel.to) {
+    setStatus("\u63D0\u793A", "\u8BF7\u5148\u9009\u4E2D\u4E00\u6BB5\u6587\u5B57\u518D\u70B9\u6279\u6CE8");
+    return false;
+  }
+  createAnnotationFromSelection();
+  const fb = $("#float-comment-btn");
+  if (fb) fb.classList.add("hidden");
+  return true;
+}
 function setupFloatCommentButton() {
   const floatWrap = $("#float-comment-btn");
   if (floatWrap) {
@@ -68160,6 +68171,16 @@ function setupToolbar() {
     updateToggleBtnIcon();
   });
   updateToggleBtnIcon();
+  {
+    const btnComment = document.getElementById("btn-comment");
+    if (btnComment) {
+      btnComment.addEventListener("mousedown", (e) => e.preventDefault());
+      btnComment.addEventListener("click", (e) => {
+        e.preventDefault();
+        triggerCommentCreate();
+      });
+    }
+  }
   function syncPaneControls(kind, open2) {
     const action = kind === "outline" ? "toggle-file-pane" : "toggle-comment-pane";
     const label = kind === "outline" ? "\u5927\u7EB2\u680F" : "\u6279\u6CE8\u680F";
@@ -68249,14 +68270,7 @@ function setupToolbar() {
     }
     if ((e.ctrlKey || e.metaKey) && e.altKey && !e.shiftKey && (e.key === "m" || e.key === "M")) {
       e.preventDefault();
-      const sel = State2.editor.state.selection;
-      if (sel.empty) {
-        setStatus("\u63D0\u793A", "\u8BF7\u5148\u9009\u4E2D\u6587\u672C, \u518D\u6309 Ctrl+Alt+M \u4EBA\u7C7B\u8C03\u6574");
-        return;
-      }
-      createAnnotationFromSelection();
-      const fb = $("#float-comment-btn");
-      if (fb) fb.classList.add("hidden");
+      triggerCommentCreate();
       return;
     }
   });
