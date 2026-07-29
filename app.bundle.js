@@ -58028,7 +58028,7 @@ var ActiveHighlightExtension = Extension.create({
         (tid) => {
           try {
             const thr = (State2.annotations || []).find((a) => a && a.threadId === tid);
-            return thr ? threadTypeOf(thr) : null;
+            return thr ? threadTypeOf(thr) || thr.threadType || null : null;
           } catch (_) {
             return null;
           }
@@ -58349,21 +58349,40 @@ function threadTypeClass(thread) {
 function threadTypeOf(thread) {
   if (!thread || typeof thread !== "object") return null;
   if (thread.threadType === "ai" || thread.threadType === "review") return thread.threadType;
-  const comments = Array.isArray(thread.comments) ? thread.comments : [];
-  for (const comment of comments) {
-    const type = getMarkerType(comment && comment.body);
-    if (type) return type;
-  }
-  return null;
+  const visit = (comments) => {
+    for (const comment of comments || []) {
+      const type = getMarkerType(comment && comment.body);
+      if (type) return type;
+      const nestedType = visit(comment?.replies || comment?.comments || comment?.children || []);
+      if (nestedType) return nestedType;
+    }
+    return null;
+  };
+  return visit(Array.isArray(thread.comments) ? thread.comments : []);
+}
+function migrateLegacyThread(thread) {
+  if (!thread || typeof thread !== "object") return thread;
+  if (thread.threadType !== "ai" && thread.threadType !== "review") delete thread.threadType;
+  return thread;
+}
+function normalizeLegacyThreadType(thread) {
+  if (!thread || typeof thread !== "object") return thread;
+  if (thread.threadType === "ai" || thread.threadType === "review") return thread;
+  const marker = threadTypeOf({ ...thread, threadType: null });
+  if (marker) thread.threadType = marker;
+  else delete thread.threadType;
+  return thread;
+}
+function prepareAnnotationForMarkerMode(annotation) {
+  if (!annotation || typeof annotation !== "object") return annotation;
+  const copy2 = typeof structuredClone === "function" ? structuredClone(annotation) : JSON.parse(JSON.stringify(annotation));
+  return normalizeLegacyThreadType(migrateLegacyThread(copy2));
 }
 function isAiCard(thread, aiAuthor = "AI Reviewer") {
   if (!thread || typeof thread !== "object") return false;
   if (thread.threadType === "ai") return true;
-  const comments = Array.isArray(thread.comments) ? thread.comments : [];
-  const root2 = comments[0];
-  if (!root2) return false;
-  if (isAiAuthor(root2.author, aiAuthor)) return true;
-  return false;
+  const root2 = Array.isArray(thread.comments) ? thread.comments[0] : null;
+  return !!root2 && isAiAuthor(root2.author, aiAuthor);
 }
 function humanCommentIsWork(thread, comment, aiAuthor = "AI Reviewer") {
   if (!comment || isAiAuthor(comment.author, aiAuthor)) return false;
@@ -59326,6 +59345,7 @@ function serializeAnnotationThread(t) {
     createdAt: t.createdAt,
     comments: Array.isArray(t.comments) ? t.comments : []
   };
+  if (t.threadType === "ai" || t.threadType === "review") o.threadType = t.threadType;
   if (t.range && typeof t.range.from === "number" && typeof t.range.to === "number") {
     o.range = { from: t.range.from, to: t.range.to };
   }
@@ -60539,8 +60559,8 @@ var MENTION_TYPES = {
     prefix: "@AI ",
     label: "AI\u8C03\u6574",
     shortLabel: "AI\u8C03\u6574",
-    title: "AI\u8C03\u6574\uFF1A\u5EFA AI \u6A21\u5F0F\u6279\u6CE8\uFF08\u84DD\u8272\u8EAB\u4EFD\uFF1B\u4FDD\u5B58\u540E\u53EF\u7531 /fix-mentor \u5904\u7406\uFF0C\u4E0D\u9700\u6B63\u6587\u5199 @AI\uFF09",
-    shortcut: "Ctrl+Alt+I",
+    title: "AI\u8C03\u6574\uFF1A\u5728\u6279\u6CE8\u6B63\u6587\u4E2D\u5199 @AI\uFF1B\u4FDD\u5B58\u540E\u53EF\u7531 /fix-mentor \u5904\u7406",
+    shortcut: "",
     placeholder: "\u544A\u8BC9 AI \u6539\u4EC0\u4E48 / \u95EE\u4EC0\u4E48\u2026"
   },
   // legacy parse only — not creatable from UI
@@ -60592,24 +60612,21 @@ function seedDraft(threadId, type) {
   }
 }
 function applyThreadType(threadId, type) {
-  const next2 = type === "ai" ? "ai" : null;
   const thread = State2.annotations.find((t) => t && typeof t === "object" && t.threadId === threadId);
   if (!thread) return;
-  thread.threadType = next2;
   let draft = State2.replyDrafts[threadId];
   if (draft == null) {
     const taLive = document.querySelector(`[data-thread-input="${threadId}"]`);
     draft = taLive ? taLive.value : "";
   }
-  draft = stripMarkers(draft);
-  State2.replyDrafts[threadId] = draft;
-  if (Array.isArray(thread.comments) && thread.comments[0] && String(thread.comments[0].body || "").trim()) {
-    const body0 = thread.comments[0].body;
-    const rewritten = stripMarkers(body0);
-    if (rewritten !== body0) {
-      thread.comments[0] = { ...thread.comments[0], body: rewritten };
-    }
+  State2.replyDrafts[threadId] = stripMarkers(draft);
+  const root2 = Array.isArray(thread.comments) ? thread.comments[0] : null;
+  if (root2 && String(root2.body || "").trim()) {
+    const body = String(root2.body || "");
+    root2.body = type === "ai" ? ensureMarker(body, "ai") : stripMarkers(body);
   }
+  if (type === "ai" || type === "review") thread.threadType = type;
+  else delete thread.threadType;
   markDirty();
   try {
     if (typeof syncAnnotationMarkModeAttrs === "function") syncAnnotationMarkModeAttrs(threadId);
@@ -60624,11 +60641,7 @@ function applyThreadType(threadId, type) {
   } catch (_) {
   }
   renderCommentList();
-  focusThreadInput(threadId, { type: next2 });
-  setStatus(
-    "\u7C7B\u578B\u5DF2\u5207\u6362",
-    next2 === "ai" ? "AI\u8C03\u6574" : "\u4EBA\u7C7B\u8C03\u6574"
-  );
+  focusThreadInput(threadId);
 }
 var AI_MENTION_PREFIX = MENTION_TYPES.ai.prefix;
 function bodyHasAiMarker(body) {
@@ -60671,9 +60684,8 @@ function focusThreadInput(threadId, { type = void 0 } = {}) {
 }
 function createAnnotationFromSelection(opts = {}) {
   const options = opts && typeof opts === "object" ? opts : {};
-  let type = options.type != null ? options.type : null;
-  if (!type && options.ai) type = "ai";
-  type = type === "ai" ? "ai" : null;
+  const type = null;
+  void options;
   if (!State2.editor) return null;
   const sel = State2.editor.state.selection;
   if (sel.empty && (!sel.$anchor || !sel.$head)) return null;
@@ -60734,15 +60746,14 @@ function setupFloatCommentButton() {
       e.preventDefault();
       e.stopPropagation();
       const actType = btn.getAttribute("data-float-act");
-      if (actType !== "comment" && actType !== "ai") return;
-      const annotationType = actType === "ai" ? "ai" : null;
+      if (actType !== "comment") return;
       const sel = State2.editor && State2.editor.state.selection;
       if (!sel || sel.empty || sel.from === sel.to) {
-        setStatus("\u63D0\u793A", "\u8BF7\u5148\u9009\u4E2D\u4E00\u6BB5\u6587\u5B57\u518D\u70B9\u8C03\u6574");
+        setStatus("\u63D0\u793A", "\u8BF7\u5148\u9009\u4E2D\u4E00\u6BB5\u6587\u5B57\u518D\u70B9\u6279\u6CE8");
         floatWrap.classList.add("hidden");
         return;
       }
-      createAnnotationFromSelection({ type: annotationType });
+      createAnnotationFromSelection();
       floatWrap.classList.add("hidden");
     });
   }
@@ -61207,7 +61218,6 @@ function createAnnotationThread(from2, to, text2, opts = null) {
     // P-card fix: 初始空, 第一次 addReply 时填充
     // v1.43.25: 未提交首条评论前是 draft — 不入 undo 栈, 避免改正文/Ctrl+Z 误删整条
     pending: true,
-    threadType: options.type || null,
     authorColor: authorColorIndex(State2.authorId || threadId)
   };
   if (Array.isArray(options.imageAnchors) && options.imageAnchors.length) {
@@ -61293,7 +61303,6 @@ function handleCreateMultiCellAnnotation(cellSel, opts = {}) {
       createdAt: nowISO()
     }],
     pending: true,
-    threadType: options.type || null,
     authorColor: authorColorIndex(State2.authorId || threadId)
     // v1.43.25
   };
@@ -61460,7 +61469,6 @@ function handleCreateMultiParagraphAnnotation(from2, to, opts = {}) {
   };
   if (imageAnchors.length) thread.imageAnchors = imageAnchors;
   thread.pending = true;
-  thread.threadType = options.type || null;
   thread.authorColor = authorColorIndex(State2.authorId || threadId);
   State2.annotations.push(thread);
   const tr2 = ed.state.tr;
@@ -61486,6 +61494,30 @@ function handleCreateMultiParagraphAnnotation(from2, to, opts = {}) {
   emitAI("threadChange", { threadId, change: "create", thread });
   return thread;
 }
+function editComment(threadId, commentIndex, body) {
+  const thread = State2.annotations.find((t) => t && t.threadId === threadId);
+  if (!thread || !Array.isArray(thread.comments)) return false;
+  const index = Number(commentIndex);
+  const comment = thread.comments[index];
+  const nextBody = String(body || "").trim();
+  if (!comment || !nextBody) return false;
+  pushHistory();
+  comment.body = nextBody;
+  comment.updatedAt = nowISO();
+  const markerType = getMarkerType(nextBody);
+  if (markerType) thread.threadType = markerType;
+  else if (index === 0) delete thread.threadType;
+  if (thread.pending) thread.pending = false;
+  commitHistoryIfNeeded();
+  markDirty();
+  try {
+    syncAnnotationMarkModeAttrs(threadId);
+  } catch (_) {
+  }
+  renderCommentList();
+  emitAI("threadChange", { threadId, change: "edit", comment });
+  return true;
+}
 function addReply(threadId, body) {
   const thread = State2.annotations.find((t) => t && typeof t === "object" && t.threadId === threadId);
   if (!thread || !body.trim()) return;
@@ -61498,6 +61530,7 @@ function addReply(threadId, body) {
   };
   const markerType = getMarkerType(comment.body);
   if (markerType) thread.threadType = markerType;
+  else if (thread.threadType !== "ai" && thread.threadType !== "review") delete thread.threadType;
   if (thread.pending) thread.pending = false;
   if (Array.isArray(thread.comments) && thread.comments.length === 1 && !String(thread.comments[0].body || "").trim()) {
     thread.comments[0] = { ...thread.comments[0], ...comment, body: comment.body };
@@ -61508,6 +61541,10 @@ function addReply(threadId, body) {
   delete State2.replyDrafts[threadId];
   commitHistoryIfNeeded();
   markDirty();
+  try {
+    syncAnnotationMarkModeAttrs(threadId);
+  } catch (_) {
+  }
   renderCommentList();
   emitAI("newComment", { threadId, comment });
   emitAI("threadChange", { threadId, change: "reply", comment });
@@ -61664,6 +61701,10 @@ function deleteThread(threadId) {
   if (State2.activeThreadId === threadId) State2.activeThreadId = null;
   commitHistoryIfNeeded();
   markDirty();
+  try {
+    syncAnnotationMarkModeAttrs(threadId);
+  } catch (_) {
+  }
   renderCommentList();
   updateDocMeta();
   positionMarkDeletePopover();
@@ -61892,17 +61933,23 @@ function renderCommentList() {
                           <span class="comment-author">${escapeHtml(authorName(first3.author))}</span>
                           <span class="comment-time" title="${escapeHtml(first3.createdAt || "")}">${escapeHtml(formatTime(first3.createdAt))}</span>
                         </div>
-                        ${first3.body ? `<div class="comment-body">${escapeHtml(first3.body)}</div>` : ""}
-                        ${replies.map((r) => `
+                        ${first3.body ? `<div class="comment-body-row"><div class="comment-body">${escapeHtml(first3.body)}</div><button type="button" class="comment-edit-btn" data-act="edit-comment" data-thread="${safeThreadId}" data-comment-index="0">\u7F16\u8F91</button></div>` : ""}
+                        <div class="comment-edit-form hidden" data-edit-form="${safeThreadId}:0"><textarea data-edit-input="${safeThreadId}:0" rows="1">${escapeHtml(first3.body || "")}</textarea><button type="button" data-act="save-comment-edit" data-thread="${safeThreadId}" data-comment-index="0">\u4FDD\u5B58</button><button type="button" data-act="cancel-comment-edit" data-thread="${safeThreadId}" data-comment-index="0">\u53D6\u6D88</button></div>
+                        ${replies.map((r, replyIndex) => {
+      const commentIndex = replyIndex + 1;
+      const editKey = `${safeThreadId}:${commentIndex}`;
+      return `
                           <div class="comment-reply">
                             <div class="comment-meta">
                               ${avatarSpan(r.author, avatarColor(r.author, thread.threadId))}
                               <span class="comment-author">${escapeHtml(authorName(r.author))}</span>
                               <span class="comment-time" title="${escapeHtml(r.createdAt || "")}">${escapeHtml(formatTime(r.createdAt))}</span>
                             </div>
-                <div class="comment-body">${escapeHtml(r.body)}</div>
+                <div class="comment-body-row"><div class="comment-body">${escapeHtml(r.body)}</div><button type="button" class="comment-edit-btn" data-act="edit-comment" data-thread="${safeThreadId}" data-comment-index="${commentIndex}">\u7F16\u8F91</button></div>
+                <div class="comment-edit-form hidden" data-edit-form="${editKey}"><textarea data-edit-input="${editKey}" rows="1">${escapeHtml(r.body || "")}</textarea><button type="button" data-act="save-comment-edit" data-thread="${safeThreadId}" data-comment-index="${commentIndex}">\u4FDD\u5B58</button><button type="button" data-act="cancel-comment-edit" data-thread="${safeThreadId}" data-comment-index="${commentIndex}">\u53D6\u6D88</button></div>
               </div>
-            `).join("")}
+            `;
+    }).join("")}
             <!--
               \u8F93\u5165\u6846\u6C38\u8FDC\u5728\u5361\u7247\u672B\u5C3E (docx \u98CE\u683C, \u5BF9\u8BDD\u5F80\u4E0B\u8FFD\u52A0)
               - \u9996\u6761\u672A\u5199: placeholder "\u5F00\u59CB\u6279\u6CE8..." (\u65B0\u5EFA\u7B2C\u4E00\u53E5)
@@ -61910,7 +61957,7 @@ function renderCommentList() {
             -->
             <div class="comment-reply-form">
               <textarea data-thread-input="${safeThreadId}" rows="1" placeholder="${escapeHtml(markerPlaceholder(threadType, !!first3.body))}" autocomplete="off"></textarea>
-              <!-- Mode locked at create (float). No in-card type switch. -->
+              <!-- Single human input: write @AI or @REVIEW explicitly when needed. -->
               <div class="form-actions">
                 <button class="comment-resolve-btn ${thread.resolved ? "is-resolved" : ""}" data-act="resolve" data-thread="${safeThreadId}" title="${thread.resolved ? "\u91CD\u65B0\u6253\u5F00\u6B64\u6279\u6CE8" : "\u6807\u8BB0\u4E3A\u5DF2\u89E3\u51B3"}" aria-label="${thread.resolved ? "\u91CD\u65B0\u6253\u5F00" : "\u6807\u8BB0\u4E3A\u5DF2\u89E3\u51B3"}">${thread.resolved ? "\u91CD\u5F00" : "\u89E3\u51B3"}</button>
                 <button data-act="submit-reply" data-thread="${safeThreadId}" class="primary" disabled title="\u8F93\u5165\u540E\u53EF\u56DE\u590D (Ctrl+Enter)">\u56DE\u590D</button>
@@ -62024,6 +62071,32 @@ function renderCommentList() {
       if (input && input.value.trim()) {
         addReply(tid, input.value);
       }
+    });
+  });
+  list.querySelectorAll('[data-act="edit-comment"]').forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const key = `${btn.dataset.thread}:${btn.dataset.commentIndex}`;
+      list.querySelector(`[data-edit-form="${key}"]`)?.classList.remove("hidden");
+    });
+  });
+  list.querySelectorAll('[data-act="cancel-comment-edit"]').forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const key = `${btn.dataset.thread}:${btn.dataset.commentIndex}`;
+      const input = list.querySelector(`[data-edit-input="${key}"]`);
+      const thread = State2.annotations.find((item) => item && item.threadId === btn.dataset.thread);
+      const current = thread?.comments?.[Number(btn.dataset.commentIndex)]?.body || "";
+      if (input) input.value = current;
+      list.querySelector(`[data-edit-form="${key}"]`)?.classList.add("hidden");
+    });
+  });
+  list.querySelectorAll('[data-act="save-comment-edit"]').forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const key = `${btn.dataset.thread}:${btn.dataset.commentIndex}`;
+      const input = list.querySelector(`[data-edit-input="${key}"]`);
+      if (input) editComment(btn.dataset.thread, btn.dataset.commentIndex, input.value);
     });
   });
   list.querySelectorAll('[data-act="goto"]').forEach((btn) => {
@@ -63921,7 +63994,7 @@ function loadMarkdownIntoEditor(name, content, annotationsData = null, options =
     if (schemaReport.warnings.length > 0) {
       schemaReport.warnings.forEach((w) => showToast(`\u26A0 \u4FA7\u8F66\u6570\u636E\u8B66\u544A: ${w}`, 5e3));
     }
-    const validAnns = annotationsData.annotations.filter((a) => a && a.threadId);
+    const validAnns = annotationsData.annotations.filter((a) => a && a.threadId).map(prepareAnnotationForMarkerMode);
     const seenThreadIds = /* @__PURE__ */ new Set();
     for (const ann of validAnns) {
       const isDuplicate = ann.threadId && seenThreadIds.has(ann.threadId);
@@ -64030,7 +64103,7 @@ function loadMarkdownIntoEditor(name, content, annotationsData = null, options =
       schemaReport.warnings.forEach((w) => showToast(`\u26A0 \u4FA7\u8F66\u6570\u636E\u8B66\u544A: ${w}`, 5e3));
       console.warn("[P0-B] \u4FA7\u8F66\u9A8C\u8BC1:", schemaReport);
     }
-    const validAnns = annotationsData.annotations.filter((a) => a && a.threadId);
+    const validAnns = annotationsData.annotations.filter((a) => a && a.threadId).map(prepareAnnotationForMarkerMode);
     const cap = State2.maxAnnotations || 0;
     if (cap > 0 && validAnns.length > cap) {
       showToast(`\u26A0 \u6587\u6863\u542B ${validAnns.length} \u6761\u6279\u6CE8, \u8D85\u51FA\u65B0\u5EFA\u4E0A\u9650 ${cap}. \u5DF2\u65E0\u635F\u52A0\u8F7D\u5168\u90E8\u6279\u6CE8`, 6e3);
@@ -68087,19 +68160,18 @@ function setupToolbar() {
     updateToggleBtnIcon();
   });
   updateToggleBtnIcon();
+  function syncPaneControls(kind, open2) {
+    const action = kind === "outline" ? "toggle-file-pane" : "toggle-comment-pane";
+    const label = kind === "outline" ? "\u5927\u7EB2\u680F" : "\u6279\u6CE8\u680F";
+    document.querySelectorAll(`[data-act="${action}"]`).forEach((btn) => {
+      btn.setAttribute("aria-expanded", open2 ? "true" : "false");
+      const inPane = Boolean(btn.closest("aside"));
+      btn.setAttribute("aria-label", `${inPane ? "\u6536\u8D77" : "\u5C55\u5F00"}${label}`);
+    });
+  }
   function syncPaneToggleChips() {
-    const outlineChip = document.getElementById("btn-toggle-outline-pane");
-    const commentChip = document.getElementById("btn-toggle-comment-pane");
-    if (outlineChip) {
-      const open2 = !document.body.classList.contains("file-pane-collapsed");
-      outlineChip.setAttribute("aria-expanded", open2 ? "true" : "false");
-      outlineChip.classList.toggle("is-active", open2);
-    }
-    if (commentChip) {
-      const open2 = !document.body.classList.contains("comment-pane-collapsed");
-      commentChip.setAttribute("aria-expanded", open2 ? "true" : "false");
-      commentChip.classList.toggle("is-active", open2);
-    }
+    syncPaneControls("outline", !document.body.classList.contains("file-pane-collapsed"));
+    syncPaneControls("comment", !document.body.classList.contains("comment-pane-collapsed"));
   }
   function toggleFilePane() {
     const collapsed = document.body.classList.toggle("file-pane-collapsed");
@@ -68175,26 +68247,14 @@ function setupToolbar() {
       saveCurrent();
       return;
     }
-    if ((e.ctrlKey || e.metaKey) && e.altKey && (e.key === "m" || e.key === "M")) {
+    if ((e.ctrlKey || e.metaKey) && e.altKey && !e.shiftKey && (e.key === "m" || e.key === "M")) {
       e.preventDefault();
       const sel = State2.editor.state.selection;
       if (sel.empty) {
         setStatus("\u63D0\u793A", "\u8BF7\u5148\u9009\u4E2D\u6587\u672C, \u518D\u6309 Ctrl+Alt+M \u4EBA\u7C7B\u8C03\u6574");
         return;
       }
-      createAnnotationFromSelection({ type: e.shiftKey ? "ai" : null });
-      const fb = $("#float-comment-btn");
-      if (fb) fb.classList.add("hidden");
-      return;
-    }
-    if ((e.ctrlKey || e.metaKey) && e.altKey && (e.key === "i" || e.key === "I")) {
-      e.preventDefault();
-      const sel = State2.editor.state.selection;
-      if (sel.empty) {
-        setStatus("\u63D0\u793A", "\u8BF7\u5148\u9009\u4E2D\u6587\u672C, \u518D\u6309 Ctrl+Alt+I AI\u8C03\u6574");
-        return;
-      }
-      createAnnotationFromSelection({ type: "ai" });
+      createAnnotationFromSelection();
       const fb = $("#float-comment-btn");
       if (fb) fb.classList.add("hidden");
       return;
@@ -69043,11 +69103,16 @@ window.__mdAnnotator = {
   annotationMarkAttrs,
   syncAnnotationMarkModeAttrs,
   isAiCard,
+  editComment,
+  addReply,
   humanCommentIsWork,
   threadNeedsAiReply,
   stripMarkers,
   getMarkerType,
   applyThreadType,
+  normalizeLegacyThreadType,
+  migrateLegacyThread,
+  prepareAnnotationForMarkerMode,
   MENTION_TYPES,
   // v1.43.31 multi-tab · v1.43.52 open/save lifecycle
   snapshotActiveTab,

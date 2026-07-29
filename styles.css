@@ -916,14 +916,17 @@ code {
 
 /* ============ Main panes (三栏布局) ============ */
 #main {
+  --outline-pane-track: clamp(160px, var(--outline-pane-width, 260px), min(40vw, 600px));
+  --comment-pane-track: clamp(220px, var(--comment-pane-width, 360px), min(50vw, 800px));
   display: grid;
   /* 两边栏按视窗比例缩放 (clamp), 中间编辑区保最小 480px */
   /* v2-comment-resize: 右栏宽度用 CSS var 可由 JS 拖拽调整 (默认 clamp) */
   /* max: min(viewport * 0.5, 800px) — 用户拉到最大也只能占视窗一半, 保证编辑器最小 480px */
+  /* 折叠时轨道变 0, 编辑区真正回收宽度 */
   grid-template-columns:
-    clamp(160px, var(--outline-pane-width, 260px), min(40vw, 600px))
+    var(--outline-pane-track)
     minmax(480px, 1fr)
-    clamp(220px, var(--comment-pane-width, 360px), min(50vw, 800px))
+    var(--comment-pane-track)
     var(--refs-pane-track, 0px);
   overflow: hidden;
 }
@@ -1004,17 +1007,25 @@ code {
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  transition: margin-left 200ms ease, width 0s;
+  transition: width 200ms ease 0s;
 }
 /* P1-FilePaneCollapse: 用户手动收起文件栏 (Ctrl+[ 或按钮) */
+/* 折叠时 grid 轨道变 0, 编辑区真正扩展; 栏本体溢出隐藏不占位 */
+body.file-pane-collapsed #main { --outline-pane-track: 0px; }
 body.file-pane-collapsed #file-pane {
-  margin-left: -260px;  /* 滑出左侧 */
-  border-right: none;
+  min-width: 0;
+  width: 0;
+  overflow: hidden;
+  border: 0;
+  pointer-events: none;
 }
 /* 批注栏折叠 (Ctrl+] / 窄屏) */
+body.comment-pane-collapsed #main { --comment-pane-track: 0px; }
 body.comment-pane-collapsed #comment-pane {
-  margin-right: -320px;
-  border-left: none;
+  min-width: 0;
+  width: 0;
+  overflow: hidden;
+  border: 0;
   pointer-events: none;
 }
 body.comment-pane-collapsed #expand-comment-pane-btn {
@@ -2986,6 +2997,13 @@ body.refs-pane-collapsed #expand-refs-pane-btn {
   padding-left: 34px;
   letter-spacing: 0.005em;
 }
+.comment-body-row { display: flex; align-items: flex-start; gap: 6px; }
+.comment-body-row .comment-body { flex: 1; }
+.comment-edit-btn { border: 0; background: transparent; color: var(--text-3); cursor: pointer; font-size: 11px; opacity: .7; }
+.comment-edit-btn:hover { color: var(--accent); opacity: 1; }
+.comment-edit-form { display: flex; gap: 5px; align-items: center; margin-top: 5px; }
+.comment-edit-form textarea { flex: 1; min-height: 28px; }
+.comment-edit-form button { font-size: 11px; }
 
 /* Reply — flat timeline (同列, 无缩进/无左 rail); 仅顶部分隔 */
 .comment-reply {
@@ -3228,36 +3246,7 @@ body.refs-pane-collapsed #expand-refs-pane-btn {
   transform: scale(0.98);
   box-shadow: 0 2px 6px rgba(245, 78, 0, 0.18);
 }
-/* AI：独立深色 pill + 小机器人 icon（Lucide bot） */
-#float-comment-btn button.float-ai-btn {
-  background: var(--ai-solid);
-  box-shadow: 0 4px 14px color-mix(in srgb, var(--ai-solid) 28%, transparent), 0 1px 2px rgba(38, 37, 30, 0.08);
-  padding: 6px 12px 6px 10px;
-}
-#float-comment-btn button.float-ai-btn::before {
-  content: "";
-  display: block;
-  width: 14px;
-  height: 14px;
-  flex-shrink: 0;
-  background-color: currentColor;
-  -webkit-mask-repeat: no-repeat;
-  mask-repeat: no-repeat;
-  -webkit-mask-position: center;
-  mask-position: center;
-  -webkit-mask-size: contain;
-  mask-size: contain;
-  /* Lucide bot */
-  -webkit-mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M12 8V4H8'/><rect width='16' height='12' x='4' y='8' rx='2'/><path d='M2 14h2'/><path d='M20 14h2'/><path d='M15 13v2'/><path d='M9 13v2'/></svg>");
-  mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M12 8V4H8'/><rect width='16' height='12' x='4' y='8' rx='2'/><path d='M2 14h2'/><path d='M20 14h2'/><path d='M15 13v2'/><path d='M9 13v2'/></svg>");
-}
-#float-comment-btn button.float-ai-btn:hover {
-  background: var(--ai-hover);
-  box-shadow: 0 6px 18px color-mix(in srgb, var(--ai-hover) 35%, transparent), 0 2px 4px rgba(38, 37, 30, 0.08);
-}
-#float-comment-btn button.float-ai-btn:active {
-  box-shadow: 0 2px 6px color-mix(in srgb, var(--ai-hover) 24%, transparent);
-}
+
 /* 卡片角标：AI / 审阅 */
 .comment-type-badge {
   flex-shrink: 0;
@@ -3294,10 +3283,6 @@ body.refs-pane-collapsed #expand-refs-pane-btn {
 .comment-menu-btn:focus-visible,
 .comment-menu button:focus-visible,
 .comment-reply-form .form-actions button:focus-visible,
-#float-comment-btn button.float-ai-btn:focus-visible {
-  outline-color: var(--ai);
-}
-.mark-delete-btn:focus-visible,
 .comment-menu button.menu-danger:focus-visible {
   outline-color: var(--danger);
 }

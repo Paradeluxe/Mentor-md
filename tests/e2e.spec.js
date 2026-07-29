@@ -615,12 +615,19 @@ const SAMPLE_ANN = JSON.parse(fs.readFileSync(path.join(ROOT, 'test-data/sample.
   console.log(`  ✓ 浮动批注按钮显示 = ${floatVisible} (预期 true)`);
   if (!floatVisible) throw new Error('浮动批注按钮未出现');
 
-  // 点击 AI 浮动按钮 → 创建 AI 批注
-  await page.locator('#float-comment-btn button[data-float-act="ai"]').click();
+  // 点击统一批注按钮；AI 模式通过正文显式 @AI 触发
+  await page.locator('#float-comment-btn button[data-float-act="comment"]').click();
+  await page.waitForTimeout(150);
+  await page.evaluate(() => {
+    const input = document.querySelector('[data-thread-input]');
+    input.value = '@AI 请修改这段文字';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    document.querySelector('[data-act="submit-reply"]')?.click();
+  });
   await page.waitForTimeout(150);
   const floatThread = await page.evaluate(() => window.__mdAnnotator.getAnnotations()[0]);
   console.log(`  ✓ 点击后批注类型 = ${floatThread?.threadType} (预期 ai)`);
-  if (!floatThread || floatThread.threadType !== 'ai') throw new Error('点击 AI 浮动按钮未创建 AI 批注');
+  if (!floatThread || floatThread.threadType !== 'ai') throw new Error('显式 @AI 未创建 AI 批注');
 
   // ============================================================
   // SECTION B: 文件 IO - picker 错误 + 真写回 + 多文件切换
@@ -1734,7 +1741,7 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
     editor.view.dispatch(editor.state.tr.setSelection(editor.state.selection));
   });
   await page.waitForTimeout(200);
-  await page.locator('#float-comment-btn button[data-float-act="ai"]').click();
+  await page.locator('#float-comment-btn button[data-float-act="comment"]').click();
   await page.evaluate(() => {
     const input = document.querySelector('[data-thread-input]');
     input.value = '@AI reload persistence';
@@ -2154,7 +2161,7 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
     editor.view.dispatch(editor.state.tr.setSelection(editor.state.selection));
   });
   await page.waitForTimeout(200);
-  await page.locator('#float-comment-btn button[data-float-act="ai"]').click();
+  await page.locator('#float-comment-btn button[data-float-act="comment"]').click();
   await page.waitForTimeout(300);
   // 输入并提交
   const tid = await page.evaluate(() => window.__mdAnnotator.State.annotations[0]?.threadId);
@@ -2218,7 +2225,7 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
     editor.view.dispatch(editor.state.tr.setSelection(editor.state.selection));
   });
   await page.waitForTimeout(200);
-  await page.locator('#float-comment-btn button[data-float-act="ai"]').click();
+  await page.locator('#float-comment-btn button[data-float-act="comment"]').click();
   await page.waitForTimeout(300);
   await page.evaluate(() => {
     const ta = document.querySelector('[data-thread-input]');
@@ -2290,7 +2297,7 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
   console.log('  ✓ popover hidden:', preCheck.popoverHidden, ', btn hidden:', preCheck.btnHidden, '(均应 true/false)');
   if (preCheck.btnHidden) throw new Error('选区非空时 💬 按钮应显示, 但 hidden');
   if (!preCheck.popoverHidden) throw new Error('选区非空时 popover 应隐藏');
-  await page.locator('#float-comment-btn button[data-float-act="ai"]').click();
+  await page.locator('#float-comment-btn button[data-float-act="comment"]').click();
   await page.waitForTimeout(300);
   await page.evaluate(() => {
     const ta = document.querySelector('[data-thread-input]');
@@ -2339,7 +2346,7 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
     editor.commands.setTextSelection({ from, to });
   });
   await page.waitForTimeout(200);
-  await page.locator('#float-comment-btn button[data-float-act="ai"]').click();
+  await page.locator('#float-comment-btn button[data-float-act="comment"]').click();
   await page.waitForTimeout(300);
   await page.evaluate(() => {
     const ta = document.querySelector('[data-thread-input]');
@@ -2375,7 +2382,7 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
     editor.commands.setTextSelection({ from: 2, to: 4 });
   });
   await page.waitForTimeout(200);
-  await page.locator('#float-comment-btn button[data-float-act="ai"]').click();
+  await page.locator('#float-comment-btn button[data-float-act="comment"]').click();
   await page.waitForTimeout(300);
   await page.evaluate(() => {
     const ta = document.querySelector('[data-thread-input]');
@@ -2405,7 +2412,7 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
     editor.commands.setTextSelection({ from: 4, to: 6 });
   });
   await page.waitForTimeout(200);
-  await page.locator('#float-comment-btn button[data-float-act="ai"]').click();
+  await page.locator('#float-comment-btn button[data-float-act="comment"]').click();
   await page.waitForTimeout(300);
   await page.evaluate(() => {
     const ta = document.querySelector('[data-thread-input]');
@@ -2442,7 +2449,7 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
     editor.commands.setTextSelection({ from: 2, to: 4 });
   });
   await page.waitForTimeout(200);
-  await page.locator('#float-comment-btn button[data-float-act="ai"]').click();
+  await page.locator('#float-comment-btn button[data-float-act="comment"]').click();
   await page.waitForTimeout(300);
   await page.evaluate(() => {
     const ta = document.querySelector('[data-thread-input]');
@@ -2488,7 +2495,7 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
     editor.commands.setTextSelection({ from: 3, to: 5 });
   });
   await page.waitForTimeout(200);
-  await page.locator('#float-comment-btn button[data-float-act="ai"]').click();
+  await page.locator('#float-comment-btn button[data-float-act="comment"]').click();
   await page.waitForTimeout(300);
   await page.evaluate(() => {
     const ta = document.querySelector('[data-thread-input]');
@@ -2529,7 +2536,7 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
     editor.commands.setTextSelection({ from: 3, to: 5 });
   });
   await page.waitForTimeout(200);
-  await page.locator('#float-comment-btn button[data-float-act="ai"]').click();
+  await page.locator('#float-comment-btn button[data-float-act="comment"]').click();
   await page.waitForTimeout(300);
   await page.evaluate(() => {
     const ta = document.querySelector('[data-thread-input]');
@@ -2593,7 +2600,7 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
       editor.commands.setTextSelection({ from: 3, to: 5 });
     });
     await page.waitForTimeout(200);
-    await page.locator('#float-comment-btn button[data-float-act="ai"]').click();
+    await page.locator('#float-comment-btn button[data-float-act="comment"]').click();
     await page.waitForTimeout(300);
     await page.evaluate((idx) => {
       const ta = document.querySelector('[data-thread-input]');
@@ -2629,7 +2636,7 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
     editor.commands.setTextSelection({ from: 2, to: 4 });
   });
   await page.waitForTimeout(200);
-  await page.locator('#float-comment-btn button[data-float-act="ai"]').click();
+  await page.locator('#float-comment-btn button[data-float-act="comment"]').click();
   await page.waitForTimeout(300);
   await page.evaluate(() => {
     const ta = document.querySelector('[data-thread-input]');
@@ -2648,7 +2655,7 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
     editor.commands.setTextSelection({ from: 9, to: 11 });
   });
   await page.waitForTimeout(200);
-  await page.locator('#float-comment-btn button[data-float-act="ai"]').click();
+  await page.locator('#float-comment-btn button[data-float-act="comment"]').click();
   await page.waitForTimeout(300);
   await page.evaluate(() => {
     const ta = document.querySelector('[data-thread-input]');
@@ -2685,7 +2692,7 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
     editor.commands.setTextSelection({ from: 3, to: 4 });
   });
   await page.waitForTimeout(200);
-  await page.locator('#float-comment-btn button[data-float-act="ai"]').click();
+  await page.locator('#float-comment-btn button[data-float-act="comment"]').click();
   await page.waitForTimeout(300);
   await page.evaluate(() => {
     const ta = document.querySelector('[data-thread-input]');
@@ -2747,7 +2754,7 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
     editor.commands.setTextSelection({ from: 3, to: 4 });
   });
   await page.waitForTimeout(200);
-  await page.locator('#float-comment-btn button[data-float-act="ai"]').click();
+  await page.locator('#float-comment-btn button[data-float-act="comment"]').click();
   await page.waitForTimeout(300);
   // 输入 + Cmd+Enter
   await page.evaluate(() => {
@@ -2784,7 +2791,7 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
       editor.commands.setTextSelection({ from: pos, to: pos + 3 });
     }, text);
     await page.waitForTimeout(200);
-    await page.locator('#float-comment-btn button[data-float-act="ai"]').click();
+    await page.locator('#float-comment-btn button[data-float-act="comment"]').click();
     await page.waitForTimeout(300);
     await page.evaluate((t) => {
       const ta = document.querySelector('[data-thread-input]');
@@ -2817,7 +2824,7 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
       editor.commands.setTextSelection({ from: pos, to: pos + 1 });
     }, t);
     await page.waitForTimeout(200);
-    await page.locator('#float-comment-btn button[data-float-act="ai"]').click();
+    await page.locator('#float-comment-btn button[data-float-act="comment"]').click();
     await page.waitForTimeout(300);
     await page.evaluate((text) => {
       const ta = document.querySelector('[data-thread-input]');
@@ -2847,7 +2854,7 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
     editor.commands.setTextSelection({ from: 3, to: 4 });
   });
   await page.waitForTimeout(200);
-  await page.locator('#float-comment-btn button[data-float-act="ai"]').click();
+  await page.locator('#float-comment-btn button[data-float-act="comment"]').click();
   await page.waitForTimeout(300);
   // 输半截草稿
   await page.evaluate(() => {
@@ -2913,7 +2920,7 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
       editor.commands.setTextSelection({ from: pos, to: pos + 1 });
     }, idx);
     await page.waitForTimeout(200);
-    await page.locator('#float-comment-btn button[data-float-act="ai"]').click();
+    await page.locator('#float-comment-btn button[data-float-act="comment"]').click();
     await page.waitForTimeout(300);
     await page.evaluate(() => {
       const ta = document.querySelector('[data-thread-input]');
@@ -3024,7 +3031,7 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
     editor.commands.setTextSelection({ from: 3, to: 5 });
   });
   await page.waitForTimeout(200);
-  await page.locator('#float-comment-btn button[data-float-act="ai"]').click();
+  await page.locator('#float-comment-btn button[data-float-act="comment"]').click();
   await page.waitForTimeout(300);
   await page.evaluate(() => {
     const ta = document.querySelector('[data-thread-input]');
@@ -3109,7 +3116,7 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
     editor.commands.setTextSelection({ from: 3, to: 4 });
   });
   await page.waitForTimeout(200);
-  await page.locator('#float-comment-btn button[data-float-act="ai"]').click();
+  await page.locator('#float-comment-btn button[data-float-act="comment"]').click();
   await page.waitForTimeout(300);
   await page.evaluate(() => {
     const ta = document.querySelector('[data-thread-input]');
@@ -3580,32 +3587,46 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
     console.log('  ✓ 改署名后的 reply 在 needsReply 检测中被识别为 "已答"');
   }
 
-  // === TEST 115: 文件栏 Ctrl+[ 收起 + 浮起展开按钮 ===
-  console.log('=== TEST 115: 文件栏 Ctrl+[ 收起 + 浮起按钮 ===');
+  // === TEST 115: 大纲栏 Ctrl+[ 收起 + 浮起展开按钮 + 编辑区扩展 ===
+  console.log('=== TEST 115: 大纲栏 Ctrl+[ 收起 + 浮起按钮 ===');
   {
     // 还原 1400 视窗
     await page.setViewportSize({ width: 1400, height: 900 });
     await page.waitForTimeout(200);
     const before = await page.evaluate(() => {
-      const mainLeft = document.querySelector('#main').getBoundingClientRect().left;
       const fpRect = document.querySelector('#file-pane').getBoundingClientRect();
-      return { mainLeft, fpLeft: fpRect.left, fpWidth: fpRect.width };
+      const edRect = document.querySelector('#editor-pane').getBoundingClientRect();
+      const grid = getComputedStyle(document.querySelector('#main')).gridTemplateColumns;
+      const outlineOpen = !document.body.classList.contains('file-pane-collapsed');
+      const commentsOpen = !document.body.classList.contains('comment-pane-collapsed');
+      const outlineLabel = document.querySelector('#file-pane [data-act="toggle-file-pane"]').getAttribute('aria-label');
+      const outlineExpanded = document.querySelector('#file-pane [data-act="toggle-file-pane"]').getAttribute('aria-expanded');
+      return {
+        fpLeft: fpRect.left, fpWidth: fpRect.width,
+        edWidth: edRect.width, grid, outlineOpen, commentsOpen,
+        outlineLabel, outlineExpanded,
+      };
     });
-    console.log(`  ✓ 收起前 file-pane.left = ${before.fpLeft}, width = ${before.fpWidth}`);
-    if (before.fpLeft > 5) throw new Error(`期望 file-pane 在左侧 (left≈0), 实际 ${before.fpLeft}`);
+    console.log(`  ✓ 收起前 file-pane.left=${before.fpLeft} width=${before.fpWidth} edWidth=${before.edWidth}`);
+    if (!before.outlineOpen || !before.commentsOpen) throw new Error('桌面端大纲与批注应默认显示');
+    if (before.outlineLabel !== '收起大纲栏') throw new Error(`大纲收回键名称应为"收起大纲栏"，实际 "${before.outlineLabel}"`);
+    if (before.outlineExpanded !== 'true') throw new Error('默认展开键应有 aria-expanded=true');
 
     // Ctrl+[
     await page.keyboard.press('Control+[');
     await page.waitForTimeout(300);
     const after = await page.evaluate(() => ({
       collapsed: document.body.classList.contains('file-pane-collapsed'),
-      fpLeft: document.querySelector('#file-pane').getBoundingClientRect().left,
+      edWidth: document.querySelector('#editor-pane').getBoundingClientRect().width,
+      grid: getComputedStyle(document.querySelector('#main')).gridTemplateColumns,
       expandBtnVisible: !document.querySelector('#expand-file-pane-btn').classList.contains('hidden'),
+      headerExpanded: document.querySelector('#file-pane [data-act="toggle-file-pane"]').getAttribute('aria-expanded'),
+      edgeExpanded: document.querySelector('#expand-file-pane-btn').getAttribute('aria-expanded'),
     }));
-    console.log(`  ✓ 收起后: collapsed=${after.collapsed} file-pane.left=${after.fpLeft}`);
-    console.log(`  ✓ 浮起展开按钮可见: ${after.expandBtnVisible}`);
+    console.log(`  ✓ 收起后: collapsed=${after.collapsed} edWidth=${after.edWidth} grid="${after.grid}"`);
     if (!after.collapsed) throw new Error('Ctrl+[ 应加 file-pane-collapsed class');
-    if (after.fpLeft > -200) throw new Error(`收起后 file-pane 应左移 (<-200), 实际 ${after.fpLeft}`);
+    if (after.edWidth < before.edWidth + 200) throw new Error(`收起后编辑区应扩展 (从 ${before.edWidth} 到至少 ${before.edWidth + 200})，实际 ${after.edWidth}`);
+    if (after.headerExpanded !== 'false' || after.edgeExpanded !== 'false') throw new Error('收起后 aria-expanded 应为 false');
     if (!after.expandBtnVisible) throw new Error('浮起展开按钮应可见');
 
     // 再 Ctrl+[ 展开回
@@ -3613,14 +3634,61 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
     await page.waitForTimeout(300);
     const restored = await page.evaluate(() => ({
       collapsed: document.body.classList.contains('file-pane-collapsed'),
-      fpLeft: document.querySelector('#file-pane').getBoundingClientRect().left,
+      edWidth: document.querySelector('#editor-pane').getBoundingClientRect().width,
       expandBtnVisible: !document.querySelector('#expand-file-pane-btn').classList.contains('hidden'),
+      headerExpanded: document.querySelector('#file-pane [data-act="toggle-file-pane"]').getAttribute('aria-expanded'),
     }));
     if (restored.collapsed) throw new Error('再 Ctrl+[ 应取消 collapsed');
-    if (restored.fpLeft !== 0) throw new Error(`展开应 fpLeft=0, 实际 ${restored.fpLeft}`);
+    if (Math.abs(restored.edWidth - before.edWidth) > 20) throw new Error(`展开后应恢复编辑区宽度 (期望≈${before.edWidth}，实际 ${restored.edWidth})`);
     if (restored.expandBtnVisible) throw new Error('展开后浮起按钮应隐藏');
-    console.log('  ✓ 文件栏 Ctrl+[ 收起 + 展开 双向 + 浮起按钮联动正确');
-      }
+    if (restored.headerExpanded !== 'true') throw new Error('展开后 aria-expanded 应为 true');
+    console.log('  ✓ 大纲栏 Ctrl+[ 收起 + 展开 双向 + 浮起按钮联动正确 + 编辑区扩展');
+  }
+
+  // === TEST 115b: 批注栏 Ctrl+] 收起 + 编辑区扩展 ===
+  console.log('=== TEST 115b: 批注栏 Ctrl+] 收起 + 展开 ===');
+  {
+    await page.setViewportSize({ width: 1400, height: 900 });
+    await page.waitForTimeout(200);
+    const before = await page.evaluate(() => {
+      const cpRect = document.querySelector('#comment-pane').getBoundingClientRect();
+      const edRect = document.querySelector('#editor-pane').getBoundingClientRect();
+      const label = document.querySelector('#comment-pane [data-act="toggle-comment-pane"]').getAttribute('aria-label');
+      const expanded = document.querySelector('#comment-pane [data-act="toggle-comment-pane"]').getAttribute('aria-expanded');
+      return { cpWidth: cpRect.width, edWidth: edRect.width, label, expanded };
+    });
+    if (before.label !== '收起批注栏') throw new Error(`批注收回键名称应为"收起批注栏"，实际 "${before.label}"`);
+    if (before.expanded !== 'true') throw new Error('批注默认应有 aria-expanded=true');
+
+    // Ctrl+]
+    await page.keyboard.press('Control+]');
+    await page.waitForTimeout(300);
+    const after = await page.evaluate(() => ({
+      collapsed: document.body.classList.contains('comment-pane-collapsed'),
+      edWidth: document.querySelector('#editor-pane').getBoundingClientRect().width,
+      grid: getComputedStyle(document.querySelector('#main')).gridTemplateColumns,
+      expandBtnVisible: !document.querySelector('#expand-comment-pane-btn').classList.contains('hidden'),
+      headerExpanded: document.querySelector('#comment-pane [data-act="toggle-comment-pane"]').getAttribute('aria-expanded'),
+      edgeExpanded: document.querySelector('#expand-comment-pane-btn').getAttribute('aria-expanded'),
+    }));
+    if (!after.collapsed) throw new Error('Ctrl+] 应加 comment-pane-collapsed class');
+    if (after.edWidth < before.edWidth + 200) throw new Error(`批注收起后编辑区应扩展 (从 ${before.edWidth} 到至少 ${before.edWidth + 200})，实际 ${after.edWidth}`);
+    if (after.headerExpanded !== 'false' || after.edgeExpanded !== 'false') throw new Error('收起后 aria-expanded 应为 false');
+    if (!after.expandBtnVisible) throw new Error('批注浮起展开键应可见');
+
+    // 再 Ctrl+] 展开回
+    await page.keyboard.press('Control+]');
+    await page.waitForTimeout(300);
+    const restored = await page.evaluate(() => ({
+      collapsed: document.body.classList.contains('comment-pane-collapsed'),
+      edWidth: document.querySelector('#editor-pane').getBoundingClientRect().width,
+      expandBtnVisible: !document.querySelector('#expand-comment-pane-btn').classList.contains('hidden'),
+    }));
+    if (restored.collapsed) throw new Error('再 Ctrl+] 应取消 collapsed');
+    if (restored.expandBtnVisible) throw new Error('展开后浮起按钮应隐藏');
+    console.log('  ✓ 批注栏 Ctrl+] 收起 + 展开 + 浮起按钮联动正确 + 编辑区扩展');
+  }
+
 
       // === TEST 116: P0 #3 reply 锁 — 议长+参议并发 reply 合并去重 ===
       console.log('=== TEST 116: P0 #3 reply 锁合并 + 内容去重 ===');
