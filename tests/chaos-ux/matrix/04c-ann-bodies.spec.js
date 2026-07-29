@@ -17,12 +17,15 @@ const { DOCS, BODY_CORPUS } = require('../content-catalog');
   await boot(page);
   const { t, done } = createRunner(page, '04c-ann-bodies');
 
-  await t('B5 AI path seeds @AI draft', async () => {
+  await t('B5 AI is explicit @AI body content', async () => {
     await loadDoc(page, 'b5.md', DOCS.simple);
-    const r = await annotateText(page, 'UNIQUE_ALPHA', { ai: true });
+    const r = await annotateText(page, 'UNIQUE_ALPHA', { body: '@AI fix this' });
     if (!r.ok) throw new Error(JSON.stringify(r));
-    const has = /@AI\b/i.test(r.draft || '');
-    if (!has) throw new Error('draft missing @AI: ' + r.draft);
+    const has = await page.evaluate((tid) => {
+      const a = window.__mdAnnotator.State.annotations.find((x) => x.threadId === tid);
+      return /@AI\b/i.test(a?.comments?.[0]?.body || '');
+    }, r.tid);
+    if (!has) throw new Error('body missing @AI');
     coverage.hitContent('B5');
   });
 
@@ -36,6 +39,18 @@ const { DOCS, BODY_CORPUS } = require('../content-catalog');
     }, r.tid);
     if (body !== 'x') throw new Error('body=' + body);
     coverage.hitContent('B2');
+  });
+
+  await t('submitted comment can be edited and keeps marker type', async () => {
+    await loadDoc(page, 'edit-comment.md', DOCS.simple);
+    const r = await annotateText(page, 'UNIQUE_BETA', { body: 'plain original' });
+    const out = await page.evaluate((tid) => {
+      const M = window.__mdAnnotator;
+      M.editComment(tid, 0, '@AI revised instruction');
+      const t = M.State.annotations.find((a) => a.threadId === tid);
+      return { body: t.comments[0].body, type: t.threadType, edit: !!document.querySelector(`[data-act="edit-comment"][data-thread="${tid}"]`) };
+    }, r.tid);
+    if (out.body !== '@AI revised instruction' || out.type !== 'ai' || !out.edit) throw new Error(JSON.stringify(out));
   });
 
   await t('B7 @AI long instruction serializes', async () => {
@@ -80,7 +95,7 @@ const { DOCS, BODY_CORPUS } = require('../content-catalog');
 
   await t('B14 replyDrafts isolated per thread', async () => {
     await loadDoc(page, 'b14.md', DOCS.simple);
-    const r1 = await annotateText(page, 'UNIQUE_ALPHA', { ai: true });
+    const r1 = await annotateText(page, 'UNIQUE_ALPHA', { body: '@AI draft-one' });
     const r2 = await annotateText(page, 'UNIQUE_BETA', { ai: false });
     if (!r1.ok || !r2.ok) throw new Error(JSON.stringify({ r1, r2 }));
     await page.evaluate(
@@ -154,32 +169,20 @@ const { DOCS, BODY_CORPUS } = require('../content-catalog');
     coverage.hitContent('B4');
   });
 
-  await t('B8 applyThreadType API → AI marker', async () => {
+  await t('B8 legacy type API converts body to explicit marker', async () => {
     await loadDoc(page, 'b8.md', DOCS.simple);
     const r = await annotateText(page, 'UNIQUE_ALPHA', { body: 'plain first' });
     const out = await page.evaluate((tid) => {
       const M = window.__mdAnnotator;
       M.State.activeThreadId = tid;
       M.renderCommentList();
-      // Mode locked at create; use applyThreadType API (no in-card set-type)
-      if (M.applyThreadType) M.applyThreadType(tid, 'ai');
-      else if (M.ensureAiMarker) M.State.replyDrafts[tid] = M.ensureAiMarker('next');
+      M.applyThreadType(tid, 'ai');
       const thr = M.State.annotations.find((a) => a.threadId === tid);
       const draft = M.State.replyDrafts[tid] || '';
       const ta = document.querySelector(`[data-thread-input="${tid}"]`);
-      const firstBody = thr && thr.comments && thr.comments[0] && thr.comments[0].body;
-      return {
-        draft,
-        ta: ta && ta.value,
-        firstBody,
-        threadType: thr && thr.threadType,
-        hasBtn: false, // in-card set-type removed
-      };
+      return { draft, ta: ta && ta.value, firstBody: thr?.comments?.[0]?.body, threadType: thr?.threadType ?? null };
     }, r.tid);
-    const has =
-      /@AI\b/i.test(out.draft || out.ta || '') ||
-      /@AI\b/i.test(out.firstBody || '');
-    if (!has && out.threadType !== 'ai') throw new Error(JSON.stringify(out));
+    if (/@AI\b/i.test(out.draft || out.ta || '') || out.firstBody !== '@AI plain first' || out.threadType !== 'ai') throw new Error(JSON.stringify(out));
     coverage.hitContent('B8');
   });
 

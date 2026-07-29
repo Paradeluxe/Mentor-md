@@ -172,7 +172,7 @@ async function annotateText(page, needle, { ai = false, body = null } = {}) {
       });
       if (from < 0) return { ok: false, err: 'needle not found: ' + needle };
       M.State.editor.commands.setTextSelection({ from, to });
-      M.createAnnotationFromSelection({ ai });
+      M.createAnnotationFromSelection();
       const tid = M.State.activeThreadId;
       if (body != null && tid) {
         const thr = M.State.annotations.find((a) => a.threadId === tid);
@@ -189,6 +189,9 @@ async function annotateText(page, needle, { ai = false, body = null } = {}) {
             body,
             createdAt: new Date().toISOString(),
           });
+          const type = M.getMarkerType?.(body);
+          if (type) thr.threadType = type;
+          else delete thr.threadType;
           delete M.State.replyDrafts[tid];
           if (M.renderCommentList) M.renderCommentList();
           if (M.markDirty) M.markDirty();
@@ -199,6 +202,7 @@ async function annotateText(page, needle, { ai = false, body = null } = {}) {
         tid,
         draft: M.State.replyDrafts[tid],
         count: M.State.annotations.length,
+        body: M.State.annotations.find((a) => a.threadId === tid)?.comments?.[0]?.body || '',
       };
     },
     { needle, ai, body }
