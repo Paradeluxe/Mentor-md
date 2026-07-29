@@ -5306,8 +5306,8 @@ function renderCommentList() {
                           <span class="comment-author">${escapeHtml(authorName(first3.author))}</span>
                           <span class="comment-time" title="${escapeHtml(first3.createdAt || "")}">${escapeHtml(formatTime(first3.createdAt))}</span>
                         </div>
-                        ${first3.body ? `<div class="comment-body-row"><div class="comment-body">${escapeHtml(first3.body)}</div><button type="button" class="comment-edit-btn" data-act="edit-comment" data-thread="${safeThreadId}" data-comment-index="0">编辑</button></div>` : ""}
-                        <div class="comment-edit-form hidden" data-edit-form="${safeThreadId}:0"><textarea data-edit-input="${safeThreadId}:0" rows="1">${escapeHtml(first3.body || "")}</textarea><button type="button" data-act="save-comment-edit" data-thread="${safeThreadId}" data-comment-index="0">保存</button><button type="button" data-act="cancel-comment-edit" data-thread="${safeThreadId}" data-comment-index="0">取消</button></div>
+                        ${first3.body ? `<div class="comment-body-row" data-body-row="${safeThreadId}:0"><div class="comment-body">${escapeHtml(first3.body)}</div><button type="button" class="comment-edit-btn" data-act="edit-comment" data-thread="${safeThreadId}" data-comment-index="0">编辑</button></div>` : ""}
+                        <div class="comment-edit-form hidden" data-edit-form="${safeThreadId}:0"><textarea data-edit-input="${safeThreadId}:0" rows="1">${escapeHtml(first3.body || "")}</textarea><div class="form-actions"><button type="button" data-act="cancel-comment-edit" data-thread="${safeThreadId}" data-comment-index="0">取消</button><button type="button" data-act="save-comment-edit" data-thread="${safeThreadId}" data-comment-index="0" class="primary">保存</button></div></div>
                         ${replies.map((r, replyIndex) => {
               const commentIndex = replyIndex + 1;
               const editKey = `${safeThreadId}:${commentIndex}`;
@@ -5318,8 +5318,8 @@ function renderCommentList() {
                               <span class="comment-author">${escapeHtml(authorName(r.author))}</span>
                               <span class="comment-time" title="${escapeHtml(r.createdAt || "")}">${escapeHtml(formatTime(r.createdAt))}</span>
                             </div>
-                <div class="comment-body-row"><div class="comment-body">${escapeHtml(r.body)}</div><button type="button" class="comment-edit-btn" data-act="edit-comment" data-thread="${safeThreadId}" data-comment-index="${commentIndex}">编辑</button></div>
-                <div class="comment-edit-form hidden" data-edit-form="${editKey}"><textarea data-edit-input="${editKey}" rows="1">${escapeHtml(r.body || "")}</textarea><button type="button" data-act="save-comment-edit" data-thread="${safeThreadId}" data-comment-index="${commentIndex}">保存</button><button type="button" data-act="cancel-comment-edit" data-thread="${safeThreadId}" data-comment-index="${commentIndex}">取消</button></div>
+                <div class="comment-body-row" data-body-row="${editKey}"><div class="comment-body">${escapeHtml(r.body)}</div><button type="button" class="comment-edit-btn" data-act="edit-comment" data-thread="${safeThreadId}" data-comment-index="${commentIndex}">编辑</button></div>
+                <div class="comment-edit-form hidden" data-edit-form="${editKey}"><textarea data-edit-input="${editKey}" rows="1">${escapeHtml(r.body || "")}</textarea><div class="form-actions"><button type="button" data-act="cancel-comment-edit" data-thread="${safeThreadId}" data-comment-index="${commentIndex}">取消</button><button type="button" data-act="save-comment-edit" data-thread="${safeThreadId}" data-comment-index="${commentIndex}" class="primary">保存</button></div></div>
               </div>
             `;
             }).join("")}
@@ -5450,7 +5450,46 @@ function renderCommentList() {
     btn.addEventListener("click", (e) => {
       e.stopPropagation();
       const key = `${btn.dataset.thread}:${btn.dataset.commentIndex}`;
-      list.querySelector(`[data-edit-form="${key}"]`)?.classList.remove("hidden");
+      // 隐藏原正文行，只显示编辑表单 (docs/linear 风格，替代 in-place)
+      list.querySelector(`[data-body-row="${key}"]`)?.classList.add("hidden");
+      const form = list.querySelector(`[data-edit-form="${key}"]`);
+      form?.classList.remove("hidden");
+      // autosize + focus + 光标末尾
+      const ta = form?.querySelector(`[data-edit-input="${key}"]`);
+      if (ta) {
+        ta.style.height = "0px";
+        const maxH = 160;
+        ta.style.height = Math.min(ta.scrollHeight, maxH) + "px";
+        ta.focus();
+        ta.setSelectionRange(ta.value.length, ta.value.length);
+      }
+    });
+  });
+  // 编辑框 autosize + Ctrl+Enter 保存 + Esc 取消
+  list.querySelectorAll("[data-edit-input]").forEach((ta) => {
+    const key = ta.getAttribute("data-edit-input");
+    const tid = key.split(":")[0];
+    const idx = key.split(":")[1];
+    const autosize = () => {
+      try {
+        ta.style.height = "0px";
+        const maxH = 160;
+        ta.style.height = Math.min(ta.scrollHeight, maxH) + "px";
+        ta.style.overflowY = ta.scrollHeight > maxH + 1 ? "auto" : "hidden";
+      } catch (_) {}
+    };
+    autosize();
+    ta.addEventListener("input", autosize);
+    ta.addEventListener("keydown", (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+        e.preventDefault();
+        if (ta.value.trim()) editComment(tid, idx, ta.value);
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        const form = ta.closest(".comment-edit-form");
+        form?.classList.add("hidden");
+        list.querySelector(`[data-body-row="${key}"]`)?.classList.remove("hidden");
+      }
     });
   });
   list.querySelectorAll('[data-act="cancel-comment-edit"]').forEach((btn) => {
@@ -5462,6 +5501,7 @@ function renderCommentList() {
       const current = thread?.comments?.[Number(btn.dataset.commentIndex)]?.body || "";
       if (input) input.value = current;
       list.querySelector(`[data-edit-form="${key}"]`)?.classList.add("hidden");
+      list.querySelector(`[data-body-row="${key}"]`)?.classList.remove("hidden");
     });
   });
   list.querySelectorAll('[data-act="save-comment-edit"]').forEach((btn) => {

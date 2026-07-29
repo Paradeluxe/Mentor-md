@@ -61944,8 +61944,8 @@ function renderCommentList() {
                           <span class="comment-author">${escapeHtml(authorName(first3.author))}</span>
                           <span class="comment-time" title="${escapeHtml(first3.createdAt || "")}">${escapeHtml(formatTime(first3.createdAt))}</span>
                         </div>
-                        ${first3.body ? `<div class="comment-body-row"><div class="comment-body">${escapeHtml(first3.body)}</div><button type="button" class="comment-edit-btn" data-act="edit-comment" data-thread="${safeThreadId}" data-comment-index="0">\u7F16\u8F91</button></div>` : ""}
-                        <div class="comment-edit-form hidden" data-edit-form="${safeThreadId}:0"><textarea data-edit-input="${safeThreadId}:0" rows="1">${escapeHtml(first3.body || "")}</textarea><button type="button" data-act="save-comment-edit" data-thread="${safeThreadId}" data-comment-index="0">\u4FDD\u5B58</button><button type="button" data-act="cancel-comment-edit" data-thread="${safeThreadId}" data-comment-index="0">\u53D6\u6D88</button></div>
+                        ${first3.body ? `<div class="comment-body-row" data-body-row="${safeThreadId}:0"><div class="comment-body">${escapeHtml(first3.body)}</div><button type="button" class="comment-edit-btn" data-act="edit-comment" data-thread="${safeThreadId}" data-comment-index="0">\u7F16\u8F91</button></div>` : ""}
+                        <div class="comment-edit-form hidden" data-edit-form="${safeThreadId}:0"><textarea data-edit-input="${safeThreadId}:0" rows="1">${escapeHtml(first3.body || "")}</textarea><div class="form-actions"><button type="button" data-act="cancel-comment-edit" data-thread="${safeThreadId}" data-comment-index="0">\u53D6\u6D88</button><button type="button" data-act="save-comment-edit" data-thread="${safeThreadId}" data-comment-index="0" class="primary">\u4FDD\u5B58</button></div></div>
                         ${replies.map((r, replyIndex) => {
       const commentIndex = replyIndex + 1;
       const editKey = `${safeThreadId}:${commentIndex}`;
@@ -61956,8 +61956,8 @@ function renderCommentList() {
                               <span class="comment-author">${escapeHtml(authorName(r.author))}</span>
                               <span class="comment-time" title="${escapeHtml(r.createdAt || "")}">${escapeHtml(formatTime(r.createdAt))}</span>
                             </div>
-                <div class="comment-body-row"><div class="comment-body">${escapeHtml(r.body)}</div><button type="button" class="comment-edit-btn" data-act="edit-comment" data-thread="${safeThreadId}" data-comment-index="${commentIndex}">\u7F16\u8F91</button></div>
-                <div class="comment-edit-form hidden" data-edit-form="${editKey}"><textarea data-edit-input="${editKey}" rows="1">${escapeHtml(r.body || "")}</textarea><button type="button" data-act="save-comment-edit" data-thread="${safeThreadId}" data-comment-index="${commentIndex}">\u4FDD\u5B58</button><button type="button" data-act="cancel-comment-edit" data-thread="${safeThreadId}" data-comment-index="${commentIndex}">\u53D6\u6D88</button></div>
+                <div class="comment-body-row" data-body-row="${editKey}"><div class="comment-body">${escapeHtml(r.body)}</div><button type="button" class="comment-edit-btn" data-act="edit-comment" data-thread="${safeThreadId}" data-comment-index="${commentIndex}">\u7F16\u8F91</button></div>
+                <div class="comment-edit-form hidden" data-edit-form="${editKey}"><textarea data-edit-input="${editKey}" rows="1">${escapeHtml(r.body || "")}</textarea><div class="form-actions"><button type="button" data-act="cancel-comment-edit" data-thread="${safeThreadId}" data-comment-index="${commentIndex}">\u53D6\u6D88</button><button type="button" data-act="save-comment-edit" data-thread="${safeThreadId}" data-comment-index="${commentIndex}" class="primary">\u4FDD\u5B58</button></div></div>
               </div>
             `;
     }).join("")}
@@ -62088,7 +62088,44 @@ function renderCommentList() {
     btn.addEventListener("click", (e) => {
       e.stopPropagation();
       const key = `${btn.dataset.thread}:${btn.dataset.commentIndex}`;
-      list.querySelector(`[data-edit-form="${key}"]`)?.classList.remove("hidden");
+      list.querySelector(`[data-body-row="${key}"]`)?.classList.add("hidden");
+      const form = list.querySelector(`[data-edit-form="${key}"]`);
+      form?.classList.remove("hidden");
+      const ta2 = form?.querySelector(`[data-edit-input="${key}"]`);
+      if (ta2) {
+        ta2.style.height = "0px";
+        const maxH = 160;
+        ta2.style.height = Math.min(ta2.scrollHeight, maxH) + "px";
+        ta2.focus();
+        ta2.setSelectionRange(ta2.value.length, ta2.value.length);
+      }
+    });
+  });
+  list.querySelectorAll("[data-edit-input]").forEach((ta2) => {
+    const key = ta2.getAttribute("data-edit-input");
+    const tid = key.split(":")[0];
+    const idx = key.split(":")[1];
+    const autosize = () => {
+      try {
+        ta2.style.height = "0px";
+        const maxH = 160;
+        ta2.style.height = Math.min(ta2.scrollHeight, maxH) + "px";
+        ta2.style.overflowY = ta2.scrollHeight > maxH + 1 ? "auto" : "hidden";
+      } catch (_) {
+      }
+    };
+    autosize();
+    ta2.addEventListener("input", autosize);
+    ta2.addEventListener("keydown", (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+        e.preventDefault();
+        if (ta2.value.trim()) editComment(tid, idx, ta2.value);
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        const form = ta2.closest(".comment-edit-form");
+        form?.classList.add("hidden");
+        list.querySelector(`[data-body-row="${key}"]`)?.classList.remove("hidden");
+      }
     });
   });
   list.querySelectorAll('[data-act="cancel-comment-edit"]').forEach((btn) => {
@@ -62100,6 +62137,7 @@ function renderCommentList() {
       const current = thread?.comments?.[Number(btn.dataset.commentIndex)]?.body || "";
       if (input) input.value = current;
       list.querySelector(`[data-edit-form="${key}"]`)?.classList.add("hidden");
+      list.querySelector(`[data-body-row="${key}"]`)?.classList.remove("hidden");
     });
   });
   list.querySelectorAll('[data-act="save-comment-edit"]').forEach((btn) => {
