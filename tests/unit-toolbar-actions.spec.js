@@ -12,7 +12,7 @@ const { pathToFileURL } = require('url');
 
   assert.deepStrictEqual(
     PRIMARY_TOOLBAR_ACTIONS.map((x) => x.id),
-    ['new', 'open', 'save', 'saveAs', 'exportMd', 'exportDocx', 'references', 'undo', 'redo', 'source']
+    ['new', 'open', 'save', 'saveAs', 'exportMd', 'exportDocx', 'references', 'undo', 'redo', 'source', 'filePane', 'commentPane']
   );
 
   const noHandle = getToolbarActionState({
@@ -33,6 +33,10 @@ const { pathToFileURL } = require('url');
   assert.strictEqual(noHandle.references.pressed, false);
   assert.strictEqual(noHandle.source.label, '源码');
   assert.strictEqual(noHandle.source.pressed, false);
+  // default panes open when flags omitted
+  assert.strictEqual(noHandle.filePane.pressed, true);
+  assert.strictEqual(noHandle.commentPane.pressed, true);
+  assert.strictEqual(noHandle.filePane.expanded, true);
 
   const withHandle = getToolbarActionState({
     hasDocument: true,
@@ -42,11 +46,16 @@ const { pathToFileURL } = require('url');
     saveMode: 'mentor-handle',
     renderMode: 'source',
     referencesOpen: true,
+    filePaneOpen: false,
+    commentPaneOpen: true,
   });
   assert.strictEqual(withHandle.save.intent, 'write-current');
   assert.strictEqual(withHandle.source.label, '预览');
   assert.strictEqual(withHandle.source.pressed, true);
   assert.strictEqual(withHandle.references.pressed, true);
+  assert.strictEqual(withHandle.filePane.pressed, false);
+  assert.strictEqual(withHandle.filePane.expanded, false);
+  assert.strictEqual(withHandle.commentPane.pressed, true);
 
   const readOnly = getToolbarActionState({
     hasDocument: true,

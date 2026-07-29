@@ -56806,13 +56806,17 @@ var PRIMARY_TOOLBAR_ACTIONS = Object.freeze([
   { id: "references", label: "\u6587\u732E" },
   { id: "undo", label: "\u64A4\u9500" },
   { id: "redo", label: "\u91CD\u505A" },
-  { id: "source", label: "\u6E90\u7801" }
+  { id: "source", label: "\u6E90\u7801" },
+  { id: "filePane", label: "\u5927\u7EB2\u680F" },
+  { id: "commentPane", label: "\u6279\u6CE8\u680F" }
 ]);
 function getToolbarActionState(input = {}) {
   const hasDocument = !!input.hasDocument;
   const readOnly = !!input.readOnly;
   const busy = !!input.busy;
   const renderMode = input.renderMode === "source" ? "source" : "rendered";
+  const filePaneOpen = input.filePaneOpen !== false;
+  const commentPaneOpen = input.commentPaneOpen !== false;
   return {
     new: {
       label: "\u65B0\u5EFA",
@@ -56860,6 +56864,18 @@ function getToolbarActionState(input = {}) {
       label: renderMode === "source" ? "\u9884\u89C8" : "\u6E90\u7801",
       disabled: !hasDocument || busy,
       pressed: renderMode === "source"
+    },
+    filePane: {
+      label: "\u5927\u7EB2\u680F",
+      disabled: false,
+      pressed: filePaneOpen,
+      expanded: filePaneOpen
+    },
+    commentPane: {
+      label: "\u6279\u6CE8\u680F",
+      disabled: false,
+      pressed: commentPaneOpen,
+      expanded: commentPaneOpen
     }
   };
 }
@@ -57513,7 +57529,9 @@ var State2 = {
   // [{ id, name, html, annotations, dirty, handle, saveMode, mediaUrls, mediaFiles, ... }]
   activeTabId: null,
   // 磁盘路径提示 (来自 ?open= 或 handle 名)。v1.45.6: 取消「受保护文档」写盘拦截。
-  diskPathHint: ""
+  diskPathHint: "",
+  // outline pane tab: 'headings' | 'images'
+  outlineTab: "headings"
 };
 function mentorBaseName(nameOrPath) {
   if (!nameOrPath) return "";
@@ -60381,7 +60399,7 @@ function handleSelectionChange(opts = {}) {
     return;
   }
   if (activeMarkThreadId) {
-    activateAnnotationThread(activeMarkThreadId, { ensureCard: true });
+    activateAndRevealThread(activeMarkThreadId);
   }
   const popover = $("#mark-delete-popover");
   if (popover) {
@@ -60400,7 +60418,7 @@ function handleSelectionChange(opts = {}) {
         (a) => a && !a.invalid && Array.isArray(a.imageAnchors) && a.imageAnchors.some((x) => x && (x.from === sel0.from || src && x.src === src))
       );
       if (hit) {
-        activateAnnotationThread(hit.threadId, { ensureCard: true });
+        activateAndRevealThread(hit.threadId);
         refreshAnnotationImageDecos();
       }
     } catch (e) {
@@ -60861,7 +60879,7 @@ function setupFloatCommentButton() {
               }
             }
           }
-          activateAnnotationThread(markClick.threadId, { ensureCard: true });
+          activateAndRevealThread(markClick.threadId);
           positionMarkDeletePopover();
           return;
         }
@@ -61833,10 +61851,10 @@ function annotationWarningState(thread) {
 }
 function activateAnnotationThread(threadId, options = {}) {
   if (!threadId) {
-    const switched2 = State2.activeThreadId != null;
+    const switched = State2.activeThreadId != null;
     State2.activeThreadId = null;
     if (options.skipHighlight !== true) highlightActiveMark();
-    if (options.ensureCard !== false && switched2) {
+    if (options.ensureCard !== false && switched) {
       setActiveCommentCard(null);
     }
     return true;
@@ -61844,12 +61862,70 @@ function activateAnnotationThread(threadId, options = {}) {
   const thread = (State2.annotations || []).find((item) => item && item.threadId === threadId);
   if (!thread) return false;
   const ensureCard = options.ensureCard !== false;
-  const switched = State2.activeThreadId !== threadId;
   State2.activeThreadId = threadId;
   if (options.skipHighlight !== true) highlightActiveMark();
-  if (ensureCard && switched && !setActiveCommentCard(threadId)) {
-    renderCommentList();
+  if (ensureCard) {
+    if (!setActiveCommentCard(threadId)) {
+      ensureCommentCardVisible(threadId);
+      renderCommentList();
+      setActiveCommentCard(threadId);
+    }
   }
+  return true;
+}
+function activateAndRevealThread(threadId, options = {}) {
+  if (!threadId) return false;
+  const thread = (State2.annotations || []).find((item) => item && item.threadId === threadId);
+  if (!thread) return false;
+  let needsRender = false;
+  if (State2.manuallyCollapsedIds && State2.manuallyCollapsedIds[threadId]) {
+    delete State2.manuallyCollapsedIds[threadId];
+    needsRender = true;
+  }
+  if (thread.resolved) {
+    if (!State2.expandedThreadIds) State2.expandedThreadIds = {};
+    if (!State2.expandedThreadIds[threadId]) {
+      State2.expandedThreadIds[threadId] = true;
+      needsRender = true;
+    }
+  }
+  if (needsRender) renderCommentList();
+  const ok = activateAnnotationThread(threadId, { ensureCard: true, ...options });
+  if (!ok) return false;
+  if (!setActiveCommentCard(threadId)) {
+    ensureCommentCardVisible(threadId);
+    renderCommentList();
+    setActiveCommentCard(threadId);
+  }
+  return true;
+}
+function invokeAiForThread(threadId) {
+  if (!threadId) return false;
+  const thread = (State2.annotations || []).find((item) => item && item.threadId === threadId);
+  if (!thread) return false;
+  activateAndRevealThread(threadId);
+  const ta2 = document.querySelector(`[data-thread-input="${threadId}"]`);
+  let draft = "";
+  if (State2.replyDrafts[threadId] != null) draft = String(State2.replyDrafts[threadId]);
+  else if (ta2) draft = ta2.value || "";
+  const cleaned = stripMarkers(draft).replace(/^\s+/, "");
+  const next2 = cleaned ? ensureMarker(cleaned, "ai") : MENTION_TYPES.ai && MENTION_TYPES.ai.prefix || "@AI ";
+  State2.replyDrafts[threadId] = next2;
+  if (ta2) {
+    ta2.value = next2;
+    try {
+      ta2.dispatchEvent(new Event("input", { bubbles: true }));
+    } catch (_) {
+    }
+    try {
+      ta2.focus();
+      const n = ta2.value.length;
+      ta2.setSelectionRange(n, n);
+    } catch (_) {
+    }
+  }
+  const btn = document.querySelector(`[data-act="submit-reply"][data-thread="${threadId}"]`);
+  if (btn) btn.disabled = !String(next2).trim();
   return true;
 }
 function setActiveCommentCard(threadId) {
@@ -62008,6 +62084,7 @@ function renderCommentList() {
                         </div>
                         ${first3.body ? `<div class="comment-body-row" data-body-row="${safeThreadId}:0"><div class="comment-body">${escapeHtml(first3.body)}</div><button type="button" class="comment-edit-btn" data-act="edit-comment" data-thread="${safeThreadId}" data-comment-index="0">\u7F16\u8F91</button></div>` : ""}
                         <div class="comment-edit-form hidden" data-edit-form="${safeThreadId}:0"><textarea data-edit-input="${safeThreadId}:0" rows="1">${escapeHtml(first3.body || "")}</textarea><div class="form-actions"><button type="button" data-act="cancel-comment-edit" data-thread="${safeThreadId}" data-comment-index="0">\u53D6\u6D88</button><button type="button" data-act="save-comment-edit" data-thread="${safeThreadId}" data-comment-index="0" class="primary">\u4FDD\u5B58</button></div></div>
+          </div>
                         ${replies.map((r, replyIndex) => {
       const commentIndex = replyIndex + 1;
       const editKey = `${safeThreadId}:${commentIndex}`;
@@ -62032,11 +62109,11 @@ function renderCommentList() {
               <textarea data-thread-input="${safeThreadId}" rows="1" placeholder="${escapeHtml(markerPlaceholder(threadType, !!first3.body))}" autocomplete="off"></textarea>
               <!-- Single human input: write @AI or @REVIEW explicitly when needed. -->
               <div class="form-actions">
+                <button type="button" class="comment-invoke-ai-btn" data-act="invoke-ai" data-thread="${safeThreadId}" title="\u5728\u56DE\u590D\u4E2D\u63D2\u5165 @AI\uFF08\u663E\u5F0F\u5524\u8D77 AI\uFF09" aria-label="\u63D2\u5165 @AI">@AI</button>
                 <button class="comment-resolve-btn ${thread.resolved ? "is-resolved" : ""}" data-act="resolve" data-thread="${safeThreadId}" title="${thread.resolved ? "\u91CD\u65B0\u6253\u5F00\u6B64\u6279\u6CE8" : "\u6807\u8BB0\u4E3A\u5DF2\u89E3\u51B3"}" aria-label="${thread.resolved ? "\u91CD\u65B0\u6253\u5F00" : "\u6807\u8BB0\u4E3A\u5DF2\u89E3\u51B3"}">${thread.resolved ? "\u91CD\u5F00" : "\u89E3\u51B3"}</button>
                 <button data-act="submit-reply" data-thread="${safeThreadId}" class="primary" disabled title="\u8F93\u5165\u540E\u53EF\u56DE\u590D (Ctrl+Enter)">\u56DE\u590D</button>
               </div>
             </div>
-        </div>
         </div>
       </div>
     `;
@@ -62146,6 +62223,13 @@ function renderCommentList() {
       }
     });
   });
+  list.querySelectorAll('[data-act="invoke-ai"]').forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      invokeAiForThread(btn.dataset.thread);
+    });
+  });
   list.querySelectorAll('[data-act="edit-comment"]').forEach((btn) => {
     btn.addEventListener("click", (e) => {
       e.stopPropagation();
@@ -62213,6 +62297,7 @@ function renderCommentList() {
   list.querySelectorAll('[data-act="goto"]').forEach((btn) => {
     btn.addEventListener("click", (e) => {
       e.stopPropagation();
+      activateAndRevealThread(btn.dataset.thread);
       scrollToThread(btn.dataset.thread);
       closeAllCommentMenus();
     });
@@ -62344,7 +62429,7 @@ function toggleManualCollapse(tid) {
   }
 }
 function scrollToCommentText(tid) {
-  if (!activateAnnotationThread(tid, { ensureCard: true })) return;
+  if (!activateAndRevealThread(tid)) return;
   scrollToThread(tid);
 }
 function scrollToThread(threadId) {
@@ -62981,49 +63066,101 @@ function renderOutline() {
   const pane = $("#outline-pane");
   if (!pane) return;
   const editor2 = State2.editor;
+  const tab = State2.outlineTab === "images" ? "images" : "headings";
   if (!editor2) {
     pane.innerHTML = '<p class="outline-empty">\u6253\u5F00\u6587\u6863\u4EE5\u67E5\u770B\u5927\u7EB2</p>';
     return;
   }
-  const items = [];
+  const headings = [];
+  const images = [];
+  let imageIndex = 0;
   editor2.state.doc.descendants((node, pos) => {
     if (node.type.name === "heading" && node.attrs.level >= 1 && node.attrs.level <= 3) {
-      items.push({ level: node.attrs.level, text: node.textContent || "", pos, kind: "heading" });
+      headings.push({ level: node.attrs.level, text: node.textContent || "", pos, kind: "heading" });
     } else if (node.type.name === "bibliography") {
-      items.push({
+      headings.push({
         level: 1,
         text: node.attrs && node.attrs.heading || "References",
         pos,
         kind: "bibliography"
       });
+    } else if (node.type.name === "image") {
+      imageIndex += 1;
+      const src = node.attrs && node.attrs.src || "";
+      const alt = node.attrs && node.attrs.alt || "";
+      const title = node.attrs && node.attrs.title || "";
+      const path2 = mediaPathForSrc(src) || src;
+      const base2 = mentorBaseName(path2) || "";
+      const label = alt && String(alt).trim() || title && String(title).trim() || base2 || `\u56FE\u7247 ${imageIndex}`;
+      images.push({ pos, src, alt, title, label, index: imageIndex, kind: "image" });
     }
   });
-  if (items.length === 0) {
-    pane.innerHTML = '<p class="outline-empty">\u672C\u6587\u6863\u6682\u65E0\u6807\u9898</p>';
-    return;
+  const tabHtml = `
+    <div class="outline-tabs" role="tablist" aria-label="\u5927\u7EB2">
+      <button type="button" class="outline-tab${tab === "headings" ? " is-active" : ""}" role="tab" data-outline-tab="headings" aria-selected="${tab === "headings" ? "true" : "false"}">\u6807\u9898</button>
+      <button type="button" class="outline-tab${tab === "images" ? " is-active" : ""}" role="tab" data-outline-tab="images" aria-selected="${tab === "images" ? "true" : "false"}">\u56FE\u7247${images.length ? ` (${images.length})` : ""}</button>
+    </div>
+    <div class="outline-tab-panel" role="tabpanel">`;
+  let bodyHtml = "";
+  if (tab === "images") {
+    if (!images.length) {
+      bodyHtml = '<p class="outline-empty">\u6682\u65E0\u56FE\u7247</p>';
+    } else {
+      bodyHtml = images.map(
+        (it) => `<div class="outline-item outline-image-item" role="treeitem" tabindex="0" data-pos="${it.pos}" data-kind="image" data-image-pos="${it.pos}" title="${escapeHtml(it.label)}"><span class="outline-text">${escapeHtml(it.label)}</span></div>`
+      ).join("");
+    }
+  } else if (!headings.length) {
+    bodyHtml = '<p class="outline-empty">\u672C\u6587\u6863\u6682\u65E0\u6807\u9898</p>';
+  } else {
+    bodyHtml = headings.map(
+      (it) => `<div class="outline-item outline-h${it.level}" role="treeitem" tabindex="0" data-pos="${it.pos}" data-kind="${it.kind || "heading"}" title="${escapeHtml(it.text)}"><span class="outline-text">${escapeHtml(it.text) || "(\u65E0\u6807\u9898)"}</span></div>`
+    ).join("");
   }
-  const rows = items;
-  pane.innerHTML = rows.map(
-    (it) => `<div class="outline-item outline-h${it.level}" role="treeitem" tabindex="0" data-pos="${it.pos}" data-kind="${it.kind || "heading"}" title="${escapeHtml(it.text)}"><span class="outline-text">${escapeHtml(it.text) || "(\u65E0\u6807\u9898)"}</span></div>`
-  ).join("");
+  pane.innerHTML = tabHtml + bodyHtml + "</div>";
+  pane.querySelectorAll("[data-outline-tab]").forEach((el) => {
+    el.addEventListener("click", (e) => {
+      e.preventDefault();
+      const next2 = el.getAttribute("data-outline-tab") === "images" ? "images" : "headings";
+      if (State2.outlineTab === next2) return;
+      State2.outlineTab = next2;
+      renderOutline();
+    });
+  });
   const jumpOutline = (el) => {
     const pos = parseInt(el.dataset.pos, 10);
     if (Number.isNaN(pos)) return;
     try {
       const kind = el.dataset.kind || "heading";
-      if (kind === "bibliography") {
+      if (kind === "bibliography" || kind === "image") {
         try {
           editor2.chain().focus().setNodeSelection(pos).run();
         } catch (_) {
           editor2.commands.focus();
-          editor2.commands.setNodeSelection(pos);
+          try {
+            editor2.commands.setNodeSelection(pos);
+          } catch (e2) {
+          }
+        }
+        if (kind === "image") {
+          try {
+            const hit = (State2.annotations || []).find(
+              (a) => a && !a.invalid && Array.isArray(a.imageAnchors) && a.imageAnchors.some((x) => x && x.from === pos)
+            );
+            if (hit) activateAndRevealThread(hit.threadId);
+            refreshAnnotationImageDecos();
+          } catch (_) {
+          }
         }
       } else {
         const $pos = editor2.state.doc.resolve(pos + 1);
         editor2.chain().focus().setTextSelection($pos.pos).run();
       }
       const dom = editor2.view.nodeDOM(pos);
-      if (dom && dom.scrollIntoView) dom.scrollIntoView({ behavior: "smooth", block: "start" });
+      if (dom && dom.scrollIntoView) {
+        const target = kind === "image" && dom.querySelector ? dom.tagName === "IMG" ? dom : dom.querySelector("img") || dom : dom;
+        target.scrollIntoView({ behavior: "smooth", block: kind === "image" ? "center" : "start" });
+      }
     } catch (e) {
       console.warn("\u5927\u7EB2\u8DF3\u8F6C\u5931\u8D25:", e);
     }
@@ -63386,6 +63523,9 @@ function applyToolbarActionState(sel, state) {
     el.setAttribute("aria-pressed", state.pressed ? "true" : "false");
     if (el.id === "btn-refs") el.setAttribute("aria-expanded", state.pressed ? "true" : "false");
   }
+  if ("expanded" in state) {
+    el.setAttribute("aria-expanded", state.expanded ? "true" : "false");
+  }
   if (state.detail) el.setAttribute("data-detail", state.detail);
   if (state.intent) el.setAttribute("data-intent", state.intent);
   if ("dirty" in state && el.id === "btn-save") el.setAttribute("data-dirty", state.dirty ? "true" : "false");
@@ -63400,6 +63540,8 @@ function syncToolbarActionState() {
   }
   const refsPane = document.querySelector("#refs-pane");
   const referencesOpen = !!(refsPane && !refsPane.classList.contains("hidden"));
+  const filePaneOpen = !document.body.classList.contains("file-pane-collapsed");
+  const commentPaneOpen = !document.body.classList.contains("comment-pane-collapsed");
   const actionState = getToolbarActionState({
     hasDocument: !!State2.currentFile,
     hasWriteHandle: hasWriteHandle(),
@@ -63410,7 +63552,9 @@ function syncToolbarActionState() {
     referencesOpen,
     canUndo,
     canRedo,
-    busy: !!State2._toolbarBusy
+    busy: !!State2._toolbarBusy,
+    filePaneOpen,
+    commentPaneOpen
   });
   applyToolbarActionState("#btn-new", actionState.new);
   applyToolbarActionState("#btn-open-files", actionState.open);
@@ -63422,6 +63566,14 @@ function syncToolbarActionState() {
   applyToolbarActionState("#btn-undo", actionState.undo);
   applyToolbarActionState("#btn-redo", actionState.redo);
   applyToolbarActionState("#btn-toggle-render", actionState.source);
+  applyToolbarActionState("#btn-toggle-file-pane", actionState.filePane);
+  applyToolbarActionState("#btn-toggle-comment-pane", actionState.commentPane);
+  document.querySelectorAll('#file-pane [data-act="toggle-file-pane"]').forEach((el) => {
+    el.setAttribute("aria-expanded", actionState.filePane.expanded ? "true" : "false");
+  });
+  document.querySelectorAll('#comment-pane [data-act="toggle-comment-pane"]').forEach((el) => {
+    el.setAttribute("aria-expanded", actionState.commentPane.expanded ? "true" : "false");
+  });
   const saveBtn = document.querySelector("#btn-save");
   if (saveBtn) saveBtn.setAttribute("data-dirty", String(!!(State2.currentFile && State2.currentFile.dirty)));
 }
@@ -68287,6 +68439,10 @@ function setupToolbar() {
   function syncPaneToggleChips() {
     syncPaneControls("outline", !document.body.classList.contains("file-pane-collapsed"));
     syncPaneControls("comment", !document.body.classList.contains("comment-pane-collapsed"));
+    try {
+      syncToolbarActionState();
+    } catch {
+    }
   }
   function toggleFilePane() {
     const collapsed = document.body.classList.toggle("file-pane-collapsed");
@@ -69636,6 +69792,8 @@ window.__mdAnnotator = {
   // v1.43.47: 只切 active 卡，不整表重渲
   setActiveCommentCard: (tid) => setActiveCommentCard(tid),
   activateAnnotationThread: (tid, opts) => activateAnnotationThread(tid, opts),
+  activateAndRevealThread: (tid, opts) => activateAndRevealThread(tid, opts),
+  invokeAiForThread: (tid) => invokeAiForThread(tid),
   annotationWarningState: (thread) => annotationWarningState(thread),
   ensureCommentCardVisible: (tid) => ensureCommentCardVisible(tid),
   // highlightActiveMark exported as function ref above (DecorationSet path)

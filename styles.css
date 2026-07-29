@@ -372,12 +372,14 @@ code {
 #btn-save[data-dirty="true"] .tb-icon { color: var(--accent); }
 #btn-refs[aria-pressed="true"],
 #btn-toggle-render[aria-pressed="true"],
+#btn-toggle-file-pane[aria-pressed="true"],
 #btn-toggle-comment-pane[aria-pressed="true"] {
   background: var(--accent-soft);
   color: var(--accent);
 }
 #btn-refs[aria-pressed="true"] .tb-icon,
 #btn-toggle-render[aria-pressed="true"] .tb-icon,
+#btn-toggle-file-pane[aria-pressed="true"] .tb-icon,
 #btn-toggle-comment-pane[aria-pressed="true"] .tb-icon { color: var(--accent); }
 .tb-icon-text[aria-busy="true"] { opacity: 0.7; cursor: progress; }
 
@@ -1260,8 +1262,50 @@ body.comment-pane-collapsed #expand-comment-pane-btn {
 #outline-pane {
   flex: 1;
   overflow-y: auto;
-  padding: 4px 0;
+  padding: 0 0 4px;
   font-size: 12.5px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.outline-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 6px 8px 4px;
+  border-bottom: 1px solid var(--border-warm);
+  flex-shrink: 0;
+  background: var(--chrome, var(--panel));
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+.outline-tab {
+  flex: 1;
+  border: 0;
+  background: transparent;
+  color: var(--text-2);
+  font-size: 12px;
+  font-weight: 550;
+  padding: 5px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  line-height: 1.2;
+  transition: background 0.12s, color 0.12s;
+}
+.outline-tab:hover {
+  background: var(--panel-2);
+  color: var(--text);
+}
+.outline-tab.is-active {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+.outline-tab-panel {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 0;
+  min-height: 0;
 }
 .outline-empty {
   padding: 24px 16px;
@@ -1294,6 +1338,16 @@ body.comment-pane-collapsed #expand-comment-pane-btn {
 .outline-h2 { padding-left: 22px; }
 .outline-h3 { padding-left: 34px; color: var(--text-2); font-size: 12px; }
 .outline-h3.is-active { color: var(--accent); }
+.outline-image-item {
+  padding-left: 12px;
+}
+.outline-image-item .outline-text {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: bottom;
+}
 .tree-empty { padding: 24px 16px; color: var(--text-2); font-size: 12.5px; text-align: center; cursor: pointer; user-select: none; transition: background 0.12s; }
 .tree-empty:hover { background: var(--panel-2); color: var(--text); }
 .tree-empty:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
@@ -2910,8 +2964,14 @@ body.refs-pane-collapsed #expand-refs-pane-btn {
 .comment-resolved-badge { display: none !important; }
 
 /* 主批注体 — Notion/Linear: 宽松留白, avatar 左对齐 */
+.comment-thread {
+  --comment-inline: 14px;
+  --comment-avatar-size: 26px;
+  --comment-meta-gap: 8px;
+  --comment-body-indent: calc(var(--comment-avatar-size) + var(--comment-meta-gap));
+}
 .comment-item {
-  padding: 12px 14px 4px;
+  padding: 12px var(--comment-inline) 8px;
   letter-spacing: 0.005em;
 }
 .comment-item + .comment-item {
@@ -2922,14 +2982,14 @@ body.refs-pane-collapsed #expand-refs-pane-btn {
 .comment-meta {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-bottom: 6px;
-  min-height: 26px;
+  gap: var(--comment-meta-gap);
+  margin-bottom: 7px;
+  min-height: var(--comment-avatar-size);
 }
 /* Avatar — 26px, soft ring */
 .comment-avatar {
-  width: 26px;
-  height: 26px;
+  width: var(--comment-avatar-size);
+  height: var(--comment-avatar-size);
   border-radius: 50%;
   color: #fff;
   font-size: 11px;
@@ -2976,6 +3036,7 @@ body.refs-pane-collapsed #expand-refs-pane-btn {
   letter-spacing: -0.01em;
   line-height: 1.2;
   max-width: 140px;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2988,6 +3049,7 @@ body.refs-pane-collapsed #expand-refs-pane-btn {
   letter-spacing: 0;
   white-space: nowrap;
   font-weight: 450;
+  flex-shrink: 0;
 }
 /* Body — 缩进到 avatar 右 (26 + 8 = 34) */
 .comment-body {
@@ -2996,16 +3058,30 @@ body.refs-pane-collapsed #expand-refs-pane-btn {
   word-wrap: break-word;
   font-size: 13px;
   line-height: 1.55;
-  padding-left: 34px;
+  padding-left: var(--comment-body-indent);
   letter-spacing: 0.005em;
+  min-width: 0;
 }
-.comment-body-row { display: flex; align-items: flex-start; gap: 6px; }
-.comment-body-row .comment-body { flex: 1; }
-.comment-edit-btn { border: 0; background: transparent; color: var(--text-3); cursor: pointer; font-size: 11px; opacity: .7; }
+.comment-body-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
+}
+.comment-body-row .comment-body { flex: 1; min-width: 0; }
+.comment-edit-btn { border: 0; background: transparent; color: var(--text-3); cursor: pointer; font-size: 11px; opacity: .7; flex-shrink: 0; }
 .comment-edit-btn:hover { color: var(--accent); opacity: 1; }
 
 /* Edit form — 与 reply-form 同级 docs 风格 */
-.comment-edit-form { margin-top: 6px; }
+.comment-edit-form {
+  margin-top: 6px;
+  margin-left: 0;
+  padding-left: var(--comment-body-indent);
+  box-sizing: border-box;
+  min-width: 0;
+}
 .comment-edit-form textarea {
   width: 100%;
   min-height: calc(1.5em + 18px);
@@ -3050,6 +3126,7 @@ body.refs-pane-collapsed #expand-refs-pane-btn {
   justify-content: flex-end;
   gap: 6px;
   margin-top: 8px;
+  min-width: 0;
 }
 .comment-edit-form .form-actions button {
   font-size: 12px;
@@ -3083,7 +3160,7 @@ body.refs-pane-collapsed #expand-refs-pane-btn {
 
 /* Reply — flat timeline (同列, 无缩进/无左 rail); 仅顶部分隔 */
 .comment-reply {
-  padding: 10px 0 6px;
+  padding: 11px var(--comment-inline) 7px;
   margin: 0;
   border-left: none;
   border-top: 1px solid var(--border-warm);
@@ -3095,9 +3172,35 @@ body.refs-pane-collapsed #expand-refs-pane-btn {
 }
 /* avatar / author / body 与根评同规格 — 不再缩小或「回复 」前缀 */
 .comment-reply .comment-body {
-  padding-left: 34px;
+  padding-left: var(--comment-body-indent);
 }
-.comment-reply .comment-meta { margin-bottom: 6px; gap: 8px; min-height: 26px; }
+.comment-reply .comment-meta { margin-bottom: 7px; gap: var(--comment-meta-gap); min-height: var(--comment-avatar-size); }
+
+/* Card @AI explicit invoke */
+.comment-invoke-ai-btn {
+  font-size: 12px;
+  font-weight: 650;
+  padding: 5px 10px;
+  border-radius: 6px;
+  border: 1px solid color-mix(in srgb, var(--ai, #0aa) 45%, var(--border-warm));
+  background: color-mix(in srgb, var(--ai, #0aa) 12%, transparent);
+  color: var(--ai-solid, var(--ai, #0891b2));
+  cursor: pointer;
+  margin-right: auto;
+  line-height: 1.3;
+  letter-spacing: 0.01em;
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
+}
+.comment-invoke-ai-btn:hover {
+  background: color-mix(in srgb, var(--ai, #0aa) 22%, transparent);
+  border-color: var(--ai, #0aa);
+  color: var(--ai-solid, var(--ai, #0891b2));
+}
+.comment-thread.is-ai .comment-invoke-ai-btn {
+  border-color: color-mix(in srgb, var(--thread-accent) 55%, transparent);
+  background: var(--thread-accent-soft);
+  color: var(--thread-solid);
+}
 
 /* Reply-toggle details — "↳ 回复" expander */
 .comment-thread .reply-toggle {
@@ -3185,8 +3288,11 @@ body.refs-pane-collapsed #expand-refs-pane-btn {
   gap: 6px;
   margin-top: 8px;
 }
-/* resolve 左 · 提交 右（模式在 float 锁定，卡内无切换） */
+/* resolve 与提交靠右；@AI 靠左 */
 .comment-reply-form .form-actions .comment-resolve-btn {
+  margin-right: 0;
+}
+.comment-reply-form .form-actions .comment-invoke-ai-btn {
   margin-right: auto;
 }
 .comment-reply-form .form-actions button {
@@ -3915,7 +4021,12 @@ body.refs-pane-collapsed #expand-refs-pane-btn {
   mask-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%27M15%202H6a2%202%200%200%200-2%202v16a2%202%200%200%200%202%202h12a2%202%200%200%200%202-2V7Z%27%2F%3E%3Cpath%20d%3D%27M14%202v4a2%202%200%200%200%202%202h4%27%2F%3E%3Cpath%20d%3D%27M10%209H8%27%2F%3E%3Cpath%20d%3D%27M16%2013H8%27%2F%3E%3Cpath%20d%3D%27M16%2017H8%27%2F%3E%3C%2Fsvg%3E");
 }
 
-/* 批注栏开关按钮: lucide panel-right (栏显隐 toggle) */
+/* 大纲栏 / 批注栏开关: lucide panel-left / panel-right */
+#btn-toggle-file-pane .tb-icon::before {
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Crect%20x%3D%273%27%20y%3D%273%27%20width%3D%2718%27%20height%3D%2718%27%20rx%3D%272%27%2F%3E%3Cpath%20d%3D%27M9%203v18%27%2F%3E%3C%2Fsvg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Crect%20x%3D%273%27%20y%3D%273%27%20width%3D%2718%27%20height%3D%2718%27%20rx%3D%272%27%2F%3E%3Cpath%20d%3D%27M9%203v18%27%2F%3E%3C%2Fsvg%3E");
+}
+
 #btn-toggle-comment-pane .tb-icon::before {
   -webkit-mask-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Crect%20x%3D%273%27%20y%3D%273%27%20width%3D%2718%27%20height%3D%2718%27%20rx%3D%272%27%2F%3E%3Cpath%20d%3D%27M15%203v18%27%2F%3E%3C%2Fsvg%3E");
   mask-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Crect%20x%3D%273%27%20y%3D%273%27%20width%3D%2718%27%20height%3D%2718%27%20rx%3D%272%27%2F%3E%3Cpath%20d%3D%27M15%203v18%27%2F%3E%3C%2Fsvg%3E");

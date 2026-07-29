@@ -92,6 +92,47 @@ const {
     coverage.hitSurface('S5.collapse');
   });
 
+  await t('top toolbar outline toggle collapses and restores the drawer', async () => {
+    const before = await page.evaluate(() => {
+      const btn = document.querySelector('#btn-toggle-file-pane');
+      const pane = document.querySelector('#file-pane');
+      return {
+        exists: !!btn,
+        label: btn?.getAttribute('aria-label'),
+        pressed: btn?.getAttribute('aria-pressed'),
+        collapsed: document.body.classList.contains('file-pane-collapsed'),
+        paneWidth: pane?.getBoundingClientRect().width || 0,
+      };
+    });
+    if (!before.exists || before.label !== '大纲栏' || before.pressed !== 'true' || before.collapsed || before.paneWidth <= 0) {
+      throw new Error('unexpected initial outline toolbar state: ' + JSON.stringify(before));
+    }
+
+    await page.locator('#btn-toggle-file-pane').click();
+    await page.waitForTimeout(80);
+    const collapsed = await page.evaluate(() => ({
+      pressed: document.querySelector('#btn-toggle-file-pane')?.getAttribute('aria-pressed'),
+      collapsed: document.body.classList.contains('file-pane-collapsed'),
+      paneWidth: document.querySelector('#file-pane')?.getBoundingClientRect().width || 0,
+      headerExpanded: document.querySelector('#file-pane [data-act="toggle-file-pane"]')?.getAttribute('aria-expanded'),
+    }));
+    if (collapsed.pressed !== 'false' || !collapsed.collapsed || collapsed.paneWidth !== 0 || collapsed.headerExpanded !== 'false') {
+      throw new Error('outline toolbar did not collapse drawer: ' + JSON.stringify(collapsed));
+    }
+
+    await page.locator('#btn-toggle-file-pane').click();
+    await page.waitForTimeout(80);
+    const restored = await page.evaluate(() => ({
+      pressed: document.querySelector('#btn-toggle-file-pane')?.getAttribute('aria-pressed'),
+      collapsed: document.body.classList.contains('file-pane-collapsed'),
+      paneWidth: document.querySelector('#file-pane')?.getBoundingClientRect().width || 0,
+      headerExpanded: document.querySelector('#file-pane [data-act="toggle-file-pane"]')?.getAttribute('aria-expanded'),
+    }));
+    if (restored.pressed !== 'true' || restored.collapsed || restored.paneWidth <= 0 || restored.headerExpanded !== 'true') {
+      throw new Error('outline toolbar did not restore drawer: ' + JSON.stringify(restored));
+    }
+  });
+
   await t('rapid outline rebuild after edits', async () => {
     await page.evaluate(() => {
       const M = window.__mdAnnotator;
@@ -106,6 +147,49 @@ const {
     }
     const pe = page._chaosPageErrors || [];
     if (pe.length) throw new Error(pe.join('; '));
+  });
+
+  await t('outline images tab lists images and empty state', async () => {
+    await loadDoc(
+      page,
+      'out-imgs.md',
+      '# Heads\n\n![fig-a](data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==)\n\ntext\n'
+    );
+    await page.evaluate(() => {
+      const M = window.__mdAnnotator;
+      M.State.outlineTab = 'headings';
+      M.renderOutline();
+    });
+    const tabs = await page.evaluate(() => ({
+      n: document.querySelectorAll('#outline-pane [data-outline-tab]').length,
+      labels: [...document.querySelectorAll('#outline-pane [data-outline-tab]')].map((el) => el.textContent.trim()),
+    }));
+    if (tabs.n < 2 || !tabs.labels.some((t) => /图片/.test(t))) {
+      throw new Error('missing outline tabs: ' + JSON.stringify(tabs));
+    }
+    await page.locator('#outline-pane [data-outline-tab="images"]').click();
+    await page.waitForTimeout(60);
+    const imgs = await page.evaluate(() => {
+      const items = [...document.querySelectorAll('#outline-pane .outline-item[data-kind="image"]')];
+      return {
+        n: items.length,
+        tab: window.__mdAnnotator.State.outlineTab,
+        node: window.__mdAnnotator.State.editor?.state?.selection?.node?.type?.name || null,
+      };
+    });
+    if (imgs.tab !== 'images' || imgs.n < 1) throw new Error('images tab failed: ' + JSON.stringify(imgs));
+    await page.locator('#outline-pane .outline-item[data-kind="image"]').first().click();
+    await page.waitForTimeout(80);
+    const sel = await page.evaluate(() => window.__mdAnnotator.State.editor?.state?.selection?.node?.type?.name || null);
+    if (sel !== 'image') throw new Error('image outline click did not select image: ' + sel);
+
+    await loadDoc(page, 'out-no-img.md', '# Only\n\nplain\n');
+    await page.evaluate(() => {
+      window.__mdAnnotator.State.outlineTab = 'images';
+      window.__mdAnnotator.renderOutline();
+    });
+    const empty = await page.locator('#outline-pane').innerHTML();
+    if (!/暂无图片/.test(empty)) throw new Error('expected empty images hint: ' + empty.slice(0, 200));
   });
 
   const result = done();

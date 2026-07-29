@@ -14,6 +14,8 @@ export const PRIMARY_TOOLBAR_ACTIONS = Object.freeze([
   { id: 'undo', label: '撤销' },
   { id: 'redo', label: '重做' },
   { id: 'source', label: '源码' },
+  { id: 'filePane', label: '大纲栏' },
+  { id: 'commentPane', label: '批注栏' },
 ]);
 
 /**
@@ -28,12 +30,16 @@ export const PRIMARY_TOOLBAR_ACTIONS = Object.freeze([
  * @param {boolean} [input.canUndo]
  * @param {boolean} [input.canRedo]
  * @param {boolean} [input.busy]
+ * @param {boolean} [input.filePaneOpen] - true when outline/file drawer is open
+ * @param {boolean} [input.commentPaneOpen] - true when comment drawer is open
  */
 export function getToolbarActionState(input = {}) {
   const hasDocument = !!input.hasDocument;
   const readOnly = !!input.readOnly;
   const busy = !!input.busy;
   const renderMode = input.renderMode === 'source' ? 'source' : 'rendered';
+  const filePaneOpen = input.filePaneOpen !== false;
+  const commentPaneOpen = input.commentPaneOpen !== false;
 
   return {
     new: {
@@ -82,6 +88,18 @@ export function getToolbarActionState(input = {}) {
       label: renderMode === 'source' ? '预览' : '源码',
       disabled: !hasDocument || busy,
       pressed: renderMode === 'source',
+    },
+    filePane: {
+      label: '大纲栏',
+      disabled: false,
+      pressed: filePaneOpen,
+      expanded: filePaneOpen,
+    },
+    commentPane: {
+      label: '批注栏',
+      disabled: false,
+      pressed: commentPaneOpen,
+      expanded: commentPaneOpen,
     },
   };
 }
