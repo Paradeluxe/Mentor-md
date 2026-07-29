@@ -60844,6 +60844,10 @@ function setupFloatCommentButton() {
         return;
       }
       if (!moved) {
+        if (isImageNodeSelection(sel)) {
+          handleSelectionChange({ forceFloat: true });
+          return;
+        }
         hideFloat();
         if (markClick && markClick.threadId) {
           const pos = caretPosForMarkClick(markClick.threadId, upX, upY);
@@ -61172,6 +61176,64 @@ function setupImageAnnotationSelect() {
   };
   editorEl.addEventListener("mouseup", finishDrag, true);
   document.addEventListener("mouseup", finishDrag, true);
+  let lastImgClick = 0;
+  editorEl.addEventListener("dblclick", (e) => {
+    if (e.button !== 0) return;
+    const img = imgFromEvent(e);
+    if (!img) return;
+    e.preventDefault();
+    e.stopPropagation();
+    try {
+      $("#float-comment-btn").classList.add("hidden");
+    } catch (_) {
+    }
+    openImageLightbox(img);
+  }, true);
+}
+function openImageLightbox(img) {
+  if (!img) return;
+  const src = img.getAttribute("src") || img.src || "";
+  if (!src) return;
+  const alt = img.getAttribute("alt") || "";
+  let overlay = document.getElementById("image-lightbox");
+  if (overlay) overlay.remove();
+  overlay = document.createElement("div");
+  overlay.id = "image-lightbox";
+  overlay.className = "image-lightbox";
+  overlay.setAttribute("role", "dialog");
+  overlay.setAttribute("aria-modal", "true");
+  overlay.setAttribute("aria-label", alt ? "\u56FE\u7247\u653E\u5927\uFF1A" + alt : "\u56FE\u7247\u653E\u5927");
+  const figure = document.createElement("figure");
+  const imgEl = document.createElement("img");
+  imgEl.src = src;
+  imgEl.alt = alt;
+  imgEl.draggable = false;
+  figure.appendChild(imgEl);
+  if (alt) {
+    const cap = document.createElement("figcaption");
+    cap.textContent = alt;
+    figure.appendChild(cap);
+  }
+  overlay.appendChild(figure);
+  const close3 = () => {
+    overlay.removeEventListener("click", onClick);
+    document.removeEventListener("keydown", onKey);
+    overlay.remove();
+  };
+  const onClick = (e) => {
+    if (e.target === overlay || e.target === figure) close3();
+  };
+  const onKey = (e) => {
+    if (e.key === "Escape" || e.key === "ArrowLeft" || e.key === "Backspace") {
+      e.preventDefault();
+      close3();
+    }
+  };
+  overlay.addEventListener("click", onClick);
+  document.addEventListener("keydown", onKey);
+  document.body.appendChild(overlay);
+  overlay.tabIndex = -1;
+  overlay.focus();
 }
 var AIListeners = { newComment: [], threadChange: [] };
 function emitAI(event, payload) {

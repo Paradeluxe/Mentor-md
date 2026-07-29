@@ -4193,6 +4193,13 @@ function setupFloatCommentButton() {
       }
       // Pure single click (no drag).
       if (!moved) {
+        // Image NodeSelection set by setupImageAnnotationSelect mousedown handler —
+        // do NOT collapse to caret. Keep float comment button visible so user can
+        // click 批注 to annotate the image.
+        if (isImageNodeSelection(sel)) {
+          handleSelectionChange({ forceFloat: true });
+          return;
+        }
         hideFloat();
         // Click on annotation mark: caret at click (never leave whole-mark range).
         if (markClick && markClick.threadId) {
@@ -4525,6 +4532,72 @@ function setupImageAnnotationSelect() {
   };
   editorEl.addEventListener("mouseup", finishDrag, true);
   document.addEventListener("mouseup", finishDrag, true);
+  // Double-click an image → open fullscreen lightbox zoom.
+  // Use click count on mousedown to detect double-click reliably across browsers
+  // (dblclick event fires on the img target, but we intercept at editor capture).
+  let lastImgClick = 0;
+  editorEl.addEventListener("dblclick", (e) => {
+    if (e.button !== 0) return;
+    const img = imgFromEvent(e);
+    if (!img) return;
+    e.preventDefault();
+    e.stopPropagation();
+    // Hide float comment button — lightbox takes over.
+    try { $("#float-comment-btn").classList.add("hidden"); } catch (_) {}
+    openImageLightbox(img);
+  }, true);
+}
+/**
+ * Open a fullscreen lightbox overlay showing the clicked image at native resolution.
+ * Click outside the image (or press Esc / 左方向键) to close.
+ */
+function openImageLightbox(img) {
+  if (!img) return;
+  const src = img.getAttribute("src") || img.src || "";
+  if (!src) return;
+  const alt = img.getAttribute("alt") || "";
+  // Reuse existing overlay if present (double-trigger safety).
+  let overlay = document.getElementById("image-lightbox");
+  if (overlay) overlay.remove();
+  overlay = document.createElement("div");
+  overlay.id = "image-lightbox";
+  overlay.className = "image-lightbox";
+  overlay.setAttribute("role", "dialog");
+  overlay.setAttribute("aria-modal", "true");
+  overlay.setAttribute("aria-label", alt ? "图片放大：" + alt : "图片放大");
+  const figure = document.createElement("figure");
+  const imgEl = document.createElement("img");
+  imgEl.src = src;
+  imgEl.alt = alt;
+  imgEl.draggable = false;
+  figure.appendChild(imgEl);
+  if (alt) {
+    const cap = document.createElement("figcaption");
+    cap.textContent = alt;
+    figure.appendChild(cap);
+  }
+  overlay.appendChild(figure);
+  const close = () => {
+    overlay.removeEventListener("click", onClick);
+    document.removeEventListener("keydown", onKey);
+    overlay.remove();
+  };
+  const onClick = (e) => {
+    // Click on overlay backdrop (not on the image itself) closes.
+    if (e.target === overlay || e.target === figure) close();
+  };
+  const onKey = (e) => {
+    if (e.key === "Escape" || e.key === "ArrowLeft" || e.key === "Backspace") {
+      e.preventDefault();
+      close();
+    }
+  };
+  overlay.addEventListener("click", onClick);
+  document.addEventListener("keydown", onKey);
+  document.body.appendChild(overlay);
+  // Focus overlay for keyboard capture.
+  overlay.tabIndex = -1;
+  overlay.focus();
 }
 var AIListeners = { newComment: [], threadChange: [] };
 function emitAI(event, payload) {
