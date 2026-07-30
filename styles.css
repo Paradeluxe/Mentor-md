@@ -377,9 +377,7 @@ code {
 #toolbar [data-toolbar-group="chrome"] + [data-toolbar-group] {
   border-left: 1px solid var(--border-warm);
 }
-#toolbar .toolbar-row-editor > [data-toolbar-group="view"] {
-  margin-left: auto;
-}
+/* view toggles sit left on document row (after chrome), not right-pushed */
 #btn-save[data-dirty="true"] { color: var(--accent); }
 #btn-save[data-dirty="true"] .tb-icon { color: var(--accent); }
 #btn-refs[aria-pressed="true"],
@@ -4230,19 +4228,29 @@ body.refs-pane-collapsed #expand-refs-pane-btn {
     background: var(--border-warm, rgba(38,37,30,0.09));
   }
 }
-/* 更窄: 文件按钮只留图标, 减占宽 */
+/* 更窄: 文件/视图按钮只留图标, 减占宽 */
+@media (max-width: 1180px) {
+  #btn-toggle-file-pane > span:not(.tb-icon),
+  #btn-toggle-comment-pane > span:not(.tb-icon),
+  #btn-toggle-render > span:not(.tb-icon),
+  #btn-refs > span:not(.tb-icon) {
+    display: none;
+  }
+  #btn-toggle-file-pane, #btn-toggle-comment-pane, #btn-toggle-render, #btn-refs {
+    padding: 4px 6px;
+  }
+}
 @media (max-width: 960px) {
   #btn-new > span:not(.tb-icon),
   #btn-open-files > span:not(.tb-icon),
   #btn-save > span:not(.tb-icon),
   #btn-save-as > span:not(.tb-icon),
   #btn-export-md > span:not(.tb-icon),
-  #btn-export-docx > span:not(.tb-icon),
-  #btn-toggle-render > span:not(.tb-icon) {
+  #btn-export-docx > span:not(.tb-icon) {
     display: none;
   }
   #btn-new, #btn-open-files, #btn-save, #btn-save-as,
-  #btn-export-md, #btn-export-docx, #btn-toggle-render {
+  #btn-export-md, #btn-export-docx {
     padding: 4px 6px;
   }
 }

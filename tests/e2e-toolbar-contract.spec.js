@@ -49,16 +49,24 @@ function assert(cond, message) {
 
     assert(rowContract.rows.join(',') === 'document,editor',
       `toolbar rows document,editor (got ${rowContract.rows.join(',')})`);
-    assert(rowContract.documentGroups.join(',') === 'chrome,document,save,export,references,title',
+    assert(rowContract.documentGroups.join(',') === 'chrome,document,save,export,references,view,title',
       `document row groups (got ${rowContract.documentGroups.join(',')})`);
-    assert(rowContract.editorGroups.join(',') === 'history,format,view',
+    assert(rowContract.editorGroups.join(',') === 'history,format',
       `editor row groups (got ${rowContract.editorGroups.join(',')})`);
     assert(rowContract.documentLabel === '文档与全局操作', 'document row aria-label');
     assert(rowContract.editorLabel === '编辑与视图操作', 'editor row aria-label');
     assert(rowContract.newRow === 'document' && rowContract.titleRow === 'document',
       'new/title belong to document row');
-    assert(rowContract.boldRow === 'editor' && rowContract.sourceRow === 'editor',
-      'format/source belong to editor row');
+    assert(rowContract.boldRow === 'editor', 'format belongs to editor row');
+    assert(rowContract.sourceRow === 'document', 'source/view belongs to document row');
+    const viewLeft = await page.evaluate(() => {
+      const refs = document.querySelector('[data-toolbar-group="references"]')?.getBoundingClientRect();
+      const view = document.querySelector('[data-toolbar-group="view"]')?.getBoundingClientRect();
+      const title = document.querySelector('#title-group')?.getBoundingClientRect();
+      return { refsRight: refs?.right, viewLeft: view?.left, viewRight: view?.right, titleLeft: title?.left };
+    });
+    assert(viewLeft.viewLeft >= viewLeft.refsRight - 1, 'view group is after 文献');
+    assert(viewLeft.titleLeft >= viewLeft.viewRight - 1, 'view group is left of title/author');
 
     console.log('\n=== Two-row toolbar geometry ===');
     async function readToolbarGeometry(width) {
@@ -87,6 +95,7 @@ function assert(cond, message) {
         const title = box('#title-group');
         const format = box('#format-toolbar');
         const view = box('[data-toolbar-group="view"]');
+        const history = box('[data-toolbar-group="history"]');
         return {
           toolbarHeight: toolbar.getBoundingClientRect().height,
           document: box('[data-toolbar-row="document"]'),
@@ -94,8 +103,11 @@ function assert(cond, message) {
           documentOverflow: documentRow.scrollWidth > documentRow.clientWidth + 1,
           editorOverflow: editorRow.scrollWidth > editorRow.clientWidth + 1,
           titleFormatOverlap: overlaps(title, format),
+          titleViewOverlap: overlaps(title, view),
           formatViewOverlap: overlaps(format, view),
+          historyViewOverlap: overlaps(history, view),
           titleRightGap: documentRow.getBoundingClientRect().right - title.right,
+          viewOnDocumentRow: view && documentRow.contains(document.querySelector('[data-toolbar-group="view"]')),
         };
       });
     }
@@ -110,8 +122,9 @@ function assert(cond, message) {
         `${width}px document row is above editor row`);
       assert(!g.documentOverflow && !g.editorOverflow,
         `${width}px rows have no horizontal overflow`);
-      assert(!g.titleFormatOverlap && !g.formatViewOverlap,
+      assert(!g.titleFormatOverlap && !g.formatViewOverlap && !g.titleViewOverlap && !g.historyViewOverlap,
         `${width}px toolbar groups do not overlap`);
+      assert(g.viewOnDocumentRow, `${width}px view group stays on document row`);
       assert(Math.abs(g.titleRightGap) <= 1,
         `${width}px title/author stays right aligned (gap ${g.titleRightGap})`);
     }
