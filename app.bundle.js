@@ -57311,6 +57311,547 @@ function decideExternalRefresh({
   return { action: "reload", pauseAutosave: false };
 }
 
+// modules/supervision.js
+var supervisionKey = new PluginKey("mentor-supervision");
+var SUPERVISION_VERSION = 1;
+var SUPERVISION_BYPASS_META = "supervisionBypass";
+function emptySupervisionState() {
+  return {
+    version: SUPERVISION_VERSION,
+    active: false,
+    health: "ok",
+    error: "",
+    lockMode: "pending-paragraphs",
+    pendingThreadIds: [],
+    processedThreadIds: [],
+    currentThreadId: "",
+    phase: "idle",
+    // idle | working | waiting
+    message: "",
+    tool: "",
+    startedAt: "",
+    updatedAt: "",
+    lockedRanges: [],
+    currentRange: null,
+    missingThreadIds: [],
+    decos: DecorationSet.empty
+  };
+}
+function normalizeSupervisionPayload(raw) {
+  if (!raw || typeof raw !== "object") {
+    return inactivePayload("missing", "");
+  }
+  const version = Number(raw.v || SUPERVISION_VERSION);
+  if (version !== SUPERVISION_VERSION) {
+    return inactivePayload(
+      "unsupported",
+      `protocol v${raw.v} not supported (expected v${SUPERVISION_VERSION})`
+    );
+  }
+  const active = raw.active === true || raw.active === 1 || raw.active === "true";
+  const pendingThreadIds = uniqueStrings(raw.pendingThreadIds || raw.pending || []);
+  const processedThreadIds = uniqueStrings(raw.processedThreadIds || raw.processed || []);
+  const currentThreadId = active ? String(raw.currentThreadId || raw.current || raw.workingThreadId || "").trim() : "";
+  const lockMode = raw.lockMode === "document" ? "document" : "pending-paragraphs";
+  const requestedPhase = String(raw.phase || "").trim();
+  let phase;
+  if (!active) {
+    phase = "idle";
+  } else if (requestedPhase === "working" || requestedPhase === "waiting") {
+    phase = requestedPhase;
+  } else {
+    phase = currentThreadId ? "working" : "waiting";
+  }
+  const health = resolveActiveHealth(raw.health, active);
+  return {
+    version,
+    active,
+    health,
+    error: String(raw.error || ""),
+    lockMode,
+    pendingThreadIds,
+    processedThreadIds,
+    currentThreadId,
+    phase,
+    message: String(raw.message || ""),
+    tool: String(raw.tool || raw.source || ""),
+    startedAt: String(raw.startedAt || ""),
+    updatedAt: String(raw.updatedAt || raw.startedAt || "")
+  };
+}
+function inactivePayload(health, error) {
+  return {
+    version: SUPERVISION_VERSION,
+    active: false,
+    health,
+    error: error || "",
+    lockMode: "pending-paragraphs",
+    pendingThreadIds: [],
+    processedThreadIds: [],
+    currentThreadId: "",
+    phase: "idle",
+    message: "",
+    tool: "",
+    startedAt: "",
+    updatedAt: ""
+  };
+}
+var ACTIVE_HEALTH_VALUES = /* @__PURE__ */ new Set(["ok", "stale", "degraded"]);
+function resolveActiveHealth(rawHealth, active) {
+  if (active) {
+    if (ACTIVE_HEALTH_VALUES.has(rawHealth)) return rawHealth;
+    return "ok";
+  }
+  if (rawHealth === "missing" || rawHealth === "unsupported" || rawHealth === "unreadable") {
+    return rawHealth;
+  }
+  return "ok";
+}
+function uniqueStrings(arr) {
+  const out = [];
+  const seen = /* @__PURE__ */ new Set();
+  if (!Array.isArray(arr)) return out;
+  for (const x of arr) {
+    const s = x == null ? "" : String(x).trim();
+    if (!s || seen.has(s)) continue;
+    seen.add(s);
+    out.push(s);
+  }
+  return out;
+}
+function findThreadMarkRange(doc5, markType, threadId) {
+  const pieces = findThreadMarkRanges(doc5, markType, threadId);
+  if (!pieces.length) return null;
+  return { from: pieces[0].from, to: pieces[0].to };
+}
+function findThreadMarkRanges(doc5, markType, threadId) {
+  if (!doc5 || !markType || !threadId) return [];
+  const want = String(threadId);
+  const pieces = [];
+  doc5.descendants((node, pos) => {
+    if (!node.isText) return;
+    for (const m of node.marks || []) {
+      if (m.type !== markType) continue;
+      const tid = m.attrs && m.attrs.threadId;
+      if (String(tid) !== want) continue;
+      pieces.push({ from: pos, to: pos + node.nodeSize, threadId: want });
+    }
+  });
+  return mergeRanges(pieces);
+}
+function collectLockedRanges(doc5, markType, pendingThreadIds) {
+  const want = new Set(uniqueStrings(pendingThreadIds));
+  if (!doc5 || !markType || !want.size) return [];
+  const pieces = [];
+  doc5.descendants((node, pos) => {
+    if (!node.isText) return;
+    for (const m of node.marks || []) {
+      if (m.type !== markType) continue;
+      const tid = m.attrs && m.attrs.threadId;
+      if (!tid || !want.has(String(tid))) continue;
+      pieces.push({ from: pos, to: pos + node.nodeSize, threadId: String(tid) });
+    }
+  });
+  return mergeRanges(pieces);
+}
+function sanitizeRanges(ranges) {
+  if (!ranges || !ranges.length) return [];
+  return ranges.map((r) => ({ from: r.from | 0, to: r.to | 0, threadId: String(r.threadId || "") })).filter((r) => r.to > r.from);
+}
+function coalesceContiguous(list, threadId) {
+  const sorted = list.slice().sort((a, b) => a.from - b.from || a.to - b.to);
+  const out = [];
+  for (const r of sorted) {
+    const last = out[out.length - 1];
+    if (last && r.from <= last.to) {
+      last.to = Math.max(last.to, r.to);
+    } else {
+      out.push({ from: r.from, to: r.to, threadId });
+    }
+  }
+  return out;
+}
+function mergeRanges(ranges) {
+  const sanitized = sanitizeRanges(ranges);
+  if (!sanitized.length) return [];
+  const byThread = /* @__PURE__ */ new Map();
+  for (const range of sanitized) {
+    const list = byThread.get(range.threadId) || [];
+    list.push(range);
+    byThread.set(range.threadId, list);
+  }
+  return [...byThread.entries()].flatMap(([threadId, list]) => coalesceContiguous(list, threadId)).sort((a, b) => a.from - b.from || a.to - b.to || a.threadId.localeCompare(b.threadId));
+}
+function rangesOverlap(aFrom, aTo, bFrom, bTo) {
+  return aFrom < bTo && aTo > bFrom;
+}
+function transactionTouchesRanges(tr2, lockedRanges) {
+  if (!tr2 || !tr2.docChanged) return false;
+  if (!lockedRanges || !lockedRanges.length) return false;
+  const steps = tr2.steps || [];
+  if (!steps.length) return false;
+  for (const step of steps) {
+    const span = stepSpan(step);
+    if (!span) return true;
+    for (const r of lockedRanges) {
+      if (rangesOverlap(span.from, span.to, r.from, r.to)) return true;
+    }
+  }
+  return false;
+}
+function isFullDocumentLoad(tr2, state) {
+  if (!tr2 || !tr2.docChanged || !state || !state.doc) return false;
+  const size = state.doc.content.size;
+  if (size <= 4) return true;
+  const steps = tr2.steps || [];
+  for (const step of steps) {
+    const from2 = typeof step.from === "number" ? step.from : null;
+    const to = typeof step.to === "number" ? step.to : null;
+    if (from2 === 0 && to != null && to >= size) return true;
+    if (from2 === 0 && to != null && to >= size - 1 && tr2.doc && tr2.doc.content.size > size) {
+      return true;
+    }
+  }
+  try {
+    if (tr2.doc && tr2.doc.content.size > Math.max(64, size * 2) && size < 32) return true;
+  } catch (_) {
+  }
+  return false;
+}
+function stepSpan(step) {
+  if (!step) return null;
+  if (typeof step.from === "number" && typeof step.to === "number") {
+    return { from: step.from, to: step.to };
+  }
+  try {
+    const j = typeof step.toJSON === "function" ? step.toJSON() : null;
+    if (j && typeof j.from === "number" && typeof j.to === "number") {
+      return { from: j.from, to: j.to };
+    }
+    if (j && typeof j.from === "number") {
+      const gap = typeof j.gapTo === "number" ? j.gapTo : j.from;
+      return { from: j.from, to: Math.max(gap, j.from) };
+    }
+  } catch (_) {
+  }
+  return null;
+}
+function createSupervisionPetElement(opts = {}) {
+  const phase = opts.phase || "working";
+  const threadId = opts.threadId || "";
+  const el = document.createElement("span");
+  el.className = `supervision-pet is-${phase}`;
+  el.setAttribute("contenteditable", "false");
+  el.setAttribute("role", "status");
+  if (threadId) el.setAttribute("data-thread-id", String(threadId));
+  el.setAttribute("data-phase", phase);
+  const label = phase === "waiting" ? "\u7B49\u5F85\u4E2D" : phase === "degraded" ? "\u672A\u5B9A\u4F4D" : "\u6539\u8FD9\u91CC";
+  const aria = phase === "waiting" ? "AI \u76D1\u7BA1\u7B49\u5F85\u4E2D" : phase === "degraded" ? "AI \u76D1\u7BA1\u4E2D\u4F46\u672A\u5B9A\u4F4D\u5230\u6279\u6CE8" : "AI \u6B63\u5728\u5904\u7406\u8FD9\u6761\u6279\u6CE8";
+  el.setAttribute("aria-label", aria);
+  el.title = aria;
+  el.innerHTML = `<span class="supervision-pet-body" aria-hidden="true"><svg viewBox="0 0 32 28" width="22" height="19" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><ellipse cx="16" cy="16" rx="12" ry="10" fill="#7dd3fc"/><circle cx="11" cy="14" r="4" fill="#0c4a6e"/><circle cx="21" cy="14" r="4" fill="#0c4a6e"/><circle cx="12.2" cy="13.5" r="1.3" fill="#e0f2fe"/><circle cx="22.2" cy="13.5" r="1.3" fill="#e0f2fe"/><path d="M14 19 Q16 22 18 19" fill="none" stroke="#0369a1" stroke-width="1.4" stroke-linecap="round"/><path d="M7 8 Q11 2 14 9" fill="#38bdf8"/><path d="M25 8 Q21 2 18 9" fill="#38bdf8"/></svg><span class="supervision-pet-label">${label}</span></span>`;
+  return el;
+}
+function buildSupervisionDecos(doc5, lockedRanges, lockMode, currentRange, currentThreadId, phase) {
+  if (!doc5) return DecorationSet.empty;
+  const decos = [];
+  if (lockMode === "document") {
+    if (typeof doc5.forEach === "function") {
+      doc5.forEach((node, offset) => {
+        decos.push(
+          Decoration.node(offset, offset + node.nodeSize, {
+            class: "supervision-locked-block",
+            "data-supervision-lock": "document"
+          })
+        );
+      });
+    }
+  } else {
+    for (const r of lockedRanges || []) {
+      if (!(r.to > r.from)) continue;
+      const isCurrent = currentThreadId && (r.threadId === currentThreadId || String(r.threadId || "").split(",").includes(String(currentThreadId)));
+      decos.push(
+        Decoration.inline(r.from, r.to, {
+          class: isCurrent ? "supervision-locked supervision-current" : "supervision-locked",
+          "data-supervision-lock": isCurrent ? "current" : "pending",
+          title: isCurrent ? "AI \u6B63\u5728\u5904\u7406\u6B64\u6BB5" : "AI \u76D1\u7BA1\u5904\u7406\u4E2D \u2014 \u6B64\u6BB5\u6682\u4E0D\u53EF\u7F16\u8F91"
+        })
+      );
+    }
+  }
+  if (currentRange && currentRange.from != null && currentThreadId) {
+    const pos = Math.max(0, Math.min(currentRange.from, doc5.content.size));
+    decos.push(
+      Decoration.widget(
+        pos,
+        () => createSupervisionPetElement({
+          phase: phase || "working",
+          threadId: currentThreadId
+        }),
+        {
+          side: -1,
+          ignoreSelection: true,
+          stopEvent: () => true,
+          key: `supervision-pet-${currentThreadId}-${phase || "working"}`
+        }
+      )
+    );
+  }
+  return DecorationSet.create(doc5, decos);
+}
+function materializeSupervisionState(doc5, markType, payload) {
+  const base2 = { ...emptySupervisionState(), ...normalizeSupervisionPayload(payload) };
+  if (!base2.active) {
+    return {
+      ...emptySupervisionState(),
+      message: base2.message,
+      tool: base2.tool,
+      updatedAt: base2.updatedAt
+    };
+  }
+  let lockedRanges = [];
+  let missingThreadIds = [];
+  if (base2.lockMode === "document") {
+    lockedRanges = doc5 ? [{ from: 0, to: doc5.content.size, threadId: "*" }] : [];
+  } else {
+    lockedRanges = collectLockedRanges(doc5, markType, base2.pendingThreadIds);
+    const locatedIds = new Set(lockedRanges.map((r) => r.threadId));
+    missingThreadIds = base2.pendingThreadIds.filter((id) => !locatedIds.has(id));
+    if (missingThreadIds.length) {
+      base2.health = "degraded";
+    }
+  }
+  let currentRange = null;
+  if (base2.currentThreadId && doc5 && markType) {
+    currentRange = findThreadMarkRange(doc5, markType, base2.currentThreadId);
+    if (!currentRange && base2.lockMode === "document" && doc5.content.size > 1) {
+      currentRange = { from: 1, to: Math.min(8, doc5.content.size) };
+    }
+  }
+  const decos = buildSupervisionDecos(
+    doc5,
+    lockedRanges,
+    base2.lockMode,
+    currentRange,
+    base2.currentThreadId,
+    base2.phase
+  );
+  return { ...base2, lockedRanges, currentRange, missingThreadIds, decos };
+}
+function supervisionBannerText(state) {
+  if (!state || !state.active) return "";
+  const tool = state.tool || "AI";
+  const pending = (state.pendingThreadIds || []).length;
+  const processed = (state.processedThreadIds || []).length;
+  if (state.message) return String(state.message);
+  const missing = (state.missingThreadIds || []).length;
+  if (state.health === "stale") {
+    return `${tool} \u76D1\u7BA1\u8FDE\u63A5\u5F02\u5E38 \xB7 \u4FDD\u7559\u4E0A\u6B21\u9501\u5B9A`;
+  }
+  if (state.health === "degraded" || missing) {
+    return `${tool} \u76D1\u7BA1\u4ECD\u5728\u8FD0\u884C \xB7 \u6709 ${missing || pending} \u6761\u6682\u672A\u5B9A\u4F4D`;
+  }
+  if (state.phase === "working" && state.currentThreadId) {
+    return `${tool} \u6B63\u5728\u6539\u4E00\u6BB5 \xB7 \u5269\u4F59 ${pending}`;
+  }
+  if (state.lockMode === "document") {
+    return `${tool} \u76D1\u7BA1\u4E2D \xB7 \u6B63\u6587\u6682\u65F6\u53EA\u8BFB`;
+  }
+  if (pending || processed) {
+    return `${tool} \u76D1\u7BA1\u4E2D \xB7 \u672A\u5904\u7406 ${pending} \xB7 \u5DF2\u5B8C\u6210 ${processed}`;
+  }
+  return `${tool} \u76D1\u7BA1\u4E2D`;
+}
+function supervisionSignalPhase(state) {
+  if (!state || !state.active) return "off";
+  if (state.phase === "working" && state.currentThreadId) return "working";
+  return "waiting";
+}
+function createSupervisionPlugin() {
+  return new Plugin({
+    key: supervisionKey,
+    state: {
+      init: () => emptySupervisionState(),
+      apply(tr2, prev, _old, nextState) {
+        const meta = tr2.getMeta(supervisionKey);
+        const markType = nextState.schema.marks.annotation;
+        if (meta && typeof meta === "object") {
+          return materializeSupervisionState(nextState.doc, markType, meta);
+        }
+        if (prev.active && tr2.docChanged) {
+          return materializeSupervisionState(nextState.doc, markType, {
+            active: prev.active,
+            lockMode: prev.lockMode === "document" ? "document" : "pending-paragraphs",
+            pendingThreadIds: prev.pendingThreadIds,
+            processedThreadIds: prev.processedThreadIds,
+            currentThreadId: prev.currentThreadId,
+            message: prev.message,
+            tool: prev.tool,
+            updatedAt: prev.updatedAt
+          });
+        }
+        return prev;
+      }
+    },
+    props: {
+      decorations(state) {
+        const ps = supervisionKey.getState(state);
+        return ps && ps.decos ? ps.decos : DecorationSet.empty;
+      },
+      attributes(state) {
+        const ps = supervisionKey.getState(state);
+        if (ps && ps.active) {
+          return {
+            "data-supervision": "on",
+            "data-supervision-lock": ps.lockMode || "pending-paragraphs",
+            "data-supervision-phase": ps.phase || "waiting"
+          };
+        }
+        return { "data-supervision": "off" };
+      }
+    },
+    filterTransaction(tr2, state) {
+      if (!tr2.docChanged) return true;
+      if (tr2.getMeta(SUPERVISION_BYPASS_META) || tr2.getMeta(supervisionKey)) return true;
+      if (tr2.getMeta("externalReload") || tr2.getMeta("setContentSuspend")) return true;
+      if (isFullDocumentLoad(tr2, state)) return true;
+      const ps = supervisionKey.getState(state);
+      if (!ps || !ps.active) return true;
+      if (ps.lockMode === "document") return false;
+      const locked = ps.lockedRanges || [];
+      if (!locked.length) return true;
+      return !transactionTouchesRanges(tr2, locked);
+    }
+  });
+}
+function setSupervisionMeta(tr2, payload) {
+  return tr2.setMeta(supervisionKey, payload == null ? { active: false } : payload);
+}
+
+// modules/supervision-poller.js
+var SupervisionPollError = class extends Error {
+  constructor(message, { cause, status = 0 } = {}) {
+    super(message);
+    this.name = "SupervisionPollError";
+    this.cause = cause;
+    this.status = status;
+  }
+};
+function createSupervisionPoller({
+  fetchStatus,
+  onSnapshot,
+  pollMs = 1e3,
+  setIntervalFn = setInterval,
+  clearIntervalFn = clearInterval,
+  setTimeoutFn = setTimeout,
+  clearTimeoutFn = clearTimeout,
+  now = () => Date.now()
+} = {}) {
+  if (typeof fetchStatus !== "function") {
+    throw new TypeError("createSupervisionPoller: fetchStatus must be a function");
+  }
+  if (typeof onSnapshot !== "function") {
+    throw new TypeError("createSupervisionPoller: onSnapshot must be a function");
+  }
+  let generation = 0;
+  let sessionId = "";
+  let currentCtx = null;
+  let timerId = null;
+  let lastGood = null;
+  let probingGen = 0;
+  let stopped = true;
+  function clearTimer() {
+    if (timerId != null) {
+      try {
+        clearIntervalFn(timerId);
+      } catch (_) {
+      }
+      timerId = null;
+    }
+  }
+  function emit(snapshot) {
+    if (stopped) return;
+    try {
+      onSnapshot(snapshot);
+    } catch (e) {
+      void e;
+    }
+  }
+  function annotate(raw) {
+    const payload = raw && typeof raw === "object" ? raw : { active: false };
+    return Object.assign({}, payload, {
+      documentId: currentCtx ? currentCtx.documentId : "",
+      generation,
+      sessionId
+    });
+  }
+  async function probe() {
+    if (stopped || !currentCtx || probingGen === generation) return;
+    probingGen = generation;
+    const ctx = currentCtx;
+    const myGen = generation;
+    try {
+      const raw = await fetchStatus(ctx);
+      if (stopped || myGen !== generation || ctx !== currentCtx) return;
+      const snap = annotate(raw);
+      if (snap.active) lastGood = snap;
+      emit(snap);
+    } catch (error) {
+      if (stopped || myGen !== generation || ctx !== currentCtx) return;
+      if (lastGood && lastGood.active) {
+        const stale = Object.assign({}, lastGood, {
+          health: "stale",
+          error: "poll-failed",
+          generation,
+          sessionId
+        });
+        emit(stale);
+      } else {
+        emit(annotate({ active: false, health: "unreadable", error: "poll-failed" }));
+      }
+    } finally {
+      if (probingGen === myGen) probingGen = 0;
+    }
+  }
+  async function start({ path: path2, token, documentId } = {}) {
+    const nextDoc = String(documentId || "");
+    if (!path2 || !token || !nextDoc) {
+      stop();
+      return;
+    }
+    generation += 1;
+    sessionId = `${nextDoc}#${generation}`;
+    currentCtx = { path: String(path2), token: String(token), documentId: nextDoc };
+    stopped = false;
+    lastGood = null;
+    clearTimer();
+    timerId = setIntervalFn(() => {
+      probe();
+    }, pollMs);
+    await probe();
+  }
+  function stop() {
+    stopped = true;
+    generation += 1;
+    currentCtx = null;
+    clearTimer();
+    probingGen = 0;
+    lastGood = null;
+  }
+  function mode() {
+    return stopped ? "off" : "server-poll";
+  }
+  function probeNow() {
+    return probe();
+  }
+  return {
+    start,
+    stop,
+    mode,
+    probe: probeNow
+  };
+}
+
 // app.js
 var KatexInline = Node2.create({
   name: "katex",
@@ -57901,6 +58442,23 @@ var State2 = {
     pos: null,
     ordinal: 0,
     total: 0
+  },
+  // fix-mentor supervision mode (sidecar <file>.mentor.supervision.json)
+  supervision: {
+    active: false,
+    lockMode: "pending-paragraphs",
+    pendingThreadIds: [],
+    processedThreadIds: [],
+    currentThreadId: "",
+    phase: "idle",
+    message: "",
+    tool: "",
+    updatedAt: "",
+    lastFingerprint: "",
+    lastCurrentId: "",
+    // health/error from poller snapshot (timer ownership is in supervision-poller.js)
+    health: "ok",
+    error: ""
   }
 };
 function mentorBaseName(nameOrPath) {
@@ -57913,7 +58471,7 @@ var AnnotationStore = createAnnotationStore();
 var DraftStore = createDraftStore();
 var _idbDocWriteQueue = createSerialWriteQueue();
 var md = new import_markdown_it.default({ html: false, linkify: true, breaks: false });
-var HTML_SUBSUP_RE = /^<(sup|sub)>([\s\S]*?)<\/\1>/i;
+var HTML_SUBSUP_RE = /^<(sup|sub)>([\s\S]*?)<\/>/i;
 function htmlSubsupRule(state, silent) {
   const pos = state.pos;
   const tail = state.src.slice(pos, pos + 256);
@@ -58423,6 +58981,12 @@ var ActiveHighlightExtension = Extension.create({
         }
       )
     ];
+  }
+});
+var SupervisionExtension = Extension.create({
+  name: "mentor-supervision",
+  addProseMirrorPlugins() {
+    return [createSupervisionPlugin()];
   }
 });
 var AnnotationAnchorExtension = Extension.create({
@@ -60439,6 +61003,7 @@ function initEditor() {
       AnnotationMark,
       AnnotationBubbleExtension,
       ActiveHighlightExtension,
+      SupervisionExtension,
       AnnotationAnchorExtension,
       KatexInline,
       KatexBlock
@@ -60490,6 +61055,10 @@ function initEditor() {
         const trClear = ed.state.tr;
         setAnnotationAnchorResetMeta(trClear, []);
         trClear.setMeta("addToHistory", false);
+        try {
+          trClear.setMeta(SUPERVISION_BYPASS_META, true);
+        } catch (_) {
+        }
         ed.view.dispatch(trClear);
       } catch (_) {
       }
@@ -61078,6 +61647,16 @@ function createAnnotationFromSelection(opts = {}) {
   void options;
   if (!State2.editor) return null;
   const sel = State2.editor.state.selection;
+  try {
+    if (!sel.empty && isRangeSupervisionLocked(sel.from, sel.to)) {
+      try {
+        showToast("AI \u76D1\u7BA1\u4E2D\uFF1A\u672A\u5904\u7406\u6BB5\u843D\u6682\u4E0D\u53EF\u6279\u6CE8", 2200);
+      } catch (_) {
+      }
+      return null;
+    }
+  } catch (_) {
+  }
   if (sel.empty && (!sel.$anchor || !sel.$head)) return null;
   const isCellSel = sel.constructor && (sel.constructor.name === "CellSelection" || sel.forEachCell && sel.$anchorCell && sel.$headCell);
   if (isCellSel) {
@@ -62270,6 +62849,27 @@ function activateAndRevealThread(threadId, options = {}) {
     setActiveCommentCard(threadId);
   }
   return true;
+}
+function revealSupervisionThread(threadId) {
+  const id = String(threadId || "").trim();
+  if (!id) return { found: false, filtered: false };
+  const thread = (State2.annotations || []).find((item) => item && item.threadId === id);
+  if (!thread) return { found: false, filtered: false };
+  const filtered = State2.filterOpen && !State2.filterResolved && thread.resolved || State2.filterResolved && !State2.filterOpen && !thread.resolved;
+  try {
+    if (document.body.classList.contains("comment-pane-collapsed")) {
+      const toggles = window.__mdAnnotatorTogglePanes;
+      if (toggles && typeof toggles.toggleCommentPane === "function") toggles.toggleCommentPane();
+    }
+  } catch (_) {
+  }
+  if (!filtered) {
+    try {
+      activateAndRevealThread(id, { source: "supervision" });
+    } catch (_) {
+    }
+  }
+  return { found: true, filtered: Boolean(filtered) };
 }
 function invokeAiForThread(threadId) {
   if (!threadId) return false;
@@ -65750,9 +66350,267 @@ function renderLiveSyncBanner() {
   const button = el.querySelector('[data-act="live-sync-takeover"]');
   if (button) button.hidden = _liveSync.role !== "follower";
 }
+function isRangeSupervisionLocked(from2, to) {
+  const s = getSupervisionState();
+  if (!s.active) return false;
+  if (s.lockMode === "document") return true;
+  try {
+    if (!State2.editor || !State2.editor.state) return false;
+    const ps = supervisionKey.getState(State2.editor.state);
+    const ranges = ps && ps.lockedRanges || [];
+    for (const r of ranges) {
+      if (from2 < r.to && to > r.from) return true;
+    }
+  } catch (_) {
+  }
+  return false;
+}
+function getSupervisionState() {
+  return State2.supervision || {
+    active: false,
+    lockMode: "pending-paragraphs",
+    pendingThreadIds: [],
+    processedThreadIds: [],
+    currentThreadId: "",
+    phase: "idle",
+    message: "",
+    tool: "",
+    updatedAt: "",
+    lastFingerprint: "",
+    lastCurrentId: "",
+    health: "ok",
+    error: ""
+  };
+}
+function supervisionFingerprint(payload) {
+  const n = normalizeSupervisionPayload(payload || {});
+  return JSON.stringify({
+    a: n.active,
+    m: n.lockMode,
+    p: n.pendingThreadIds,
+    d: n.processedThreadIds,
+    c: n.currentThreadId,
+    ph: n.phase,
+    h: n.health || "ok",
+    e: n.error || "",
+    msg: n.message,
+    t: n.tool,
+    u: n.updatedAt
+  });
+}
+function renderSupervisionBanner() {
+  const el = document.getElementById("supervision-banner");
+  const textEl = document.getElementById("supervision-banner-text");
+  const lamp = document.getElementById("supervision-signal");
+  if (!el || !textEl) return;
+  const s = getSupervisionState();
+  const sig = supervisionSignalPhase(s);
+  if (!s.active) {
+    el.classList.add("hidden");
+    el.dataset.active = "0";
+    el.dataset.phase = "off";
+    el.dataset.health = "ok";
+    textEl.textContent = "";
+    if (lamp) {
+      lamp.dataset.phase = "off";
+      lamp.dataset.health = "ok";
+      lamp.title = "\u76D1\u7BA1\u672A\u5F00\u542F";
+    }
+    try {
+      document.body.classList.remove("supervision-active");
+      document.body.removeAttribute("data-supervision-lock");
+      document.body.removeAttribute("data-supervision-phase");
+    } catch (_) {
+    }
+    return;
+  }
+  el.classList.remove("hidden");
+  el.dataset.active = "1";
+  el.dataset.lock = s.lockMode || "pending-paragraphs";
+  el.dataset.phase = sig;
+  el.dataset.health = s.health || "ok";
+  textEl.textContent = supervisionBannerText(s) || "AI \u76D1\u7BA1\u4E2D";
+  if (lamp) {
+    lamp.dataset.phase = sig;
+    lamp.dataset.health = s.health || "ok";
+    lamp.title = s.health === "stale" ? "\u76D1\u7BA1\u8FDE\u63A5\u5F02\u5E38" : s.health === "degraded" ? "\u76D1\u7BA1\u951A\u70B9\u672A\u5B9A\u4F4D" : sig === "working" ? "\u6B63\u5728\u6539\u4E00\u6BB5" : "\u76D1\u7BA1\u7B49\u5F85\u4E2D";
+  }
+  try {
+    document.body.classList.add("supervision-active");
+    document.body.setAttribute("data-supervision-lock", s.lockMode || "pending-paragraphs");
+    document.body.setAttribute("data-supervision-phase", sig);
+  } catch (_) {
+  }
+}
+function scrollSupervisionPetIntoView(behavior) {
+  try {
+    const pet = document.querySelector(".ProseMirror .supervision-pet");
+    if (pet && typeof pet.scrollIntoView === "function") {
+      const b = behavior === "auto" ? "auto" : "smooth";
+      pet.scrollIntoView({ block: "nearest", behavior: b, inline: "nearest" });
+    }
+  } catch (_) {
+  }
+}
+function applySupervisionPayload(raw, { force = false } = {}) {
+  const normalized = normalizeSupervisionPayload(raw || { active: false });
+  const fp = supervisionFingerprint(normalized);
+  const s = getSupervisionState();
+  if (!force && fp === s.lastFingerprint) {
+    if (normalized.active && State2.editor && State2.editor.view) {
+      try {
+        const { state, view } = State2.editor;
+        const tr2 = setSupervisionMeta(state.tr, normalized);
+        tr2.setMeta("addToHistory", false);
+        tr2.setMeta(SUPERVISION_BYPASS_META, true);
+        view.dispatch(tr2);
+      } catch (_) {
+      }
+      renderSupervisionBanner();
+    }
+    return s;
+  }
+  const prevCurrent = s.currentThreadId || s.lastCurrentId || "";
+  s.active = normalized.active;
+  s.lockMode = normalized.lockMode;
+  s.pendingThreadIds = normalized.pendingThreadIds.slice();
+  s.processedThreadIds = normalized.processedThreadIds.slice();
+  s.currentThreadId = normalized.currentThreadId || "";
+  s.phase = normalized.phase || "idle";
+  s.message = normalized.message;
+  s.tool = normalized.tool;
+  s.updatedAt = normalized.updatedAt;
+  s.health = normalized.health || "ok";
+  s.error = normalized.error || "";
+  s.lastFingerprint = fp;
+  State2.supervision = s;
+  try {
+    if (State2.editor && State2.editor.view) {
+      const { state, view } = State2.editor;
+      const tr2 = setSupervisionMeta(state.tr, normalized);
+      tr2.setMeta("addToHistory", false);
+      tr2.setMeta(SUPERVISION_BYPASS_META, true);
+      view.dispatch(tr2);
+    }
+  } catch (e) {
+    console.warn("[supervision] dispatch failed", e);
+  }
+  renderSupervisionBanner();
+  if (normalized.active && normalized.currentThreadId && normalized.currentThreadId !== prevCurrent) {
+    s.lastCurrentId = normalized.currentThreadId;
+    State2.supervision = s;
+    let revealInfo = { found: false, filtered: false };
+    try {
+      revealInfo = revealSupervisionThread(normalized.currentThreadId) || revealInfo;
+    } catch (_) {
+    }
+    if (revealInfo.filtered) {
+      try {
+        const textEl = document.getElementById("supervision-banner-text");
+        if (textEl && textEl.textContent && !/筛选外/.test(textEl.textContent)) {
+          textEl.textContent = textEl.textContent + " \xB7 \u5F53\u524D\u6279\u6CE8\u4F4D\u4E8E\u7B5B\u9009\u5916";
+        }
+      } catch (_) {
+      }
+    }
+    try {
+      const reduce2 = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      requestAnimationFrame(() => {
+        try {
+          scrollSupervisionPetIntoView(reduce2 ? "auto" : "smooth");
+        } catch (_) {
+        }
+      });
+    } catch (_) {
+      try {
+        scrollSupervisionPetIntoView();
+      } catch (_2) {
+      }
+    }
+  } else if (!normalized.active) {
+    s.lastCurrentId = "";
+    State2.supervision = s;
+  }
+  try {
+    syncToolbarActionState();
+  } catch (_) {
+  }
+  return s;
+}
+function clearSupervisionLocal() {
+  applySupervisionPayload({ active: false }, { force: true });
+}
+async function fetchSupervisionStatus(path2, token) {
+  if (!path2 || !token) return { active: false, health: "missing" };
+  const url = location.origin + "/supervision?path=" + encodeURIComponent(path2) + "&token=" + encodeURIComponent(token);
+  let res;
+  try {
+    res = await fetch(url, { cache: "no-store" });
+  } catch (error) {
+    throw new SupervisionPollError("network", { cause: error });
+  }
+  if (res.status === 403 || res.status === 404 || res.status >= 500) {
+    throw new SupervisionPollError("http-" + res.status, { status: res.status });
+  }
+  if (!res.ok) {
+    throw new SupervisionPollError("http-" + res.status, { status: res.status });
+  }
+  let data;
+  try {
+    data = await res.json();
+  } catch (error) {
+    throw new SupervisionPollError("invalid-json", { cause: error });
+  }
+  if (!data || typeof data !== "object") {
+    throw new SupervisionPollError("invalid-json");
+  }
+  return data;
+}
+var _supervisionPoller = null;
+function getSupervisionPoller() {
+  if (_supervisionPoller) return _supervisionPoller;
+  _supervisionPoller = createSupervisionPoller({
+    pollMs: 1e3,
+    fetchStatus: async ({ path: path2, token }) => fetchSupervisionStatus(path2, token),
+    onSnapshot: (snap) => {
+      try {
+        applySupervisionPayload(snap || { active: false });
+      } catch (e) {
+        console.warn("[supervision] apply snapshot failed", e);
+      }
+    }
+  });
+  return _supervisionPoller;
+}
+function supervisionDocumentId(path2) {
+  return String(path2 || (State2.externalWatchPath || "") || (State2.currentFile && State2.currentFile.path || ""));
+}
+function startSupervisionPolling() {
+  const path2 = State2.externalWatchPath || "";
+  const token = State2.externalWatchToken || "";
+  if (!path2 || !token) return;
+  const documentId = supervisionDocumentId(path2);
+  if (!documentId) return;
+  try {
+    getSupervisionPoller().start({ path: path2, token, documentId });
+  } catch (e) {
+    console.warn("[supervision] start failed", e);
+  }
+}
+function stopSupervisionPolling() {
+  try {
+    getSupervisionPoller().stop();
+  } catch (_) {
+  }
+  clearSupervisionLocal();
+}
 function clearExternalWatchSource() {
   State2.externalWatchPath = "";
   State2.externalWatchToken = "";
+  try {
+    stopSupervisionPolling();
+  } catch (_) {
+  }
 }
 function getExternalWatchState() {
   const watch = State2.externalWatch || {};
@@ -65802,6 +66660,10 @@ async function startExternalWatchForCurrentDocument() {
     });
     State2.externalWatch.watcher = watcher;
     State2.externalWatch.mode = await watcher.start();
+    try {
+      startSupervisionPolling();
+    } catch (_) {
+    }
     return;
   }
   if (State2.externalWatchPath && State2.externalWatchToken) {
@@ -65813,6 +66675,10 @@ async function startExternalWatchForCurrentDocument() {
     });
     State2.externalWatch.watcher = watcher;
     State2.externalWatch.mode = await watcher.start();
+  }
+  try {
+    startSupervisionPolling();
+  } catch (_) {
   }
 }
 function noteExternalOwnWrite(mtimeMs = 0, revision = "") {
@@ -70096,6 +70962,10 @@ async function _handleUrlOpen() {
         State2.externalWatchPath = openPath;
         State2.externalWatchToken = token || "";
         await openFromMentorFile(file);
+        try {
+          startSupervisionPolling();
+        } catch (_) {
+        }
         opened = true;
         showToast("\u5DF2\u6253\u5F00 " + baseName, 2500);
       } else {
@@ -70359,6 +71229,12 @@ window.__mdAnnotator = {
   undo: undo2,
   redo: redo2,
   rebuildAnnotationMarks,
+  applySupervisionPayload,
+  getSupervisionState,
+  startSupervisionPolling,
+  stopSupervisionPolling,
+  supervisionKey,
+  normalizeSupervisionPayload,
   // H-autosave: autosave helpers (v1.43.54 unified write path)
   startAutosaveTimer,
   stopAutosaveTimer,
@@ -70638,6 +71514,7 @@ window.__mdAnnotator = {
   setActiveCommentCard: (tid) => setActiveCommentCard(tid),
   activateAnnotationThread: (tid, opts) => activateAnnotationThread(tid, opts),
   activateAndRevealThread: (tid, opts) => activateAndRevealThread(tid, opts),
+  revealSupervisionThread: (tid) => revealSupervisionThread(tid),
   invokeAiForThread: (tid) => invokeAiForThread(tid),
   annotationWarningState: (thread) => annotationWarningState(thread),
   ensureCommentCardVisible: (tid) => ensureCommentCardVisible(tid),

@@ -2,6 +2,51 @@
 
 按时间倒序记录已发布的变化。最新条目在上方。
 
+## v1.47.2 (2026-07-30) — supervision reliability + pet polish
+
+### Behavior
+- Supervision protocol hardened: explicit `phase` / `health` / `error`; no auto-infer of `currentThreadId` from first pending.
+- Missing pending anchors **degrade** (health=`degraded`) instead of silently escalating to full-document lock.
+- Status bar: **single signal lamp** (removed duplicate banner-dot); compact with live-sync; stale/degraded dashed lamp (no gate-yellow).
+- Current-thread change syncs body pet + open card; does not mutate comment filter; notes when current is outside filter.
+- Inline pet: phase labels (改这里/等待中/未定位), `role=status` + aria-label; reduced-motion disables bob/pulse.
+
+### Client / server
+- `modules/supervision-poller.js`: single timer owner, document-generation fence, stale-on-fail keep snapshot.
+- `GET /supervision`: shared path/token validation; typed `missing` / `invalid-json` / `read-error` payloads.
+- Logical lock ranges merge **per threadId** (split marks stay lockable).
+
+### Tests
+- `tests/unit-supervision.spec.js`, `tests/unit-supervision-poller.spec.js`
+- `tests/mentor-server-supervision.spec.py`
+- `tests/e2e-supervision-navigation.spec.js`, `e2e-supervision-statusbar.spec.js`, `e2e-supervision-lifecycle.spec.js`
+
+## v1.47.1 (2026-07-30) — supervision pet + signal lamp
+
+### Behavior
+- Sidecar adds **`currentThreadId`** (fix-mentor `working_on` / `tick` / auto first pending).
+- Status bar **signal lamp**: off / waiting / working (pulse).
+- Inline **owl pet** widget at the current annotation mark + stronger `supervision-current` highlight; auto-scroll when current changes.
+- `supervision_session.working_on(m)` points the pet before each mention.
+
+## v1.47.0 (2026-07-30) — fix-mentor supervision mode
+
+### Behavior
+- **监管模式**: while `/fix-mentor` runs, open Mentor tabs show a cyan status-bar banner and **lock unprocessed `@AI` anchor paragraphs** (body not editable; no new body annotations on locked ranges).
+- Handshake via sidecar `<file.mentor>.supervision.json` written by `mentor_io.start_supervision` / `supervision_session`; cleared by `end_supervision`.
+- Mentor polls `GET /supervision?path=&token=` every 1s when deep-link path+token are known.
+- Progressive unlock: as `pendingThreadIds` shrink, locks release; empty active pending falls back to full-document lock until end.
+- Comment pane remains usable for reading threads; locks only apply to ProseMirror body ranges.
+
+### Server / IO
+- `mentor-server.py`: `GET /supervision?path=&token=`
+- `fix-mentor/scripts/mentor_io.py`: `start_supervision`, `update_supervision`, `end_supervision`, `supervision_session`
+
+### Tests / docs
+- `tests/unit-supervision.spec.js`
+- `modules/supervision.js`
+- `references/supervision-mode-fix-mentor.md`
+
 ## v1.46.1 (2026-07-30) — Office-style save semantics
 
 ### Behavior
