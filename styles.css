@@ -3272,13 +3272,26 @@ body.refs-pane-collapsed #expand-refs-pane-btn {
   font-size: 13px;
 }
 
-/* Reply form — Docs 风格输入区; stays under scrollable messages */
+/* Reply form — Docs 风格输入区; sits under messages with top-edge stack */
 .comment-reply-form {
   flex: 0 0 auto;
-  margin: 0 var(--comment-inline) 10px;
-  padding: 8px 0 0;
-  border-top: 1px solid var(--border-warm);
-  background: inherit;
+  position: relative;
+  z-index: 1;
+  margin: 0;
+  padding: 10px var(--comment-inline) 10px;
+  border-top: 1px solid color-mix(in srgb, var(--border-warm) 85%, transparent);
+  background: var(--thread-surface, var(--panel));
+  border-radius: 0 0 calc(var(--radius-lg) - 1px) calc(var(--radius-lg) - 1px);
+  /* upward soft shadow = composer layered over scrolled thread */
+  box-shadow:
+    0 -10px 18px -12px rgba(38, 37, 30, 0.16),
+    0 -3px 8px -4px rgba(38, 37, 30, 0.06);
+}
+.comment-thread.is-active .comment-reply-form {
+  background: var(--thread-active-surface, var(--thread-surface, var(--panel)));
+}
+.comment-thread.is-resolved .comment-reply-form {
+  background: var(--surface-resolved, var(--thread-surface, var(--panel)));
 }
 .comment-reply-form textarea {
   width: 100%;
