@@ -4,6 +4,8 @@
  * No DOM / no State / no Tiptap.
  */
 
+import { coalesceAnnotationMarkPieces } from './annotations.js';
+
 const DEFAULT_CONTEXT = 40;
 const SCORE_GAP_MIN = 1;
 const ATTACHED_MIN_SCORE = 1;
@@ -400,12 +402,15 @@ export function projectLegacyFlags(status) {
 
 /**
  * Audit threads vs live marks vs document text.
- * marks: [{ threadId, from, to, text }]
+ * marks: [{ threadId, from, to, text }] — physical pieces or logical ranges.
+ * Physical ProseMirror fragments from nested/overlapping annotations are
+ * coalesced per threadId before duplicate/range checks.
  */
 export function auditAnnotationInvariants({ threads, marks, doc }) {
   const errors = [];
   const thrList = Array.isArray(threads) ? threads.filter((t) => t && t.threadId) : [];
   const markList = Array.isArray(marks) ? marks.filter((m) => m && m.threadId) : [];
+  const logicalMarks = coalesceAnnotationMarkPieces(markList);
 
   const seenIds = new Set();
   for (const t of thrList) {
@@ -415,11 +420,14 @@ export function auditAnnotationInvariants({ threads, marks, doc }) {
     seenIds.add(t.threadId);
   }
 
-  const marksByTid = new Map();
   for (const m of markList) {
     if (!seenIds.has(m.threadId)) {
       errors.push({ code: 'mark-unknown-thread', threadId: m.threadId });
     }
+  }
+
+  const marksByTid = new Map();
+  for (const m of logicalMarks) {
     if (!marksByTid.has(m.threadId)) marksByTid.set(m.threadId, []);
     marksByTid.get(m.threadId).push(m);
   }
@@ -482,7 +490,7 @@ export function auditAnnotationInvariants({ threads, marks, doc }) {
   // Overlapping comments are supported. Only flag an exact range collision when
   // either thread is already unresolved; two healthy attached threads may
   // intentionally share/nest the same text.
-  const sorted = markList.slice().sort((a, b) => a.from - b.from || a.to - b.to);
+  const sorted = logicalMarks.slice().sort((a, b) => a.from - b.from || a.to - b.to);
   const statusByTid = new Map(thrList.map((t) => [t.threadId, (t.anchor && t.anchor.status) || (t.deleted ? 'orphaned' : (t.fuzzy ? 'ambiguous' : 'attached'))]));
   for (let i = 0; i < sorted.length; i++) {
     for (let j = i + 1; j < sorted.length; j++) {

@@ -386,6 +386,134 @@ const { chromium } = require('playwright');
     }
   });
 
+  await t('small-then-large contained middle stays healthy and savable', async () => {
+    const result = await page.evaluate(() => {
+      const M = window.__mdAnnotator;
+      M.openNewTabBlank();
+      M.loadMarkdownIntoEditor('overlap-contain.md', 'alpha bravo charlie delta', { annotations: [] }, { alreadyPrepared: true, forceDisk: true });
+      const ed = M.State.editor;
+      const mk = (from, to, body) => {
+        ed.commands.setTextSelection({ from, to });
+        const t = M.createAnnotationFromSelection();
+        if (!t) return null;
+        M.addReply(t.threadId, body);
+        return t;
+      };
+      const small = mk(7, 12, 'small');
+      const large = mk(1, 20, 'large');
+      const audit = M.collectLiveAnnotationAudit();
+      let snapErr = null;
+      let snap = null;
+      try {
+        snap = M.createSaveSnapshot();
+      } catch (e) {
+        snapErr = { message: e && e.message, code: e && e.code, audit: e && e.audit };
+      }
+      const marks = {};
+      ed.state.doc.descendants((node, pos) => {
+        if (!node.isText) return;
+        for (const m of node.marks) {
+          if (m.type.name !== 'annotation') continue;
+          const tid = m.attrs.threadId;
+          if (!marks[tid]) marks[tid] = [];
+          marks[tid].push({ from: pos, to: pos + node.nodeSize, text: node.text });
+        }
+      });
+      const bravoIds = new Set();
+      ed.state.doc.nodesBetween(7, 12, (node) => {
+        if (!node.isText) return;
+        for (const m of node.marks) {
+          if (m.type.name === 'annotation') bravoIds.add(m.attrs.threadId);
+        }
+      });
+      return {
+        smallId: small && small.threadId,
+        largeId: large && large.threadId,
+        threads: M.State.annotations.map((a) => ({
+          id: a.threadId,
+          text: a.text,
+          range: a.range,
+          invalid: !!a.invalid,
+          status: a.anchor && a.anchor.status,
+        })),
+        marks,
+        bravoIds: Array.from(bravoIds),
+        audit,
+        snapErr,
+        snapOk: !!(snap && snap.sidecar),
+        sidecar: snap && snap.sidecar && (snap.sidecar.annotations || snap.sidecar).map
+          ? (Array.isArray(snap.sidecar) ? snap.sidecar : snap.sidecar.annotations || []).map((a) => ({
+              id: a.threadId,
+              text: a.text,
+              range: a.range,
+            }))
+          : null,
+      };
+    });
+    if (!result.smallId || !result.largeId) throw new Error('create failed: ' + JSON.stringify(result));
+    if (!result.audit.healthy) throw new Error('audit unhealthy: ' + JSON.stringify(result.audit));
+    if (result.snapErr) throw new Error('save blocked: ' + JSON.stringify(result.snapErr));
+    if (!result.snapOk) throw new Error('snapshot missing: ' + JSON.stringify(result));
+    if (!result.bravoIds.includes(result.smallId) || !result.bravoIds.includes(result.largeId)) {
+      throw new Error('overlap node missing both marks: ' + JSON.stringify(result));
+    }
+    const largeT = result.threads.find((t) => t.id === result.largeId);
+    if (!largeT || largeT.range.from !== 1 || largeT.range.to !== 20 || largeT.text !== 'alpha bravo charlie') {
+      throw new Error('large range/text wrong: ' + JSON.stringify(result));
+    }
+    const smallT = result.threads.find((t) => t.id === result.smallId);
+    if (!smallT || smallT.range.from !== 7 || smallT.range.to !== 12 || smallT.text !== 'bravo') {
+      throw new Error('small range/text wrong: ' + JSON.stringify(result));
+    }
+  });
+
+  await t('large-then-small and partial-overlap stay healthy and savable', async () => {
+    const result = await page.evaluate(() => {
+      const M = window.__mdAnnotator;
+      const run = (name, ops) => {
+        M.openNewTabBlank();
+        M.loadMarkdownIntoEditor(name + '.md', 'alpha bravo charlie delta', { annotations: [] }, { alreadyPrepared: true, forceDisk: true });
+        const ed = M.State.editor;
+        const ids = [];
+        for (const [from, to, body] of ops) {
+          ed.commands.setTextSelection({ from, to });
+          const t = M.createAnnotationFromSelection();
+          if (t) {
+            M.addReply(t.threadId, body);
+            ids.push(t.threadId);
+          }
+        }
+        const audit = M.collectLiveAnnotationAudit();
+        let snapErr = null;
+        try {
+          M.createSaveSnapshot();
+        } catch (e) {
+          snapErr = { message: e && e.message, code: e && e.code, audit: e && e.audit };
+        }
+        return {
+          name,
+          n: ids.length,
+          healthy: !!(audit && audit.healthy),
+          codes: (audit && audit.errors || []).map((e) => e.code),
+          snapErr,
+          threads: M.State.annotations.map((a) => ({ id: a.threadId, text: a.text, range: a.range })),
+        };
+      };
+      return [
+        run('big-then-small', [[1, 20, 'big'], [7, 12, 'small']]),
+        run('partial-ab', [[1, 12, 'a'], [7, 16, 'b']]),
+        run('partial-ba', [[7, 16, 'b'], [1, 12, 'a']]),
+        run('same-from', [[1, 12, 'a'], [1, 20, 'b']]),
+        run('same-to', [[7, 20, 'a'], [1, 20, 'b']]),
+      ];
+    });
+    for (const row of result) {
+      if (row.n !== 2 || !row.healthy || row.snapErr) {
+        throw new Error('matrix row failed: ' + JSON.stringify(row));
+      }
+    }
+  });
+
   await t('mentor handle open preserves references before citation anchor restore', async () => {
     const result = await page.evaluate(async () => {
       const M = window.__mdAnnotator;

@@ -46,6 +46,7 @@ import {
   applyAnnPatch,
   collectChangedRanges,
   scanAnnotationMarksInRanges,
+  coalesceAnnotationMarkPieces,
   createActiveHighlightPlugin,
   activeHighlightKey,
   setActiveHighlightMeta,
@@ -2691,20 +2692,11 @@ function collectLiveAnnotationAudit() {
       }
     }
   });
-  marks.sort((a, b) => a.from - b.from || a.to - b.to);
-  const collapsed = [];
-  for (const m of marks) {
-    const last = collapsed[collapsed.length - 1];
-    if (last && last.threadId === m.threadId && last.to === m.from) {
-      last.to = m.to;
-      last.text += m.text;
-    } else {
-      collapsed.push({ ...m });
-    }
-  }
+  // Keep physical pieces; auditAnnotationInvariants coalesces by threadId so
+  // nested/partial-overlap fragmentation is not treated as duplicate anchors.
   const sep = String.fromCharCode(10);
   const plain = doc5.textBetween(0, doc5.content.size, sep, sep);
-  return auditAnnotationInvariants({ threads: State.annotations || [], marks: collapsed, doc: plain });
+  return auditAnnotationInvariants({ threads: State.annotations || [], marks, doc: plain });
 }
 function exportAnchorDiagnosis() {
   const audit = collectLiveAnnotationAudit();

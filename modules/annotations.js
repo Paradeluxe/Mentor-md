@@ -109,6 +109,66 @@ export function collectChangedRanges(transaction) {
 }
 
 /**
+ * Collapse ProseMirror-split physical annotation mark pieces into logical ranges.
+ * Groups by threadId, merges contiguous/overlapping intervals, keeps true gaps.
+ * Physical multi-mark fragmentation from nested/overlapping annotations is NOT
+ * treated as multiple anchors.
+ *
+ * @param {Array<{threadId:string,from:number,to:number,text?:string}>} pieces
+ * @returns {Array<{threadId:string,from:number,to:number,text:string,pieces:number}>}
+ */
+export function coalesceAnnotationMarkPieces(pieces) {
+  const byThread = new Map();
+  for (const piece of pieces || []) {
+    if (!piece || !piece.threadId) continue;
+    const from = Number(piece.from);
+    const to = Number(piece.to);
+    if (!(from < to)) continue;
+    if (!byThread.has(piece.threadId)) byThread.set(piece.threadId, []);
+    byThread.get(piece.threadId).push({
+      threadId: piece.threadId,
+      from,
+      to,
+      text: String(piece.text || "")
+    });
+  }
+
+  const logical = [];
+  for (const [threadId, threadPieces] of byThread) {
+    const ordered = threadPieces.slice().sort((a, b) => a.from - b.from || a.to - b.to);
+    const deduped = [];
+    for (const p of ordered) {
+      const last = deduped[deduped.length - 1];
+      if (last && last.from === p.from && last.to === p.to) continue;
+      deduped.push(p);
+    }
+    let current = null;
+    for (const piece of deduped) {
+      if (current && piece.from <= current.to) {
+        if (piece.to > current.to) {
+          const skip = Math.max(0, current.to - piece.from);
+          current.text += String(piece.text || "").slice(skip);
+          current.to = piece.to;
+        }
+        current.pieces += 1;
+      } else {
+        current = {
+          threadId,
+          from: piece.from,
+          to: piece.to,
+          text: String(piece.text || ""),
+          pieces: 1
+        };
+        logical.push(current);
+      }
+    }
+  }
+  return logical.sort(
+    (a, b) => a.from - b.from || a.to - b.to || String(a.threadId).localeCompare(String(b.threadId))
+  );
+}
+
+/**
  * Walk only changed ranges (plus small pad) for annotation marks.
  * Falls back to full doc when ranges is null.
  */
@@ -116,6 +176,7 @@ export function scanAnnotationMarksInRanges(doc, markType, ranges, pad = 32) {
   const threadFound = new Set();
   const threadCurrentText = new Map();
   const threadMarkRange = new Map();
+  const threadLogicalRanges = new Map();
   const textCount = new Map();
   const size = doc.content.size;
   const seenTextNodes = new Set();
@@ -134,22 +195,30 @@ export function scanAnnotationMarksInRanges(doc, markType, ranges, pad = 32) {
         threadFound.add(tid);
         if (!markPieces.has(tid)) markPieces.set(tid, []);
         markPieces.get(tid).push({ from: pos, to: pos + node.nodeSize, text: text2 || '' });
-        const end = pos + node.nodeSize;
-        if (!threadMarkRange.has(tid)) threadMarkRange.set(tid, { from: pos, to: end });
-        else {
-          const r = threadMarkRange.get(tid);
-          if (pos < r.from) r.from = pos;
-          if (end > r.to) r.to = end;
-        }
       }
     }
   };
 
-  const finalizeText = () => {
+  const finalizeFromLogical = () => {
+    const flat = [];
+    for (const [tid, pieces] of markPieces) {
+      for (const p of pieces) flat.push({ threadId: tid, from: p.from, to: p.to, text: p.text });
+    }
+    const logical = coalesceAnnotationMarkPieces(flat);
+    for (const L of logical) {
+      if (!threadLogicalRanges.has(L.threadId)) threadLogicalRanges.set(L.threadId, []);
+      threadLogicalRanges.get(L.threadId).push({ from: L.from, to: L.to, text: L.text });
+      if (!threadMarkRange.has(L.threadId)) {
+        threadMarkRange.set(L.threadId, { from: L.from, to: L.to });
+      } else {
+        const r = threadMarkRange.get(L.threadId);
+        if (L.from < r.from) r.from = L.from;
+        if (L.to > r.to) r.to = L.to;
+      }
+    }
     for (const [tid, pieces] of markPieces) {
       pieces.sort((a, b) => a.from - b.from || a.to - b.to);
-      // Default to literal marked text. Callers that know a thread was created
-      // as multi-range can add structural separators using markPieces.
+      // Literal marked text from physical pieces (multi-range callers may re-split).
       threadCurrentText.set(tid, pieces.map((piece) => piece.text).join(''));
     }
   };
@@ -172,8 +241,15 @@ export function scanAnnotationMarksInRanges(doc, markType, ranges, pad = 32) {
       }
     }
   }
-  finalizeText();
-  return { threadFound, threadCurrentText, threadMarkRange, textCount, incremental: !!(ranges && ranges.length) };
+  finalizeFromLogical();
+  return {
+    threadFound,
+    threadCurrentText,
+    threadMarkRange,
+    threadLogicalRanges,
+    textCount,
+    incremental: !!(ranges && ranges.length)
+  };
 }
 
 /**

@@ -55037,10 +55037,60 @@ function collectChangedRanges(transaction) {
   }
   return merged;
 }
+function coalesceAnnotationMarkPieces(pieces) {
+  const byThread = /* @__PURE__ */ new Map();
+  for (const piece of pieces || []) {
+    if (!piece || !piece.threadId) continue;
+    const from2 = Number(piece.from);
+    const to = Number(piece.to);
+    if (!(from2 < to)) continue;
+    if (!byThread.has(piece.threadId)) byThread.set(piece.threadId, []);
+    byThread.get(piece.threadId).push({
+      threadId: piece.threadId,
+      from: from2,
+      to,
+      text: String(piece.text || "")
+    });
+  }
+  const logical = [];
+  for (const [threadId, threadPieces] of byThread) {
+    const ordered = threadPieces.slice().sort((a, b) => a.from - b.from || a.to - b.to);
+    const deduped = [];
+    for (const p of ordered) {
+      const last = deduped[deduped.length - 1];
+      if (last && last.from === p.from && last.to === p.to) continue;
+      deduped.push(p);
+    }
+    let current = null;
+    for (const piece of deduped) {
+      if (current && piece.from <= current.to) {
+        if (piece.to > current.to) {
+          const skip = Math.max(0, current.to - piece.from);
+          current.text += String(piece.text || "").slice(skip);
+          current.to = piece.to;
+        }
+        current.pieces += 1;
+      } else {
+        current = {
+          threadId,
+          from: piece.from,
+          to: piece.to,
+          text: String(piece.text || ""),
+          pieces: 1
+        };
+        logical.push(current);
+      }
+    }
+  }
+  return logical.sort(
+    (a, b) => a.from - b.from || a.to - b.to || String(a.threadId).localeCompare(String(b.threadId))
+  );
+}
 function scanAnnotationMarksInRanges(doc5, markType, ranges, pad2 = 32) {
   const threadFound = /* @__PURE__ */ new Set();
   const threadCurrentText = /* @__PURE__ */ new Map();
   const threadMarkRange = /* @__PURE__ */ new Map();
+  const threadLogicalRanges = /* @__PURE__ */ new Map();
   const textCount = /* @__PURE__ */ new Map();
   const size = doc5.content.size;
   const seenTextNodes = /* @__PURE__ */ new Set();
@@ -55058,17 +55108,26 @@ function scanAnnotationMarksInRanges(doc5, markType, ranges, pad2 = 32) {
         threadFound.add(tid);
         if (!markPieces.has(tid)) markPieces.set(tid, []);
         markPieces.get(tid).push({ from: pos, to: pos + node.nodeSize, text: text2 || "" });
-        const end = pos + node.nodeSize;
-        if (!threadMarkRange.has(tid)) threadMarkRange.set(tid, { from: pos, to: end });
-        else {
-          const r = threadMarkRange.get(tid);
-          if (pos < r.from) r.from = pos;
-          if (end > r.to) r.to = end;
-        }
       }
     }
   };
-  const finalizeText = () => {
+  const finalizeFromLogical = () => {
+    const flat = [];
+    for (const [tid, pieces] of markPieces) {
+      for (const p of pieces) flat.push({ threadId: tid, from: p.from, to: p.to, text: p.text });
+    }
+    const logical = coalesceAnnotationMarkPieces(flat);
+    for (const L of logical) {
+      if (!threadLogicalRanges.has(L.threadId)) threadLogicalRanges.set(L.threadId, []);
+      threadLogicalRanges.get(L.threadId).push({ from: L.from, to: L.to, text: L.text });
+      if (!threadMarkRange.has(L.threadId)) {
+        threadMarkRange.set(L.threadId, { from: L.from, to: L.to });
+      } else {
+        const r = threadMarkRange.get(L.threadId);
+        if (L.from < r.from) r.from = L.from;
+        if (L.to > r.to) r.to = L.to;
+      }
+    }
     for (const [tid, pieces] of markPieces) {
       pieces.sort((a, b) => a.from - b.from || a.to - b.to);
       threadCurrentText.set(tid, pieces.map((piece) => piece.text).join(""));
@@ -55091,8 +55150,15 @@ function scanAnnotationMarksInRanges(doc5, markType, ranges, pad2 = 32) {
       }
     }
   }
-  finalizeText();
-  return { threadFound, threadCurrentText, threadMarkRange, textCount, incremental: !!(ranges && ranges.length) };
+  finalizeFromLogical();
+  return {
+    threadFound,
+    threadCurrentText,
+    threadMarkRange,
+    threadLogicalRanges,
+    textCount,
+    incremental: !!(ranges && ranges.length)
+  };
 }
 function createActiveHighlightPlugin(getActiveThreadId, getThreadType) {
   return new Plugin({
@@ -56471,6 +56537,7 @@ function auditAnnotationInvariants({ threads, marks, doc: doc5 }) {
   const errors = [];
   const thrList = Array.isArray(threads) ? threads.filter((t) => t && t.threadId) : [];
   const markList = Array.isArray(marks) ? marks.filter((m) => m && m.threadId) : [];
+  const logicalMarks = coalesceAnnotationMarkPieces(markList);
   const seenIds = /* @__PURE__ */ new Set();
   for (const t of thrList) {
     if (seenIds.has(t.threadId)) {
@@ -56478,11 +56545,13 @@ function auditAnnotationInvariants({ threads, marks, doc: doc5 }) {
     }
     seenIds.add(t.threadId);
   }
-  const marksByTid = /* @__PURE__ */ new Map();
   for (const m of markList) {
     if (!seenIds.has(m.threadId)) {
       errors.push({ code: "mark-unknown-thread", threadId: m.threadId });
     }
+  }
+  const marksByTid = /* @__PURE__ */ new Map();
+  for (const m of logicalMarks) {
     if (!marksByTid.has(m.threadId)) marksByTid.set(m.threadId, []);
     marksByTid.get(m.threadId).push(m);
   }
@@ -56535,7 +56604,7 @@ function auditAnnotationInvariants({ threads, marks, doc: doc5 }) {
       }
     }
   }
-  const sorted = markList.slice().sort((a, b) => a.from - b.from || a.to - b.to);
+  const sorted = logicalMarks.slice().sort((a, b) => a.from - b.from || a.to - b.to);
   const statusByTid = new Map(thrList.map((t) => [t.threadId, t.anchor && t.anchor.status || (t.deleted ? "orphaned" : t.fuzzy ? "ambiguous" : "attached")]));
   for (let i = 0; i < sorted.length; i++) {
     for (let j = i + 1; j < sorted.length; j++) {
@@ -59452,20 +59521,9 @@ function collectLiveAnnotationAudit() {
       }
     }
   });
-  marks.sort((a, b) => a.from - b.from || a.to - b.to);
-  const collapsed = [];
-  for (const m of marks) {
-    const last = collapsed[collapsed.length - 1];
-    if (last && last.threadId === m.threadId && last.to === m.from) {
-      last.to = m.to;
-      last.text += m.text;
-    } else {
-      collapsed.push({ ...m });
-    }
-  }
   const sep = String.fromCharCode(10);
   const plain = doc5.textBetween(0, doc5.content.size, sep, sep);
-  return auditAnnotationInvariants({ threads: State2.annotations || [], marks: collapsed, doc: plain });
+  return auditAnnotationInvariants({ threads: State2.annotations || [], marks, doc: plain });
 }
 function exportAnchorDiagnosis() {
   const audit = collectLiveAnnotationAudit();

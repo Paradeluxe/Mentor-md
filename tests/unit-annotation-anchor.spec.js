@@ -221,14 +221,47 @@ const t = async (name, fn) => {
     assert.ok(a.errors.some((e) => /duplicate-mark|text-mismatch|range-mismatch/.test(e.code)));
   });
 
+  await t('auditAnnotationInvariants accepts contained-middle physical split', async () => {
+    const doc = 'alpha bravo charlie';
+    const threads = [
+      { threadId: 'outer', text: 'alpha bravo charlie', range: { from: 0, to: 19 }, anchor: { status: 'attached' } },
+      { threadId: 'inner', text: 'bravo', range: { from: 6, to: 11 }, anchor: { status: 'attached' } },
+    ];
+    // Nested marks split the outer into three physical pieces (middle carries both marks).
+    const marks = [
+      { threadId: 'outer', from: 0, to: 6, text: 'alpha ' },
+      { threadId: 'inner', from: 6, to: 11, text: 'bravo' },
+      { threadId: 'outer', from: 6, to: 11, text: 'bravo' },
+      { threadId: 'outer', from: 11, to: 19, text: ' charlie' },
+    ];
+    const a = mod.auditAnnotationInvariants({ threads, marks, doc });
+    assert.equal(a.healthy, true, JSON.stringify(a.errors));
+    assert.deepStrictEqual(a.errors, []);
+  });
+
+  await t('auditAnnotationInvariants accepts partial-overlap physical split', async () => {
+    const doc = 'alpha bravo charlie';
+    const threads = [
+      { threadId: 'a', text: 'alpha bravo', range: { from: 0, to: 11 }, anchor: { status: 'attached' } },
+      { threadId: 'b', text: 'bravo charlie', range: { from: 6, to: 19 }, anchor: { status: 'attached' } },
+    ];
+    const marks = [
+      { threadId: 'a', from: 0, to: 6, text: 'alpha ' },
+      { threadId: 'a', from: 6, to: 11, text: 'bravo' },
+      { threadId: 'b', from: 6, to: 11, text: 'bravo' },
+      { threadId: 'b', from: 11, to: 19, text: ' charlie' },
+    ];
+    const a = mod.auditAnnotationInvariants({ threads, marks, doc });
+    assert.equal(a.healthy, true, JSON.stringify(a.errors));
+  });
+
   await t('auditAnnotationInvariants detects mark replacement caused by overlap', async () => {
     const doc = 'alpha bravo charlie';
     const threads = [
       { threadId: 'outer', text: 'alpha bravo charlie', range: { from: 0, to: 19 }, anchor: { status: 'attached' } },
       { threadId: 'inner', text: 'bravo charlie', range: { from: 6, to: 19 }, anchor: { status: 'attached' } },
     ];
-    // ProseMirror marks of the same type cannot coexist with different attrs;
-    // adding inner replaces outer over 6..19.
+    // Outer missing the shared segment — true replacement / incomplete outer.
     const marks = [
       { threadId: 'outer', from: 0, to: 6, text: 'alpha ' },
       { threadId: 'inner', from: 6, to: 19, text: 'bravo charlie' },
