@@ -43,18 +43,20 @@ const { pathToFileURL } = require('url');
     path.join(__dirname, '..', 'modules', 'supervision.js')
   ).href;
   const {
-    normalizeSupervisionPayload,
-    mergeRanges,
-    rangesOverlap,
-    transactionTouchesRanges,
-    supervisionBannerText,
-    supervisionSignalPhase,
-    isFullDocumentLoad,
-    materializeSupervisionState,
-    emptySupervisionState,
-    collectLockedRanges,
-    createSupervisionPetElement,
-  } = await import(modUrl);
+      normalizeSupervisionPayload,
+      mergeRanges,
+      rangesOverlap,
+      transactionTouchesRanges,
+      supervisionBannerText,
+      supervisionSignalPhase,
+      isFullDocumentLoad,
+      materializeSupervisionState,
+      emptySupervisionState,
+      collectLockedRanges,
+      createSupervisionPetElement,
+      findThreadMarkRanges,
+      findThreadMarkRange,
+    } = await import(modUrl);
 
   let pass = 0;
   function check(name, fn) {
@@ -160,18 +162,56 @@ const { pathToFileURL } = require('url');
   });
 
   check('mergeRanges contiguous', () => {
-    assert.deepStrictEqual(
-      mergeRanges([
+      assert.deepStrictEqual(
+        mergeRanges([
+          { from: 1, to: 5, threadId: 'a' },
+          { from: 5, to: 9, threadId: 'a' },
+          { from: 20, to: 22, threadId: 'b' },
+        ]),
+        [
+          { from: 1, to: 9, threadId: 'a' },
+          { from: 20, to: 22, threadId: 'b' },
+        ]
+      );
+    });
+
+    check('mergeRanges coalesces only within the same thread', () => {
+      assert.deepStrictEqual(
+        mergeRanges([
+          { from: 1, to: 5, threadId: 'a' },
+          { from: 3, to: 8, threadId: 'b' },
+          { from: 5, to: 9, threadId: 'a' },
+        ]),
+        [
+          { from: 1, to: 9, threadId: 'a' },
+          { from: 3, to: 8, threadId: 'b' },
+        ]
+      );
+    });
+
+    check('findThreadMarkRanges returns every disjoint piece for one logical thread', () => {
+      const markType = { name: 'annotation' };
+      const textNode = (text, tid) => ({
+        isText: true,
+        nodeSize: text.length,
+        marks: tid ? [{ type: markType, attrs: { threadId: tid } }] : [],
+      });
+      const doc = {
+        descendants(fn) {
+          fn(textNode('AAAA', 'a'), 1); // 1-5
+          fn(textNode('xxxx', null), 5); // 5-9 free
+          fn(textNode('BBBB', 'a'), 12); // 12-16
+          fn(textNode('CCCC', 'b'), 20); // other thread
+        },
+      };
+      const ranges = findThreadMarkRanges(doc, markType, 'a');
+      assert.deepStrictEqual(ranges, [
         { from: 1, to: 5, threadId: 'a' },
-        { from: 5, to: 9, threadId: 'a' },
-        { from: 20, to: 22, threadId: 'b' },
-      ]),
-      [
-        { from: 1, to: 9, threadId: 'a' },
-        { from: 20, to: 22, threadId: 'b' },
-      ]
-    );
-  });
+        { from: 12, to: 16, threadId: 'a' },
+      ]);
+      const first = findThreadMarkRange(doc, markType, 'a');
+      assert.deepStrictEqual(first, { from: 1, to: 5 });
+    });
 
   check('rangesOverlap', () => {
     assert.strictEqual(rangesOverlap(0, 5, 4, 8), true);

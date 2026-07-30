@@ -161,29 +161,29 @@ function uniqueStrings(arr) {
  * @returns {{from:number,to:number}|null}
  */
 export function findThreadMarkRange(doc, markType, threadId) {
-  if (!doc || !markType || !threadId) return null;
+  const pieces = findThreadMarkRanges(doc, markType, threadId);
+  if (!pieces.length) return null;
+  return { from: pieces[0].from, to: pieces[0].to };
+}
+
+/**
+ * All coalesced mark spans for one logical threadId (may be disjoint).
+ * @returns {Array<{from:number,to:number,threadId:string}>}
+ */
+export function findThreadMarkRanges(doc, markType, threadId) {
+  if (!doc || !markType || !threadId) return [];
   const want = String(threadId);
-  let from = null;
-  let to = null;
+  const pieces = [];
   doc.descendants((node, pos) => {
     if (!node.isText) return;
     for (const m of node.marks || []) {
       if (m.type !== markType) continue;
       const tid = m.attrs && m.attrs.threadId;
       if (String(tid) !== want) continue;
-      const a = pos;
-      const b = pos + node.nodeSize;
-      if (from == null) {
-        from = a;
-        to = b;
-      } else if (a <= to) {
-        to = Math.max(to, b);
-      }
-      // only first contiguous run from the start of the thread
+      pieces.push({ from: pos, to: pos + node.nodeSize, threadId: want });
     }
   });
-  if (from == null) return null;
-  return { from, to };
+  return mergeRanges(pieces);
 }
 
 export function collectLockedRanges(doc, markType, pendingThreadIds) {
@@ -202,27 +202,39 @@ export function collectLockedRanges(doc, markType, pendingThreadIds) {
   return mergeRanges(pieces);
 }
 
-export function mergeRanges(ranges) {
+function sanitizeRanges(ranges) {
   if (!ranges || !ranges.length) return [];
-  const sorted = ranges
-    .map((r) => ({ from: r.from | 0, to: r.to | 0, threadId: r.threadId || "" }))
-    .filter((r) => r.to > r.from)
-    .sort((a, b) => a.from - b.from || a.to - b.to);
+  return ranges
+    .map((r) => ({ from: r.from | 0, to: r.to | 0, threadId: String(r.threadId || "") }))
+    .filter((r) => r.to > r.from);
+}
+
+function coalesceContiguous(list, threadId) {
+  const sorted = list.slice().sort((a, b) => a.from - b.from || a.to - b.to);
   const out = [];
   for (const r of sorted) {
     const last = out[out.length - 1];
     if (last && r.from <= last.to) {
       last.to = Math.max(last.to, r.to);
-      if (r.threadId && last.threadId && r.threadId !== last.threadId) {
-        last.threadId = last.threadId + "," + r.threadId;
-      } else if (r.threadId && !last.threadId) {
-        last.threadId = r.threadId;
-      }
     } else {
-      out.push({ from: r.from, to: r.to, threadId: r.threadId || "" });
+      out.push({ from: r.from, to: r.to, threadId });
     }
   }
   return out;
+}
+
+export function mergeRanges(ranges) {
+  const sanitized = sanitizeRanges(ranges);
+  if (!sanitized.length) return [];
+  const byThread = new Map();
+  for (const range of sanitized) {
+    const list = byThread.get(range.threadId) || [];
+    list.push(range);
+    byThread.set(range.threadId, list);
+  }
+  return [...byThread.entries()]
+    .flatMap(([threadId, list]) => coalesceContiguous(list, threadId))
+    .sort((a, b) => a.from - b.from || a.to - b.to || a.threadId.localeCompare(b.threadId));
 }
 
 export function rangesOverlap(aFrom, aTo, bFrom, bTo) {
