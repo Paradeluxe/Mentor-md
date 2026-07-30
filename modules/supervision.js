@@ -337,15 +337,17 @@ export function buildSupervisionDecos(doc, lockedRanges, lockMode, currentRange,
   if (!doc) return DecorationSet.empty;
   const decos = [];
   if (lockMode === "document") {
-    doc.forEach((node, offset) => {
-      decos.push(
-        Decoration.node(offset, offset + node.nodeSize, {
-          class: "supervision-locked-block",
-          "data-supervision-lock": "document",
-        })
-      );
-    });
-  } else {
+      if (typeof doc.forEach === "function") {
+        doc.forEach((node, offset) => {
+          decos.push(
+            Decoration.node(offset, offset + node.nodeSize, {
+              class: "supervision-locked-block",
+              "data-supervision-lock": "document",
+            })
+          );
+        });
+      }
+    } else {
     for (const r of lockedRanges || []) {
       if (!(r.to > r.from)) continue;
       const isCurrent =
