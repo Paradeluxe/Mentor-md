@@ -3655,12 +3655,18 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
     const before = await page.evaluate(() => {
       const cpRect = document.querySelector('#comment-pane').getBoundingClientRect();
       const edRect = document.querySelector('#editor-pane').getBoundingClientRect();
-      const label = document.querySelector('#comment-pane [data-act="toggle-comment-pane"]').getAttribute('aria-label');
-      const expanded = document.querySelector('#comment-pane [data-act="toggle-comment-pane"]').getAttribute('aria-expanded');
-      return { cpWidth: cpRect.width, edWidth: edRect.width, label, expanded };
+      const toolbar = document.querySelector('#btn-toggle-comment-pane');
+      return {
+        cpWidth: cpRect.width,
+        edWidth: edRect.width,
+        toolbarLabel: toolbar?.getAttribute('aria-label'),
+        toolbarPressed: toolbar?.getAttribute('aria-pressed'),
+        headerCollapseBtn: !!document.querySelector('#comment-pane .pane-collapse-btn'),
+      };
     });
-    if (before.label !== '收起批注栏') throw new Error(`批注收回键名称应为"收起批注栏"，实际 "${before.label}"`);
-    if (before.expanded !== 'true') throw new Error('批注默认应有 aria-expanded=true');
+    if (before.headerCollapseBtn) throw new Error('批注栏内不应再有收起按钮');
+    if (before.toolbarLabel !== '批注栏') throw new Error(`工具栏批注切换应为"批注栏"，实际 "${before.toolbarLabel}"`);
+    if (before.toolbarPressed !== 'true') throw new Error('默认工具栏批注按钮应为 aria-pressed=true');
 
     // Ctrl+]
     await page.keyboard.press('Control+]');
@@ -3670,12 +3676,12 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
       edWidth: document.querySelector('#editor-pane').getBoundingClientRect().width,
       grid: getComputedStyle(document.querySelector('#main')).gridTemplateColumns,
       expandBtnVisible: !document.querySelector('#expand-comment-pane-btn').classList.contains('hidden'),
-      headerExpanded: document.querySelector('#comment-pane [data-act="toggle-comment-pane"]').getAttribute('aria-expanded'),
       edgeExpanded: document.querySelector('#expand-comment-pane-btn').getAttribute('aria-expanded'),
+      toolbarPressed: document.querySelector('#btn-toggle-comment-pane')?.getAttribute('aria-pressed'),
     }));
     if (!after.collapsed) throw new Error('Ctrl+] 应加 comment-pane-collapsed class');
     if (after.edWidth < before.edWidth + 200) throw new Error(`批注收起后编辑区应扩展 (从 ${before.edWidth} 到至少 ${before.edWidth + 200})，实际 ${after.edWidth}`);
-    if (after.headerExpanded !== 'false' || after.edgeExpanded !== 'false') throw new Error('收起后 aria-expanded 应为 false');
+    if (after.edgeExpanded !== 'false' || after.toolbarPressed !== 'false') throw new Error('收起后 expand/toolbar 状态应为 collapsed');
     if (!after.expandBtnVisible) throw new Error('批注浮起展开键应可见');
 
     // 再 Ctrl+] 展开回
@@ -3685,9 +3691,11 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
       collapsed: document.body.classList.contains('comment-pane-collapsed'),
       edWidth: document.querySelector('#editor-pane').getBoundingClientRect().width,
       expandBtnVisible: !document.querySelector('#expand-comment-pane-btn').classList.contains('hidden'),
+      toolbarPressed: document.querySelector('#btn-toggle-comment-pane')?.getAttribute('aria-pressed'),
     }));
     if (restored.collapsed) throw new Error('再 Ctrl+] 应取消 collapsed');
     if (restored.expandBtnVisible) throw new Error('展开后浮起按钮应隐藏');
+    if (restored.toolbarPressed !== 'true') throw new Error('展开后工具栏应为 aria-pressed=true');
     console.log('  ✓ 批注栏 Ctrl+] 收起 + 展开 + 浮起按钮联动正确 + 编辑区扩展');
   }
 
