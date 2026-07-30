@@ -2,6 +2,18 @@
 
 按时间倒序记录已发布的变化。最新条目在上方。
 
+## v1.46.1 (2026-07-30) — Office-style save semantics
+
+### Behavior
+- **Autosave = AutoRecover only**: writes DraftStore/IDB draft; does **not** write the official `.mentor`/`.md` handle and does **not** clear dirty.
+- **User-confirmed save** (Ctrl+S / Save): only path that commits to disk and `markClean` (last confirmed baseline).
+- **Exit/close**: `beforeunload` + tab close prompt when dirty vs last user-confirmed save.
+- Status text on autosave:「已自动保存草稿」.
+
+### Gates
+- `tests/v143-autosave-simple.spec.js` (draft-only + `shouldPromptUnload`)
+- `tests/e2e-save-clears-dirty.spec.js` (manual save still clears dirty)
+
 ## v1.46.0 (2026-07-30) — external .mentor live refresh
 
 ### Behavior

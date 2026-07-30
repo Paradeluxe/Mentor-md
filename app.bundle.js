@@ -60042,7 +60042,7 @@ async function writeToHandle(handle, data) {
     _saveInFlight = false;
     if (_saveQueued) {
       _saveQueued = false;
-      if (State2.currentFile && State2.currentFile.dirty && hasWriteHandle()) {
+      if (State2.currentFile && State2.currentFile.dirty) {
         scheduleAutosaveDebounce();
       }
     }
@@ -60135,7 +60135,9 @@ async function writeCurrentToHandle({ reason = "manual", showProgress = false, f
       }
     } catch {
     }
-    if ((State2.currentFile.dirtyGen || 0) === snapshot.dirtyGen) {
+    if (reason === "autosave") {
+      console.warn("[save] writeCurrentToHandle reason=autosave is deprecated; draft-only autosaveNow preferred");
+    } else if ((State2.currentFile.dirtyGen || 0) === snapshot.dirtyGen) {
       markClean();
     } else {
       _saveQueued = true;
@@ -60194,12 +60196,11 @@ async function writeCurrentToHandle({ reason = "manual", showProgress = false, f
 }
 function startAutosaveTimer() {
   stopAutosaveTimer();
-  if (!hasWriteHandle()) return;
   if (!canWriteLiveDocument()) return;
   _autosaveTimer = setInterval(() => {
     if (State2.currentFile && State2.currentFile.dirty) scheduleAutosaveDebounce();
   }, AUTOSAVE_INTERVAL);
-  console.log("[autosave] timer started (debounce + 30s safety, handle mode)");
+  console.log("[autosave] timer started (draft AutoRecover, debounce + 30s safety)");
 }
 function stopAutosaveTimer() {
   if (_autosaveTimer) {
@@ -60212,9 +60213,9 @@ function stopAutosaveTimer() {
   }
 }
 function scheduleAutosaveDebounce() {
-  if (!hasWriteHandle()) return;
   if (!canWriteLiveDocument()) return;
   if (!State2.currentFile || !State2.currentFile.dirty) return;
+  if (State2.externalWatch && State2.externalWatch.autosavePausedForExternal) return;
   if (scheduleAutosaveDebounce._t) clearTimeout(scheduleAutosaveDebounce._t);
   scheduleAutosaveDebounce._t = setTimeout(() => {
     scheduleAutosaveDebounce._t = null;
@@ -60222,41 +60223,49 @@ function scheduleAutosaveDebounce() {
   }, AUTOSAVE_DEBOUNCE);
 }
 async function autosaveNow() {
-  if (!hasWriteHandle()) return;
-  if (!canWriteLiveDocument()) return;
-  if (!State2.currentFile || !State2.currentFile.dirty) return;
-  if (State2.readOnlyMode) return;
-  const result = await writeCurrentToHandle({ reason: "autosave", showProgress: false });
-  if (result.ok) {
+  if (!canWriteLiveDocument()) return { ok: false, skipped: true, error: "live-follower" };
+  if (!State2.currentFile || !State2.currentFile.dirty) return { ok: false, skipped: true, error: "clean" };
+  if (State2.readOnlyMode) return { ok: false, skipped: true, error: "read-only" };
+  if (State2.externalWatch && State2.externalWatch.autosavePausedForExternal) {
+    return { ok: false, skipped: true, error: "external-paused" };
+  }
+  try {
+    await putAtomicDraftForCurrent();
     const time = (/* @__PURE__ */ new Date()).toLocaleTimeString();
-    setStatus("\u5DF2\u81EA\u52A8\u4FDD\u5B58", time);
-    console.log(`[autosave] written at ${time}`);
-    return;
-  }
-  if (result.skipped) {
-    if (result.error === "external-modified" && !autosaveNow._externalToast) {
-      autosaveNow._externalToast = true;
-      showToast(
-        "\u78C1\u76D8\u4E0A\u7684\u6587\u4EF6\u5DF2\u88AB\u5916\u90E8\u4FEE\u6539\uFF0C\u81EA\u52A8\u4FDD\u5B58\u5DF2\u6682\u505C\u3002\u8BF7\u91CD\u65B0\u6253\u5F00\u78C1\u76D8\u7248\uFF08\u52FF\u5728\u65E7\u7F13\u51B2\u4E0A Ctrl+S \u8986\u76D6\uFF09\uFF0C\u6216\u53E6\u5B58\u526F\u672C\u3002",
-        6e3
-      );
-      setStatus(
-        "\u5916\u90E8\u5DF2\u4FEE\u6539 \xB7 \u6682\u505C autosave",
-        mentorBaseName(State2.currentFile && State2.currentFile.name) + " \u2014 \u91CD\u5F00\u6587\u4EF6\u7528\u78C1\u76D8"
-      );
+    setStatus("\u5DF2\u81EA\u52A8\u4FDD\u5B58\u8349\u7A3F", time);
+    console.log(`[autosave] draft only at ${time}`);
+    return { ok: true, draft: true };
+  } catch (e) {
+    const err = e && e.message ? e.message : String(e);
+    const now = Date.now();
+    if (now - _autosaveFailToastAt > 15e3) {
+      _autosaveFailToastAt = now;
+      showToast("\u81EA\u52A8\u4FDD\u5B58\u8349\u7A3F\u5931\u8D25: " + err, 3e3);
     }
-    return;
+    console.warn("[autosave] draft failed:", err);
+    return { ok: false, error: err };
   }
-  const now = Date.now();
-  if (now - _autosaveFailToastAt > 15e3) {
-    _autosaveFailToastAt = now;
-    if (result.error === "need-permission" || result.error === "\u6743\u9650\u88AB\u62D2") {
-      showToast("\u81EA\u52A8\u4FDD\u5B58\u9700\u8981\u5199\u6743\u9650 \u2014 \u8BF7\u6309 Ctrl+S \u4E00\u6B21\u6388\u6743", 3500);
-    } else if (result.error && result.error !== "busy") {
-      showToast("\u81EA\u52A8\u4FDD\u5B58\u5931\u8D25: " + result.error, 3e3);
+}
+function shouldPromptUnload() {
+  try {
+    if (State2.currentFile && State2.currentFile.dirty) return true;
+    const tabs = State2.tabs || [];
+    for (let i = 0; i < tabs.length; i++) {
+      if (tabs[i] && tabs[i].dirty) return true;
     }
+  } catch (_) {
   }
-  console.warn("[autosave] failed:", result.error);
+  return false;
+}
+function onBeforeUnload(e) {
+  try {
+    _closeDocChannelFull();
+  } catch (_) {
+  }
+  if (!shouldPromptUnload()) return;
+  e.preventDefault();
+  e.returnValue = "";
+  return "";
 }
 function updateTreeDirtyDots() {
   $$(".tree-node[data-handle-name]").forEach((el) => {
@@ -64144,7 +64153,7 @@ function closeTab(tabId) {
   const tab = State2.tabs.find((t) => t && t.id === tabId);
   if (!tab) return false;
   if (tab.dirty) {
-    if (!confirm(`\u300C${tab.name}\u300D\u6709\u672A\u4FDD\u5B58\u4FEE\u6539\uFF0C\u786E\u5B9A\u5173\u95ED\uFF1F`)) return false;
+    if (!confirm(`\u300C${tab.name}\u300D\u6709\u672A\u786E\u8BA4\u4FDD\u5B58\u7684\u4FEE\u6539\uFF08\u76F8\u5BF9\u4E0A\u6B21 Ctrl+S\uFF09\uFF0C\u786E\u5B9A\u5173\u95ED\uFF1F`)) return false;
   }
   const wasActive = State2.activeTabId === tabId;
   State2.tabs = State2.tabs.filter((t) => t && t.id !== tabId);
@@ -66431,7 +66440,7 @@ function _openDocChannel() {
 function _closeDocChannelFull() {
   closeLiveSync();
 }
-window.addEventListener("beforeunload", _closeDocChannelFull);
+window.addEventListener("beforeunload", onBeforeUnload);
 function _validateSidecar(annotations) {
   const report = { errors: [], warnings: [], duplicates: /* @__PURE__ */ new Set() };
   const safeId = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
@@ -70354,6 +70363,7 @@ window.__mdAnnotator = {
   startAutosaveTimer,
   stopAutosaveTimer,
   autosaveNow,
+  shouldPromptUnload,
   scheduleAutosaveDebounce,
   hasWriteHandle,
   writeCurrentToHandle,

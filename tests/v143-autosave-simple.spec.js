@@ -56,34 +56,39 @@ const { chromium } = require('playwright');
     if (!r.a || r.b || !r.c || r.d) throw new Error(JSON.stringify(r));
   });
 
-  await t('autosave mentor-handle dirty → markClean', async () => {
-    const r = await page.evaluate(async () => {
-      const M = window.__mdAnnotator;
-      let writes = 0;
-      M.State.saveMode = 'mentor-handle';
-      M.State.diskPathHint = '';
-      M.State.mediaFiles = {};
-      M.State.currentFile = {
-        name: 'notes.mentor',
-        dirty: true,
-        dirtyGen: 1,
-        handle: {
-          queryPermission: async () => 'granted',
-          requestPermission: async () => 'granted',
-          createWritable: async () => {
-            writes++;
-            return { write: async () => {}, close: async () => {}, abort: async () => {} };
+  await t('autosave mentor-handle dirty → draft only, stays dirty', async () => {
+      const r = await page.evaluate(async () => {
+        const M = window.__mdAnnotator;
+        let writes = 0;
+        M.State.saveMode = 'mentor-handle';
+        M.State.diskPathHint = '';
+        M.State.mediaFiles = {};
+        M.State.currentFile = {
+          name: 'notes.mentor',
+          dirty: true,
+          dirtyGen: 1,
+          handle: {
+            queryPermission: async () => 'granted',
+            requestPermission: async () => 'granted',
+            createWritable: async () => {
+              writes++;
+              return { write: async () => {}, close: async () => {}, abort: async () => {} };
+            },
+            getFile: async () => ({ lastModified: Date.now() }),
           },
-          getFile: async () => ({ lastModified: Date.now() }),
-        },
-      };
-      M.State.editor.commands.setContent('<p>hello autosave</p>', false);
-      await M.autosaveNow();
-      return { writes, dirty: M.State.currentFile.dirty };
+        };
+        M.State.editor.commands.setContent('<p>hello autosave</p>', false);
+        await M.autosaveNow();
+        return {
+          writes,
+          dirty: M.State.currentFile.dirty,
+          shouldPrompt: typeof M.shouldPromptUnload === 'function' ? M.shouldPromptUnload() : null,
+        };
+      });
+      if (r.writes !== 0) throw new Error('writes=' + r.writes + ' (autosave must not touch disk)');
+      if (r.dirty !== true) throw new Error('dirty=' + r.dirty);
+      if (r.shouldPrompt !== true) throw new Error('shouldPromptUnload=' + r.shouldPrompt);
     });
-    if (r.writes !== 1) throw new Error('writes=' + r.writes);
-    if (r.dirty !== false) throw new Error('dirty=' + r.dirty);
-  });
 
   await t('download mode autosave does not write', async () => {
     const r = await page.evaluate(async () => {
@@ -132,43 +137,44 @@ const { chromium } = require('playwright');
     if (r.writes !== 0) throw new Error('wrote when clean');
   });
 
-  await t('dirtyGen: edit during save keeps dirty', async () => {
-    const r = await page.evaluate(async () => {
-      const M = window.__mdAnnotator;
-      let resolveWrite;
-      const gate = new Promise((res) => { resolveWrite = res; });
-      M.State.saveMode = 'mentor-handle';
-      M.State.diskPathHint = '';
-      M.State.mediaFiles = {};
-      M.State.fileMtime = null;
-      M.State.readOnlyMode = false;
-      M.State.currentFile = {
-        name: 'race.mentor',
-        dirty: true,
-        dirtyGen: 10,
-        handle: {
-          queryPermission: async () => 'granted',
-          createWritable: async () => ({
-            write: async () => { await gate; },
-            close: async () => {},
-            abort: async () => {},
-          }),
-          getFile: async () => ({ lastModified: Date.now() }),
-        },
-      };
-      M.State.editor.commands.setContent('<p>v1</p>', false);
-      const p = M.writeCurrentToHandle({ reason: 'autosave' });
-      // Simulate edit mid-save
-      M.State.currentFile.dirty = true;
-      M.State.currentFile.dirtyGen = 11;
-      resolveWrite();
-      const res = await p;
-      return { ok: res.ok, dirty: M.State.currentFile.dirty, gen: M.State.currentFile.dirtyGen };
+  await t('dirtyGen: edit during manual save keeps dirty', async () => {
+      const r = await page.evaluate(async () => {
+        const M = window.__mdAnnotator;
+        let resolveWrite;
+        const gate = new Promise((res) => { resolveWrite = res; });
+        M.State.saveMode = 'mentor-handle';
+        M.State.diskPathHint = '';
+        M.State.mediaFiles = {};
+        M.State.fileMtime = null;
+        M.State.readOnlyMode = false;
+        M.State.currentFile = {
+          name: 'race.mentor',
+          dirty: true,
+          dirtyGen: 10,
+          handle: {
+            queryPermission: async () => 'granted',
+            requestPermission: async () => 'granted',
+            createWritable: async () => ({
+              write: async () => { await gate; },
+              close: async () => {},
+              abort: async () => {},
+            }),
+            getFile: async () => ({ lastModified: Date.now() }),
+          },
+        };
+        M.State.editor.commands.setContent('<p>v1</p>', false);
+        const p = M.writeCurrentToHandle({ reason: 'manual' });
+        // Simulate edit mid-save
+        M.State.currentFile.dirty = true;
+        M.State.currentFile.dirtyGen = 11;
+        resolveWrite();
+        const res = await p;
+        return { ok: res.ok, dirty: M.State.currentFile.dirty, gen: M.State.currentFile.dirtyGen };
+      });
+      if (!r.ok) throw new Error('write failed');
+      if (!r.dirty) throw new Error('should remain dirty after mid-edit');
+      if (r.gen !== 11) throw new Error('gen ' + r.gen);
     });
-    if (!r.ok) throw new Error('write failed');
-    if (!r.dirty) throw new Error('should remain dirty after mid-edit');
-    if (r.gen !== 11) throw new Error('gen ' + r.gen);
-  });
 
   await t('single-flight: second write returns busy', async () => {
     const r = await page.evaluate(async () => {
@@ -209,34 +215,53 @@ const { chromium } = require('playwright');
   });
 
   await t('autosave without permission does not call createWritable', async () => {
-    const r = await page.evaluate(async () => {
-      const M = window.__mdAnnotator;
-      let creates = 0;
-      M.State.saveMode = 'mentor-handle';
-      M.State.currentFile = {
-        name: 'noperm.mentor',
-        dirty: true,
-        dirtyGen: 1,
-        handle: {
-          queryPermission: async () => 'prompt',
-          requestPermission: async () => {
-            throw new Error('should not request from autosave');
+      const r = await page.evaluate(async () => {
+        const M = window.__mdAnnotator;
+        let creates = 0;
+        M.State.saveMode = 'mentor-handle';
+        M.State.currentFile = {
+          name: 'noperm.mentor',
+          dirty: true,
+          dirtyGen: 1,
+          handle: {
+            queryPermission: async () => 'prompt',
+            requestPermission: async () => {
+              throw new Error('should not request from autosave');
+            },
+            createWritable: async () => {
+              creates++;
+              return { write: async () => {}, close: async () => {} };
+            },
           },
-          createWritable: async () => {
-            creates++;
-            return { write: async () => {}, close: async () => {} };
-          },
-        },
-      };
-      await M.autosaveNow();
-      return { creates, dirty: M.State.currentFile.dirty };
+        };
+        await M.autosaveNow();
+        return { creates, dirty: M.State.currentFile.dirty };
+      });
+      if (r.creates !== 0) throw new Error('createWritable called without grant');
+      if (!r.dirty) throw new Error('should stay dirty');
     });
-    if (r.creates !== 0) throw new Error('createWritable called without grant');
-    if (!r.dirty) throw new Error('should stay dirty');
-  });
 
+    await t('shouldPromptUnload true when dirty, false when clean', async () => {
+      const r = await page.evaluate(() => {
+        const M = window.__mdAnnotator;
+        if (typeof M.shouldPromptUnload !== 'function') return { missing: true };
+        M.State.tabs = [];
+        M.State.currentFile = { name: 'a.mentor', dirty: true };
+        const a = M.shouldPromptUnload();
+        M.State.currentFile.dirty = false;
+        const b = M.shouldPromptUnload();
+        M.State.currentFile = null;
+        M.State.tabs = [{ id: 't1', name: 'b.mentor', dirty: true }];
+        const c = M.shouldPromptUnload();
+        M.State.tabs = [{ id: 't1', name: 'b.mentor', dirty: false }];
+        const d = M.shouldPromptUnload();
+        return { a, b, c, d };
+      });
+      if (r.missing) throw new Error('shouldPromptUnload not exported');
+      if (!r.a || r.b || !r.c || r.d) throw new Error(JSON.stringify(r));
+    });
 
-  console.log('\n=== RESULT:', pass, 'pass /', fail, 'fail ===');
+    console.log('\n=== RESULT:', pass, 'pass /', fail, 'fail ===');
   await browser.close();
   process.exit(fail ? 1 : 0);
 })().catch((e) => {
