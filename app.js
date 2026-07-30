@@ -12007,14 +12007,14 @@ function updateToolbarState() {
           isActive2 = editor2.isActive("codeBlock");
           break;
         case "link":
-                  isActive2 = editor2.isActive("link");
-                  break;
-                // table/image are insert actions, not format toggles — never paint is-active
-                // (isActive("table") stays true while the caret is inside a cell and looked "stuck on").
-                case "table":
-                case "image":
-                  isActive2 = false;
-                  break;
+          isActive2 = editor2.isActive("link");
+          break;
+        // table/image are insert actions, not format toggles — never paint is-active
+        // (isActive("table") stays true while the caret is inside a cell and looked "stuck on").
+        case "table":
+        case "image":
+          isActive2 = false;
+          break;
       }
     } catch (e) {
     }
