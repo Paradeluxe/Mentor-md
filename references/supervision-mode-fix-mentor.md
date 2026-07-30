@@ -98,3 +98,30 @@ end_supervision(path)  # always in finally
 3. Bundle rebuilt (`npm run build:bundle`) after app.js changes; hard-refresh (cache)
 
 Handle-only open (file picker without path) **cannot** read the sibling sidecar in the browser; path+token is required. Windows double-click / assoc already uses server open.
+
+
+## Protocol fields (v1.47.2+)
+
+Writer sidecar JSON (`*.mentor.supervision.json`):
+
+| field | meaning |
+|-------|---------|
+| `v` | protocol version (1). Unsupported → inactive safe payload. |
+| `active` | supervision on/off |
+| `phase` | `idle` / `working` / `waiting` |
+| `health` | `ok` / `stale` / `degraded` / `missing` |
+| `error` | short machine code when not ok |
+| `lockMode` | `pending-paragraphs` (default) or explicit `document` |
+| `pendingThreadIds` | locked threads |
+| `processedThreadIds` | completed |
+| `currentThreadId` | **must be explicit** — client does not auto-pick first pending |
+| `message` / `tool` / `updatedAt` | banner copy |
+
+### Client rules
+- Poller owns the timer; documentId generation drops late responses after tab/path switch.
+- Transient poll failures → `health=stale` while keeping last locks (no unlock flash).
+- Missing marks for pending ids → `health=degraded`, **no** auto document lock.
+- UI: one statusbar lamp; owl pet only when `currentThreadId` mark found (or explicit document lock pin).
+
+### Server `GET /supervision?path=&token=`
+Same path/token rules as `/revision`. Missing file → `active:false, health:missing`. Read/JSON errors → typed inactive payloads (not silent empty active).
