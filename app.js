@@ -5408,7 +5408,8 @@ function renderCommentList() {
     const totalMsgs = 1 + replies.length;
     const historyExpanded = !!(State.expandedCommentHistory && State.expandedCommentHistory[thread.threadId]);
     const historyStart = historyExpanded ? 0 : Math.max(0, totalMsgs - COMMENT_HISTORY_TAIL);
-    const hiddenHead = historyStart;
+    const hiddenHead = historyExpanded ? 0 : historyStart;
+    const canToggleHistory = totalMsgs > COMMENT_HISTORY_TAIL;
     const msgHiddenClass = (idx) => (!historyExpanded && idx < historyStart ? " is-msg-hidden" : "");
     return `
       <div class="comment-thread ${isActive2 ? "is-active" : ""} ${thread.resolved ? "is-resolved" : ""} ${thread.fuzzy ? "is-fuzzy" : ""} ${thread.deleted ? "is-deleted" : ""} ${(warnKind === "ambiguous" || thread.invalidReason === "ambiguous") ? "is-ambiguous" : ""} ${isCollapsed ? "is-collapsed" : ""} ${thread.pending ? "is-pending" : ""}${threadTypeClass(thread)}" data-thread="${safeThreadId}" data-thread-type="${threadType || ""}">
@@ -5443,7 +5444,7 @@ function renderCommentList() {
         </div>
         <div class="comment-body-wrap">
           <div class="comment-messages${historyExpanded ? " is-history-expanded" : ""}">
-          ${hiddenHead > 0 ? `<button type="button" class="comment-history-toggle" data-act="toggle-comment-history" data-thread="${safeThreadId}" aria-expanded="${historyExpanded ? "true" : "false"}">${historyExpanded ? "收起更早消息" : `更早 ${hiddenHead} 条`}</button>` : ""}
+          ${canToggleHistory ? `<button type="button" class="comment-history-toggle" data-act="toggle-comment-history" data-thread="${safeThreadId}" aria-expanded="${historyExpanded ? "true" : "false"}">${historyExpanded ? "收起更早消息" : `更早 ${totalMsgs - COMMENT_HISTORY_TAIL} 条`}</button>` : ""}
           <div class="comment-item${msgHiddenClass(0)}" data-msg-index="0">
             <div class="comment-meta">
                           ${avatarSpan(first3.author, annotationAuthorColor(thread))}

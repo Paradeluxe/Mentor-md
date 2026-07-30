@@ -62112,7 +62112,8 @@ function renderCommentList() {
     const totalMsgs = 1 + replies.length;
     const historyExpanded = !!(State2.expandedCommentHistory && State2.expandedCommentHistory[thread.threadId]);
     const historyStart = historyExpanded ? 0 : Math.max(0, totalMsgs - COMMENT_HISTORY_TAIL);
-    const hiddenHead = historyStart;
+    const hiddenHead = historyExpanded ? 0 : historyStart;
+    const canToggleHistory = totalMsgs > COMMENT_HISTORY_TAIL;
     const msgHiddenClass = (idx2) => !historyExpanded && idx2 < historyStart ? " is-msg-hidden" : "";
     return `
       <div class="comment-thread ${isActive2 ? "is-active" : ""} ${thread.resolved ? "is-resolved" : ""} ${thread.fuzzy ? "is-fuzzy" : ""} ${thread.deleted ? "is-deleted" : ""} ${warnKind === "ambiguous" || thread.invalidReason === "ambiguous" ? "is-ambiguous" : ""} ${isCollapsed ? "is-collapsed" : ""} ${thread.pending ? "is-pending" : ""}${threadTypeClass(thread)}" data-thread="${safeThreadId}" data-thread-type="${threadType || ""}">
@@ -62147,7 +62148,7 @@ function renderCommentList() {
         </div>
         <div class="comment-body-wrap">
           <div class="comment-messages${historyExpanded ? " is-history-expanded" : ""}">
-          ${hiddenHead > 0 ? `<button type="button" class="comment-history-toggle" data-act="toggle-comment-history" data-thread="${safeThreadId}" aria-expanded="${historyExpanded ? "true" : "false"}">${historyExpanded ? "\u6536\u8D77\u66F4\u65E9\u6D88\u606F" : `\u66F4\u65E9 ${hiddenHead} \u6761`}</button>` : ""}
+          ${canToggleHistory ? `<button type="button" class="comment-history-toggle" data-act="toggle-comment-history" data-thread="${safeThreadId}" aria-expanded="${historyExpanded ? "true" : "false"}">${historyExpanded ? "\u6536\u8D77\u66F4\u65E9\u6D88\u606F" : `\u66F4\u65E9 ${totalMsgs - COMMENT_HISTORY_TAIL} \u6761`}</button>` : ""}
           <div class="comment-item${msgHiddenClass(0)}" data-msg-index="0">
             <div class="comment-meta">
                           ${avatarSpan(first3.author, annotationAuthorColor(thread))}
