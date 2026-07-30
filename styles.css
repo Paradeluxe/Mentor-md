@@ -2979,26 +2979,21 @@ body.refs-pane-collapsed #expand-refs-pane-btn {
   --comment-avatar-size: 26px;
   --comment-meta-gap: 8px;
   --comment-body-indent: calc(var(--comment-avatar-size) + var(--comment-meta-gap));
-  /* idle cards keep a modest message stack; active can grow a bit */
-  --comment-messages-max: min(168px, 26vh);
-  --comment-messages-max-active: min(240px, 34vh);
 }
-/* body-wrap: messages (scroll) + sticky reply composer */
+/* body-wrap: messages (scroll, height pinned to last 2 via JS) + reply composer */
 .comment-body-wrap {
   display: flex;
   flex-direction: column;
   min-height: 0;
 }
 .comment-messages {
-  max-height: var(--comment-messages-max);
+  /* JS sets max-height to last-two message stack; fallback keeps cards compact */
+  max-height: min(140px, 22vh);
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
   min-height: 0;
-}
-.comment-thread.is-active .comment-messages {
-  max-height: var(--comment-messages-max-active);
 }
 /* thin scrollbar so tall threads don't dominate the rail */
 .comment-messages::-webkit-scrollbar {
@@ -3298,35 +3293,6 @@ body.refs-pane-collapsed #expand-refs-pane-btn {
 }
 .comment-thread.is-resolved .comment-reply-form {
   background: var(--surface-resolved, var(--thread-surface, var(--panel)));
-}
-.comment-messages > .is-msg-hidden {
-  display: none;
-}
-.comment-history-toggle {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: calc(100% - 8px);
-  margin: 6px 4px 2px;
-  padding: 5px 8px;
-  border: none;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--text-3);
-  font: inherit;
-  font-size: 12px;
-  font-weight: 550;
-  cursor: pointer;
-  letter-spacing: 0.01em;
-  transition: color 0.12s, background 0.12s;
-}
-.comment-history-toggle:hover {
-  color: var(--thread-accent, var(--accent));
-  background: color-mix(in srgb, var(--thread-accent-soft, var(--accent-soft)) 55%, transparent);
-}
-.comment-history-toggle:focus-visible {
-  outline: 2px solid var(--thread-accent, var(--accent));
-  outline-offset: 1px;
 }
 .comment-reply-form textarea {
   width: 100%;

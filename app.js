@@ -644,8 +644,6 @@ var State = {
   })(),
   // H2 fix: 解决卡片临时展开状态 (key = threadId, value = true), 仅 session 内
   expandedThreadIds: {},
-  // show full message history inside a card (default: last 2 only)
-  expandedCommentHistory: {},
   // v4-抽屉: 用户手动折叠的批注 (独立于"已解决自动折叠", docx 风格可手动收起任意卡)
   manuallyCollapsedIds: {},
   // v1.42.6: reattach 流程: 哪条 deleted ann 正在等用户选新文字
@@ -5319,6 +5317,32 @@ function setActiveCommentCard(threadId) {
   }
   return false;
 }
+function pinCommentMessagesToLastTwo(root = document) {
+  const boxes = root.querySelectorAll ? root.querySelectorAll(".comment-messages") : [];
+  boxes.forEach((box) => {
+    try {
+      const thread = box.closest(".comment-thread");
+      if (thread && thread.classList.contains("is-collapsed")) {
+        box.style.maxHeight = "";
+        return;
+      }
+      const nodes = [...box.querySelectorAll(":scope > .comment-item, :scope > .comment-reply")];
+      if (!nodes.length) {
+        box.style.maxHeight = "";
+        return;
+      }
+      // Measure natural stack height first.
+      box.style.maxHeight = "none";
+      const tail = nodes.slice(-2);
+      let h = 0;
+      for (const n of tail) h += n.offsetHeight || 0;
+      // Keep at least one short line visible; cap runaway single messages lightly.
+      const maxH = Math.min(Math.max(h, 40), 320);
+      box.style.maxHeight = `${maxH}px`;
+      box.scrollTop = box.scrollHeight;
+    } catch (_) {}
+  });
+}
 function renderCommentList() {
   const list = $("#comment-list");
   const empty4 = $("#comment-empty");
@@ -5404,13 +5428,6 @@ function renderCommentList() {
     const isCollapsed = thread.resolved && !State.expandedThreadIds?.[thread.threadId] || !!State.manuallyCollapsedIds?.[thread.threadId];
     const threadType = threadTypeOf(thread);
     const safeThreadId = escapeHtml(thread.threadId);
-    const COMMENT_HISTORY_TAIL = 2;
-    const totalMsgs = 1 + replies.length;
-    const historyExpanded = !!(State.expandedCommentHistory && State.expandedCommentHistory[thread.threadId]);
-    const historyStart = historyExpanded ? 0 : Math.max(0, totalMsgs - COMMENT_HISTORY_TAIL);
-    const hiddenHead = historyExpanded ? 0 : historyStart;
-    const canToggleHistory = totalMsgs > COMMENT_HISTORY_TAIL;
-    const msgHiddenClass = (idx) => (!historyExpanded && idx < historyStart ? " is-msg-hidden" : "");
     return `
       <div class="comment-thread ${isActive2 ? "is-active" : ""} ${thread.resolved ? "is-resolved" : ""} ${thread.fuzzy ? "is-fuzzy" : ""} ${thread.deleted ? "is-deleted" : ""} ${(warnKind === "ambiguous" || thread.invalidReason === "ambiguous") ? "is-ambiguous" : ""} ${isCollapsed ? "is-collapsed" : ""} ${thread.pending ? "is-pending" : ""}${threadTypeClass(thread)}" data-thread="${safeThreadId}" data-thread-type="${threadType || ""}">
         ${(warnKind === "orphaned" || thread.deleted) ? '<div class="deleted-banner">📍 原文已被删除 - <button class="link-btn" data-act="reattach" data-thread="' + safeThreadId + '">重新选择正文</button> · <button class="link-btn link-danger" data-act="delete-orphan" data-thread="' + safeThreadId + '">删除</button></div>' : (warnKind === "ambiguous") ? '<div class="ambiguous-banner">⚠ 无法唯一确定原文位置（重复锚点）— <button class="link-btn" data-act="reattach" data-thread="' + safeThreadId + '">重新选择正文</button> · <button class="link-btn link-danger" data-act="delete-orphan" data-thread="' + safeThreadId + '">删除</button></div>' : (warnKind === "collision" || warnKind === "image-missing" || (thread.invalid && !thread.deleted)) ? '<div class="invalid-banner">⚠ 批注锚点失效 — <button class="link-btn" data-act="reattach" data-thread="' + safeThreadId + '">重新选择正文</button> · <button class="link-btn link-danger" data-act="delete-orphan" data-thread="' + safeThreadId + '">删除</button></div>' : thread.fuzzy ? '<div class="fuzzy-banner">⚠ 位置可能偏移 - 请检查文档</div>' : ""}
@@ -5443,9 +5460,8 @@ function renderCommentList() {
           </button>
         </div>
         <div class="comment-body-wrap">
-          <div class="comment-messages${historyExpanded ? " is-history-expanded" : ""}">
-          ${canToggleHistory ? `<button type="button" class="comment-history-toggle" data-act="toggle-comment-history" data-thread="${safeThreadId}" aria-expanded="${historyExpanded ? "true" : "false"}">${historyExpanded ? "收起更早消息" : `更早 ${totalMsgs - COMMENT_HISTORY_TAIL} 条`}</button>` : ""}
-          <div class="comment-item${msgHiddenClass(0)}" data-msg-index="0">
+          <div class="comment-messages">
+          <div class="comment-item" data-msg-index="0">
             <div class="comment-meta">
                           ${avatarSpan(first3.author, annotationAuthorColor(thread))}
                           <span class="comment-author">${escapeHtml(authorName(first3.author))}</span>
@@ -5458,7 +5474,7 @@ function renderCommentList() {
               const commentIndex = replyIndex + 1;
               const editKey = `${safeThreadId}:${commentIndex}`;
               return `
-                          <div class="comment-reply${msgHiddenClass(commentIndex)}" data-msg-index="${commentIndex}">
+                          <div class="comment-reply" data-msg-index="${commentIndex}">
                             <div class="comment-meta">
                               ${avatarSpan(r.author, avatarColor(r.author, thread.threadId))}
                               <span class="comment-author">${escapeHtml(authorName(r.author))}</span>
@@ -5601,19 +5617,6 @@ function renderCommentList() {
       e.preventDefault();
       e.stopPropagation();
       invokeAiForThread(btn.dataset.thread);
-    });
-  });
-  list.querySelectorAll('[data-act="toggle-comment-history"]').forEach((btn) => {
-    btn.addEventListener("click", (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      const tid = btn.dataset.thread;
-      if (!tid) return;
-      if (!State.expandedCommentHistory || typeof State.expandedCommentHistory !== "object") {
-        State.expandedCommentHistory = {};
-      }
-      State.expandedCommentHistory[tid] = !State.expandedCommentHistory[tid];
-      renderCommentList();
     });
   });
   list.querySelectorAll('[data-act="edit-comment"]').forEach((btn) => {
@@ -5789,6 +5792,8 @@ function renderCommentList() {
       }
     });
   });
+  // Viewport = height of the last two messages; older history is scroll-up.
+  requestAnimationFrame(() => pinCommentMessagesToLastTwo(list));
 }
 function closeAllCommentMenus() {
   document.querySelectorAll(".comment-menu:not(.hidden)").forEach((m) => m.classList.add("hidden"));

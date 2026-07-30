@@ -57557,8 +57557,6 @@ var State2 = {
   })(),
   // H2 fix: 解决卡片临时展开状态 (key = threadId, value = true), 仅 session 内
   expandedThreadIds: {},
-  // show full message history inside a card (default: last 2 only)
-  expandedCommentHistory: {},
   // v4-抽屉: 用户手动折叠的批注 (独立于"已解决自动折叠", docx 风格可手动收起任意卡)
   manuallyCollapsedIds: {},
   // v1.42.6: reattach 流程: 哪条 deleted ann 正在等用户选新文字
@@ -62024,6 +62022,31 @@ function setActiveCommentCard(threadId) {
   }
   return false;
 }
+function pinCommentMessagesToLastTwo(root2 = document) {
+  const boxes = root2.querySelectorAll ? root2.querySelectorAll(".comment-messages") : [];
+  boxes.forEach((box) => {
+    try {
+      const thread = box.closest(".comment-thread");
+      if (thread && thread.classList.contains("is-collapsed")) {
+        box.style.maxHeight = "";
+        return;
+      }
+      const nodes = [...box.querySelectorAll(":scope > .comment-item, :scope > .comment-reply")];
+      if (!nodes.length) {
+        box.style.maxHeight = "";
+        return;
+      }
+      box.style.maxHeight = "none";
+      const tail = nodes.slice(-2);
+      let h = 0;
+      for (const n of tail) h += n.offsetHeight || 0;
+      const maxH = Math.min(Math.max(h, 40), 320);
+      box.style.maxHeight = `${maxH}px`;
+      box.scrollTop = box.scrollHeight;
+    } catch (_) {
+    }
+  });
+}
 function renderCommentList() {
   const list = $("#comment-list");
   const empty4 = $("#comment-empty");
@@ -62108,13 +62131,6 @@ function renderCommentList() {
     const isCollapsed = thread.resolved && !State2.expandedThreadIds?.[thread.threadId] || !!State2.manuallyCollapsedIds?.[thread.threadId];
     const threadType = threadTypeOf(thread);
     const safeThreadId = escapeHtml(thread.threadId);
-    const COMMENT_HISTORY_TAIL = 2;
-    const totalMsgs = 1 + replies.length;
-    const historyExpanded = !!(State2.expandedCommentHistory && State2.expandedCommentHistory[thread.threadId]);
-    const historyStart = historyExpanded ? 0 : Math.max(0, totalMsgs - COMMENT_HISTORY_TAIL);
-    const hiddenHead = historyExpanded ? 0 : historyStart;
-    const canToggleHistory = totalMsgs > COMMENT_HISTORY_TAIL;
-    const msgHiddenClass = (idx2) => !historyExpanded && idx2 < historyStart ? " is-msg-hidden" : "";
     return `
       <div class="comment-thread ${isActive2 ? "is-active" : ""} ${thread.resolved ? "is-resolved" : ""} ${thread.fuzzy ? "is-fuzzy" : ""} ${thread.deleted ? "is-deleted" : ""} ${warnKind === "ambiguous" || thread.invalidReason === "ambiguous" ? "is-ambiguous" : ""} ${isCollapsed ? "is-collapsed" : ""} ${thread.pending ? "is-pending" : ""}${threadTypeClass(thread)}" data-thread="${safeThreadId}" data-thread-type="${threadType || ""}">
         ${warnKind === "orphaned" || thread.deleted ? '<div class="deleted-banner">\u{1F4CD} \u539F\u6587\u5DF2\u88AB\u5220\u9664 - <button class="link-btn" data-act="reattach" data-thread="' + safeThreadId + '">\u91CD\u65B0\u9009\u62E9\u6B63\u6587</button> \xB7 <button class="link-btn link-danger" data-act="delete-orphan" data-thread="' + safeThreadId + '">\u5220\u9664</button></div>' : warnKind === "ambiguous" ? '<div class="ambiguous-banner">\u26A0 \u65E0\u6CD5\u552F\u4E00\u786E\u5B9A\u539F\u6587\u4F4D\u7F6E\uFF08\u91CD\u590D\u951A\u70B9\uFF09\u2014 <button class="link-btn" data-act="reattach" data-thread="' + safeThreadId + '">\u91CD\u65B0\u9009\u62E9\u6B63\u6587</button> \xB7 <button class="link-btn link-danger" data-act="delete-orphan" data-thread="' + safeThreadId + '">\u5220\u9664</button></div>' : warnKind === "collision" || warnKind === "image-missing" || thread.invalid && !thread.deleted ? '<div class="invalid-banner">\u26A0 \u6279\u6CE8\u951A\u70B9\u5931\u6548 \u2014 <button class="link-btn" data-act="reattach" data-thread="' + safeThreadId + '">\u91CD\u65B0\u9009\u62E9\u6B63\u6587</button> \xB7 <button class="link-btn link-danger" data-act="delete-orphan" data-thread="' + safeThreadId + '">\u5220\u9664</button></div>' : thread.fuzzy ? '<div class="fuzzy-banner">\u26A0 \u4F4D\u7F6E\u53EF\u80FD\u504F\u79FB - \u8BF7\u68C0\u67E5\u6587\u6863</div>' : ""}
@@ -62147,9 +62163,8 @@ function renderCommentList() {
           </button>
         </div>
         <div class="comment-body-wrap">
-          <div class="comment-messages${historyExpanded ? " is-history-expanded" : ""}">
-          ${canToggleHistory ? `<button type="button" class="comment-history-toggle" data-act="toggle-comment-history" data-thread="${safeThreadId}" aria-expanded="${historyExpanded ? "true" : "false"}">${historyExpanded ? "\u6536\u8D77\u66F4\u65E9\u6D88\u606F" : `\u66F4\u65E9 ${totalMsgs - COMMENT_HISTORY_TAIL} \u6761`}</button>` : ""}
-          <div class="comment-item${msgHiddenClass(0)}" data-msg-index="0">
+          <div class="comment-messages">
+          <div class="comment-item" data-msg-index="0">
             <div class="comment-meta">
                           ${avatarSpan(first3.author, annotationAuthorColor(thread))}
                           <span class="comment-author">${escapeHtml(authorName(first3.author))}</span>
@@ -62162,7 +62177,7 @@ function renderCommentList() {
       const commentIndex = replyIndex + 1;
       const editKey = `${safeThreadId}:${commentIndex}`;
       return `
-                          <div class="comment-reply${msgHiddenClass(commentIndex)}" data-msg-index="${commentIndex}">
+                          <div class="comment-reply" data-msg-index="${commentIndex}">
                             <div class="comment-meta">
                               ${avatarSpan(r.author, avatarColor(r.author, thread.threadId))}
                               <span class="comment-author">${escapeHtml(authorName(r.author))}</span>
@@ -62304,19 +62319,6 @@ function renderCommentList() {
       e.preventDefault();
       e.stopPropagation();
       invokeAiForThread(btn.dataset.thread);
-    });
-  });
-  list.querySelectorAll('[data-act="toggle-comment-history"]').forEach((btn) => {
-    btn.addEventListener("click", (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      const tid = btn.dataset.thread;
-      if (!tid) return;
-      if (!State2.expandedCommentHistory || typeof State2.expandedCommentHistory !== "object") {
-        State2.expandedCommentHistory = {};
-      }
-      State2.expandedCommentHistory[tid] = !State2.expandedCommentHistory[tid];
-      renderCommentList();
     });
   });
   list.querySelectorAll('[data-act="edit-comment"]').forEach((btn) => {
@@ -62490,6 +62492,7 @@ function renderCommentList() {
       }
     });
   });
+  requestAnimationFrame(() => pinCommentMessagesToLastTwo(list));
 }
 function closeAllCommentMenus() {
   document.querySelectorAll(".comment-menu:not(.hidden)").forEach((m) => m.classList.add("hidden"));
