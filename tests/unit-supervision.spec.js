@@ -287,6 +287,42 @@ const { pathToFileURL } = require('url');
     assert.deepStrictEqual(collectLockedRanges(doc, markType, ['nope']), []);
   });
 
+
+  check('missing pending marks degrades without document lock', () => {
+    const markType = { name: 'annotation' };
+    const doc = {
+      content: { size: 50 },
+      descendants(fn) {
+        // no marks at all
+      },
+    };
+    const s = materializeSupervisionState(doc, markType, {
+      v: 1,
+      active: true,
+      pendingThreadIds: ['missing'],
+      currentThreadId: 'missing',
+    });
+    assert.strictEqual(s.lockMode, 'pending-paragraphs');
+    assert.strictEqual(s.health, 'degraded');
+    assert.deepStrictEqual(s.lockedRanges, []);
+    assert.deepStrictEqual(s.missingThreadIds, ['missing']);
+  });
+
+  check('explicit document lock still locks whole doc', () => {
+    const doc = { content: { size: 40 }, descendants() {} };
+    const s = materializeSupervisionState(doc, { name: 'annotation' }, {
+      v: 1,
+      active: true,
+      lockMode: 'document',
+      pendingThreadIds: [],
+      currentThreadId: '',
+    });
+    assert.strictEqual(s.lockMode, 'document');
+    assert.ok(s.lockedRanges.length === 1);
+    assert.strictEqual(s.lockedRanges[0].from, 0);
+    assert.strictEqual(s.lockedRanges[0].to, 40);
+  });
+
   check('isFullDocumentLoad allows empty-doc open', () => {
     const tr = { docChanged: true, steps: [{ from: 0, to: 2 }], doc: { content: { size: 500 } } };
     const state = { doc: { content: { size: 2 } } };

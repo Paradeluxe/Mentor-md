@@ -33,6 +33,7 @@ export function emptySupervisionState() {
     updatedAt: "",
     lockedRanges: [],
     currentRange: null,
+    missingThreadIds: [],
     decos: DecorationSet.empty,
   };
 }
@@ -398,20 +399,24 @@ export function materializeSupervisionState(doc, markType, payload) {
     };
   }
   let lockedRanges = [];
+  let missingThreadIds = [];
   if (base.lockMode === "document") {
     lockedRanges = doc ? [{ from: 0, to: doc.content.size, threadId: "*" }] : [];
   } else {
     lockedRanges = collectLockedRanges(doc, markType, base.pendingThreadIds);
-    if (base.pendingThreadIds.length && lockedRanges.length === 0) {
-      base.lockMode = "document";
-      lockedRanges = doc ? [{ from: 0, to: doc.content.size, threadId: "*" }] : [];
+    const locatedIds = new Set(lockedRanges.map((r) => r.threadId));
+    missingThreadIds = base.pendingThreadIds.filter((id) => !locatedIds.has(id));
+    // Do NOT auto-escalate to full-document lock when marks are missing.
+    // Writer must set lockMode:'document' explicitly for whole-doc lock.
+    if (missingThreadIds.length) {
+      base.health = "degraded";
     }
   }
 
   let currentRange = null;
   if (base.currentThreadId && doc && markType) {
     currentRange = findThreadMarkRange(doc, markType, base.currentThreadId);
-    // document-lock fallback: pin pet near top if mark missing
+    // Explicit document-lock only: pin pet near top if mark missing.
     if (!currentRange && base.lockMode === "document" && doc.content.size > 1) {
       currentRange = { from: 1, to: Math.min(8, doc.content.size) };
     }
@@ -425,7 +430,7 @@ export function materializeSupervisionState(doc, markType, payload) {
     base.currentThreadId,
     base.phase
   );
-  return { ...base, lockedRanges, currentRange, decos };
+  return { ...base, lockedRanges, currentRange, missingThreadIds, decos };
 }
 
 export function supervisionBannerText(state) {
@@ -434,6 +439,13 @@ export function supervisionBannerText(state) {
   const pending = (state.pendingThreadIds || []).length;
   const processed = (state.processedThreadIds || []).length;
   if (state.message) return String(state.message);
+  const missing = (state.missingThreadIds || []).length;
+  if (state.health === "stale") {
+    return `${tool} 监管连接异常 · 保留上次锁定`;
+  }
+  if (state.health === "degraded" || missing) {
+    return `${tool} 监管仍在运行 · 有 ${missing || pending} 条暂未定位`;
+  }
   if (state.phase === "working" && state.currentThreadId) {
     return `${tool} 正在改一段 · 剩余 ${pending}`;
   }
