@@ -57600,7 +57600,14 @@ var State2 = {
   // 磁盘路径提示 (来自 ?open= 或 handle 名)。v1.45.6: 取消「受保护文档」写盘拦截。
   diskPathHint: "",
   // outline pane tab: 'headings' | 'images'
-  outlineTab: "headings"
+  outlineTab: "headings",
+  // session-only feedback for card → body citation cycle navigation
+  citationNavigation: {
+    key: "",
+    pos: null,
+    ordinal: 0,
+    total: 0
+  }
 };
 function mentorBaseName(nameOrPath) {
   if (!nameOrPath) return "";
@@ -63754,6 +63761,7 @@ function restoreTab(tab) {
   State2.activeThreadId = tab.activeThreadId || null;
   State2.replyDrafts = Object.assign({}, tab.replyDrafts || {});
   State2.references = normalizeReferenceManifest(tab.references || emptyReferenceManifest());
+  State2.citationNavigation = { key: "", pos: null, ordinal: 0, total: 0 };
   State2.reattachTarget = null;
   State2.annotations = [];
   State2._suspendAnnValidate = true;
@@ -63869,6 +63877,7 @@ function openNewTabBlank() {
   revokeMediaUrls();
   State2.annotations = [];
   State2.references = emptyReferenceManifest();
+  State2.citationNavigation = { key: "", pos: null, ordinal: 0, total: 0 };
   State2.activeThreadId = null;
   State2._suspendAnnValidate = true;
   try {
@@ -64231,6 +64240,7 @@ function loadMarkdownIntoEditor(name, content, annotationsData = null, options =
   if (opts.references !== void 0) {
     State2.references = normalizeReferenceManifest(opts.references);
   }
+  State2.citationNavigation = { key: "", pos: null, ordinal: 0, total: 0 };
   if (annotationsData && annotationsData.annotations) {
     const schemaReport = _validateSidecar(annotationsData.annotations);
     if (schemaReport.errors.length > 0) {
@@ -67287,6 +67297,17 @@ var _renderReferencesPane = () => {
 var _setReferencesPaneOpen = () => {
 };
 var REFERENCE_FORM_FIELDS = ["key", "type", "authors", "year", "title", "journal", "doi", "url", "volume", "issue", "pages", "publisher"];
+function collectCitationUsagePositions(key) {
+  const target = String(key || "").trim();
+  const usages = [];
+  if (!target || !State2.editor) return usages;
+  State2.editor.state.doc.descendants((node, pos) => {
+    if (!node.type || node.type.name !== "citation") return;
+    const keys3 = Array.isArray(node.attrs.keys) ? node.attrs.keys : [];
+    if (keys3.includes(target)) usages.push({ pos, node });
+  });
+  return usages;
+}
 function getCitationUsages() {
   const usages = {};
   if (!State2.editor) return usages;
@@ -67294,6 +67315,76 @@ function getCitationUsages() {
     if (node.type && node.type.name === "citation") for (const key of node.attrs.keys || []) usages[key] = (usages[key] || 0) + 1;
   });
   return usages;
+}
+function revealCitationAtPosition(pos) {
+  if (!State2.editor) return false;
+  let dom = null;
+  try {
+    dom = State2.editor.view.nodeDOM(pos);
+  } catch (_) {
+  }
+  if (!(dom instanceof Element)) {
+    try {
+      const mapped = State2.editor.view.domAtPos(pos);
+      dom = mapped.node instanceof Element ? mapped.node : mapped.node && mapped.node.parentElement;
+    } catch (_) {
+    }
+  }
+  const atom = dom && dom.matches && dom.matches(".mentor-citation") ? dom : dom && dom.closest && dom.closest(".mentor-citation") || dom && dom.querySelector && dom.querySelector(".mentor-citation");
+  if (!atom) return false;
+  try {
+    atom.scrollIntoView({ block: "center", behavior: "smooth" });
+  } catch (_) {
+    try {
+      atom.scrollIntoView(true);
+    } catch (e2) {
+    }
+  }
+  return true;
+}
+function activateNextCitationUsage(key) {
+  const target = String(key || "").trim();
+  const usages = collectCitationUsagePositions(target);
+  if (!target || !State2.editor || !usages.length) {
+    State2.citationNavigation = { key: target, pos: null, ordinal: 0, total: 0 };
+    try {
+      _setReferencesPaneOpen(true);
+    } catch (_) {
+    }
+    _renderReferencesPane();
+    if (target) showToast(`\u6B63\u6587\u672A\u5F15\u7528 @${target}`, 1400);
+    return false;
+  }
+  const sel = State2.editor.state.selection;
+  const currentIndex = usages.findIndex(
+    ({ pos }) => sel instanceof NodeSelection && sel.node && sel.node.type && sel.node.type.name === "citation" && sel.from === pos
+  );
+  const nextIndex = currentIndex >= 0 ? (currentIndex + 1) % usages.length : 0;
+  const next2 = usages[nextIndex];
+  try {
+    const tr2 = State2.editor.state.tr.setSelection(
+      NodeSelection.create(State2.editor.state.doc, next2.pos)
+    );
+    tr2.setMeta("addToHistory", false);
+    State2.editor.view.dispatch(tr2);
+    State2.editor.view.focus();
+  } catch (e) {
+    console.warn("[activateNextCitationUsage]", e);
+    return false;
+  }
+  revealCitationAtPosition(next2.pos);
+  State2.citationNavigation = {
+    key: target,
+    pos: next2.pos,
+    ordinal: nextIndex + 1,
+    total: usages.length
+  };
+  try {
+    _setReferencesPaneOpen(true);
+  } catch (_) {
+  }
+  _renderReferencesPane();
+  return true;
 }
 function commitReferenceManifest(next2, { reconcile = true } = {}) {
   State2.references = normalizeReferenceManifest(next2 || emptyReferenceManifest());
@@ -67705,12 +67796,16 @@ function initReferencesPane() {
       const key = escapeHtml(entry.key);
       const meta = [entry.year, entry.journal].filter(Boolean).join(" \xB7 ");
       const n = usages[entry.key] || 0;
-      return `<article class="refs-card" data-key="${key}">
+      const nav4 = State2.citationNavigation || {};
+      const isNavCard = !!(nav4.key === entry.key && nav4.total === n && n > 0 && nav4.ordinal > 0);
+      const usageText = n ? isNavCard ? `\u7B2C ${nav4.ordinal} / ${n} \u5904` : `\u6B63\u6587 \xD7${n}` : "\u672A\u5F15\u7528";
+      const ariaLabel = n ? `\u5B9A\u4F4D @${entry.key} \u7684\u6B63\u6587\u5F15\u7528\uFF0C\u5171 ${n} \u5904` : `@${entry.key} \u672A\u5728\u6B63\u6587\u5F15\u7528`;
+      return `<article class="refs-card${isNavCard ? " is-active" : ""}" data-key="${key}" data-usage-count="${n}"${n ? ' role="button" tabindex="0"' : ""} aria-label="${escapeHtml(ariaLabel)}">
         <div class="rc-key">@${key}</div>
         <div class="rc-authors">${escapeHtml(entry.authors || "\u2014")}</div>
         ${entry.title ? `<div class="rc-title">${escapeHtml(entry.title)}</div>` : ""}
         <div class="rc-meta">${escapeHtml(meta)}</div>
-        <div class="rc-usage${n ? "" : " is-unused"}">${n ? `\u6B63\u6587 \xD7${n}` : "\u672A\u5F15\u7528"}</div>
+        <div class="rc-usage${n ? "" : " is-unused"}" aria-live="polite">${usageText}</div>
         <div class="rc-actions">
           <button type="button" class="rc-insert-btn" data-act="insert-cite" data-key="${key}">\u63D2\u5165 [@${key}]</button>
           <button type="button" class="rc-edit-btn" data-act="edit-reference" data-key="${key}">\u7F16\u8F91</button>
@@ -67748,8 +67843,10 @@ function initReferencesPane() {
   expand?.addEventListener("click", () => setOpen(true));
   list.addEventListener("click", (event) => {
     const insert = event.target.closest('[data-act="insert-cite"]');
-    if (insert && insertCitation(insert.dataset.key)) {
-      showToast(`\u5DF2\u63D2\u5165 [@${insert.dataset.key}]`, 1400);
+    if (insert) {
+      if (insertCitation(insert.dataset.key)) {
+        showToast(`\u5DF2\u63D2\u5165 [@${insert.dataset.key}]`, 1400);
+      }
       return;
     }
     const edit = event.target.closest('[data-act="edit-reference"]');
@@ -67761,7 +67858,18 @@ function initReferencesPane() {
     const del2 = event.target.closest('[data-act="delete-reference"]');
     if (del2) {
       if (deleteReferenceEntry(del2.dataset.key)) showToast(`\u5DF2\u5220\u9664 @${del2.dataset.key}`, 1400);
+      return;
     }
+    const card = event.target.closest(".refs-card[data-key]");
+    if (card) activateNextCitationUsage(card.dataset.key);
+  });
+  list.addEventListener("keydown", (event) => {
+    if (!["Enter", " "].includes(event.key)) return;
+    if (event.target.closest("button, input, select, textarea")) return;
+    const card = event.target.closest('.refs-card[data-key][data-usage-count]:not([data-usage-count="0"])');
+    if (!card) return;
+    event.preventDefault();
+    activateNextCitationUsage(card.dataset.key);
   });
   bibToggle?.addEventListener("click", () => {
     const cfg = normalizeBibliographyConfig(
@@ -69392,6 +69500,8 @@ window.__mdAnnotator = {
   insertCitationIntoSelection: insertCitation,
   focusCitationByKey,
   getCitationUsages,
+  collectCitationUsagePositions,
+  activateNextCitationUsage,
   reconcileCitationNodes,
   reconcileBibliographyNode,
   insertBibliographyField,

@@ -2166,6 +2166,20 @@ body.refs-pane-collapsed #expand-refs-pane-btn {
 .refs-card.is-highlighted {
   background: color-mix(in srgb, var(--accent) 14%, transparent);
 }
+.refs-card[data-usage-count]:not([data-usage-count="0"]) {
+  cursor: pointer;
+}
+.refs-card[data-usage-count="0"] {
+  cursor: default;
+}
+.refs-card:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.refs-card.is-active .rc-usage {
+  color: var(--accent);
+  font-weight: 600;
+}
 .refs-card .rc-usage.is-unused { font-style: italic; opacity: 0.75; }
 .reference-editor-content {
   width: min(560px, calc(100vw - 32px));

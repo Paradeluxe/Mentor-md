@@ -95,6 +95,7 @@ python3 -m http.server 8787
   - **多条文件** → 合并进现有库；完全重复跳过，同 key 不同内容可选择覆盖
 - **导出 BibTeX** `*.references.bib` 给 Pandoc / Zotero
 - 卡片上 **插入 [@citekey]**；改 citekey 时会同步正文里的 Pandoc 标记
+- 点击有正文引用的文献卡片，会按正文顺序定位第 1 / 2 / … 处；反复点击循环，卡片显示当前位置
 - **文末文献列表（EndNote 式）**：侧栏「插入文献列表」放入只读字段；条目只在文献库改。`.mentor` 正文保存语义标记 `<!-- mentor:bibliography -->`，不写死 APA 文本。导出 MD/DOCX 时再物化为 `# References`。范围可选「仅正文引用 / 全部文献库」。「转换手写 References…」仅在手写段与库 1:1 安全匹配时启用，否则保留原文
 
 不直接读取 `zotero.sqlite`，无自动 live sync——以导出文件为边界。Mentor 正文显示轻量作者—年份，保存 Markdown 时仍保持 `[@citekey]`。文末 References 由文献库自动生成，不可直接编辑列表文字。

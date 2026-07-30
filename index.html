@@ -4,10 +4,10 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Mentor — 像 docx 一样批注 Markdown</title>
-<meta name="build" content="v1.45.9 cache-bust v=195" />
+<meta name="build" content="v1.45.9 cache-bust v=196" />
 <!-- v1.43.37 offline: local fonts + KaTeX (no CDN) -->
 <link rel="stylesheet" href="vendor/fonts/local-fonts.css?v=1" />
-<link rel="stylesheet" href="styles.css?v=195" />
+<link rel="stylesheet" href="styles.css?v=196" />
 <link rel="stylesheet" href="vendor/katex/katex.min.css?v=1" />
 <!-- 字体：系统无衬线 + 等宽（侧栏时间戳、文件名） -->
 <style>
@@ -336,7 +336,7 @@
 
 <!-- v1.43.37 offline: bundled app (esbuild) + local icons; no esm.sh -->
 <script src="icons.js?v=184"></script>
-<script type="module" src="app.bundle.js?v=195"></script>
+<script type="module" src="app.bundle.js?v=196"></script>
 <!-- 帮助 popover (浮在 body 顶层, 位置由 JS 动态计算) -->
 <div id="help-popover" class="help-popover hidden" role="tooltip">
   <div class="help-popover-arrow"></div>
@@ -353,7 +353,7 @@
     <li><strong>另存:</strong> 下载 <code>.mentor</code> 副本，不改变原文件</li>
     <li><strong>导出 DOCX:</strong> 仅正文，不含批注与引用库元数据</li>
     <li><strong>跨刷新重连:</strong> 授权过的 .md handle 留在 IndexedDB; 重开应用自动恢复并继续保存</li>
-    <li><strong>正文引文:</strong> 从文献库插入；正文点击引文可定位对应文献，缺失 key 会明确标红</li>
+    <li><strong>正文引文:</strong> 从文献库插入；点击正文引文可定位对应文献；反复点击文献卡片可按正文顺序逐处定位，最后循环；缺失 key 会明确标红</li>
     <li><strong>文献库:</strong> 管理元数据；正文引文使用 Pandoc <code>[@citekey]</code>；改 citekey 会同步正文；导出 BibTeX 给 Pandoc/Zotero</li>
     <li><strong>Zotero 单条导入:</strong> 在 Zotero 选中文献，导出 Better BibTeX (.bib) 或 CSL JSON，再到文献库点「导入文献」。单条记录会先进入确认表单，不会整库覆盖</li>
     <li><strong>可移植引用:</strong> .mentor 内嵌 references.json + references.bib；不直接读取 zotero.sqlite，无自动 live sync</li>
