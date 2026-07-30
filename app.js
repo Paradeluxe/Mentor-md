@@ -623,14 +623,14 @@ var State = {
   // bibliography 默认 cited scope: 仅显示正文中引用过的条目；
   // scope=all 走完整文献库。enabled=false 时不渲染 References 区块。
   references: createReferenceManifest({ sourceName: "", sourceFormat: "", entries: [], bibliography: { enabled: false, scope: "cited", heading: "References" } }),
-  // v2-resolve-btn: 默认 filter "all" — 用户解决批注后, 卡片仍可见才能点 "重新打开" 入口
+  // Default filter: open only — unresolved first; reopen via 已解决/全部 tabs
   filterOpen: true,
   commentListLimit: 60,
   // v1.43.46: 侧栏分窗首屏条数
   commentListWindowStart: 0,
   // v1.43.50: 滑动窗口起点
   commentListShowAll: false,
-  filterResolved: true,
+  filterResolved: false,
   // F18: reply 草稿持久 (Word 行为: 切文档再切回草稿保留)
   // key = threadId, value = textarea 内容
   replyDrafts: {},

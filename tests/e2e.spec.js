@@ -67,12 +67,19 @@ const SAMPLE_ANN = JSON.parse(fs.readFileSync(path.join(ROOT, 'test-data/sample.
   console.log(`  ✓ 编辑器中有 ${markCount} 个高亮 mark (预期 2)`);
   if (markCount !== 2) throw new Error(`mark 数错: ${markCount}`);
 
-  // 默认展示全部，已解决线程仍可直接重新打开。
+  // 默认优先未解决；已解决需切「已解决/全部」再重开。
   let commentCount = await page.locator('.comment-thread').count();
-  console.log(`  ✓ 默认 filter (全部): 侧栏显示 ${commentCount} 个 (预期 2)`);
-  if (commentCount !== 2) throw new Error(`默认 filter 应显示 2 个，实际 ${commentCount}`);
+  console.log(`  ✓ 默认 filter (未解决): 侧栏显示 ${commentCount} 个 (预期 1)`);
+  if (commentCount !== 1) throw new Error(`默认 filter 应显示 1 个，实际 ${commentCount}`);
 
-  // 切到"未解决" filter，应该隐藏已解决的线程。
+  // 切到「全部」filter，应同时看到已解决。
+  await page.locator('.filter-tab[data-filter-tab="all"]').click();
+  await page.waitForTimeout(150);
+  commentCount = await page.locator('.comment-thread').count();
+  console.log(`  ✓ 全部 filter: 侧栏显示 ${commentCount} 个 (预期 2)`);
+  if (commentCount !== 2) throw new Error(`全部 filter 应显示 2 个，实际 ${commentCount}`);
+
+  // 切回默认「未解决」。
   await page.locator('.filter-tab[data-filter-tab="open"]').click();
   await page.waitForTimeout(150);
   commentCount = await page.locator('.comment-thread').count();
