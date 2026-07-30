@@ -57557,6 +57557,8 @@ var State2 = {
   })(),
   // H2 fix: 解决卡片临时展开状态 (key = threadId, value = true), 仅 session 内
   expandedThreadIds: {},
+  // show full message history inside a card (default: last 2 only)
+  expandedCommentHistory: {},
   // v4-抽屉: 用户手动折叠的批注 (独立于"已解决自动折叠", docx 风格可手动收起任意卡)
   manuallyCollapsedIds: {},
   // v1.42.6: reattach 流程: 哪条 deleted ann 正在等用户选新文字
@@ -62106,11 +62108,16 @@ function renderCommentList() {
     const isCollapsed = thread.resolved && !State2.expandedThreadIds?.[thread.threadId] || !!State2.manuallyCollapsedIds?.[thread.threadId];
     const threadType = threadTypeOf(thread);
     const safeThreadId = escapeHtml(thread.threadId);
+    const COMMENT_HISTORY_TAIL = 2;
+    const totalMsgs = 1 + replies.length;
+    const historyExpanded = !!(State2.expandedCommentHistory && State2.expandedCommentHistory[thread.threadId]);
+    const historyStart = historyExpanded ? 0 : Math.max(0, totalMsgs - COMMENT_HISTORY_TAIL);
+    const hiddenHead = historyStart;
+    const msgHiddenClass = (idx2) => !historyExpanded && idx2 < historyStart ? " is-msg-hidden" : "";
     return `
       <div class="comment-thread ${isActive2 ? "is-active" : ""} ${thread.resolved ? "is-resolved" : ""} ${thread.fuzzy ? "is-fuzzy" : ""} ${thread.deleted ? "is-deleted" : ""} ${warnKind === "ambiguous" || thread.invalidReason === "ambiguous" ? "is-ambiguous" : ""} ${isCollapsed ? "is-collapsed" : ""} ${thread.pending ? "is-pending" : ""}${threadTypeClass(thread)}" data-thread="${safeThreadId}" data-thread-type="${threadType || ""}">
         ${warnKind === "orphaned" || thread.deleted ? '<div class="deleted-banner">\u{1F4CD} \u539F\u6587\u5DF2\u88AB\u5220\u9664 - <button class="link-btn" data-act="reattach" data-thread="' + safeThreadId + '">\u91CD\u65B0\u9009\u62E9\u6B63\u6587</button> \xB7 <button class="link-btn link-danger" data-act="delete-orphan" data-thread="' + safeThreadId + '">\u5220\u9664</button></div>' : warnKind === "ambiguous" ? '<div class="ambiguous-banner">\u26A0 \u65E0\u6CD5\u552F\u4E00\u786E\u5B9A\u539F\u6587\u4F4D\u7F6E\uFF08\u91CD\u590D\u951A\u70B9\uFF09\u2014 <button class="link-btn" data-act="reattach" data-thread="' + safeThreadId + '">\u91CD\u65B0\u9009\u62E9\u6B63\u6587</button> \xB7 <button class="link-btn link-danger" data-act="delete-orphan" data-thread="' + safeThreadId + '">\u5220\u9664</button></div>' : warnKind === "collision" || warnKind === "image-missing" || thread.invalid && !thread.deleted ? '<div class="invalid-banner">\u26A0 \u6279\u6CE8\u951A\u70B9\u5931\u6548 \u2014 <button class="link-btn" data-act="reattach" data-thread="' + safeThreadId + '">\u91CD\u65B0\u9009\u62E9\u6B63\u6587</button> \xB7 <button class="link-btn link-danger" data-act="delete-orphan" data-thread="' + safeThreadId + '">\u5220\u9664</button></div>' : thread.fuzzy ? '<div class="fuzzy-banner">\u26A0 \u4F4D\u7F6E\u53EF\u80FD\u504F\u79FB - \u8BF7\u68C0\u67E5\u6587\u6863</div>' : ""}
-        <!-- \u5361\u7247\u5934: \u5E8F\u53F7 + \u5F15\u6587 (\u53EF\u70B9\u51FB\u8DF3\u8F6C) + \u22EF \u83DC\u5355\u6309\u94AE -->
-        <!-- v5: \u70B9\u51FB\u5361\u7247\u6807\u9898\u533A\u57DF = \u6298\u53E0/\u5C55\u5F00 (\u7528\u6237\u660E\u786E\u8981\u6C42). \u8DF3\u8F6C\u6B63\u6587\u8D70 \u22EF \u83DC\u5355 "\u{1F4CD} \u8DF3\u8F6C\u5230\u6279\u6CE8\u5904" -->
+        <!-- card header: number + quote + menu -->
         <div class="comment-quote" data-thread="${safeThreadId}" title="\u70B9\u51FB\u6536\u8D77/\u5C55\u5F00\u6279\u6CE8">
           <span class="comment-number-badge" data-number="${number}" title="\u6279\u6CE8 #${number}">${number}</span>
           <span class="comment-quote-text">${escapeHtml((thread.text || "").slice(0, 200))}${(thread.text || "").length > 200 ? "\u2026" : ""}</span>
@@ -62119,7 +62126,6 @@ function renderCommentList() {
 
           <button class="comment-menu-btn" data-act="toggle-menu" data-thread="${safeThreadId}" title="\u66F4\u591A\u64CD\u4F5C" aria-label="\u66F4\u591A\u64CD\u4F5C">\u22EF</button>
         </div>
-        <!-- \u22EF \u5F39\u7A97\u83DC\u5355 (\u9ED8\u8BA4 hidden) \u2014 v6: SVG icons, \u4E0D\u7528 emoji -->
         <div class="comment-menu hidden" data-menu-for="${safeThreadId}">
           <button data-act="goto" data-thread="${safeThreadId}">
             <span class="menu-icon menu-icon-goto"></span>
@@ -62139,10 +62145,10 @@ function renderCommentList() {
             <span class="menu-label">\u5220\u9664\u6279\u6CE8</span>
           </button>
         </div>
-        <!-- \u5361\u7247\u4F53: \u9ED8\u8BA4\u6536\u8D77 (\u89E3\u51B3\u540E), active \u65F6\u5C55\u5F00. \u7528 details \u4FDD\u7559\u539F\u751F\u6298\u53E0\u80FD\u529B -->
         <div class="comment-body-wrap">
-          <div class="comment-messages">
-          <div class="comment-item">
+          <div class="comment-messages${historyExpanded ? " is-history-expanded" : ""}">
+          ${hiddenHead > 0 ? `<button type="button" class="comment-history-toggle" data-act="toggle-comment-history" data-thread="${safeThreadId}" aria-expanded="${historyExpanded ? "true" : "false"}">${historyExpanded ? "\u6536\u8D77\u66F4\u65E9\u6D88\u606F" : `\u66F4\u65E9 ${hiddenHead} \u6761`}</button>` : ""}
+          <div class="comment-item${msgHiddenClass(0)}" data-msg-index="0">
             <div class="comment-meta">
                           ${avatarSpan(first3.author, annotationAuthorColor(thread))}
                           <span class="comment-author">${escapeHtml(authorName(first3.author))}</span>
@@ -62155,7 +62161,7 @@ function renderCommentList() {
       const commentIndex = replyIndex + 1;
       const editKey = `${safeThreadId}:${commentIndex}`;
       return `
-                          <div class="comment-reply">
+                          <div class="comment-reply${msgHiddenClass(commentIndex)}" data-msg-index="${commentIndex}">
                             <div class="comment-meta">
                               ${avatarSpan(r.author, avatarColor(r.author, thread.threadId))}
                               <span class="comment-author">${escapeHtml(authorName(r.author))}</span>
@@ -62167,14 +62173,8 @@ function renderCommentList() {
             `;
     }).join("")}
           </div>
-            <!--
-              \u8F93\u5165\u6846\u6C38\u8FDC\u5728\u5361\u7247\u672B\u5C3E (docx \u98CE\u683C, \u5BF9\u8BDD\u5F80\u4E0B\u8FFD\u52A0)
-              - \u9996\u6761\u672A\u5199: placeholder "\u5F00\u59CB\u6279\u6CE8..." (\u65B0\u5EFA\u7B2C\u4E00\u53E5)
-              - \u9996\u6761\u5DF2\u5199: placeholder "\u56DE\u590D..." (\u540E\u7EED\u8FFD\u52A0)
-            -->
             <div class="comment-reply-form">
               <textarea data-thread-input="${safeThreadId}" rows="1" placeholder="${escapeHtml(markerPlaceholder(threadType, !!first3.body))}" autocomplete="off"></textarea>
-              <!-- Single human input: write @AI or @REVIEW explicitly when needed. -->
               <div class="form-actions">
                 <button type="button" class="comment-invoke-ai-btn" data-act="invoke-ai" data-thread="${safeThreadId}" title="\u5728\u56DE\u590D\u4E2D\u63D2\u5165 @AI\uFF08\u663E\u5F0F\u5524\u8D77 AI\uFF09" aria-label="\u63D2\u5165 @AI">@AI</button>
                 <button class="comment-resolve-btn ${thread.resolved ? "is-resolved" : ""}" data-act="resolve" data-thread="${safeThreadId}" title="${thread.resolved ? "\u91CD\u65B0\u6253\u5F00\u6B64\u6279\u6CE8" : "\u6807\u8BB0\u4E3A\u5DF2\u89E3\u51B3"}" aria-label="${thread.resolved ? "\u91CD\u65B0\u6253\u5F00" : "\u6807\u8BB0\u4E3A\u5DF2\u89E3\u51B3"}">${thread.resolved ? "\u91CD\u5F00" : "\u89E3\u51B3"}</button>
@@ -62271,6 +62271,14 @@ function renderCommentList() {
     });
     ta2.addEventListener("focus", () => {
       autosize();
+      ta2.closest(".comment-reply-form")?.classList.add("is-composing");
+    });
+    ta2.addEventListener("blur", () => {
+      requestAnimationFrame(() => {
+        const form = ta2.closest(".comment-reply-form");
+        if (!form) return;
+        if (!form.contains(document.activeElement)) form.classList.remove("is-composing");
+      });
     });
     ta2.addEventListener("keydown", (e) => {
       if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
@@ -62295,6 +62303,19 @@ function renderCommentList() {
       e.preventDefault();
       e.stopPropagation();
       invokeAiForThread(btn.dataset.thread);
+    });
+  });
+  list.querySelectorAll('[data-act="toggle-comment-history"]').forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const tid = btn.dataset.thread;
+      if (!tid) return;
+      if (!State2.expandedCommentHistory || typeof State2.expandedCommentHistory !== "object") {
+        State2.expandedCommentHistory = {};
+      }
+      State2.expandedCommentHistory[tid] = !State2.expandedCommentHistory[tid];
+      renderCommentList();
     });
   });
   list.querySelectorAll('[data-act="edit-comment"]').forEach((btn) => {

@@ -644,6 +644,8 @@ var State = {
   })(),
   // H2 fix: 解决卡片临时展开状态 (key = threadId, value = true), 仅 session 内
   expandedThreadIds: {},
+  // show full message history inside a card (default: last 2 only)
+  expandedCommentHistory: {},
   // v4-抽屉: 用户手动折叠的批注 (独立于"已解决自动折叠", docx 风格可手动收起任意卡)
   manuallyCollapsedIds: {},
   // v1.42.6: reattach 流程: 哪条 deleted ann 正在等用户选新文字
@@ -5402,43 +5404,47 @@ function renderCommentList() {
     const isCollapsed = thread.resolved && !State.expandedThreadIds?.[thread.threadId] || !!State.manuallyCollapsedIds?.[thread.threadId];
     const threadType = threadTypeOf(thread);
     const safeThreadId = escapeHtml(thread.threadId);
+    const COMMENT_HISTORY_TAIL = 2;
+    const totalMsgs = 1 + replies.length;
+    const historyExpanded = !!(State.expandedCommentHistory && State.expandedCommentHistory[thread.threadId]);
+    const historyStart = historyExpanded ? 0 : Math.max(0, totalMsgs - COMMENT_HISTORY_TAIL);
+    const hiddenHead = historyStart;
+    const msgHiddenClass = (idx) => (!historyExpanded && idx < historyStart ? " is-msg-hidden" : "");
     return `
       <div class="comment-thread ${isActive2 ? "is-active" : ""} ${thread.resolved ? "is-resolved" : ""} ${thread.fuzzy ? "is-fuzzy" : ""} ${thread.deleted ? "is-deleted" : ""} ${(warnKind === "ambiguous" || thread.invalidReason === "ambiguous") ? "is-ambiguous" : ""} ${isCollapsed ? "is-collapsed" : ""} ${thread.pending ? "is-pending" : ""}${threadTypeClass(thread)}" data-thread="${safeThreadId}" data-thread-type="${threadType || ""}">
         ${(warnKind === "orphaned" || thread.deleted) ? '<div class="deleted-banner">📍 原文已被删除 - <button class="link-btn" data-act="reattach" data-thread="' + safeThreadId + '">重新选择正文</button> · <button class="link-btn link-danger" data-act="delete-orphan" data-thread="' + safeThreadId + '">删除</button></div>' : (warnKind === "ambiguous") ? '<div class="ambiguous-banner">⚠ 无法唯一确定原文位置（重复锚点）— <button class="link-btn" data-act="reattach" data-thread="' + safeThreadId + '">重新选择正文</button> · <button class="link-btn link-danger" data-act="delete-orphan" data-thread="' + safeThreadId + '">删除</button></div>' : (warnKind === "collision" || warnKind === "image-missing" || (thread.invalid && !thread.deleted)) ? '<div class="invalid-banner">⚠ 批注锚点失效 — <button class="link-btn" data-act="reattach" data-thread="' + safeThreadId + '">重新选择正文</button> · <button class="link-btn link-danger" data-act="delete-orphan" data-thread="' + safeThreadId + '">删除</button></div>' : thread.fuzzy ? '<div class="fuzzy-banner">⚠ 位置可能偏移 - 请检查文档</div>' : ""}
-        <!-- \u5361\u7247\u5934: \u5E8F\u53F7 + \u5F15\u6587 (\u53EF\u70B9\u51FB\u8DF3\u8F6C) + \u22EF \u83DC\u5355\u6309\u94AE -->
-        <!-- v5: \u70B9\u51FB\u5361\u7247\u6807\u9898\u533A\u57DF = \u6298\u53E0/\u5C55\u5F00 (\u7528\u6237\u660E\u786E\u8981\u6C42). \u8DF3\u8F6C\u6B63\u6587\u8D70 \u22EF \u83DC\u5355 "\u{1F4CD} \u8DF3\u8F6C\u5230\u6279\u6CE8\u5904" -->
-        <div class="comment-quote" data-thread="${safeThreadId}" title="\u70B9\u51FB\u6536\u8D77/\u5C55\u5F00\u6279\u6CE8">
-          <span class="comment-number-badge" data-number="${number}" title="\u6279\u6CE8 #${number}">${number}</span>
-          <span class="comment-quote-text">${escapeHtml((thread.text || "").slice(0, 200))}${(thread.text || "").length > 200 ? "\u2026" : ""}</span>
+        <!-- card header: number + quote + menu -->
+        <div class="comment-quote" data-thread="${safeThreadId}" title="点击收起/展开批注">
+          <span class="comment-number-badge" data-number="${number}" title="批注 #${number}">${number}</span>
+          <span class="comment-quote-text">${escapeHtml((thread.text || "").slice(0, 200))}${(thread.text || "").length > 200 ? "…" : ""}</span>
           ${threadType === "ai" ? '<span class="comment-type-badge is-ai" title="AI">AI</span>' : threadType === "review" ? '<span class="comment-type-badge is-review" title="历史审阅">审阅</span>' : ""}
-          ${thread.pending ? '<span class="comment-pending-badge" title="\u672A\u63D0\u4EA4\u9996\u6761\u8BC4\u8BBA">\u8349\u7A3F</span>' : ""}
+          ${thread.pending ? '<span class="comment-pending-badge" title="未提交首条评论">草稿</span>' : ""}
 
-          <button class="comment-menu-btn" data-act="toggle-menu" data-thread="${safeThreadId}" title="\u66F4\u591A\u64CD\u4F5C" aria-label="\u66F4\u591A\u64CD\u4F5C">\u22EF</button>
+          <button class="comment-menu-btn" data-act="toggle-menu" data-thread="${safeThreadId}" title="更多操作" aria-label="更多操作">⋯</button>
         </div>
-        <!-- \u22EF \u5F39\u7A97\u83DC\u5355 (\u9ED8\u8BA4 hidden) \u2014 v6: SVG icons, \u4E0D\u7528 emoji -->
         <div class="comment-menu hidden" data-menu-for="${safeThreadId}">
           <button data-act="goto" data-thread="${safeThreadId}">
             <span class="menu-icon menu-icon-goto"></span>
-            <span class="menu-label">\u8DF3\u8F6C\u5230\u6279\u6CE8\u5904</span>
+            <span class="menu-label">跳转到批注处</span>
           </button>
           <button data-act="resolve" data-thread="${safeThreadId}">
             <span class="menu-icon menu-icon-resolve"></span>
-            <span class="menu-label">${thread.resolved ? "\u91CD\u65B0\u6253\u5F00" : "\u6807\u8BB0\u4E3A\u5DF2\u89E3\u51B3"}</span>
+            <span class="menu-label">${thread.resolved ? "重新打开" : "标记为已解决"}</span>
           </button>
           <button data-act="copy" data-thread="${safeThreadId}">
             <span class="menu-icon menu-icon-copy"></span>
-            <span class="menu-label">\u590D\u5236\u5F15\u6587</span>
+            <span class="menu-label">复制引文</span>
           </button>
           <div class="menu-sep"></div>
           <button data-act="delete" data-thread="${safeThreadId}" class="menu-danger">
             <span class="menu-icon menu-icon-delete"></span>
-            <span class="menu-label">\u5220\u9664\u6279\u6CE8</span>
+            <span class="menu-label">删除批注</span>
           </button>
         </div>
-        <!-- \u5361\u7247\u4F53: \u9ED8\u8BA4\u6536\u8D77 (\u89E3\u51B3\u540E), active \u65F6\u5C55\u5F00. \u7528 details \u4FDD\u7559\u539F\u751F\u6298\u53E0\u80FD\u529B -->
         <div class="comment-body-wrap">
-          <div class="comment-messages">
-          <div class="comment-item">
+          <div class="comment-messages${historyExpanded ? " is-history-expanded" : ""}">
+          ${hiddenHead > 0 ? `<button type="button" class="comment-history-toggle" data-act="toggle-comment-history" data-thread="${safeThreadId}" aria-expanded="${historyExpanded ? "true" : "false"}">${historyExpanded ? "收起更早消息" : `更早 ${hiddenHead} 条`}</button>` : ""}
+          <div class="comment-item${msgHiddenClass(0)}" data-msg-index="0">
             <div class="comment-meta">
                           ${avatarSpan(first3.author, annotationAuthorColor(thread))}
                           <span class="comment-author">${escapeHtml(authorName(first3.author))}</span>
@@ -5451,7 +5457,7 @@ function renderCommentList() {
               const commentIndex = replyIndex + 1;
               const editKey = `${safeThreadId}:${commentIndex}`;
               return `
-                          <div class="comment-reply">
+                          <div class="comment-reply${msgHiddenClass(commentIndex)}" data-msg-index="${commentIndex}">
                             <div class="comment-meta">
                               ${avatarSpan(r.author, avatarColor(r.author, thread.threadId))}
                               <span class="comment-author">${escapeHtml(authorName(r.author))}</span>
@@ -5463,14 +5469,8 @@ function renderCommentList() {
             `;
             }).join("")}
           </div>
-            <!--
-              输入框永远在卡片末尾 (docx 风格, 对话往下追加)
-              - 首条未写: placeholder "开始批注..." (新建第一句)
-              - 首条已写: placeholder "回复..." (后续追加)
-            -->
             <div class="comment-reply-form">
               <textarea data-thread-input="${safeThreadId}" rows="1" placeholder="${escapeHtml(markerPlaceholder(threadType, !!first3.body))}" autocomplete="off"></textarea>
-              <!-- Single human input: write @AI or @REVIEW explicitly when needed. -->
               <div class="form-actions">
                 <button type="button" class="comment-invoke-ai-btn" data-act="invoke-ai" data-thread="${safeThreadId}" title="在回复中插入 @AI（显式唤起 AI）" aria-label="插入 @AI">@AI</button>
                 <button class="comment-resolve-btn ${thread.resolved ? "is-resolved" : ""}" data-act="resolve" data-thread="${safeThreadId}" title="${thread.resolved ? "重新打开此批注" : "标记为已解决"}" aria-label="${thread.resolved ? "重新打开" : "标记为已解决"}">${thread.resolved ? "重开" : "解决"}</button>
@@ -5567,6 +5567,15 @@ function renderCommentList() {
       });
       ta2.addEventListener("focus", () => {
         autosize();
+        ta2.closest(".comment-reply-form")?.classList.add("is-composing");
+      });
+      ta2.addEventListener("blur", () => {
+        // keep shadow while moving focus to resolve/reply buttons inside the form
+        requestAnimationFrame(() => {
+          const form = ta2.closest(".comment-reply-form");
+          if (!form) return;
+          if (!form.contains(document.activeElement)) form.classList.remove("is-composing");
+        });
       });
       ta2.addEventListener("keydown", (e) => {
         if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
@@ -5591,6 +5600,19 @@ function renderCommentList() {
       e.preventDefault();
       e.stopPropagation();
       invokeAiForThread(btn.dataset.thread);
+    });
+  });
+  list.querySelectorAll('[data-act="toggle-comment-history"]').forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const tid = btn.dataset.thread;
+      if (!tid) return;
+      if (!State.expandedCommentHistory || typeof State.expandedCommentHistory !== "object") {
+        State.expandedCommentHistory = {};
+      }
+      State.expandedCommentHistory[tid] = !State.expandedCommentHistory[tid];
+      renderCommentList();
     });
   });
   list.querySelectorAll('[data-act="edit-comment"]').forEach((btn) => {

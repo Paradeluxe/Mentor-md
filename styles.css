@@ -3272,7 +3272,7 @@ body.refs-pane-collapsed #expand-refs-pane-btn {
   font-size: 13px;
 }
 
-/* Reply form — Docs 风格输入区; sits under messages with top-edge stack */
+/* Reply form — shadow only while composing (focus within) */
 .comment-reply-form {
   flex: 0 0 auto;
   position: relative;
@@ -3282,7 +3282,12 @@ body.refs-pane-collapsed #expand-refs-pane-btn {
   border-top: 1px solid color-mix(in srgb, var(--border-warm) 85%, transparent);
   background: var(--thread-surface, var(--panel));
   border-radius: 0 0 calc(var(--radius-lg) - 1px) calc(var(--radius-lg) - 1px);
-  /* upward soft shadow = composer layered over scrolled thread */
+  box-shadow: none;
+  transition: box-shadow 0.16s ease, border-color 0.16s ease;
+}
+.comment-reply-form:focus-within,
+.comment-reply-form.is-composing {
+  border-top-color: color-mix(in srgb, var(--border-warm) 70%, transparent);
   box-shadow:
     0 -14px 26px -10px rgba(38, 37, 30, 0.28),
     0 -6px 14px -6px rgba(38, 37, 30, 0.14),
@@ -3293,6 +3298,35 @@ body.refs-pane-collapsed #expand-refs-pane-btn {
 }
 .comment-thread.is-resolved .comment-reply-form {
   background: var(--surface-resolved, var(--thread-surface, var(--panel)));
+}
+.comment-messages > .is-msg-hidden {
+  display: none;
+}
+.comment-history-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: calc(100% - 8px);
+  margin: 6px 4px 2px;
+  padding: 5px 8px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-3);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 550;
+  cursor: pointer;
+  letter-spacing: 0.01em;
+  transition: color 0.12s, background 0.12s;
+}
+.comment-history-toggle:hover {
+  color: var(--thread-accent, var(--accent));
+  background: color-mix(in srgb, var(--thread-accent-soft, var(--accent-soft)) 55%, transparent);
+}
+.comment-history-toggle:focus-visible {
+  outline: 2px solid var(--thread-accent, var(--accent));
+  outline-offset: 1px;
 }
 .comment-reply-form textarea {
   width: 100%;
