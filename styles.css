@@ -268,28 +268,33 @@ code {
   min-height: 0;
 }
 
-/* ============ Toolbar (two-row structure; Task1 = display:contents keep single-line paint) ============ */
+/* ============ Toolbar: document row + editor row ============ */
 #toolbar {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0;
+  padding: 3px 10px 4px;
+  min-height: 68px;
+  background: var(--chrome);
+  border-bottom: 1px solid var(--border-warm);
+  overflow: visible;
+  z-index: 10;
+}
+.toolbar-row {
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 5px 10px;
-  min-height: 40px;
-  background: var(--chrome);
-  border-bottom: 1px solid var(--border-warm);
-  /* v1.43.37: 窄屏横滑一行, 避免 3 行 95px 占高度 — Task2 will replace with real two rows */
-  flex-wrap: nowrap;
-  overflow-x: auto;
-  overflow-y: hidden;
-  z-index: 10;
+  width: 100%;
+  min-width: 0;
+  min-height: 30px;
 }
-/* Task1: flatten rows into single paint flow so existing selectors/layout still work */
-.toolbar-row {
-  display: contents;
+.toolbar-row + .toolbar-row {
+  border-top: 1px solid var(--border-warm);
 }
-#toolbar::-webkit-scrollbar { height: 4px; }
-#toolbar::-webkit-scrollbar-thumb { background: var(--border-warm-medium); border-radius: 2px; }
-#toolbar .tb-group { flex-shrink: 0; }
+#toolbar .tb-group {
+  flex-shrink: 0;
+}
 .tb-group {
   display: flex;
   align-items: center;
@@ -372,6 +377,9 @@ code {
 #toolbar [data-toolbar-group="chrome"] + [data-toolbar-group] {
   border-left: 1px solid var(--border-warm);
 }
+#toolbar .toolbar-row-editor > [data-toolbar-group="view"] {
+  margin-left: auto;
+}
 #btn-save[data-dirty="true"] { color: var(--accent); }
 #btn-save[data-dirty="true"] .tb-icon { color: var(--accent); }
 #btn-refs[aria-pressed="true"],
@@ -424,22 +432,22 @@ code {
 
 #title-group {
   margin-left: auto;
+  flex: 1 1 180px;
+  min-width: 0;
   font-size: 12.5px;
   color: var(--text-2);
   display: flex;
   align-items: center;
   justify-content: flex-end;
   gap: 6px;
-  position: sticky;
-  right: 0;
+  position: static;
   z-index: 2;
-  flex-shrink: 0;
   padding-left: 10px;
-  background: var(--chrome);
+  background: transparent;
 }
 /* Beat `#toolbar [data-toolbar-group] + [data-toolbar-group]` (margin-left:2px) */
 #toolbar [data-toolbar-group] + [data-toolbar-group="title"],
-#toolbar > #title-group {
+#toolbar .toolbar-row-document > #title-group {
   margin-left: auto;
   border-left: none;
   padding-left: 10px;
@@ -447,6 +455,7 @@ code {
 /* v1.43.24: 顶栏文件列表（替代 current-file-name 纯文本 + 侧栏最近文件） */
 .file-list-wrap {
   position: relative;
+  min-width: 0;
   max-width: min(360px, 36vw);
 }
 .file-list-trigger {
@@ -3803,12 +3812,7 @@ body.refs-pane-collapsed #expand-refs-pane-btn {
   -webkit-mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'><polyline points='16 18 22 12 16 6'/><polyline points='8 6 2 12 8 18'/></svg>");
   mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'><polyline points='16 18 22 12 16 6'/><polyline points='8 6 2 12 8 18'/></svg>");
 }
-/* 加大工具栏 .tb-sep 间距，让 "源码" 按钮组更明确独立 */
-.tb-group:has(#btn-toggle-render) {
-  margin-left: 4px;
-  padding-left: 8px;
-  border-left: 1px solid var(--border-warm);
-}
+/* view group uses margin-left:auto on editor row — no extra left border here */
 /* 全屏源码视图 - 跟 Tiptap 编辑器同等地位，不做"卡片"反模式 */
 #source-view.source-view {
   display: block;

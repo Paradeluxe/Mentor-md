@@ -60,6 +60,64 @@ function assert(cond, message) {
     assert(rowContract.boldRow === 'editor' && rowContract.sourceRow === 'editor',
       'format/source belong to editor row');
 
+    console.log('\n=== Two-row toolbar geometry ===');
+    async function readToolbarGeometry(width) {
+      await page.setViewportSize({ width, height: 900 });
+      await page.waitForTimeout(80);
+      return page.evaluate(() => {
+        const box = (selector) => {
+          const el = document.querySelector(selector);
+          if (!el) return null;
+          const r = el.getBoundingClientRect();
+          return {
+            left: r.left,
+            right: r.right,
+            top: r.top,
+            bottom: r.bottom,
+            width: r.width,
+            height: r.height,
+          };
+        };
+        const overlaps = (a, b) => !!a && !!b
+          && Math.max(a.left, b.left) < Math.min(a.right, b.right)
+          && Math.max(a.top, b.top) < Math.min(a.bottom, b.bottom);
+        const toolbar = document.querySelector('#toolbar');
+        const documentRow = document.querySelector('[data-toolbar-row="document"]');
+        const editorRow = document.querySelector('[data-toolbar-row="editor"]');
+        const title = box('#title-group');
+        const format = box('#format-toolbar');
+        const view = box('[data-toolbar-group="view"]');
+        return {
+          toolbarHeight: toolbar.getBoundingClientRect().height,
+          document: box('[data-toolbar-row="document"]'),
+          editor: box('[data-toolbar-row="editor"]'),
+          documentOverflow: documentRow.scrollWidth > documentRow.clientWidth + 1,
+          editorOverflow: editorRow.scrollWidth > editorRow.clientWidth + 1,
+          titleFormatOverlap: overlaps(title, format),
+          formatViewOverlap: overlaps(format, view),
+          titleRightGap: documentRow.getBoundingClientRect().right - title.right,
+        };
+      });
+    }
+
+    for (const width of [1500, 1024, 900]) {
+      const g = await readToolbarGeometry(width);
+      assert(g.toolbarHeight >= 64 && g.toolbarHeight <= 74,
+        `${width}px toolbar stays compact (got ${g.toolbarHeight})`);
+      assert(g.document.height >= 28 && g.editor.height >= 28,
+        `${width}px has two visible rows`);
+      assert(g.document.bottom <= g.editor.top + 1,
+        `${width}px document row is above editor row`);
+      assert(!g.documentOverflow && !g.editorOverflow,
+        `${width}px rows have no horizontal overflow`);
+      assert(!g.titleFormatOverlap && !g.formatViewOverlap,
+        `${width}px toolbar groups do not overlap`);
+      assert(Math.abs(g.titleRightGap) <= 1,
+        `${width}px title/author stays right aligned (gap ${g.titleRightGap})`);
+    }
+    // restore default viewport used by later checks
+    await page.setViewportSize({ width: 1400, height: 900 });
+
     console.log('\n=== Static labels + groups ===');
     const staticState = await page.evaluate(() => {
       const labelOf = (sel) => {
