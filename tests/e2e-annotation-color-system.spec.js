@@ -55,10 +55,16 @@ function contrast(rgbA, rgbB) {
         if (!range) throw new Error(`Missing text: ${text}`);
         editor.commands.setTextSelection(range);
       };
-      const create = (text, type) => {
+      const create = (text, marker = null) => {
         selectText(text);
-        const thread = M.createAnnotationFromSelection({ type });
-        if (!thread) throw new Error(`Unable to create ${type} annotation`);
+        const thread = M.createAnnotationFromSelection();
+        if (!thread) throw new Error(`Unable to create annotation for ${text}`);
+        if (marker) {
+          const target = M.State.annotations.find((item) => item.threadId === thread.threadId);
+          target.comments.push({ id: `seed-${Date.now()}`, author: { id: 'u', name: 'tester' }, body: marker === 'ai' ? '@AI seed instruction' : '@REVIEW seed instruction', createdAt: new Date().toISOString() });
+          M.syncAnnotationMarkModeAttrs?.(thread.threadId);
+          M.renderCommentList();
+        }
         return thread;
       };
       const enableSubmit = (threadId, value) => {
@@ -125,7 +131,7 @@ function contrast(rgbA, rgbB) {
         aiIsActive: card(ai.threadId)?.classList.contains('is-active'),
         aiSubmit: solidOf(ai.threadId) || style(`[data-thread="${ai.threadId}"] button.primary`, 'backgroundColor'),
                 humanSubmit: solidOf(human.threadId) || style(`[data-thread="${human.threadId}"] button.primary`, 'backgroundColor'),
-                floatAi: style('#float-comment-btn .float-ai-btn', 'backgroundColor'),
+        floatAi: style(`[data-thread="${ai.threadId}"] button.primary`, 'backgroundColor'),
                 floatHuman: style('#float-comment-btn .float-comment-act', 'backgroundColor'),
         floatReviewMissing: !document.querySelector('#float-comment-btn .float-review-btn'),
         bubbleVisible: Array.from(document.querySelectorAll('.annotation-bubble')).some((bubble) => bubble.getBoundingClientRect().width > 0),
@@ -136,32 +142,26 @@ function contrast(rgbA, rgbB) {
         panel: style('#comment-pane', 'backgroundColor'),
       };
 
-      // type switch must not change authorColor; human→ai→human tracks mode solid
-            // drafts no longer auto-get @AI — mode is threadType only
-            const authorBeforeSwitch = human.authorColor;
-            M.applyThreadType(human.threadId, 'ai');
-            await wait(40);
-            enableSubmit(human.threadId, 'after switch instruction');
+      // Explicit marker conversion must not change author color or draft content.
+      const authorBeforeSwitch = human.authorColor;
+      M.addReply(human.threadId, '@AI after switch instruction');
+      await wait(40);
       const afterToAi = {
-              type: card(human.threadId)?.dataset.threadType,
-              author: human.authorColor,
-              submit: solidOf(human.threadId),
-            };
-            M.applyThreadType(human.threadId, null);
-            await wait(40);
-            enableSubmit(human.threadId, 'back to human');
-            const afterToHuman = {
-              type: card(human.threadId)?.dataset.threadType || '',
-              author: human.authorColor,
-              submit: solidOf(human.threadId),
-            };
+        type: card(human.threadId)?.dataset.threadType,
+        author: human.authorColor,
+        submit: solidOf(human.threadId),
+      };
+      M.editComment(human.threadId, 0, 'back to human');
+      await wait(40);
+      const afterToHuman = {
+        type: card(human.threadId)?.dataset.threadType || '',
+        author: human.authorColor,
+        submit: solidOf(human.threadId),
+      };
 
             // legacy review display still paints review solid (no float)
             const legacy = M.createTestAnnotation('Human target text');
-            legacy.threadType = 'review';
-            if (legacy.comments && legacy.comments[0]) {
-              legacy.comments[0].body = '@REVIEW legacy check';
-            }
+            legacy.comments[0].body = '@REVIEW legacy check';
             try { M.syncAnnotationMarkModeAttrs && M.syncAnnotationMarkModeAttrs(legacy.threadId); } catch (_) {}
             M.renderCommentList();
             await wait(40);
@@ -226,7 +226,8 @@ function contrast(rgbA, rgbB) {
       });
       if (imagePosition < 0) throw new Error('Missing image node');
       editor.commands.setNodeSelection(imagePosition);
-      const imageThread = M.createAnnotationFromSelection({ type: 'ai' });
+      const imageThread = M.createAnnotationFromSelection();
+      M.applyThreadType(imageThread.threadId, 'ai');
       if (!imageThread) throw new Error('Unable to create image annotation');
       await wait(80);
       const image = document.querySelector('#editor img.annotation-image');

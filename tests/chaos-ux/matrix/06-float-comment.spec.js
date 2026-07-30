@@ -16,7 +16,7 @@ const { DOCS } = require('../content-catalog');
   await boot(page);
   const { t, done } = createRunner(page, '06-float');
 
-  await t('float bar has 批注 + AI only (no review)', async () => {
+  await t('float bar has one 批注 button and no AI entry', async () => {
     const r = await page.evaluate(() => {
       const bar = document.querySelector('#float-comment-btn');
       const btns = bar ? Array.from(bar.querySelectorAll('button[data-float-act]')) : [];
@@ -29,9 +29,8 @@ const { DOCS } = require('../content-catalog');
         labels: btns.map((b) => (b.textContent || '').trim()),
       };
     });
-    if (!r.bar || !r.c || !r.a || r.rev || r.count !== 2) throw new Error(JSON.stringify(r));
+    if (!r.bar || !r.c || r.a || r.rev || r.count !== 1) throw new Error(JSON.stringify(r));
     coverage.hitSurface('S6.float-comment');
-    coverage.hitSurface('S6.float-ai');
   });
 
   await t('selection shows float; click comment creates thread', async () => {
@@ -70,7 +69,7 @@ const { DOCS } = require('../content-catalog');
     if (r.n < 1 || !r.tid) throw new Error(JSON.stringify(r));
   });
 
-  await t('AI float seeds @AI draft', async () => {
+  await t('@AI is explicit marker content, not a float action', async () => {
     await loadDoc(page, 'float-ai.md', DOCS.simple);
     const r = await page.evaluate(() => {
       const M = window.__mdAnnotator;
@@ -85,16 +84,12 @@ const { DOCS } = require('../content-catalog');
         }
       });
       M.State.editor.commands.setTextSelection({ from, to });
-      const bar = document.querySelector('#float-comment-btn');
-      if (bar) bar.classList.remove('hidden');
-      const btn = bar?.querySelector('[data-float-act="ai"]');
-      if (btn) btn.click();
-      else M.createAnnotationFromSelection({ ai: true });
+      M.createAnnotationFromSelection();
       const tid = M.State.activeThreadId;
       const draft = M.State.replyDrafts[tid] || '';
-      return { tid, draft, has: /@AI\b/i.test(draft) };
+      return { tid, draft, has: /@AI\b/i.test(draft), type: M.State.annotations.find((a) => a.threadId === tid)?.threadType };
     });
-    if (!r.has) throw new Error(JSON.stringify(r));
+    if (!r.tid || r.has || r.type) throw new Error(JSON.stringify(r));
     coverage.hitContent('B5');
   });
 

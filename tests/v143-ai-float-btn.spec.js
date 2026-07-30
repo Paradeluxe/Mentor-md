@@ -26,7 +26,7 @@ const { chromium } = require('playwright');
     if (m) m.classList.add('hidden');
   });
 
-  await t('float bar has exactly 批注 + AI', async () => {
+  await t('float bar has one 批注 button and no AI entry', async () => {
     const r = await page.evaluate(() => {
       const bar = document.querySelector('#float-comment-btn');
       const btns = bar ? Array.from(bar.querySelectorAll('button[data-float-act]')) : [];
@@ -39,17 +39,15 @@ const { chromium } = require('playwright');
         c: !!c,
         a: !!a,
         review: !!review,
-        aiClass: !!(a && a.classList.contains('float-ai-btn')),
-        humanLabel: c ? (c.textContent || '').includes('批注') && !(c.textContent || '').includes('人类') : false,
-        aiLabel: a ? ((a.textContent || '').trim() === 'AI') : false,
+        humanLabel: c ? (c.textContent || '').trim() === '批注' : false,
       };
     });
-    if (!r.bar || r.count !== 2 || !r.c || !r.a || r.review || !r.aiClass || !r.humanLabel || !r.aiLabel) {
+    if (!r.bar || r.count !== 1 || !r.c || r.a || r.review || !r.humanLabel) {
       throw new Error(JSON.stringify(r));
     }
   });
 
-  await t('AI selection is mode card without default @AI draft', async () => {
+  await t('@AI marker activates AI mode without default draft', async () => {
       const r = await page.evaluate(() => {
         const M = window.__mdAnnotator;
         M.loadMarkdownIntoEditor(
@@ -68,7 +66,7 @@ const { chromium } = require('playwright');
         });
         if (from < 0) return { err: 'range not found' };
         M.State.editor.commands.setTextSelection({ from, to });
-        M.createAnnotationFromSelection({ type: 'ai' });
+        M.createAnnotationFromSelection();
         const tid = M.State.activeThreadId;
         const draft = M.State.replyDrafts[tid] || '';
         const ta = document.querySelector(`[data-thread-input="${tid}"]`);
@@ -85,7 +83,7 @@ const { chromium } = require('playwright');
         };
       });
       if (r.err) throw new Error(r.err);
-      if (!r.noMarker || r.threadType !== 'ai' || !r.isAiCard) throw new Error(JSON.stringify(r));
+      if (!r.noMarker || r.threadType != null || r.isAiCard) throw new Error(JSON.stringify(r));
     });
 
   await t('create type review is coerced to human (no @REVIEW)', async () => {
@@ -146,7 +144,7 @@ const { chromium } = require('playwright');
     }
   });
 
-  await t('modes locked at create: no in-card type switch; badges separate; applyThreadType API only', async () => {
+  await t('modes are marker-only: no in-card switch, no stored thread type', async () => {
     const r = await page.evaluate(() => {
       const M = window.__mdAnnotator;
       M.loadMarkdownIntoEditor('type-switch.md', '# T\n\nSwitch type unique anchor text.\nHuman-only phrase here.\n', null);
@@ -180,7 +178,7 @@ const { chromium } = require('playwright');
         }
       });
       M.State.editor.commands.setTextSelection({ from: from2, to: to2 });
-      M.createAnnotationFromSelection({ type: 'ai' });
+      M.createAnnotationFromSelection();
       const tidA = M.State.activeThreadId;
       const thrA = M.State.annotations.find((a) => a.threadId === tidA);
       M.renderCommentList();
@@ -189,16 +187,13 @@ const { chromium } = require('playwright');
       const noSwitcherA = !cardA || !cardA.querySelector('.comment-type-switch, [data-act="set-type"]');
       const authorBefore = thrH.authorColor;
 
-      // API still works for tools/tests; not exposed as card buttons
-      thrH.threadType = 'review';
-      M.State.replyDrafts[tidH] = '@REVIEW fix the typo';
-      M.applyThreadType(tidH, 'ai');
+      // Explicit marker submission promotes threadType to 'ai' and persists.
+      M.addReply(tidH, '@AI fix the typo');
       const draftAi = M.State.replyDrafts[tidH] || '';
-      const threadTypeAi = thrH.threadType;
+      const threadTypeAi = thrH.threadType ?? null;
       const stacked = /@REVIEW/i.test(draftAi) && /@AI/i.test(draftAi);
-      M.applyThreadType(tidH, 'review'); // coerce → human
-      const draftH = M.State.replyDrafts[tidH] || '';
-      const threadTypeH = thrH.threadType;
+      const draftH = draftAi;
+      const threadTypeH = threadTypeAi;
       const authorAfter = thrH.authorColor;
 
       return {
@@ -217,24 +212,10 @@ const { chromium } = require('playwright');
                 stacked,
                 humanNoMarkers: !/@AI\b/i.test(draftH) && !/@REVIEW\b/i.test(draftH),
                 authorStable: authorBefore === authorAfter,
-                aiStillAi: thrA.threadType === 'ai',
+                aiStillAi: thrA.threadType == null,
               };
             });
-            if (
-              r.aiCreateType !== 'ai' ||
-              !r.aiStillAi ||
-              !r.noHumanBadge ||
-              !r.aiBadge ||
-              !r.noSwitcherH ||
-              !r.noSwitcherA ||
-              !r.noAiOnModeSwitch ||
-              !r.noReviewAi ||
-              r.stacked ||
-              r.threadTypeAi !== 'ai' ||
-              (r.threadTypeH != null && r.threadTypeH !== '') ||
-              !r.humanNoMarkers ||
-              !r.authorStable
-            ) {
+            if (!r.noHumanBadge || r.aiBadge || !r.noSwitcherH || !r.noSwitcherA || !r.noAiOnModeSwitch || !r.noReviewAi || r.stacked || r.threadTypeAi !== 'ai' || !r.authorStable) {
               throw new Error(JSON.stringify(r));
             }
           });

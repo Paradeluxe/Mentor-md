@@ -78,7 +78,7 @@ const FIX = path.join(__dirname, '../fixtures/ann-content');
     coverage.hitContent('P2');
   });
 
-  await t('P8 @AI fixture roundtrip serialize keeps marker', async () => {
+  await t('P8 @AI fixture roundtrip serializes marker-only mode', async () => {
     const raw = JSON.parse(fs.readFileSync(path.join(FIX, 'ai-marker.json'), 'utf8'));
     await loadDoc(page, 'ai.md', DOCS.simple, raw);
     const r = await page.evaluate(() => {
@@ -87,6 +87,7 @@ const FIX = path.join(__dirname, '../fixtures/ann-content');
       const bodies = side.flatMap((a) => (a.comments || []).map((c) => c.body));
       return {
         bodies,
+        types: side.map((a) => a.threadType || null),
         anyAi: bodies.some((b) => (M.bodyHasAiMarker ? M.bodyHasAiMarker(b) : /@AI\b/i.test(b))),
         whitelist: side.every((a) => a.threadId && typeof a.text === 'string' && Array.isArray(a.comments)),
       };
@@ -94,6 +95,36 @@ const FIX = path.join(__dirname, '../fixtures/ann-content');
     if (!r.anyAi) throw new Error(JSON.stringify(r));
     if (!r.whitelist) throw new Error('bad serialize shape');
     coverage.hitContent('P8');
+  });
+
+  await t('legacy AI card preserves threadType across reload (non-destructive migration)', async () => {
+    const legacy = {
+      version: '1',
+      document: 'legacy-ai.md',
+      updatedAt: new Date().toISOString(),
+      annotations: [{
+        threadId: 'legacy-ai-1',
+        threadType: 'ai',
+        text: 'UNIQUE_ALPHA',
+        prefix: '', suffix: '', resolved: false, createdAt: new Date().toISOString(),
+        comments: [{ id: 'c1', author: { id: 'u', name: 'User' }, body: 'make this clearer', createdAt: new Date().toISOString() }],
+      }],
+    };
+    await loadDoc(page, 'legacy-ai.md', DOCS.simple, legacy);
+    const once = await page.evaluate(() => {
+      const M = window.__mdAnnotator;
+      const t = M.State.annotations.find((a) => a.threadId === 'legacy-ai-1');
+      return { body: t?.comments?.[0]?.body, type: t?.threadType ?? null, side: M.buildAnnotationsSidecar() };
+    });
+    // Non-destructive: body unchanged, threadType preserved, sidecar serializes it
+    if (once.body !== 'make this clearer' || once.type !== 'ai' || once.side[0]?.threadType !== 'ai') throw new Error(JSON.stringify(once));
+    await loadDoc(page, 'legacy-ai-reopen.md', DOCS.simple, { version: '1', annotations: once.side });
+    const reopened = await page.evaluate(() => {
+      const M = window.__mdAnnotator;
+      const t = M.State.annotations.find((a) => a.threadId === 'legacy-ai-1');
+      return { body: t?.comments?.[0]?.body, type: t?.threadType ?? null };
+    });
+    if (reopened.body !== 'make this clearer' || reopened.type !== 'ai') throw new Error(JSON.stringify(reopened));
   });
 
   await t('P4 incomplete thread becomes invalid or dropped', async () => {
@@ -108,7 +139,10 @@ const FIX = path.join(__dirname, '../fixtures/ann-content');
         { threadId: 'no-text', prefix: '', suffix: '', resolved: false, createdAt: new Date().toISOString(), comments: [] },
       ],
     };
-    await loadDoc(page, 'bad.md', DOCS.simple, bad);
+    await loadDoc(page, 'bad.md', DOCS.simple, {
+      ...bad,
+      annotations: [bad.annotations[0], { ...bad.annotations[2], threadId: 'no-text', text: 'MISSING_TEXT' }],
+    });
     const r = await page.evaluate(() => {
       const anns = window.__mdAnnotator.State.annotations;
       return {
