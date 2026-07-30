@@ -135,6 +135,16 @@ import {
 import { createExternalChangeWatcher } from './modules/external-change-watcher.js';
 import { createExternalRevisionWatcher } from './modules/external-revision-watcher.js';
 import { decideExternalRefresh } from './modules/external-change-reconcile.js';
+import {
+  createSupervisionPlugin,
+  supervisionKey,
+  setSupervisionMeta,
+  supervisionBannerText,
+  supervisionSignalPhase,
+  normalizeSupervisionPayload,
+  SUPERVISION_BYPASS_META,
+} from './modules/supervision.js';
+import { createSupervisionPoller, SupervisionPollError } from './modules/supervision-poller.js';
 
 var KatexInline = Node.create({
   name: "katex",
@@ -714,7 +724,24 @@ var State = {
     pos: null,
     ordinal: 0,
     total: 0
-  }
+  },
+  // fix-mentor supervision mode (sidecar <file>.mentor.supervision.json)
+  supervision: {
+    active: false,
+    lockMode: "pending-paragraphs",
+    pendingThreadIds: [],
+    processedThreadIds: [],
+    currentThreadId: "",
+    phase: "idle",
+    message: "",
+    tool: "",
+    updatedAt: "",
+    lastFingerprint: "",
+    lastCurrentId: "",
+    // health/error from poller snapshot (timer ownership is in supervision-poller.js)
+    health: "ok",
+    error: "",
+  },
 };
 
 function mentorBaseName(nameOrPath) {
@@ -729,7 +756,7 @@ var AnnotationStore = createAnnotationStore();
 var DraftStore = createDraftStore();
 var _idbDocWriteQueue = createSerialWriteQueue();
 var md = new MarkdownIt({ html: false, linkify: true, breaks: false });
-var HTML_SUBSUP_RE = /^<(sup|sub)>([\s\S]*?)<\/\1>/i;
+var HTML_SUBSUP_RE = /^<(sup|sub)>([\s\S]*?)<\/>/i;
 function htmlSubsupRule(state, silent) {
   const pos = state.pos;
   const tail = state.src.slice(pos, pos + 256);
@@ -1250,6 +1277,12 @@ var ActiveHighlightExtension = Extension.create({
         }
       )
     ];
+  }
+});
+var SupervisionExtension = Extension.create({
+  name: "mentor-supervision",
+  addProseMirrorPlugins() {
+    return [createSupervisionPlugin()];
   }
 });
 var AnnotationAnchorExtension = Extension.create({
@@ -3376,6 +3409,7 @@ function initEditor() {
       AnnotationMark,
             AnnotationBubbleExtension,
             ActiveHighlightExtension,
+            SupervisionExtension,
             AnnotationAnchorExtension,
             KatexInline,
             KatexBlock
@@ -3432,6 +3466,7 @@ function initEditor() {
             const trClear = ed.state.tr;
             setAnnotationAnchorResetMeta(trClear, []);
             trClear.setMeta("addToHistory", false);
+            try { trClear.setMeta(SUPERVISION_BYPASS_META, true); } catch (_) {}
             ed.view.dispatch(trClear);
           } catch (_) {}
           const r = _setContentOrig(normalizedContent, emitUpdate, parseOptions);
@@ -4054,6 +4089,12 @@ function createAnnotationFromSelection(opts = {}) {
   void options;
   if (!State.editor) return null;
   const sel = State.editor.state.selection;
+  try {
+    if (!sel.empty && isRangeSupervisionLocked(sel.from, sel.to)) {
+      try { showToast("AI 监管中：未处理段落暂不可批注", 2200); } catch (_) {}
+      return null;
+    }
+  } catch (_) {}
   if (sel.empty && (!sel.$anchor || !sel.$head)) return null;
   const isCellSel = sel.constructor && (sel.constructor.name === "CellSelection" || sel.forEachCell && sel.$anchorCell && sel.$headCell);
   if (isCellSel) {
@@ -8895,9 +8936,259 @@ function renderLiveSyncBanner() {
 }
 
 
+
+/* ===== fix-mentor supervision mode ===== */
+
+function isRangeSupervisionLocked(from, to) {
+  const s = getSupervisionState();
+  if (!s.active) return false;
+  if (s.lockMode === "document") return true;
+  try {
+    if (!State.editor || !State.editor.state) return false;
+    const ps = supervisionKey.getState(State.editor.state);
+    const ranges = (ps && ps.lockedRanges) || [];
+    for (const r of ranges) {
+      if (from < r.to && to > r.from) return true;
+    }
+  } catch (_) {}
+  return false;
+}
+
+function getSupervisionState() {
+  return State.supervision || {
+    active: false,
+    lockMode: "pending-paragraphs",
+    pendingThreadIds: [],
+    processedThreadIds: [],
+    currentThreadId: "",
+    phase: "idle",
+    message: "",
+    tool: "",
+    updatedAt: "",
+    lastFingerprint: "",
+    lastCurrentId: "",
+    health: "ok",
+    error: "",
+  };
+}
+
+function supervisionFingerprint(payload) {
+  const n = normalizeSupervisionPayload(payload || {});
+  return JSON.stringify({
+    a: n.active,
+    m: n.lockMode,
+    p: n.pendingThreadIds,
+    d: n.processedThreadIds,
+    c: n.currentThreadId,
+    ph: n.phase,
+    h: n.health || "ok",
+    e: n.error || "",
+    msg: n.message,
+    t: n.tool,
+    u: n.updatedAt,
+  });
+}
+
+function renderSupervisionBanner() {
+  const el = document.getElementById("supervision-banner");
+  const textEl = document.getElementById("supervision-banner-text");
+  const lamp = document.getElementById("supervision-signal");
+  if (!el || !textEl) return;
+  const s = getSupervisionState();
+  const sig = supervisionSignalPhase(s);
+  if (!s.active) {
+    el.classList.add("hidden");
+    el.dataset.active = "0";
+    el.dataset.phase = "off";
+    el.dataset.health = "ok";
+    textEl.textContent = "";
+    if (lamp) {
+      lamp.dataset.phase = "off";
+      lamp.dataset.health = "ok";
+      lamp.title = "监管未开启";
+    }
+    try {
+      document.body.classList.remove("supervision-active");
+      document.body.removeAttribute("data-supervision-lock");
+      document.body.removeAttribute("data-supervision-phase");
+    } catch (_) {}
+    return;
+  }
+  el.classList.remove("hidden");
+  el.dataset.active = "1";
+  el.dataset.lock = s.lockMode || "pending-paragraphs";
+  el.dataset.phase = sig;
+  el.dataset.health = s.health || "ok";
+  textEl.textContent = supervisionBannerText(s) || "AI 监管中";
+  if (lamp) {
+    lamp.dataset.phase = sig;
+    lamp.dataset.health = s.health || "ok";
+    lamp.title = s.health === "stale"
+      ? "监管连接异常"
+      : s.health === "degraded"
+        ? "监管锚点未定位"
+        : sig === "working" ? "正在改一段" : "监管等待中";
+  }
+  try {
+    document.body.classList.add("supervision-active");
+    document.body.setAttribute("data-supervision-lock", s.lockMode || "pending-paragraphs");
+    document.body.setAttribute("data-supervision-phase", sig);
+  } catch (_) {}
+}
+
+function scrollSupervisionPetIntoView() {
+  try {
+    const pet = document.querySelector(".ProseMirror .supervision-pet");
+    if (pet && typeof pet.scrollIntoView === "function") {
+      pet.scrollIntoView({ block: "nearest", behavior: "smooth", inline: "nearest" });
+    }
+  } catch (_) {}
+}
+
+function applySupervisionPayload(raw, { force = false } = {}) {
+  const normalized = normalizeSupervisionPayload(raw || { active: false });
+  const fp = supervisionFingerprint(normalized);
+  const s = getSupervisionState();
+  if (!force && fp === s.lastFingerprint) {
+    // Same sidecar, but re-materialize while active so late-loaded annotation
+    // marks still get the pet/lock decos (open race: poll before marks paint).
+    if (normalized.active && State.editor && State.editor.view) {
+      try {
+        const { state, view } = State.editor;
+        const tr = setSupervisionMeta(state.tr, normalized);
+        tr.setMeta("addToHistory", false);
+        tr.setMeta(SUPERVISION_BYPASS_META, true);
+        view.dispatch(tr);
+      } catch (_) {}
+      renderSupervisionBanner();
+    }
+    return s;
+  }
+  const prevCurrent = s.currentThreadId || s.lastCurrentId || "";
+  s.active = normalized.active;
+  s.lockMode = normalized.lockMode;
+  s.pendingThreadIds = normalized.pendingThreadIds.slice();
+  s.processedThreadIds = normalized.processedThreadIds.slice();
+  s.currentThreadId = normalized.currentThreadId || "";
+  s.phase = normalized.phase || "idle";
+  s.message = normalized.message;
+  s.tool = normalized.tool;
+  s.updatedAt = normalized.updatedAt;
+  s.health = normalized.health || "ok";
+  s.error = normalized.error || "";
+  s.lastFingerprint = fp;
+  State.supervision = s;
+  try {
+    if (State.editor && State.editor.view) {
+      const { state, view } = State.editor;
+      const tr = setSupervisionMeta(state.tr, normalized);
+      tr.setMeta("addToHistory", false);
+      tr.setMeta(SUPERVISION_BYPASS_META, true);
+      view.dispatch(tr);
+    }
+  } catch (e) {
+    console.warn("[supervision] dispatch failed", e);
+  }
+  renderSupervisionBanner();
+  if (normalized.active && normalized.currentThreadId && normalized.currentThreadId !== prevCurrent) {
+    s.lastCurrentId = normalized.currentThreadId;
+    State.supervision = s;
+    try {
+      requestAnimationFrame(() => {
+        try { scrollSupervisionPetIntoView(); } catch (_) {}
+      });
+    } catch (_) {
+      try { scrollSupervisionPetIntoView(); } catch (_) {}
+    }
+  } else if (!normalized.active) {
+    s.lastCurrentId = "";
+    State.supervision = s;
+  }
+  try { syncToolbarActionState(); } catch (_) {}
+  return s;
+}
+
+function clearSupervisionLocal() {
+  applySupervisionPayload({ active: false }, { force: true });
+}
+
+async function fetchSupervisionStatus(path, token) {
+  if (!path || !token) return { active: false, health: "missing" };
+  const url =
+    location.origin +
+    "/supervision?path=" +
+    encodeURIComponent(path) +
+    "&token=" +
+    encodeURIComponent(token);
+  let res;
+  try {
+    res = await fetch(url, { cache: "no-store" });
+  } catch (error) {
+    throw new SupervisionPollError("network", { cause: error });
+  }
+  if (res.status === 403 || res.status === 404 || res.status >= 500) {
+    throw new SupervisionPollError("http-" + res.status, { status: res.status });
+  }
+  if (!res.ok) {
+    throw new SupervisionPollError("http-" + res.status, { status: res.status });
+  }
+  let data;
+  try {
+    data = await res.json();
+  } catch (error) {
+    throw new SupervisionPollError("invalid-json", { cause: error });
+  }
+  if (!data || typeof data !== "object") {
+    throw new SupervisionPollError("invalid-json");
+  }
+  return data;
+}
+
+var _supervisionPoller = null;
+function getSupervisionPoller() {
+  if (_supervisionPoller) return _supervisionPoller;
+  _supervisionPoller = createSupervisionPoller({
+    pollMs: 1000,
+    fetchStatus: async ({ path, token }) => fetchSupervisionStatus(path, token),
+    onSnapshot: (snap) => {
+      try {
+        applySupervisionPayload(snap || { active: false });
+      } catch (e) {
+        console.warn("[supervision] apply snapshot failed", e);
+      }
+    },
+  });
+  return _supervisionPoller;
+}
+
+function supervisionDocumentId(path) {
+  return String(path || (State.externalWatchPath || "") || ((State.currentFile && State.currentFile.path) || ""));
+}
+
+function startSupervisionPolling() {
+  const path = State.externalWatchPath || "";
+  const token = State.externalWatchToken || "";
+  if (!path || !token) return;
+  const documentId = supervisionDocumentId(path);
+  if (!documentId) return;
+  try {
+    getSupervisionPoller().start({ path, token, documentId });
+  } catch (e) {
+    console.warn("[supervision] start failed", e);
+  }
+}
+
+function stopSupervisionPolling() {
+  try {
+    getSupervisionPoller().stop();
+  } catch (_) {}
+  clearSupervisionLocal();
+}
+
 function clearExternalWatchSource() {
   State.externalWatchPath = "";
   State.externalWatchToken = "";
+  try { stopSupervisionPolling(); } catch (_) {}
 }
 
 function getExternalWatchState() {
@@ -8947,6 +9238,8 @@ async function startExternalWatchForCurrentDocument() {
     });
     State.externalWatch.watcher = watcher;
     State.externalWatch.mode = await watcher.start();
+    // Path+token (deep-link) may coexist with handle — still poll supervision sidecar.
+    try { startSupervisionPolling(); } catch (_) {}
     return;
   }
   if (State.externalWatchPath && State.externalWatchToken) {
@@ -8959,6 +9252,7 @@ async function startExternalWatchForCurrentDocument() {
     State.externalWatch.watcher = watcher;
     State.externalWatch.mode = await watcher.start();
   }
+  try { startSupervisionPolling(); } catch (_) {}
 }
 
 function noteExternalOwnWrite(mtimeMs = 0, revision = "") {
@@ -13246,7 +13540,10 @@ async function _handleUrlOpen() {
         State.diskPathHint = openPath;
         State.externalWatchPath = openPath;
         State.externalWatchToken = token || "";
+        // Load body FIRST, then start supervision poll. Polling before setContent
+        // used to document-lock an empty editor and block the open (blank page).
         await openFromMentorFile(file);
+        try { startSupervisionPolling(); } catch (_) {}
         opened = true;
         showToast("\u5DF2\u6253\u5F00 " + baseName, 2500);
       } else {
@@ -13511,6 +13808,12 @@ window.__mdAnnotator = {
   undo: undo2,
   redo: redo2,
   rebuildAnnotationMarks,
+  applySupervisionPayload,
+  getSupervisionState,
+  startSupervisionPolling,
+  stopSupervisionPolling,
+  supervisionKey,
+  normalizeSupervisionPayload,
   // H-autosave: autosave helpers (v1.43.54 unified write path)
   startAutosaveTimer,
   stopAutosaveTimer,
