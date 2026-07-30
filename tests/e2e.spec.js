@@ -3599,18 +3599,20 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
       const grid = getComputedStyle(document.querySelector('#main')).gridTemplateColumns;
       const outlineOpen = !document.body.classList.contains('file-pane-collapsed');
       const commentsOpen = !document.body.classList.contains('comment-pane-collapsed');
-      const outlineLabel = document.querySelector('#file-pane [data-act="toggle-file-pane"]').getAttribute('aria-label');
-      const outlineExpanded = document.querySelector('#file-pane [data-act="toggle-file-pane"]').getAttribute('aria-expanded');
+      const toolbar = document.querySelector('#btn-toggle-file-pane');
       return {
         fpLeft: fpRect.left, fpWidth: fpRect.width,
         edWidth: edRect.width, grid, outlineOpen, commentsOpen,
-        outlineLabel, outlineExpanded,
+        toolbarLabel: toolbar?.getAttribute('aria-label'),
+        toolbarPressed: toolbar?.getAttribute('aria-pressed'),
+        headerCollapseBtn: !!document.querySelector('#file-pane .pane-collapse-btn'),
       };
     });
     console.log(`  ✓ 收起前 file-pane.left=${before.fpLeft} width=${before.fpWidth} edWidth=${before.edWidth}`);
     if (!before.outlineOpen || !before.commentsOpen) throw new Error('桌面端大纲与批注应默认显示');
-    if (before.outlineLabel !== '收起大纲栏') throw new Error(`大纲收回键名称应为"收起大纲栏"，实际 "${before.outlineLabel}"`);
-    if (before.outlineExpanded !== 'true') throw new Error('默认展开键应有 aria-expanded=true');
+    if (before.headerCollapseBtn) throw new Error('大纲栏内不应再有收起按钮');
+    if (before.toolbarLabel !== '大纲栏') throw new Error(`工具栏大纲切换应为"大纲栏"，实际 "${before.toolbarLabel}"`);
+    if (before.toolbarPressed !== 'true') throw new Error('默认工具栏大纲按钮应为 aria-pressed=true');
 
     // Ctrl+[
     await page.keyboard.press('Control+[');
@@ -3620,13 +3622,13 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
       edWidth: document.querySelector('#editor-pane').getBoundingClientRect().width,
       grid: getComputedStyle(document.querySelector('#main')).gridTemplateColumns,
       expandBtnVisible: !document.querySelector('#expand-file-pane-btn').classList.contains('hidden'),
-      headerExpanded: document.querySelector('#file-pane [data-act="toggle-file-pane"]').getAttribute('aria-expanded'),
       edgeExpanded: document.querySelector('#expand-file-pane-btn').getAttribute('aria-expanded'),
+      toolbarPressed: document.querySelector('#btn-toggle-file-pane')?.getAttribute('aria-pressed'),
     }));
     console.log(`  ✓ 收起后: collapsed=${after.collapsed} edWidth=${after.edWidth} grid="${after.grid}"`);
     if (!after.collapsed) throw new Error('Ctrl+[ 应加 file-pane-collapsed class');
     if (after.edWidth < before.edWidth + 200) throw new Error(`收起后编辑区应扩展 (从 ${before.edWidth} 到至少 ${before.edWidth + 200})，实际 ${after.edWidth}`);
-    if (after.headerExpanded !== 'false' || after.edgeExpanded !== 'false') throw new Error('收起后 aria-expanded 应为 false');
+    if (after.edgeExpanded !== 'false' || after.toolbarPressed !== 'false') throw new Error('收起后 expand/toolbar 状态应为 collapsed');
     if (!after.expandBtnVisible) throw new Error('浮起展开按钮应可见');
 
     // 再 Ctrl+[ 展开回
@@ -3636,12 +3638,12 @@ WYSIWYG 编辑（所见即所得）—— 选区级批注（精确到字符范�
       collapsed: document.body.classList.contains('file-pane-collapsed'),
       edWidth: document.querySelector('#editor-pane').getBoundingClientRect().width,
       expandBtnVisible: !document.querySelector('#expand-file-pane-btn').classList.contains('hidden'),
-      headerExpanded: document.querySelector('#file-pane [data-act="toggle-file-pane"]').getAttribute('aria-expanded'),
+      toolbarPressed: document.querySelector('#btn-toggle-file-pane')?.getAttribute('aria-pressed'),
     }));
     if (restored.collapsed) throw new Error('再 Ctrl+[ 应取消 collapsed');
     if (Math.abs(restored.edWidth - before.edWidth) > 20) throw new Error(`展开后应恢复编辑区宽度 (期望≈${before.edWidth}，实际 ${restored.edWidth})`);
     if (restored.expandBtnVisible) throw new Error('展开后浮起按钮应隐藏');
-    if (restored.headerExpanded !== 'true') throw new Error('展开后 aria-expanded 应为 true');
+    if (restored.toolbarPressed !== 'true') throw new Error('展开后工具栏应为 aria-pressed=true');
     console.log('  ✓ 大纲栏 Ctrl+[ 收起 + 展开 双向 + 浮起按钮联动正确 + 编辑区扩展');
   }
 

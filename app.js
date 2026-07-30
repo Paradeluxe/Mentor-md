@@ -6963,10 +6963,7 @@ function syncToolbarActionState() {
   applyToolbarActionState("#btn-toggle-render", actionState.source);
   applyToolbarActionState("#btn-toggle-file-pane", actionState.filePane);
   applyToolbarActionState("#btn-toggle-comment-pane", actionState.commentPane);
-  // Pane header expand buttons share expanded semantics with the drawers.
-  document.querySelectorAll('#file-pane [data-act="toggle-file-pane"]').forEach((el) => {
-    el.setAttribute("aria-expanded", actionState.filePane.expanded ? "true" : "false");
-  });
+  // Comment/refs header collapse buttons share expanded semantics with the drawers.
   document.querySelectorAll('#comment-pane [data-act="toggle-comment-pane"]').forEach((el) => {
     el.setAttribute("aria-expanded", actionState.commentPane.expanded ? "true" : "false");
   });

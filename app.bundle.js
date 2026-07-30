@@ -63638,9 +63638,6 @@ function syncToolbarActionState() {
   applyToolbarActionState("#btn-toggle-render", actionState.source);
   applyToolbarActionState("#btn-toggle-file-pane", actionState.filePane);
   applyToolbarActionState("#btn-toggle-comment-pane", actionState.commentPane);
-  document.querySelectorAll('#file-pane [data-act="toggle-file-pane"]').forEach((el) => {
-    el.setAttribute("aria-expanded", actionState.filePane.expanded ? "true" : "false");
-  });
   document.querySelectorAll('#comment-pane [data-act="toggle-comment-pane"]').forEach((el) => {
     el.setAttribute("aria-expanded", actionState.commentPane.expanded ? "true" : "false");
   });

@@ -68,22 +68,24 @@ const {
     if (r.err) throw new Error(r.err);
   });
 
-  await t('collapse outline pane via button / Ctrl+[', async () => {
+  await t('collapse outline pane via toolbar / Ctrl+[', async () => {
     const before = await page.evaluate(() => {
       const pane = document.querySelector('#file-pane');
       return {
         hidden: pane?.classList.contains('hidden') || pane?.classList.contains('is-collapsed'),
         display: pane && getComputedStyle(pane).display,
         width: pane && pane.getBoundingClientRect().width,
+        headerCollapseBtn: !!document.querySelector('#file-pane .pane-collapse-btn'),
       };
     });
+    if (before.headerCollapseBtn) throw new Error('outline header collapse button should be removed');
     await page.evaluate(() => {
-      const btn = document.querySelector('[data-act="toggle-file-pane"]');
+      const btn = document.querySelector('#btn-toggle-file-pane');
       if (btn) btn.click();
     });
     await page.waitForTimeout(50);
     await page.evaluate(() => {
-      const btn = document.querySelector('[data-act="toggle-file-pane"]');
+      const btn = document.querySelector('#btn-toggle-file-pane');
       if (btn) btn.click();
       const expand = document.querySelector('#expand-file-pane-btn');
       if (expand && !expand.classList.contains('hidden')) expand.click();
@@ -102,9 +104,10 @@ const {
         pressed: btn?.getAttribute('aria-pressed'),
         collapsed: document.body.classList.contains('file-pane-collapsed'),
         paneWidth: pane?.getBoundingClientRect().width || 0,
+        headerCollapseBtn: !!document.querySelector('#file-pane .pane-collapse-btn'),
       };
     });
-    if (!before.exists || before.label !== '大纲栏' || before.pressed !== 'true' || before.collapsed || before.paneWidth <= 0) {
+    if (!before.exists || before.label !== '大纲栏' || before.pressed !== 'true' || before.collapsed || before.paneWidth <= 0 || before.headerCollapseBtn) {
       throw new Error('unexpected initial outline toolbar state: ' + JSON.stringify(before));
     }
 
@@ -114,9 +117,9 @@ const {
       pressed: document.querySelector('#btn-toggle-file-pane')?.getAttribute('aria-pressed'),
       collapsed: document.body.classList.contains('file-pane-collapsed'),
       paneWidth: document.querySelector('#file-pane')?.getBoundingClientRect().width || 0,
-      headerExpanded: document.querySelector('#file-pane [data-act="toggle-file-pane"]')?.getAttribute('aria-expanded'),
+      expandExpanded: document.querySelector('#expand-file-pane-btn')?.getAttribute('aria-expanded'),
     }));
-    if (collapsed.pressed !== 'false' || !collapsed.collapsed || collapsed.paneWidth !== 0 || collapsed.headerExpanded !== 'false') {
+    if (collapsed.pressed !== 'false' || !collapsed.collapsed || collapsed.paneWidth !== 0 || collapsed.expandExpanded !== 'false') {
       throw new Error('outline toolbar did not collapse drawer: ' + JSON.stringify(collapsed));
     }
 
@@ -126,9 +129,8 @@ const {
       pressed: document.querySelector('#btn-toggle-file-pane')?.getAttribute('aria-pressed'),
       collapsed: document.body.classList.contains('file-pane-collapsed'),
       paneWidth: document.querySelector('#file-pane')?.getBoundingClientRect().width || 0,
-      headerExpanded: document.querySelector('#file-pane [data-act="toggle-file-pane"]')?.getAttribute('aria-expanded'),
     }));
-    if (restored.pressed !== 'true' || restored.collapsed || restored.paneWidth <= 0 || restored.headerExpanded !== 'true') {
+    if (restored.pressed !== 'true' || restored.collapsed || restored.paneWidth <= 0) {
       throw new Error('outline toolbar did not restore drawer: ' + JSON.stringify(restored));
     }
   });

@@ -39,6 +39,6 @@
     { "id": "S7.filter-all", "name": "filter-all", "selector": "[data-filter-tab=all]", "group": "sidebar" },
     { "id": "S7.filter-open", "name": "filter-open", "selector": "[data-filter-tab=open]", "group": "sidebar" },
     { "id": "S7.filter-resolved", "name": "filter-resolved", "selector": "[data-filter-tab=resolved]", "group": "sidebar" },
-    { "id": "S5.collapse", "name": "outline-collapse", "selector": "[data-act=toggle-file-pane]", "group": "outline" }
+    { "id": "S5.collapse", "name": "outline-collapse", "selector": "#btn-toggle-file-pane", "group": "outline" }
   ]
 }
