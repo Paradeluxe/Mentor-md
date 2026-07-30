@@ -268,7 +268,7 @@ code {
   min-height: 0;
 }
 
-/* ============ Toolbar (Cursor 化: transparent + 跟 pane-header 统一) ============ */
+/* ============ Toolbar (two-row structure; Task1 = display:contents keep single-line paint) ============ */
 #toolbar {
   display: flex;
   align-items: center;
@@ -277,11 +277,15 @@ code {
   min-height: 40px;
   background: var(--chrome);
   border-bottom: 1px solid var(--border-warm);
-  /* v1.43.37: 窄屏横滑一行, 避免 3 行 95px 占高度 */
+  /* v1.43.37: 窄屏横滑一行, 避免 3 行 95px 占高度 — Task2 will replace with real two rows */
   flex-wrap: nowrap;
   overflow-x: auto;
   overflow-y: hidden;
   z-index: 10;
+}
+/* Task1: flatten rows into single paint flow so existing selectors/layout still work */
+.toolbar-row {
+  display: contents;
 }
 #toolbar::-webkit-scrollbar { height: 4px; }
 #toolbar::-webkit-scrollbar-thumb { background: var(--border-warm-medium); border-radius: 2px; }

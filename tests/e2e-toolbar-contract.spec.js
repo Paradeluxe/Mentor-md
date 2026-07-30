@@ -26,6 +26,40 @@ function assert(cond, message) {
       document.querySelector('#author-modal')?.classList.add('hidden');
     });
 
+    console.log('\n=== Two-row toolbar structure ===');
+    const rowContract = await page.evaluate(() => {
+      const names = (selector) => [...document.querySelectorAll(selector)]
+        .map((el) => el.getAttribute('data-toolbar-group'));
+      const rowOf = (selector) => document.querySelector(selector)
+        ?.closest('[data-toolbar-row]')
+        ?.getAttribute('data-toolbar-row') || null;
+      return {
+        rows: [...document.querySelectorAll('#toolbar > [data-toolbar-row]')]
+          .map((el) => el.getAttribute('data-toolbar-row')),
+        documentGroups: names('#toolbar > [data-toolbar-row="document"] > [data-toolbar-group]'),
+        editorGroups: names('#toolbar > [data-toolbar-row="editor"] > [data-toolbar-group]'),
+        documentLabel: document.querySelector('[data-toolbar-row="document"]')?.getAttribute('aria-label') || null,
+        editorLabel: document.querySelector('[data-toolbar-row="editor"]')?.getAttribute('aria-label') || null,
+        newRow: rowOf('#btn-new'),
+        titleRow: rowOf('#title-group'),
+        boldRow: rowOf('#format-toolbar [data-cmd="bold"]'),
+        sourceRow: rowOf('#btn-toggle-render'),
+      };
+    });
+
+    assert(rowContract.rows.join(',') === 'document,editor',
+      `toolbar rows document,editor (got ${rowContract.rows.join(',')})`);
+    assert(rowContract.documentGroups.join(',') === 'chrome,document,save,export,references,title',
+      `document row groups (got ${rowContract.documentGroups.join(',')})`);
+    assert(rowContract.editorGroups.join(',') === 'history,format,view',
+      `editor row groups (got ${rowContract.editorGroups.join(',')})`);
+    assert(rowContract.documentLabel === '文档与全局操作', 'document row aria-label');
+    assert(rowContract.editorLabel === '编辑与视图操作', 'editor row aria-label');
+    assert(rowContract.newRow === 'document' && rowContract.titleRow === 'document',
+      'new/title belong to document row');
+    assert(rowContract.boldRow === 'editor' && rowContract.sourceRow === 'editor',
+      'format/source belong to editor row');
+
     console.log('\n=== Static labels + groups ===');
     const staticState = await page.evaluate(() => {
       const labelOf = (sel) => {

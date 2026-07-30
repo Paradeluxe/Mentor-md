@@ -19,66 +19,33 @@
 <body>
 <div id="app">
 
-  <!-- Toolbar -->
-  <header id="toolbar">
-    <div class="tb-group" data-toolbar-group="chrome">
-      <button id="help-btn" class="help-btn" data-act="toggle-help" title="使用帮助 (按 ? 键)" aria-label="使用帮助" onclick="window.__mdAnnotator && window.__mdAnnotator.toggleHelp && window.__mdAnnotator.toggleHelp(); event.stopPropagation();">?</button>
-      <button id="settings-btn" class="settings-btn" data-act="toggle-settings" title="设置" aria-label="设置"></button>
-    </div>
-    <div class="tb-group" data-toolbar-group="document">
-      <button id="btn-new" title="新建空白文档" class="tb-icon-text"><span class="tb-icon"></span><span class="tb-label">新建</span></button>
-      <button id="btn-open-files" title="打开 .mentor 或 Markdown" class="tb-icon-text"><span class="tb-icon"></span><span class="tb-label">打开</span></button>
-    </div>
-    <div class="tb-group" data-toolbar-group="save">
-      <button id="btn-save" title="保存当前文档" class="tb-icon-text" aria-keyshortcuts="Control+S Meta+S"><span class="tb-icon"></span><span class="tb-label">保存</span></button>
-      <button id="btn-save-as" title="另存为 .mentor 副本" class="tb-icon-text"><span class="tb-icon"></span><span class="tb-label">另存</span></button>
-    </div>
-    <div class="tb-group" data-toolbar-group="export">
-      <button id="btn-export-md" title="导出 Markdown 副本" class="tb-icon-text"><span class="tb-icon"></span><span class="tb-label">MD</span></button>
-      <button id="btn-export-docx" title="导出 DOCX 副本（仅正文）" data-export-mode="body-only" class="tb-icon-text"><span class="tb-icon"></span><span class="tb-label">DOCX</span></button>
-    </div>
-    <div class="tb-group" data-toolbar-group="references">
-      <button id="btn-refs" title="打开文献库" class="tb-icon-text" aria-controls="refs-pane" aria-expanded="false" aria-pressed="false"><span class="tb-icon"></span><span class="tb-label">文献</span></button>
-      <input type="file" id="refs-file-input" accept=".bib,.ris,.enw,.xml,.json,.txt" style="display:none">
-    </div>
-    <div class="tb-group" data-toolbar-group="history">
-      <button id="btn-undo" title="撤销 (Ctrl+Z)" class="tb-icon-text" disabled aria-label="撤销"><span class="tb-icon"></span></button>
-      <button id="btn-redo" title="重做 (Ctrl+Y)" class="tb-icon-text" disabled aria-label="重做"><span class="tb-icon"></span></button>
-    </div>
-    <div class="tb-group" data-toolbar-group="view">
-      <button id="btn-toggle-render" title="切换源码/渲染视图" class="tb-icon-text tb-toggle" data-mode="rendered" aria-pressed="false"><span class="tb-icon"></span><span class="tb-label">源码</span></button>
-      <button id="btn-toggle-file-pane" title="显示/隐藏 大纲栏 (Ctrl+[)" class="tb-icon-text tb-pane-toggle" data-act="toggle-file-pane" aria-keyshortcuts="Control+[ Meta+[" aria-pressed="true" aria-label="大纲栏"><span class="tb-icon"></span><span class="tb-label">大纲栏</span></button>
-      <button id="btn-toggle-comment-pane" title="显示/隐藏 批注栏 (Ctrl+])" class="tb-icon-text tb-pane-toggle" data-act="toggle-comment-pane" aria-keyshortcuts="Control+] Meta+]" aria-pressed="true" aria-label="批注栏"><span class="tb-icon"></span><span class="tb-label">批注栏</span></button>
-    </div>
-    <div class="tb-group" id="format-toolbar" data-toolbar-group="format">
-      <button data-cmd="bold" title="加粗 (Ctrl+B)" class="tb-format" aria-label="加粗"></button>
-      <button data-cmd="italic" title="斜体 (Ctrl+I)" class="tb-format" aria-label="斜体"></button>
-      <span class="tb-sep tb-sep-primary"></span>
-      <button data-cmd="h1" title="一级标题" class="tb-format" aria-label="一级标题"></button>
-      <button data-cmd="h2" title="二级标题" class="tb-format" aria-label="二级标题"></button>
-      <span class="tb-sep tb-sep-primary"></span>
-      <button data-cmd="bulletList" title="无序列表" class="tb-format" aria-label="无序列表"></button>
-      <button data-cmd="orderedList" title="有序列表" class="tb-format" aria-label="有序列表"></button>
-      <span class="tb-sep tb-sep-primary"></span>
-      <button data-cmd="link" title="插入链接" class="tb-format" aria-label="链接"></button>
-      <button data-cmd="image" title="插入图片" class="tb-format" aria-label="图片"></button>
-      <button data-cmd="table" title="插入表格 (3×3)" class="tb-format" aria-label="表格"></button>
-      <div class="tb-more-wrap" id="tb-more-wrap">
-        <button type="button" id="btn-tb-more" class="tb-format tb-more-btn" title="更多格式" aria-label="更多格式" aria-haspopup="true" aria-expanded="false"></button>
-        <div id="tb-more-menu" class="tb-more-menu hidden" role="menu">
-          <button data-cmd="strike" title="删除线" class="tb-format" aria-label="删除线"></button>
-          <button data-cmd="code" title="行内代码" class="tb-format" aria-label="行内代码"></button>
-          <button data-cmd="superscript" title="上标 (Ctrl+Shift+=)" class="tb-format" aria-label="上标"></button>
-          <button data-cmd="subscript" title="下标 (Ctrl+Shift+-)" class="tb-format" aria-label="下标"></button>
-          <span class="tb-sep"></span>
-          <button data-cmd="h3" title="三级标题" class="tb-format" aria-label="三级标题"></button>
-          <span class="tb-sep"></span>
-          <button data-cmd="blockquote" title="块引用" class="tb-format" aria-label="块引用"></button>
-          <button data-cmd="codeBlock" title="代码块" class="tb-format" aria-label="代码块"></button>
+  <!-- Toolbar: document row + editor row -->
+    <header id="toolbar" aria-label="Mentor 工具栏">
+      <div class="toolbar-row toolbar-row-document"
+        data-toolbar-row="document"
+        role="toolbar"
+        aria-label="文档与全局操作">
+        <div class="tb-group" data-toolbar-group="chrome">
+          <button id="help-btn" class="help-btn" data-act="toggle-help" title="使用帮助 (按 ? 键)" aria-label="使用帮助" onclick="window.__mdAnnotator && window.__mdAnnotator.toggleHelp && window.__mdAnnotator.toggleHelp(); event.stopPropagation();">?</button>
+          <button id="settings-btn" class="settings-btn" data-act="toggle-settings" title="设置" aria-label="设置"></button>
         </div>
-      </div>
-    </div>
-    <div class="tb-group" id="title-group" data-toolbar-group="title">
+        <div class="tb-group" data-toolbar-group="document">
+          <button id="btn-new" title="新建空白文档" class="tb-icon-text"><span class="tb-icon"></span><span class="tb-label">新建</span></button>
+          <button id="btn-open-files" title="打开 .mentor 或 Markdown" class="tb-icon-text"><span class="tb-icon"></span><span class="tb-label">打开</span></button>
+        </div>
+        <div class="tb-group" data-toolbar-group="save">
+          <button id="btn-save" title="保存当前文档" class="tb-icon-text" aria-keyshortcuts="Control+S Meta+S"><span class="tb-icon"></span><span class="tb-label">保存</span></button>
+          <button id="btn-save-as" title="另存为 .mentor 副本" class="tb-icon-text"><span class="tb-icon"></span><span class="tb-label">另存</span></button>
+        </div>
+        <div class="tb-group" data-toolbar-group="export">
+          <button id="btn-export-md" title="导出 Markdown 副本" class="tb-icon-text"><span class="tb-icon"></span><span class="tb-label">MD</span></button>
+          <button id="btn-export-docx" title="导出 DOCX 副本（仅正文）" data-export-mode="body-only" class="tb-icon-text"><span class="tb-icon"></span><span class="tb-label">DOCX</span></button>
+        </div>
+        <div class="tb-group" data-toolbar-group="references">
+          <button id="btn-refs" title="打开文献库" class="tb-icon-text" aria-controls="refs-pane" aria-expanded="false" aria-pressed="false"><span class="tb-icon"></span><span class="tb-label">文献</span></button>
+          <input type="file" id="refs-file-input" accept=".bib,.ris,.enw,.xml,.json,.txt" style="display:none">
+        </div>
+        <div class="tb-group" id="title-group" data-toolbar-group="title">
           <div id="file-list-wrap" class="file-list-wrap">
             <button type="button" id="file-list-trigger" class="file-list-trigger" title="最近文件 / 切换文档" aria-haspopup="listbox" aria-expanded="false">
               <span id="current-file-name" class="file-list-name">未打开文档</span>
@@ -98,7 +65,51 @@
             <span class="author-chip-edit" aria-hidden="true"></span>
           </button>
         </div>
-  </header>
+      </div>
+
+      <div class="toolbar-row toolbar-row-editor"
+        data-toolbar-row="editor"
+        role="toolbar"
+        aria-label="编辑与视图操作">
+        <div class="tb-group" data-toolbar-group="history">
+          <button id="btn-undo" title="撤销 (Ctrl+Z)" class="tb-icon-text" disabled aria-label="撤销"><span class="tb-icon"></span></button>
+          <button id="btn-redo" title="重做 (Ctrl+Y)" class="tb-icon-text" disabled aria-label="重做"><span class="tb-icon"></span></button>
+        </div>
+        <div class="tb-group" id="format-toolbar" data-toolbar-group="format">
+          <button data-cmd="bold" title="加粗 (Ctrl+B)" class="tb-format" aria-label="加粗"></button>
+          <button data-cmd="italic" title="斜体 (Ctrl+I)" class="tb-format" aria-label="斜体"></button>
+          <span class="tb-sep tb-sep-primary"></span>
+          <button data-cmd="h1" title="一级标题" class="tb-format" aria-label="一级标题"></button>
+          <button data-cmd="h2" title="二级标题" class="tb-format" aria-label="二级标题"></button>
+          <span class="tb-sep tb-sep-primary"></span>
+          <button data-cmd="bulletList" title="无序列表" class="tb-format" aria-label="无序列表"></button>
+          <button data-cmd="orderedList" title="有序列表" class="tb-format" aria-label="有序列表"></button>
+          <span class="tb-sep tb-sep-primary"></span>
+          <button data-cmd="link" title="插入链接" class="tb-format" aria-label="链接"></button>
+          <button data-cmd="image" title="插入图片" class="tb-format" aria-label="图片"></button>
+          <button data-cmd="table" title="插入表格 (3×3)" class="tb-format" aria-label="表格"></button>
+          <div class="tb-more-wrap" id="tb-more-wrap">
+            <button type="button" id="btn-tb-more" class="tb-format tb-more-btn" title="更多格式" aria-label="更多格式" aria-haspopup="true" aria-expanded="false"></button>
+            <div id="tb-more-menu" class="tb-more-menu hidden" role="menu">
+              <button data-cmd="strike" title="删除线" class="tb-format" aria-label="删除线"></button>
+              <button data-cmd="code" title="行内代码" class="tb-format" aria-label="行内代码"></button>
+              <button data-cmd="superscript" title="上标 (Ctrl+Shift+=)" class="tb-format" aria-label="上标"></button>
+              <button data-cmd="subscript" title="下标 (Ctrl+Shift+-)" class="tb-format" aria-label="下标"></button>
+              <span class="tb-sep"></span>
+              <button data-cmd="h3" title="三级标题" class="tb-format" aria-label="三级标题"></button>
+              <span class="tb-sep"></span>
+              <button data-cmd="blockquote" title="块引用" class="tb-format" aria-label="块引用"></button>
+              <button data-cmd="codeBlock" title="代码块" class="tb-format" aria-label="代码块"></button>
+            </div>
+          </div>
+        </div>
+        <div class="tb-group" data-toolbar-group="view">
+          <button id="btn-toggle-render" title="切换源码/渲染视图" class="tb-icon-text tb-toggle" data-mode="rendered" aria-pressed="false"><span class="tb-icon"></span><span class="tb-label">源码</span></button>
+          <button id="btn-toggle-file-pane" title="显示/隐藏 大纲栏 (Ctrl+[)" class="tb-icon-text tb-pane-toggle" data-act="toggle-file-pane" aria-keyshortcuts="Control+[ Meta+[" aria-pressed="true" aria-label="大纲栏"><span class="tb-icon"></span><span class="tb-label">大纲栏</span></button>
+          <button id="btn-toggle-comment-pane" title="显示/隐藏 批注栏 (Ctrl+])" class="tb-icon-text tb-pane-toggle" data-act="toggle-comment-pane" aria-keyshortcuts="Control+] Meta+]" aria-pressed="true" aria-label="批注栏"><span class="tb-icon"></span><span class="tb-label">批注栏</span></button>
+        </div>
+      </div>
+    </header>
 
     <!-- v1.43.31: 多文档标签栏 -->
     <div id="doc-tabs" class="doc-tabs" role="tablist" aria-label="打开的文档"></div>
