@@ -91,6 +91,27 @@ def token_ok(handler, params=None):
     return token and secrets.compare_digest(token, SESSION_TOKEN)
 
 
+def resolve_local_mentor_path(handler, params, require_exists=True):
+    """Shared validation for /open and /revision.
+
+    Returns (path, None) on success or (None, (code, message, as_json)) on failure.
+    as_json True means caller should emit JSON error body (revision path).
+    """
+    if not request_is_local(handler):
+        return None, (403, 'Local only', False)
+    if not token_ok(handler, params):
+        return None, (403, 'Missing or invalid token', False)
+    raw_path = (params.get('path') or [''])[0]
+    if not raw_path:
+        return None, (400, 'Missing path', False)
+    mentor_path = os.path.abspath(raw_path)
+    if not mentor_path.lower().endswith('.mentor'):
+        return None, (400, 'Not a mentor file', False)
+    if require_exists and not os.path.isfile(mentor_path):
+        return None, (404, 'not-found', True)
+    return mentor_path, None
+
+
 class MentorHandler(http.server.SimpleHTTPRequestHandler):
     def log_message(self, fmt, *args):
         pass
@@ -130,28 +151,18 @@ class MentorHandler(http.server.SimpleHTTPRequestHandler):
 
     def do_GET(self):
         if self.path.startswith('/open'):
-            if not request_is_local(self):
-                self.send_error(403, 'Local only')
-                return
             parsed = urllib.parse.urlparse(self.path)
             params = urllib.parse.parse_qs(parsed.query)
-            if not token_ok(self, params):
-                self.send_error(403, 'Missing or invalid token')
+            mentor_path, err = resolve_local_mentor_path(self, params, require_exists=True)
+            if err:
+                code, message, _as_json = err
+                if message == 'not-found':
+                    self.send_error(404, 'File not found')
+                else:
+                    self.send_error(code, message)
                 return
-            if 'path' not in params:
-                self.send_error(400, 'Missing path')
-                return
-            mentor_path = os.path.abspath(params['path'][0])
             # Token already proved local session. Accept any existing local .mentor
             # (refresh with ?open= must not die just because in-memory allowlist reset).
-            if not mentor_path.lower().endswith('.mentor'):
-                self.send_error(400, 'Not a mentor file')
-                return
-            if not os.path.isfile(mentor_path):
-                self.send_error(404, 'File not found')
-                return
-            # Optional tighten: only drive-letter / UNC under user profile not required —
-            # handler is 127.0.0.1-only + session token.
             ALLOWED_OPEN_PATHS.add(mentor_path)
             with open(mentor_path, 'rb') as f:
                 data = f.read()
@@ -161,6 +172,29 @@ class MentorHandler(http.server.SimpleHTTPRequestHandler):
             # Same-origin only: do not emit Access-Control-Allow-Origin
             self.end_headers()
             self.wfile.write(data)
+            return
+        if self.path.startswith('/revision'):
+            parsed = urllib.parse.urlparse(self.path)
+            params = urllib.parse.parse_qs(parsed.query)
+            mentor_path, err = resolve_local_mentor_path(self, params, require_exists=True)
+            if err:
+                code, message, as_json = err
+                if as_json or code == 404:
+                    self._send_json(code, {'ok': False, 'error': 'not-found' if message == 'not-found' else message})
+                else:
+                    self.send_error(code, message)
+                return
+            try:
+                st = os.stat(mentor_path)
+            except FileNotFoundError:
+                self._send_json(404, {'ok': False, 'error': 'not-found'})
+                return
+            self._send_json(200, {
+                'ok': True,
+                'mtimeMs': st.st_mtime_ns // 1_000_000,
+                'size': st.st_size,
+                'revision': f'{st.st_mtime_ns}:{st.st_size}',
+            })
             return
         if self.path.startswith('/session'):
             if not request_is_local(self):
