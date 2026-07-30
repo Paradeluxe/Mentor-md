@@ -5317,28 +5317,12 @@ function setActiveCommentCard(threadId) {
   }
   return false;
 }
-function pinCommentMessagesToLastTwo(root = document) {
+function scrollCommentMessagesToBottom(root = document) {
   const boxes = root.querySelectorAll ? root.querySelectorAll(".comment-messages") : [];
   boxes.forEach((box) => {
     try {
       const thread = box.closest(".comment-thread");
-      if (thread && thread.classList.contains("is-collapsed")) {
-        box.style.maxHeight = "";
-        return;
-      }
-      const nodes = [...box.querySelectorAll(":scope > .comment-item, :scope > .comment-reply")];
-      if (!nodes.length) {
-        box.style.maxHeight = "";
-        return;
-      }
-      // Measure natural stack height first.
-      box.style.maxHeight = "none";
-      const tail = nodes.slice(-2);
-      let h = 0;
-      for (const n of tail) h += n.offsetHeight || 0;
-      // Keep at least one short line visible; cap runaway single messages lightly.
-      const maxH = Math.min(Math.max(h, 40), 320);
-      box.style.maxHeight = `${maxH}px`;
+      if (thread && thread.classList.contains("is-collapsed")) return;
       box.scrollTop = box.scrollHeight;
     } catch (_) {}
   });
@@ -5792,8 +5776,8 @@ function renderCommentList() {
       }
     });
   });
-  // Viewport = height of the last two messages; older history is scroll-up.
-  requestAnimationFrame(() => pinCommentMessagesToLastTwo(list));
+  // Keep latest messages in view inside the fixed-height viewport.
+  requestAnimationFrame(() => scrollCommentMessagesToBottom(list));
 }
 function closeAllCommentMenus() {
   document.querySelectorAll(".comment-menu:not(.hidden)").forEach((m) => m.classList.add("hidden"));

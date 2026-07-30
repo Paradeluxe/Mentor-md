@@ -62022,26 +62022,12 @@ function setActiveCommentCard(threadId) {
   }
   return false;
 }
-function pinCommentMessagesToLastTwo(root2 = document) {
+function scrollCommentMessagesToBottom(root2 = document) {
   const boxes = root2.querySelectorAll ? root2.querySelectorAll(".comment-messages") : [];
   boxes.forEach((box) => {
     try {
       const thread = box.closest(".comment-thread");
-      if (thread && thread.classList.contains("is-collapsed")) {
-        box.style.maxHeight = "";
-        return;
-      }
-      const nodes = [...box.querySelectorAll(":scope > .comment-item, :scope > .comment-reply")];
-      if (!nodes.length) {
-        box.style.maxHeight = "";
-        return;
-      }
-      box.style.maxHeight = "none";
-      const tail = nodes.slice(-2);
-      let h = 0;
-      for (const n of tail) h += n.offsetHeight || 0;
-      const maxH = Math.min(Math.max(h, 40), 320);
-      box.style.maxHeight = `${maxH}px`;
+      if (thread && thread.classList.contains("is-collapsed")) return;
       box.scrollTop = box.scrollHeight;
     } catch (_) {
     }
@@ -62492,7 +62478,7 @@ function renderCommentList() {
       }
     });
   });
-  requestAnimationFrame(() => pinCommentMessagesToLastTwo(list));
+  requestAnimationFrame(() => scrollCommentMessagesToBottom(list));
 }
 function closeAllCommentMenus() {
   document.querySelectorAll(".comment-menu:not(.hidden)").forEach((m) => m.classList.add("hidden"));

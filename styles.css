@@ -2979,21 +2979,25 @@ body.refs-pane-collapsed #expand-refs-pane-btn {
   --comment-avatar-size: 26px;
   --comment-meta-gap: 8px;
   --comment-body-indent: calc(var(--comment-avatar-size) + var(--comment-meta-gap));
+  /* fixed default message viewport (~2–3 short replies); scroll for the rest */
+  --comment-messages-max: 200px;
 }
-/* body-wrap: messages (scroll, height pinned to last 2 via JS) + reply composer */
+/* body-wrap: messages (scroll) + reply composer */
 .comment-body-wrap {
   display: flex;
   flex-direction: column;
   min-height: 0;
 }
 .comment-messages {
-  /* JS sets max-height to last-two message stack; fallback keeps cards compact */
-  max-height: min(140px, 22vh);
+  max-height: var(--comment-messages-max);
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
   min-height: 0;
+}
+.comment-thread.is-active {
+  --comment-messages-max: 240px;
 }
 /* thin scrollbar so tall threads don't dominate the rail */
 .comment-messages::-webkit-scrollbar {
