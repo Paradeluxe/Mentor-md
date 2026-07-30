@@ -136,6 +136,20 @@ const { pathToFileURL } = require('url');
     assert.strictEqual(supervisionSignalPhase({ active: false }), 'off');
   });
 
+
+  check('pet label follows phase', () => {
+    const working = createSupervisionPetElement({ phase: 'working', threadId: 't1' });
+    const waiting = createSupervisionPetElement({ phase: 'waiting', threadId: 't1' });
+    assert.ok(working.innerHTML.includes('改这里'));
+    assert.ok(waiting.innerHTML.includes('等待中'));
+  });
+
+  check('pet exposes an accessible status label', () => {
+    const pet = createSupervisionPetElement({ phase: 'working', threadId: 't1' });
+    assert.strictEqual(pet.getAttribute('role'), 'status');
+    assert.strictEqual(pet.getAttribute('aria-label'), 'AI 正在处理这条批注');
+  });
+
   check('pet element shape', () => {
     const el = createSupervisionPetElement({ phase: 'working', threadId: 't1' });
     assert.ok(el.className.includes('supervision-pet'));

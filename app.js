@@ -5340,6 +5340,27 @@ function activateAndRevealThread(threadId, options = {}) {
   }
   return true;
 }
+
+/** Sync body pet/active mark with comment card when supervision current changes. */
+function revealSupervisionThread(threadId) {
+  const id = String(threadId || "").trim();
+  if (!id) return { found: false, filtered: false };
+  const thread = (State.annotations || []).find((item) => item && item.threadId === id);
+  if (!thread) return { found: false, filtered: false };
+  const filtered =
+    (State.filterOpen && !State.filterResolved && thread.resolved) ||
+    (State.filterResolved && !State.filterOpen && !thread.resolved);
+  try {
+    if (document.body.classList.contains("comment-pane-collapsed")) {
+      const toggles = window.__mdAnnotatorTogglePanes;
+      if (toggles && typeof toggles.toggleCommentPane === "function") toggles.toggleCommentPane();
+    }
+  } catch (_) {}
+  if (!filtered) {
+    try { activateAndRevealThread(id, { source: "supervision" }); } catch (_) {}
+  }
+  return { found: true, filtered: Boolean(filtered) };
+}
 /** Explicit card @AI invoke — seeds composer only for this thread. */
 function invokeAiForThread(threadId) {
   if (!threadId) return false;
@@ -9036,11 +9057,12 @@ function renderSupervisionBanner() {
   } catch (_) {}
 }
 
-function scrollSupervisionPetIntoView() {
+function scrollSupervisionPetIntoView(behavior) {
   try {
     const pet = document.querySelector(".ProseMirror .supervision-pet");
     if (pet && typeof pet.scrollIntoView === "function") {
-      pet.scrollIntoView({ block: "nearest", behavior: "smooth", inline: "nearest" });
+      const b = behavior === "auto" ? "auto" : "smooth";
+      pet.scrollIntoView({ block: "nearest", behavior: b, inline: "nearest" });
     }
   } catch (_) {}
 }
@@ -9093,9 +9115,21 @@ function applySupervisionPayload(raw, { force = false } = {}) {
   if (normalized.active && normalized.currentThreadId && normalized.currentThreadId !== prevCurrent) {
     s.lastCurrentId = normalized.currentThreadId;
     State.supervision = s;
+    let revealInfo = { found: false, filtered: false };
+    try { revealInfo = revealSupervisionThread(normalized.currentThreadId) || revealInfo; } catch (_) {}
+    if (revealInfo.filtered) {
+      // Keep filter contract; surface that current task is outside current filter.
+      try {
+        const textEl = document.getElementById("supervision-banner-text");
+        if (textEl && textEl.textContent && !/筛选外/.test(textEl.textContent)) {
+          textEl.textContent = textEl.textContent + " · 当前批注位于筛选外";
+        }
+      } catch (_) {}
+    }
     try {
+      const reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
       requestAnimationFrame(() => {
-        try { scrollSupervisionPetIntoView(); } catch (_) {}
+        try { scrollSupervisionPetIntoView(reduce ? "auto" : "smooth"); } catch (_) {}
       });
     } catch (_) {
       try { scrollSupervisionPetIntoView(); } catch (_) {}
@@ -14093,6 +14127,7 @@ window.__mdAnnotator = {
   setActiveCommentCard: (tid) => setActiveCommentCard(tid),
   activateAnnotationThread: (tid, opts) => activateAnnotationThread(tid, opts),
   activateAndRevealThread: (tid, opts) => activateAndRevealThread(tid, opts),
+  revealSupervisionThread: (tid) => revealSupervisionThread(tid),
   invokeAiForThread: (tid) => invokeAiForThread(tid),
   annotationWarningState: (thread) => annotationWarningState(thread),
   ensureCommentCardVisible: (tid) => ensureCommentCardVisible(tid),

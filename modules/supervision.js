@@ -310,12 +310,22 @@ export function createSupervisionPetElement(opts = {}) {
   const el = document.createElement("span");
   el.className = `supervision-pet is-${phase}`;
   el.setAttribute("contenteditable", "false");
-  el.setAttribute("aria-hidden", "true");
+  el.setAttribute("role", "status");
   if (threadId) el.setAttribute("data-thread-id", String(threadId));
-  el.title = phase === "working" ? "AI 正在改这里" : "AI 监管中";
+  el.setAttribute("data-phase", phase);
+  const label =
+    phase === "waiting" ? "等待中" : phase === "degraded" ? "未定位" : "改这里";
+  const aria =
+    phase === "waiting"
+      ? "AI 监管等待中"
+      : phase === "degraded"
+        ? "AI 监管中但未定位到批注"
+        : "AI 正在处理这条批注";
+  el.setAttribute("aria-label", aria);
+  el.title = aria;
   el.innerHTML =
     '<span class="supervision-pet-body" aria-hidden="true">' +
-    '<svg viewBox="0 0 32 28" width="22" height="19" xmlns="http://www.w3.org/2000/svg">' +
+    '<svg viewBox="0 0 32 28" width="22" height="19" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">' +
     '<ellipse cx="16" cy="16" rx="12" ry="10" fill="#7dd3fc"/>' +
     '<circle cx="11" cy="14" r="4" fill="#0c4a6e"/>' +
     '<circle cx="21" cy="14" r="4" fill="#0c4a6e"/>' +
@@ -325,7 +335,7 @@ export function createSupervisionPetElement(opts = {}) {
     '<path d="M7 8 Q11 2 14 9" fill="#38bdf8"/>' +
     '<path d="M25 8 Q21 2 18 9" fill="#38bdf8"/>' +
     "</svg>" +
-    '<span class="supervision-pet-label">改这里</span>' +
+    `<span class="supervision-pet-label">${label}</span>` +
     "</span>";
   return el;
 }
@@ -381,7 +391,7 @@ export function buildSupervisionDecos(doc, lockedRanges, lockMode, currentRange,
           side: -1,
           ignoreSelection: true,
           stopEvent: () => true,
-          key: `supervision-pet-${currentThreadId}`,
+          key: `supervision-pet-${currentThreadId}-${phase || "working"}`,
         }
       )
     );
