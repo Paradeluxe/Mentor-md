@@ -112,6 +112,107 @@ def resolve_local_mentor_path(handler, params, require_exists=True):
     return mentor_path, None
 
 
+def _unique_string_list(value):
+    out = []
+    seen = set()
+    if not isinstance(value, list):
+        return out
+    for item in value:
+        s = '' if item is None else str(item).strip()
+        if not s or s in seen:
+            continue
+        seen.add(s)
+        out.append(s)
+    return out
+
+
+def inactive_supervision_payload(health='missing', error=''):
+    """Stable inactive /supervision snapshot (no path leaks)."""
+    payload = {
+        'ok': True,
+        'v': 1,
+        'active': False,
+        'health': health,
+        'pendingThreadIds': [],
+        'processedThreadIds': [],
+        'currentThreadId': '',
+    }
+    if error:
+        payload['error'] = error
+    return payload
+
+
+def read_supervision_snapshot(sidecar_path):
+    """Read sidecar into a whitelist-only snapshot for GET /supervision."""
+    if not os.path.isfile(sidecar_path):
+        return inactive_supervision_payload('missing')
+    try:
+        with open(sidecar_path, 'r', encoding='utf-8') as f:
+            raw = json.load(f)
+    except Exception:
+        return inactive_supervision_payload('unreadable', 'invalid-json')
+    if not isinstance(raw, dict):
+        return inactive_supervision_payload('unreadable', 'invalid-shape')
+
+    try:
+        version = int(raw.get('v', 1))
+    except (TypeError, ValueError):
+        version = 1
+    if version != 1:
+        return inactive_supervision_payload('unsupported', 'unsupported-version')
+
+    active = raw.get('active') is True or raw.get('active') == 1 or raw.get('active') == 'true'
+    pending = _unique_string_list(raw.get('pendingThreadIds') or raw.get('pending') or [])
+    processed = _unique_string_list(raw.get('processedThreadIds') or raw.get('processed') or [])
+    current = ''
+    if active:
+        current = str(
+            raw.get('currentThreadId') or raw.get('current') or raw.get('workingThreadId') or ''
+        ).strip()
+    requested_phase = str(raw.get('phase') or '').strip()
+    if not active:
+        phase = 'idle'
+    elif requested_phase in ('waiting', 'working'):
+        phase = requested_phase
+    else:
+        phase = 'working' if current else 'waiting'
+    health = raw.get('health') if raw.get('health') in ('ok', 'stale', 'degraded') else 'ok'
+    lock_mode = 'document' if raw.get('lockMode') == 'document' else 'pending-paragraphs'
+
+    payload = {
+        'ok': True,
+        'v': 1,
+        'active': bool(active),
+        'health': health if active else ('ok' if health == 'ok' else health),
+        'lockMode': lock_mode,
+        'pendingThreadIds': pending,
+        'processedThreadIds': processed,
+        'currentThreadId': current if active else '',
+        'phase': phase,
+        'message': str(raw.get('message') or ''),
+        'tool': str(raw.get('tool') or raw.get('source') or ''),
+        'startedAt': str(raw.get('startedAt') or ''),
+        'updatedAt': str(raw.get('updatedAt') or raw.get('startedAt') or ''),
+    }
+    if not active:
+        # Inactive snapshot keeps a compact stable shape for clients.
+        compact = inactive_supervision_payload('ok' if raw.get('active') is False else 'ok')
+        compact['message'] = payload['message']
+        compact['tool'] = payload['tool']
+        return compact
+    err = str(raw.get('error') or '')
+    if err:
+        # Fixed codes only — never echo free-form exception text from disk.
+        if err in ('invalid-json', 'invalid-shape', 'unreadable', 'poll-failed', 'unsupported-version'):
+            payload['error'] = err
+    try:
+        st = os.stat(sidecar_path)
+        payload['sidecarMtimeMs'] = st.st_mtime_ns // 1_000_000
+    except OSError:
+        pass
+    return payload
+
+
 class MentorHandler(http.server.SimpleHTTPRequestHandler):
     def log_message(self, fmt, *args):
         pass
@@ -196,6 +297,26 @@ class MentorHandler(http.server.SimpleHTTPRequestHandler):
                 'revision': f'{st.st_mtime_ns}:{st.st_size}',
             })
             return
+        # fix-mentor supervision sidecar: <path.mentor>.supervision.json
+        if self.path.startswith('/supervision'):
+            parsed = urllib.parse.urlparse(self.path)
+            params = urllib.parse.parse_qs(parsed.query)
+            # Sidecar may be absent while mentor exists — do not require mentor file.
+            mentor_path, err = resolve_local_mentor_path(self, params, require_exists=False)
+            if err:
+                code, message, as_json = err
+                if as_json or code in (400, 403, 404):
+                    # Fixed error codes only — never echo absolute paths.
+                    err_code = 'not-found' if message == 'not-found' else (
+                        'bad-token' if code == 403 else 'bad-request'
+                    )
+                    self._send_json(code, {'ok': False, 'active': False, 'error': err_code})
+                else:
+                    self.send_error(code, message)
+                return
+            side = mentor_path + '.supervision.json'
+            self._send_json(200, read_supervision_snapshot(side))
+            return
         if self.path.startswith('/session'):
             if not request_is_local(self):
                 self.send_error(403, 'Local only')
@@ -203,6 +324,7 @@ class MentorHandler(http.server.SimpleHTTPRequestHandler):
             self._send_json(200, {'ok': True, 'token': SESSION_TOKEN})
             return
         super().do_GET()
+
 
 
 def start_server(port, open_url=None):
