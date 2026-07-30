@@ -57034,6 +57034,283 @@ function buildSaveResultCopy({ kind, fileName } = {}) {
   return { status: "\u5DF2\u5B8C\u6210", detail: "", clearsDirty: false };
 }
 
+// modules/external-change-watcher.js
+function createExternalChangeWatcher({
+  handle,
+  onHint,
+  FileSystemObserver = globalThis.FileSystemObserver,
+  pollMs = 2e3,
+  debounceMs = 180,
+  now = () => Date.now(),
+  setIntervalFn = setInterval,
+  clearIntervalFn = clearInterval,
+  setTimeoutFn = setTimeout,
+  clearTimeoutFn = clearTimeout
+}) {
+  let stopped = true;
+  let mode = "off";
+  let baselineMtime = 0;
+  let writeQuietUntil = 0;
+  let pollTimer = null;
+  let debounceTimer = null;
+  let observer = null;
+  let queuedCause = null;
+  async function probe(cause) {
+    if (stopped || now() < writeQuietUntil) return;
+    let file;
+    try {
+      file = await handle.getFile();
+    } catch (error) {
+      onHint({ cause: "unreadable", error });
+      return;
+    }
+    const mtime = Number(file.lastModified || 0);
+    if (mtime > baselineMtime) {
+      baselineMtime = mtime;
+      onHint({ cause, mtime });
+    }
+  }
+  function queueHint(cause) {
+    if (stopped || now() < writeQuietUntil) return;
+    queuedCause = queuedCause || cause;
+    if (debounceTimer) return;
+    debounceTimer = setTimeoutFn(async () => {
+      debounceTimer = null;
+      const nextCause = queuedCause;
+      queuedCause = null;
+      await probe(nextCause);
+    }, debounceMs);
+  }
+  async function start() {
+    stopped = false;
+    try {
+      baselineMtime = Number((await handle.getFile()).lastModified || 0);
+    } catch (_) {
+    }
+    if (typeof FileSystemObserver === "function") {
+      try {
+        observer = new FileSystemObserver(() => queueHint("observer"));
+        await observer.observe(handle);
+        mode = "observer";
+        return mode;
+      } catch (_) {
+        try {
+          observer?.disconnect();
+        } catch (_2) {
+        }
+        observer = null;
+      }
+    }
+    pollTimer = setIntervalFn(() => queueHint("mtime"), pollMs);
+    mode = "handle-poll";
+    return mode;
+  }
+  function stop() {
+    stopped = true;
+    mode = "off";
+    queuedCause = null;
+    if (debounceTimer) {
+      try {
+        clearTimeoutFn(debounceTimer);
+      } catch (_) {
+      }
+      debounceTimer = null;
+    }
+    if (pollTimer) {
+      try {
+        clearIntervalFn(pollTimer);
+      } catch (_) {
+      }
+      pollTimer = null;
+    }
+    if (observer) {
+      try {
+        observer.disconnect();
+      } catch (_) {
+      }
+      observer = null;
+    }
+  }
+  function noteOwnWrite(mtimeOrOpts, quietMs = 1500) {
+    let mtime = mtimeOrOpts;
+    let quiet = quietMs;
+    if (mtimeOrOpts && typeof mtimeOrOpts === "object") {
+      mtime = mtimeOrOpts.mtime;
+      quiet = mtimeOrOpts.quietMs != null ? mtimeOrOpts.quietMs : 1500;
+    }
+    const next2 = Number(mtime || 0);
+    if (next2 > baselineMtime) baselineMtime = next2;
+    writeQuietUntil = now() + Math.max(0, Number(quiet) || 0);
+  }
+  function modeName() {
+    return mode;
+  }
+  return {
+    start,
+    stop,
+    noteOwnWrite,
+    mode: modeName,
+    probe: () => probe("manual")
+  };
+}
+
+// modules/external-revision-watcher.js
+function createExternalRevisionWatcher({
+  path: path2,
+  getToken,
+  fetchImpl = globalThis.fetch,
+  onHint,
+  pollMs = 2e3,
+  debounceMs = 180,
+  now = () => Date.now(),
+  setIntervalFn = setInterval,
+  clearIntervalFn = clearInterval,
+  setTimeoutFn = setTimeout,
+  clearTimeoutFn = clearTimeout
+}) {
+  let stopped = true;
+  let mode = "off";
+  let baselineRevision = "";
+  let writeQuietUntil = 0;
+  let pollTimer = null;
+  let debounceTimer = null;
+  let queuedCause = null;
+  let probing = false;
+  function revisionUrl() {
+    const token = typeof getToken === "function" ? getToken() : "";
+    const qs = new URLSearchParams({
+      path: String(path2 || ""),
+      token: String(token || "")
+    });
+    return `/revision?${qs.toString()}`;
+  }
+  async function probe(cause) {
+    if (stopped || now() < writeQuietUntil || probing) return;
+    probing = true;
+    try {
+      let res;
+      try {
+        res = await fetchImpl(revisionUrl(), { cache: "no-store" });
+      } catch (error) {
+        onHint({ cause: "unreadable", error });
+        return;
+      }
+      if (!res || res.status === 403 || res.status === 404 || res.status >= 400) {
+        onHint({
+          cause: "unreadable",
+          error: new Error(`revision HTTP ${res ? res.status : "no-response"}`),
+          status: res ? res.status : 0
+        });
+        return;
+      }
+      let body;
+      try {
+        body = await res.json();
+      } catch (error) {
+        onHint({ cause: "unreadable", error });
+        return;
+      }
+      if (!body || body.ok !== true || !body.revision) {
+        onHint({ cause: "unreadable", error: new Error("invalid revision payload") });
+        return;
+      }
+      const revision = String(body.revision);
+      const mtime = Number(body.mtimeMs || 0);
+      if (!baselineRevision) {
+        baselineRevision = revision;
+        return;
+      }
+      if (revision !== baselineRevision) {
+        baselineRevision = revision;
+        onHint({
+          cause,
+          mtime,
+          size: Number(body.size || 0),
+          revision
+        });
+      }
+    } finally {
+      probing = false;
+    }
+  }
+  function queueHint(cause) {
+    if (stopped || now() < writeQuietUntil) return;
+    queuedCause = queuedCause || cause;
+    if (debounceTimer) return;
+    debounceTimer = setTimeoutFn(async () => {
+      debounceTimer = null;
+      const nextCause = queuedCause;
+      queuedCause = null;
+      await probe(nextCause);
+    }, debounceMs);
+  }
+  async function start() {
+    stopped = false;
+    mode = "server-poll";
+    await probe("baseline");
+    pollTimer = setIntervalFn(() => queueHint("revision"), pollMs);
+    return mode;
+  }
+  function stop() {
+    stopped = true;
+    mode = "off";
+    queuedCause = null;
+    if (debounceTimer) {
+      try {
+        clearTimeoutFn(debounceTimer);
+      } catch (_) {
+      }
+      debounceTimer = null;
+    }
+    if (pollTimer) {
+      try {
+        clearIntervalFn(pollTimer);
+      } catch (_) {
+      }
+      pollTimer = null;
+    }
+  }
+  function noteOwnWrite(mtimeOrOpts, quietMs = 1500, revision = "") {
+    let quiet = quietMs;
+    let rev = revision;
+    if (mtimeOrOpts && typeof mtimeOrOpts === "object") {
+      quiet = mtimeOrOpts.quietMs != null ? mtimeOrOpts.quietMs : 1500;
+      rev = mtimeOrOpts.revision || "";
+    } else if (arguments.length >= 3) {
+      rev = revision;
+    }
+    if (rev) baselineRevision = String(rev);
+    writeQuietUntil = now() + Math.max(0, Number(quiet) || 0);
+  }
+  function modeName() {
+    return mode;
+  }
+  return {
+    start,
+    stop,
+    noteOwnWrite,
+    mode: modeName,
+    probe: () => probe("manual")
+  };
+}
+
+// modules/external-change-reconcile.js
+function decideExternalRefresh({
+  dirty,
+  sameFingerprint,
+  unreadable,
+  isOwner = true,
+  hasSource = true,
+  isCurrentGeneration = true
+}) {
+  if (!isOwner || !hasSource || !isCurrentGeneration || sameFingerprint) {
+    return { action: "ignore", pauseAutosave: false };
+  }
+  if (unreadable) return { action: "unreadable", pauseAutosave: true };
+  if (dirty) return { action: "prompt", pauseAutosave: true };
+  return { action: "reload", pauseAutosave: false };
+}
+
 // app.js
 var KatexInline = Node2.create({
   name: "katex",
@@ -57599,6 +57876,23 @@ var State2 = {
   activeTabId: null,
   // 磁盘路径提示 (来自 ?open= 或 handle 名)。v1.45.6: 取消「受保护文档」写盘拦截。
   diskPathHint: "",
+  // Runtime-only deep-link watch capability (never persisted / never left in URL).
+  externalWatchPath: "",
+  externalWatchToken: "",
+  externalWatch: {
+    mode: "off",
+    generation: 0,
+    lastMtime: 0,
+    lastRevision: "",
+    lastFingerprint: "",
+    writeQuietUntil: 0,
+    pending: null,
+    resolving: false,
+    watcher: null,
+    debounceTimer: null,
+    retryTimer: null,
+    autosavePausedForExternal: false
+  },
   // outline pane tab: 'headings' | 'images'
   outlineTab: "headings",
   // session-only feedback for card → body citation cycle navigation
@@ -59835,6 +60129,10 @@ async function writeCurrentToHandle({ reason = "manual", showProgress = false, f
     try {
       const newFile = await handle.getFile();
       State2.fileMtime = newFile.lastModified;
+      try {
+        noteExternalOwnWrite(newFile.lastModified);
+      } catch (_) {
+      }
     } catch {
     }
     if ((State2.currentFile.dirtyGen || 0) === snapshot.dirtyGen) {
@@ -64772,6 +65070,10 @@ function loadMarkdownIntoEditor(name, content, annotationsData = null, options =
   if (State2.currentFile && State2.currentFile.handle && typeof State2.currentFile.handle.getFile === "function") {
     State2.currentFile.handle.getFile().then((f) => {
       State2.fileMtime = f.lastModified;
+      try {
+        if (State2.externalWatch) State2.externalWatch.lastMtime = f.lastModified || 0;
+      } catch (_) {
+      }
     }).catch(() => {
     });
   } else {
@@ -64780,6 +65082,11 @@ function loadMarkdownIntoEditor(name, content, annotationsData = null, options =
   if (!State2.activeTabId) State2.activeTabId = genTabId2();
   snapshotActiveTab();
   renderDocTabs();
+  try {
+    if (canWriteLiveDocument()) startExternalWatchForCurrentDocument();
+  } catch (e) {
+    console.warn("[external-watch] start after load failed", e);
+  }
 }
 function findAnnotationRange(doc5, annotation) {
   _anchorResolveCallCount++;
@@ -65321,6 +65628,7 @@ async function openFromHandle(fileHandle, sidecarHandle = null, options = {}) {
   }
 }
 async function openFromMentorHandle(fileHandle, options = {}) {
+  clearExternalWatchSource();
   const quiet = !!(options && options.quiet);
   const preferDraft = !!(options && options.preferDraft);
   const forceDisk = !!(options && options.forceDisk);
@@ -65433,6 +65741,321 @@ function renderLiveSyncBanner() {
   const button = el.querySelector('[data-act="live-sync-takeover"]');
   if (button) button.hidden = _liveSync.role !== "follower";
 }
+function clearExternalWatchSource() {
+  State2.externalWatchPath = "";
+  State2.externalWatchToken = "";
+}
+function getExternalWatchState() {
+  const watch = State2.externalWatch || {};
+  return {
+    mode: watch.mode || "off",
+    generation: watch.generation || 0,
+    pending: Boolean(watch.pending),
+    resolving: Boolean(watch.resolving),
+    lastMtime: watch.lastMtime || 0,
+    lastRevision: watch.lastRevision || "",
+    lastFingerprint: watch.lastFingerprint || "",
+    path: State2.externalWatchPath || "",
+    hasToken: Boolean(State2.externalWatchToken)
+  };
+}
+function stopExternalWatch() {
+  const watch = State2.externalWatch;
+  if (!watch) return;
+  watch.generation = (watch.generation || 0) + 1;
+  if (watch.debounceTimer) {
+    clearTimeout(watch.debounceTimer);
+    watch.debounceTimer = null;
+  }
+  if (watch.retryTimer) {
+    clearTimeout(watch.retryTimer);
+    watch.retryTimer = null;
+  }
+  try {
+    watch.watcher && watch.watcher.stop && watch.watcher.stop();
+  } catch (_) {
+  }
+  watch.watcher = null;
+  watch.mode = "off";
+  watch.pending = null;
+  watch.resolving = false;
+}
+async function startExternalWatchForCurrentDocument() {
+  stopExternalWatch();
+  if (!canWriteLiveDocument()) return;
+  if (!State2.currentFile) return;
+  const generation = State2.externalWatch.generation;
+  const handle = State2.currentFile && State2.currentFile.handle;
+  if (handle && typeof handle.getFile === "function") {
+    const watcher = createExternalChangeWatcher({
+      handle,
+      onHint: (hint) => scheduleExternalRefresh({ generation, hint })
+    });
+    State2.externalWatch.watcher = watcher;
+    State2.externalWatch.mode = await watcher.start();
+    return;
+  }
+  if (State2.externalWatchPath && State2.externalWatchToken) {
+    const watcher = createExternalRevisionWatcher({
+      path: State2.externalWatchPath,
+      getToken: () => State2.externalWatchToken,
+      fetchImpl: window.fetch.bind(window),
+      onHint: (hint) => scheduleExternalRefresh({ generation, hint })
+    });
+    State2.externalWatch.watcher = watcher;
+    State2.externalWatch.mode = await watcher.start();
+  }
+}
+function noteExternalOwnWrite(mtimeMs = 0, revision = "") {
+  const watch = State2.externalWatch;
+  if (!watch) return;
+  const quietMs = 2200;
+  watch.writeQuietUntil = Date.now() + quietMs;
+  if (mtimeMs) {
+    watch.lastMtime = mtimeMs;
+    State2.fileMtime = mtimeMs;
+  }
+  if (revision) watch.lastRevision = String(revision);
+  try {
+    if (watch.watcher && typeof watch.watcher.noteOwnWrite === "function") {
+      watch.watcher.noteOwnWrite({ mtime: mtimeMs || void 0, revision: revision || void 0, quietMs });
+    }
+  } catch (_) {
+  }
+}
+async function bytesToHex2(buffer) {
+  const bytes = new Uint8Array(buffer);
+  let out = "";
+  for (let i = 0; i < bytes.length; i++) out += bytes[i].toString(16).padStart(2, "0");
+  return out;
+}
+async function sha256Hex2(text2) {
+  const data = new TextEncoder().encode(String(text2 || ""));
+  if (globalThis.crypto && crypto.subtle && typeof crypto.subtle.digest === "function") {
+    const dig = await crypto.subtle.digest("SHA-256", data);
+    return bytesToHex2(dig);
+  }
+  let h = 2166136261;
+  for (let i = 0; i < data.length; i++) {
+    h ^= data[i];
+    h = Math.imul(h, 16777619);
+  }
+  return ("00000000" + (h >>> 0).toString(16)).slice(-8);
+}
+async function externalArchiveFingerprint(archive) {
+  const media = archive && archive.mediaFiles ? archive.mediaFiles : {};
+  const mediaNames = Object.keys(media).sort();
+  const mediaParts = [];
+  for (const name of mediaNames) {
+    const blob = media[name];
+    let digest = name + ":" + (blob && blob.size || 0) + ":" + (blob && blob.type || "");
+    try {
+      if (blob && typeof blob.arrayBuffer === "function") {
+        const buf = await blob.arrayBuffer();
+        if (globalThis.crypto && crypto.subtle && typeof crypto.subtle.digest === "function") {
+          digest = name + ":" + await bytesToHex2(await crypto.subtle.digest("SHA-256", buf));
+        } else {
+          digest = name + ":" + await bytesToHex2(buf.slice(0, Math.min(buf.byteLength, 64)));
+        }
+      }
+    } catch (_) {
+    }
+    mediaParts.push(digest);
+  }
+  const payload = JSON.stringify({
+    mdText: archive && archive.mdText || "",
+    annotations: archive && archive.annotations || null,
+    references: archive && archive.references || null,
+    structuralHtml: archive && archive.archive && archive.archive.documentHtml || "",
+    verification: archive && archive.archive && archive.archive.verification || null,
+    media: mediaParts
+  });
+  return sha256Hex2(payload);
+}
+async function fetchExternalMentorFile(path2, token) {
+  if (!path2 || !token) throw new Error("missing external mentor source");
+  const url = location.origin + "/open?path=" + encodeURIComponent(path2) + "&token=" + encodeURIComponent(token);
+  const r = await fetch(url, { cache: "no-store" });
+  if (!r.ok) throw new Error("external open failed HTTP " + r.status);
+  const blob = await r.blob();
+  const baseName = String(path2).split("\\").pop().split("/").pop() || "open.mentor";
+  return new File([blob], baseName, {
+    type: "application/zip",
+    lastModified: Date.now()
+  });
+}
+function scheduleExternalRefresh({ generation, hint } = {}) {
+  const watch = State2.externalWatch;
+  if (!watch) return;
+  if (generation != null && generation !== watch.generation) return;
+  if (watch.resolving) return;
+  if (Date.now() < (watch.writeQuietUntil || 0)) return;
+  watch.pending = {
+    detectedAt: Date.now(),
+    mtime: hint && hint.mtime || 0,
+    revision: hint && hint.revision || "",
+    cause: hint && hint.cause || "unknown"
+  };
+  if (watch.debounceTimer) return;
+  watch.debounceTimer = setTimeout(() => {
+    watch.debounceTimer = null;
+    refreshFromExternalDisk({ generation: watch.generation }).catch((e) => {
+      console.warn("[external-watch] refresh failed", e);
+    });
+  }, 180);
+}
+function pauseAutosaveForExternalConflict(pause) {
+  const watch = State2.externalWatch;
+  if (!watch) return;
+  watch.autosavePausedForExternal = !!pause;
+  try {
+    if (pause) stopAutosaveTimer();
+    else if (canWriteLiveDocument()) startAutosaveTimer();
+  } catch (_) {
+  }
+}
+function showExternalUnreadableState() {
+  try {
+    showToast("\u78C1\u76D8\u6587\u4EF6\u6682\u65F6\u65E0\u6CD5\u8BFB\u53D6\uFF0C\u5C06\u4FDD\u6301\u672C\u5730\u5185\u5BB9", 3200);
+  } catch (_) {
+  }
+}
+async function openExternalConflictDialog({ generation, file, archive, fingerprint }) {
+  pauseAutosaveForExternalConflict(true);
+  const choice = window.confirm(
+    "\u78C1\u76D8\u4E0A\u7684 .mentor \u5DF2\u88AB\u5916\u90E8\u7A0B\u5E8F\u4FEE\u6539\uFF0C\u4E14\u672C\u5730\u6709\u672A\u4FDD\u5B58\u4FEE\u6539\u3002\n\n\u786E\u5B9A = \u91C7\u7528\u78C1\u76D8\u7248\u672C\uFF08\u4E22\u5F03\u672C\u5730\u672A\u4FDD\u5B58\u4FEE\u6539\uFF09\n\u53D6\u6D88 = \u4FDD\u7559\u672C\u5730\u7F16\u8F91"
+  );
+  const watch = State2.externalWatch;
+  if (!watch || generation !== watch.generation) {
+    pauseAutosaveForExternalConflict(false);
+    return;
+  }
+  if (choice) {
+    await applyExternalArchiveReload({ generation, file, archive, fingerprint });
+  } else {
+    if (file && file.lastModified) watch.lastMtime = file.lastModified;
+    if (fingerprint) watch.lastFingerprint = fingerprint;
+    if (watch.pending && watch.pending.revision) watch.lastRevision = watch.pending.revision;
+    watch.pending = null;
+  }
+  pauseAutosaveForExternalConflict(false);
+}
+async function applyExternalArchiveReload({ generation, file, archive, fingerprint }) {
+  const watch = State2.externalWatch;
+  if (!watch || generation !== watch.generation) return;
+  if (!canWriteLiveDocument()) return;
+  const handle = State2.currentFile && State2.currentFile.handle || null;
+  const documentId = State2.currentFile && State2.currentFile.documentId || null;
+  const pendingRevision = watch.pending && watch.pending.revision || "";
+  await activateOpenedDocument({
+    name: file && file.name || State2.currentFile && State2.currentFile.name || "open.mentor",
+    content: archive.mdText,
+    annotations: archive.annotations,
+    references: archive.references,
+    mediaFiles: archive.mediaFiles,
+    handle: handle || null,
+    saveMode: handle ? "mentor-handle" : "mentor-download",
+    structuralHtml: archive.archive && archive.archive.documentHtml || null,
+    archiveVerification: archive.archive && archive.archive.verification || null,
+    documentId,
+    diskMtime: file && file.lastModified || Date.now(),
+    forceDisk: true,
+    preferDraft: false,
+    quiet: true
+  });
+  const live = State2.externalWatch;
+  live.lastMtime = file && file.lastModified || live.lastMtime || 0;
+  live.lastFingerprint = fingerprint || "";
+  if (pendingRevision) live.lastRevision = pendingRevision;
+  State2.fileMtime = live.lastMtime || State2.fileMtime;
+  live.pending = null;
+  try {
+    if (live.watcher && typeof live.watcher.noteOwnWrite === "function") {
+      live.watcher.noteOwnWrite({ mtime: live.lastMtime, revision: live.lastRevision, quietMs: 500 });
+    }
+  } catch (_) {
+  }
+  if (canWriteLiveDocument()) {
+    try {
+      scheduleLiveSyncPublish({ full: true });
+    } catch (_) {
+    }
+  }
+  try {
+    showToast("\u5DF2\u4ECE\u78C1\u76D8\u5237\u65B0\u5916\u90E8\u4FEE\u6539", 2800);
+  } catch (_) {
+  }
+}
+async function refreshFromExternalDisk({ generation, interactive = false } = {}) {
+  const watch = State2.externalWatch;
+  if (!watch) return;
+  const handle = State2.currentFile && State2.currentFile.handle;
+  const path2 = State2.externalWatchPath;
+  if (generation != null && generation !== watch.generation) return;
+  if ((!handle || typeof handle.getFile !== "function") && !path2) return;
+  if (watch.resolving) return;
+  if (Date.now() < (watch.writeQuietUntil || 0) && !interactive) return;
+  watch.resolving = true;
+  try {
+    let file = null;
+    try {
+      file = handle && typeof handle.getFile === "function" ? await handle.getFile() : await fetchExternalMentorFile(path2, State2.externalWatchToken);
+    } catch (err) {
+      const decision2 = decideExternalRefresh({
+        dirty: Boolean(State2.currentFile && State2.currentFile.dirty),
+        sameFingerprint: false,
+        unreadable: true,
+        isOwner: canWriteLiveDocument(),
+        hasSource: Boolean(handle || path2),
+        isCurrentGeneration: generation === watch.generation
+      });
+      if (decision2.action === "unreadable") showExternalUnreadableState();
+      return;
+    }
+    const archive = await readMentorZip(file);
+    const fingerprint = await externalArchiveFingerprint(archive);
+    const decision = decideExternalRefresh({
+      dirty: Boolean(State2.currentFile && State2.currentFile.dirty),
+      sameFingerprint: fingerprint === watch.lastFingerprint,
+      unreadable: false,
+      isOwner: canWriteLiveDocument(),
+      hasSource: Boolean(handle || path2),
+      isCurrentGeneration: generation === watch.generation
+    });
+    if (decision.action === "reload") {
+      await applyExternalArchiveReload({ generation, file, archive, fingerprint });
+    } else if (decision.action === "prompt") {
+      await openExternalConflictDialog({ generation, file, archive, fingerprint });
+    } else if (decision.action === "unreadable") {
+      showExternalUnreadableState();
+    } else {
+      if (file && file.lastModified) watch.lastMtime = file.lastModified;
+      if (watch.pending && watch.pending.revision) watch.lastRevision = watch.pending.revision;
+      watch.pending = null;
+    }
+  } catch (error) {
+    console.warn("[external-watch] refresh error", error);
+    if (!watch.retryTimer) {
+      watch.retryTimer = setTimeout(() => {
+        watch.retryTimer = null;
+        refreshFromExternalDisk({ generation: watch.generation }).catch(() => {
+        });
+      }, 800);
+    }
+  } finally {
+    if (generation == null || generation === watch.generation) watch.resolving = false;
+  }
+}
+async function flushExternalRefreshForTest() {
+  const watch = State2.externalWatch;
+  if (!watch) return false;
+  if (watch.debounceTimer) {
+    clearTimeout(watch.debounceTimer);
+    watch.debounceTimer = null;
+  }
+  await refreshFromExternalDisk({ generation: watch.generation, interactive: true });
+  return true;
+}
 function setLiveRole(role) {
   const prev = _liveSync.role;
   _liveSync.role = role;
@@ -65456,10 +66079,19 @@ function setLiveRole(role) {
       startAutosaveTimer();
     } catch {
     }
+    try {
+      startExternalWatchForCurrentDocument();
+    } catch (e) {
+      console.warn("[external-watch] start on owner role failed", e);
+    }
   } else if (role === "follower") {
     try {
       stopAutosaveTimer();
     } catch {
+    }
+    try {
+      stopExternalWatch();
+    } catch (_) {
     }
   }
 }
@@ -65725,6 +66357,10 @@ function closeLiveSync() {
   _docChannelPath = null;
   _docPeers.clear();
   State2.readOnlyMode = false;
+  try {
+    stopExternalWatch();
+  } catch (_) {
+  }
   if (State2.editor) {
     try {
       if (State2.editor.isEditable !== true) {
@@ -69448,6 +70084,8 @@ async function _handleUrlOpen() {
       }
       if (typeof openFromMentorFile === "function" && State2.editor) {
         State2.diskPathHint = openPath;
+        State2.externalWatchPath = openPath;
+        State2.externalWatchToken = token || "";
         await openFromMentorFile(file);
         opened = true;
         showToast("\u5DF2\u6253\u5F00 " + baseName, 2500);
@@ -69675,6 +70313,12 @@ window.__mdAnnotator = {
     peers: typeof _liveSync !== "undefined" && _liveSync.lease.ownerId && _liveSync.lease.ownerId !== _instanceId ? [_liveSync.lease.ownerId] : [],
     live: typeof getLiveSyncState === "function" ? getLiveSyncState() : null
   }),
+  getExternalWatchState,
+  flushExternalRefreshForTest,
+  startExternalWatchForCurrentDocument,
+  stopExternalWatch,
+  scheduleExternalRefresh,
+  noteExternalOwnWrite,
   getLiveSyncState,
   takeOverLiveEditing,
   openLiveSyncForCurrentDocument,

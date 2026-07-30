@@ -109,10 +109,16 @@ export function createExternalChangeWatcher({
     }
   }
 
-  function noteOwnWrite(mtime, quietMs = 1500) {
+  function noteOwnWrite(mtimeOrOpts, quietMs = 1500) {
+    let mtime = mtimeOrOpts;
+    let quiet = quietMs;
+    if (mtimeOrOpts && typeof mtimeOrOpts === 'object') {
+      mtime = mtimeOrOpts.mtime;
+      quiet = mtimeOrOpts.quietMs != null ? mtimeOrOpts.quietMs : 1500;
+    }
     const next = Number(mtime || 0);
     if (next > baselineMtime) baselineMtime = next;
-    writeQuietUntil = now() + Math.max(0, Number(quietMs) || 0);
+    writeQuietUntil = now() + Math.max(0, Number(quiet) || 0);
   }
 
   function modeName() {

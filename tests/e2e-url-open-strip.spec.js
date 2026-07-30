@@ -19,7 +19,7 @@ function get(url) {
   const sess = JSON.parse((await get(base + '/session')).body);
   if (!sess.token) throw new Error('no session token');
 
-  const mentorPath = path.resolve(__dirname, '..', 'example.mentor');
+  const mentorPath = path.resolve(__dirname, 'fixtures', 'sample.mentor');
   if (!fs.existsSync(mentorPath)) throw new Error('missing example.mentor');
 
   const browser = await chromium.launch({ headless: true });
@@ -46,6 +46,11 @@ function get(url) {
     const M = window.__mdAnnotator;
     return M && M.State && M.State.currentFile && M.State.currentFile.name;
   });
+  await page.waitForTimeout(1200);
+  const watch1 = await page.evaluate(() => {
+    const M = window.__mdAnnotator;
+    return M && typeof M.getExternalWatchState === 'function' ? M.getExternalWatchState() : null;
+  });
 
   // Reload same (already-stripped) URL — must not toast 无法打开 sticky
   await page.reload({ waitUntil: 'networkidle', timeout: 60000 });
@@ -65,6 +70,8 @@ function get(url) {
   const fails = [];
   if (hasOpen1) fails.push('after success URL still has open= : ' + url1);
   if (!name1 || !/\.mentor$/i.test(name1)) fails.push('did not open mentor, name=' + name1);
+  if (!watch1 || watch1.mode !== 'server-poll') fails.push('expected server-poll after deep-link, got ' + JSON.stringify(watch1));
+  if (!watch1 || !watch1.hasToken) fails.push('expected in-memory token after strip, got ' + JSON.stringify(watch1));
   if (hasOpen2) fails.push('after reload still open= : ' + url2);
   if (hasOpen3) fails.push('after bad open still open= : ' + url3);
 
@@ -72,7 +79,7 @@ function get(url) {
     console.error('FAIL', fails);
     process.exit(1);
   }
-  console.log('url-open strip OK', { name1, url1, url2, url3 });
+  console.log('url-open strip OK', { name1, url1, url2, url3, watch1 });
   process.exit(0);
 })().catch((e) => {
   console.error(e);

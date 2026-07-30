@@ -126,9 +126,17 @@ export function createExternalRevisionWatcher({
     }
   }
 
-  function noteOwnWrite(mtime, quietMs = 1500, revision = '') {
-    if (revision) baselineRevision = String(revision);
-    writeQuietUntil = now() + Math.max(0, Number(quietMs) || 0);
+  function noteOwnWrite(mtimeOrOpts, quietMs = 1500, revision = '') {
+    let quiet = quietMs;
+    let rev = revision;
+    if (mtimeOrOpts && typeof mtimeOrOpts === 'object') {
+      quiet = mtimeOrOpts.quietMs != null ? mtimeOrOpts.quietMs : 1500;
+      rev = mtimeOrOpts.revision || '';
+    } else if (arguments.length >= 3) {
+      rev = revision;
+    }
+    if (rev) baselineRevision = String(rev);
+    writeQuietUntil = now() + Math.max(0, Number(quiet) || 0);
   }
 
   function modeName() {

@@ -296,6 +296,31 @@ async function openSharedPair(browser, docId, body) {
     await ctx.close();
   }
 
+
+  // --- External watch ownership (owner on, follower off) ---
+  {
+    const { ctx, owner, follower } = await openSharedPair(browser, 'live-ext-watch-doc', '# Watch\n');
+    await owner.evaluate(async () => {
+      const M = window.__mdAnnotator;
+      const blob = new Blob(['# Watch\n'], { type: 'text/markdown' });
+      const file = new File([blob], 'live-ext-watch-doc.md', { type: 'text/markdown', lastModified: Date.now() });
+      const handle = {
+        name: file.name,
+        kind: 'file',
+        async getFile() { return file; },
+      };
+      M.State.currentFile.handle = handle;
+      await M.startExternalWatchForCurrentDocument();
+    });
+    await owner.waitForTimeout(300);
+    const ownerMode = await owner.evaluate(() => window.__mdAnnotator.getExternalWatchState().mode);
+    const followerMode = await follower.evaluate(() => window.__mdAnnotator.getExternalWatchState().mode);
+    assert.notEqual(ownerMode, 'off', 'owner mode=' + ownerMode);
+    assert.equal(followerMode, 'off', 'follower mode=' + followerMode);
+    t('external watch: owner only');
+    await ctx.close();
+  }
+
   await browser.close();
   console.log('\n=== RESULT:', pass, 'pass / 0 fail ===');
 })().catch((e) => {

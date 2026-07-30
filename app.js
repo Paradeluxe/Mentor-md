@@ -132,6 +132,9 @@ import {
   buildSaveDialogModel,
   buildSaveResultCopy
 } from './modules/save-dialog.js';
+import { createExternalChangeWatcher } from './modules/external-change-watcher.js';
+import { createExternalRevisionWatcher } from './modules/external-revision-watcher.js';
+import { decideExternalRefresh } from './modules/external-change-reconcile.js';
 
 var KatexInline = Node.create({
   name: "katex",
@@ -686,6 +689,23 @@ var State = {
   activeTabId: null,
   // 磁盘路径提示 (来自 ?open= 或 handle 名)。v1.45.6: 取消「受保护文档」写盘拦截。
   diskPathHint: "",
+  // Runtime-only deep-link watch capability (never persisted / never left in URL).
+  externalWatchPath: "",
+  externalWatchToken: "",
+  externalWatch: {
+    mode: "off",
+    generation: 0,
+    lastMtime: 0,
+    lastRevision: "",
+    lastFingerprint: "",
+    writeQuietUntil: 0,
+    pending: null,
+    resolving: false,
+    watcher: null,
+    debounceTimer: null,
+    retryTimer: null,
+    autosavePausedForExternal: false,
+  },
   // outline pane tab: 'headings' | 'images'
   outlineTab: "headings",
   // session-only feedback for card → body citation cycle navigation
@@ -696,6 +716,7 @@ var State = {
     total: 0
   }
 };
+
 function mentorBaseName(nameOrPath) {
   if (!nameOrPath) return "";
   const s = String(nameOrPath);
@@ -3038,6 +3059,9 @@ async function writeCurrentToHandle({ reason = "manual", showProgress = false, f
     try {
       const newFile = await handle.getFile();
       State.fileMtime = newFile.lastModified;
+      try {
+        noteExternalOwnWrite(newFile.lastModified);
+      } catch (_) {}
     } catch {
     }
     if ((State.currentFile.dirtyGen || 0) === snapshot.dirtyGen) {
@@ -3066,7 +3090,7 @@ async function writeCurrentToHandle({ reason = "manual", showProgress = false, f
   try {
     await AnnotationStore.put(snapshot.name, snapshot.sidecar);
   } catch (e) {
-    console.warn("[save] IDB put \u5931\u8D25:", e);
+    console.warn("[save] IDB put 失败:", e);
   }
   // Align crash-recovery draft with what just hit disk (prevents stale draft fighting newer disk)
   try {
@@ -8157,6 +8181,9 @@ function loadMarkdownIntoEditor(name, content, annotationsData = null, options =
     if (State.currentFile && State.currentFile.handle && typeof State.currentFile.handle.getFile === "function") {
       State.currentFile.handle.getFile().then((f) => {
         State.fileMtime = f.lastModified;
+        try {
+          if (State.externalWatch) State.externalWatch.lastMtime = f.lastModified || 0;
+        } catch (_) {}
       }).catch(() => {
       });
     } else {
@@ -8166,7 +8193,15 @@ function loadMarkdownIntoEditor(name, content, annotationsData = null, options =
     // Snapshot AFTER handle/saveMode are on State so tab switch keeps write-back
     snapshotActiveTab();
     renderDocTabs();
+    try {
+      // Owner election may still be pending; startExternalWatchForCurrentDocument is also
+      // invoked from setLiveRole when ownership settles.
+      if (canWriteLiveDocument()) startExternalWatchForCurrentDocument();
+    } catch (e) {
+      console.warn("[external-watch] start after load failed", e);
+    }
 }
+
 function findAnnotationRange(doc5, annotation) {
   _anchorResolveCallCount++;
   if (!annotation) return null;
@@ -8719,6 +8754,7 @@ async function openFromHandle(fileHandle, sidecarHandle = null, options = {}) {
   }
 }
 async function openFromMentorHandle(fileHandle, options = {}) {
+  clearExternalWatchSource();
   const quiet = !!(options && options.quiet);
   const preferDraft = !!(options && options.preferDraft);
   const forceDisk = !!(options && options.forceDisk);
@@ -8843,6 +8879,327 @@ function renderLiveSyncBanner() {
   if (button) button.hidden = _liveSync.role !== "follower";
 }
 
+
+function clearExternalWatchSource() {
+  State.externalWatchPath = "";
+  State.externalWatchToken = "";
+}
+
+function getExternalWatchState() {
+  const watch = State.externalWatch || {};
+  return {
+    mode: watch.mode || "off",
+    generation: watch.generation || 0,
+    pending: Boolean(watch.pending),
+    resolving: Boolean(watch.resolving),
+    lastMtime: watch.lastMtime || 0,
+    lastRevision: watch.lastRevision || "",
+    lastFingerprint: watch.lastFingerprint || "",
+    path: State.externalWatchPath || "",
+    hasToken: Boolean(State.externalWatchToken),
+  };
+}
+
+function stopExternalWatch() {
+  const watch = State.externalWatch;
+  if (!watch) return;
+  watch.generation = (watch.generation || 0) + 1;
+  if (watch.debounceTimer) {
+    clearTimeout(watch.debounceTimer);
+    watch.debounceTimer = null;
+  }
+  if (watch.retryTimer) {
+    clearTimeout(watch.retryTimer);
+    watch.retryTimer = null;
+  }
+  try { watch.watcher && watch.watcher.stop && watch.watcher.stop(); } catch (_) {}
+  watch.watcher = null;
+  watch.mode = "off";
+  watch.pending = null;
+  watch.resolving = false;
+}
+
+async function startExternalWatchForCurrentDocument() {
+  stopExternalWatch();
+  if (!canWriteLiveDocument()) return;
+  if (!State.currentFile) return;
+  const generation = State.externalWatch.generation;
+  const handle = State.currentFile && State.currentFile.handle;
+  if (handle && typeof handle.getFile === "function") {
+    const watcher = createExternalChangeWatcher({
+      handle,
+      onHint: (hint) => scheduleExternalRefresh({ generation, hint }),
+    });
+    State.externalWatch.watcher = watcher;
+    State.externalWatch.mode = await watcher.start();
+    return;
+  }
+  if (State.externalWatchPath && State.externalWatchToken) {
+    const watcher = createExternalRevisionWatcher({
+      path: State.externalWatchPath,
+      getToken: () => State.externalWatchToken,
+      fetchImpl: window.fetch.bind(window),
+      onHint: (hint) => scheduleExternalRefresh({ generation, hint }),
+    });
+    State.externalWatch.watcher = watcher;
+    State.externalWatch.mode = await watcher.start();
+  }
+}
+
+function noteExternalOwnWrite(mtimeMs = 0, revision = "") {
+  const watch = State.externalWatch;
+  if (!watch) return;
+  const quietMs = 2200;
+  watch.writeQuietUntil = Date.now() + quietMs;
+  if (mtimeMs) {
+    watch.lastMtime = mtimeMs;
+    State.fileMtime = mtimeMs;
+  }
+  if (revision) watch.lastRevision = String(revision);
+  try {
+    if (watch.watcher && typeof watch.watcher.noteOwnWrite === "function") {
+      watch.watcher.noteOwnWrite({ mtime: mtimeMs || undefined, revision: revision || undefined, quietMs });
+    }
+  } catch (_) {}
+}
+
+async function bytesToHex(buffer) {
+  const bytes = new Uint8Array(buffer);
+  let out = "";
+  for (let i = 0; i < bytes.length; i++) out += bytes[i].toString(16).padStart(2, "0");
+  return out;
+}
+
+async function sha256Hex(text) {
+  const data = new TextEncoder().encode(String(text || ""));
+  if (globalThis.crypto && crypto.subtle && typeof crypto.subtle.digest === "function") {
+    const dig = await crypto.subtle.digest("SHA-256", data);
+    return bytesToHex(dig);
+  }
+  let h = 2166136261;
+  for (let i = 0; i < data.length; i++) {
+    h ^= data[i];
+    h = Math.imul(h, 16777619);
+  }
+  return ("00000000" + (h >>> 0).toString(16)).slice(-8);
+}
+
+async function externalArchiveFingerprint(archive) {
+  const media = archive && archive.mediaFiles ? archive.mediaFiles : {};
+  const mediaNames = Object.keys(media).sort();
+  const mediaParts = [];
+  for (const name of mediaNames) {
+    const blob = media[name];
+    let digest = name + ":" + (blob && blob.size || 0) + ":" + (blob && blob.type || "");
+    try {
+      if (blob && typeof blob.arrayBuffer === "function") {
+        const buf = await blob.arrayBuffer();
+        if (globalThis.crypto && crypto.subtle && typeof crypto.subtle.digest === "function") {
+          digest = name + ":" + await bytesToHex(await crypto.subtle.digest("SHA-256", buf));
+        } else {
+          digest = name + ":" + await bytesToHex(buf.slice(0, Math.min(buf.byteLength, 64)));
+        }
+      }
+    } catch (_) {}
+    mediaParts.push(digest);
+  }
+  const payload = JSON.stringify({
+    mdText: archive && archive.mdText || "",
+    annotations: archive && archive.annotations || null,
+    references: archive && archive.references || null,
+    structuralHtml: archive && archive.archive && archive.archive.documentHtml || "",
+    verification: archive && archive.archive && archive.archive.verification || null,
+    media: mediaParts,
+  });
+  return sha256Hex(payload);
+}
+
+async function fetchExternalMentorFile(path, token) {
+  if (!path || !token) throw new Error("missing external mentor source");
+  const url = location.origin + "/open?path=" + encodeURIComponent(path) + "&token=" + encodeURIComponent(token);
+  const r = await fetch(url, { cache: "no-store" });
+  if (!r.ok) throw new Error("external open failed HTTP " + r.status);
+  const blob = await r.blob();
+  const baseName = String(path).split("\\").pop().split("/").pop() || "open.mentor";
+  return new File([blob], baseName, {
+    type: "application/zip",
+    lastModified: Date.now(),
+  });
+}
+
+function scheduleExternalRefresh({ generation, hint } = {}) {
+  const watch = State.externalWatch;
+  if (!watch) return;
+  if (generation != null && generation !== watch.generation) return;
+  if (watch.resolving) return;
+  if (Date.now() < (watch.writeQuietUntil || 0)) return;
+  watch.pending = {
+    detectedAt: Date.now(),
+    mtime: hint && hint.mtime || 0,
+    revision: hint && hint.revision || "",
+    cause: hint && hint.cause || "unknown",
+  };
+  if (watch.debounceTimer) return;
+  watch.debounceTimer = setTimeout(() => {
+    watch.debounceTimer = null;
+    refreshFromExternalDisk({ generation: watch.generation }).catch((e) => {
+      console.warn("[external-watch] refresh failed", e);
+    });
+  }, 180);
+}
+
+function pauseAutosaveForExternalConflict(pause) {
+  const watch = State.externalWatch;
+  if (!watch) return;
+  watch.autosavePausedForExternal = !!pause;
+  try {
+    if (pause) stopAutosaveTimer();
+    else if (canWriteLiveDocument()) startAutosaveTimer();
+  } catch (_) {}
+}
+
+function showExternalUnreadableState() {
+  try {
+    showToast("磁盘文件暂时无法读取，将保持本地内容", 3200);
+  } catch (_) {}
+}
+
+async function openExternalConflictDialog({ generation, file, archive, fingerprint }) {
+  pauseAutosaveForExternalConflict(true);
+  const choice = window.confirm(
+    "磁盘上的 .mentor 已被外部程序修改，且本地有未保存修改。\n\n确定 = 采用磁盘版本（丢弃本地未保存修改）\n取消 = 保留本地编辑"
+  );
+  const watch = State.externalWatch;
+  if (!watch || generation !== watch.generation) {
+    pauseAutosaveForExternalConflict(false);
+    return;
+  }
+  if (choice) {
+    await applyExternalArchiveReload({ generation, file, archive, fingerprint });
+  } else {
+    if (file && file.lastModified) watch.lastMtime = file.lastModified;
+    if (fingerprint) watch.lastFingerprint = fingerprint;
+    if (watch.pending && watch.pending.revision) watch.lastRevision = watch.pending.revision;
+    watch.pending = null;
+  }
+  pauseAutosaveForExternalConflict(false);
+}
+
+async function applyExternalArchiveReload({ generation, file, archive, fingerprint }) {
+  const watch = State.externalWatch;
+  if (!watch || generation !== watch.generation) return;
+  if (!canWriteLiveDocument()) return;
+  const handle = State.currentFile && State.currentFile.handle || null;
+  const documentId = State.currentFile && State.currentFile.documentId || null;
+  const pendingRevision = watch.pending && watch.pending.revision || "";
+  await activateOpenedDocument({
+    name: file && file.name || (State.currentFile && State.currentFile.name) || "open.mentor",
+    content: archive.mdText,
+    annotations: archive.annotations,
+    references: archive.references,
+    mediaFiles: archive.mediaFiles,
+    handle: handle || null,
+    saveMode: handle ? "mentor-handle" : "mentor-download",
+    structuralHtml: archive.archive && archive.archive.documentHtml || null,
+    archiveVerification: archive.archive && archive.archive.verification || null,
+    documentId,
+    diskMtime: file && file.lastModified || Date.now(),
+    forceDisk: true,
+    preferDraft: false,
+    quiet: true,
+  });
+  // activateOpenedDocument restarts the watcher and bumps generation — rebaseline the live watch.
+  const live = State.externalWatch;
+  live.lastMtime = file && file.lastModified || live.lastMtime || 0;
+  live.lastFingerprint = fingerprint || "";
+  if (pendingRevision) live.lastRevision = pendingRevision;
+  State.fileMtime = live.lastMtime || State.fileMtime;
+  live.pending = null;
+  try {
+    if (live.watcher && typeof live.watcher.noteOwnWrite === "function") {
+      live.watcher.noteOwnWrite({ mtime: live.lastMtime, revision: live.lastRevision, quietMs: 500 });
+    }
+  } catch (_) {}
+  if (canWriteLiveDocument()) {
+    try { scheduleLiveSyncPublish({ full: true }); } catch (_) {}
+  }
+  try { showToast("已从磁盘刷新外部修改", 2800); } catch (_) {}
+}
+
+async function refreshFromExternalDisk({ generation, interactive = false } = {}) {
+  const watch = State.externalWatch;
+  if (!watch) return;
+  const handle = State.currentFile && State.currentFile.handle;
+  const path = State.externalWatchPath;
+  if (generation != null && generation !== watch.generation) return;
+  if ((!handle || typeof handle.getFile !== "function") && !path) return;
+  if (watch.resolving) return;
+  if (Date.now() < (watch.writeQuietUntil || 0) && !interactive) return;
+  watch.resolving = true;
+  try {
+    let file = null;
+    try {
+      file = handle && typeof handle.getFile === "function"
+        ? await handle.getFile()
+        : await fetchExternalMentorFile(path, State.externalWatchToken);
+    } catch (err) {
+      const decision = decideExternalRefresh({
+        dirty: Boolean(State.currentFile && State.currentFile.dirty),
+        sameFingerprint: false,
+        unreadable: true,
+        isOwner: canWriteLiveDocument(),
+        hasSource: Boolean(handle || path),
+        isCurrentGeneration: generation === watch.generation,
+      });
+      if (decision.action === "unreadable") showExternalUnreadableState();
+      return;
+    }
+    const archive = await readMentorZip(file);
+    const fingerprint = await externalArchiveFingerprint(archive);
+    const decision = decideExternalRefresh({
+      dirty: Boolean(State.currentFile && State.currentFile.dirty),
+      sameFingerprint: fingerprint === watch.lastFingerprint,
+      unreadable: false,
+      isOwner: canWriteLiveDocument(),
+      hasSource: Boolean(handle || path),
+      isCurrentGeneration: generation === watch.generation,
+    });
+    if (decision.action === "reload") {
+      await applyExternalArchiveReload({ generation, file, archive, fingerprint });
+    } else if (decision.action === "prompt") {
+      await openExternalConflictDialog({ generation, file, archive, fingerprint });
+    } else if (decision.action === "unreadable") {
+      showExternalUnreadableState();
+    } else {
+      if (file && file.lastModified) watch.lastMtime = file.lastModified;
+      if (watch.pending && watch.pending.revision) watch.lastRevision = watch.pending.revision;
+      watch.pending = null;
+    }
+  } catch (error) {
+    console.warn("[external-watch] refresh error", error);
+    if (!watch.retryTimer) {
+      watch.retryTimer = setTimeout(() => {
+        watch.retryTimer = null;
+        refreshFromExternalDisk({ generation: watch.generation }).catch(() => {});
+      }, 800);
+    }
+  } finally {
+    if (generation == null || generation === watch.generation) watch.resolving = false;
+  }
+}
+
+async function flushExternalRefreshForTest() {
+  const watch = State.externalWatch;
+  if (!watch) return false;
+  if (watch.debounceTimer) {
+    clearTimeout(watch.debounceTimer);
+    watch.debounceTimer = null;
+  }
+  await refreshFromExternalDisk({ generation: watch.generation, interactive: true });
+  return true;
+}
+
+
 function setLiveRole(role) {
   const prev = _liveSync.role;
   _liveSync.role = role;
@@ -8864,11 +9221,19 @@ function setLiveRole(role) {
       startAutosaveTimer();
     } catch {
     }
+    try {
+      startExternalWatchForCurrentDocument();
+    } catch (e) {
+      console.warn("[external-watch] start on owner role failed", e);
+    }
   } else if (role === "follower") {
     try {
       stopAutosaveTimer();
     } catch {
     }
+    try {
+      stopExternalWatch();
+    } catch (_) {}
   }
 }
 
@@ -9150,6 +9515,9 @@ function closeLiveSync() {
   _docChannelPath = null;
   _docPeers.clear();
   State.readOnlyMode = false;
+  try {
+    stopExternalWatch();
+  } catch (_) {}
   if (State.editor) {
     try {
       if (State.editor.isEditable !== true) {
@@ -12861,6 +13229,8 @@ async function _handleUrlOpen() {
       }
       if (typeof openFromMentorFile === "function" && State.editor) {
         State.diskPathHint = openPath;
+        State.externalWatchPath = openPath;
+        State.externalWatchToken = token || "";
         await openFromMentorFile(file);
         opened = true;
         showToast("\u5DF2\u6253\u5F00 " + baseName, 2500);
@@ -13089,6 +13459,12 @@ window.__mdAnnotator = {
       : [],
     live: typeof getLiveSyncState === "function" ? getLiveSyncState() : null
   }),
+  getExternalWatchState,
+  flushExternalRefreshForTest,
+  startExternalWatchForCurrentDocument,
+  stopExternalWatch,
+  scheduleExternalRefresh,
+  noteExternalOwnWrite,
   getLiveSyncState,
   takeOverLiveEditing,
   openLiveSyncForCurrentDocument,

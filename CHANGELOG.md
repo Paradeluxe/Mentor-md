@@ -2,6 +2,27 @@
 
 按时间倒序记录已发布的变化。最新条目在上方。
 
+## v1.46.0 (2026-07-30) — external .mentor live refresh
+
+### Behavior
+- Owner tab detects external disk changes to the open `.mentor` and refreshes the page state.
+- Handle sessions: `FileSystemObserver` when available, else mtime poll.
+- Windows deep-link / association sessions: token-protected `GET /revision` poll + `/open` re-fetch (path/token kept in memory after URL strip).
+- Clean document auto-reloads full archive (body + annotations + references + media). Dirty document prompts keep-local vs take-disk.
+- Self-save quiet window suppresses echo reload. Followers still get updates via existing live-sync.
+
+### Server
+- `mentor-server.py`: `GET /revision?path=&token=`
+
+### Tests
+- unit external watchers + reconcile
+- `tests/mentor-server-revision.spec.py`
+- `tests/e2e-external-mentor-refresh.spec.js`
+- ownership + server-poll assertions in cross-tab / url-open specs
+
+### Docs
+- `references/lessons-v1-46-external-change-watcher.md`
+
 ## v1.45.9 (2026-07-28) — comment replies flat (no indent)
 
 ### UI
