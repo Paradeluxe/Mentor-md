@@ -5437,6 +5437,7 @@ function renderCommentList() {
         </div>
         <!-- \u5361\u7247\u4F53: \u9ED8\u8BA4\u6536\u8D77 (\u89E3\u51B3\u540E), active \u65F6\u5C55\u5F00. \u7528 details \u4FDD\u7559\u539F\u751F\u6298\u53E0\u80FD\u529B -->
         <div class="comment-body-wrap">
+          <div class="comment-messages">
           <div class="comment-item">
             <div class="comment-meta">
                           ${avatarSpan(first3.author, annotationAuthorColor(thread))}
@@ -5461,6 +5462,7 @@ function renderCommentList() {
               </div>
             `;
             }).join("")}
+          </div>
             <!--
               输入框永远在卡片末尾 (docx 风格, 对话往下追加)
               - 首条未写: placeholder "开始批注..." (新建第一句)

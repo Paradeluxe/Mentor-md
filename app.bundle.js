@@ -62141,6 +62141,7 @@ function renderCommentList() {
         </div>
         <!-- \u5361\u7247\u4F53: \u9ED8\u8BA4\u6536\u8D77 (\u89E3\u51B3\u540E), active \u65F6\u5C55\u5F00. \u7528 details \u4FDD\u7559\u539F\u751F\u6298\u53E0\u80FD\u529B -->
         <div class="comment-body-wrap">
+          <div class="comment-messages">
           <div class="comment-item">
             <div class="comment-meta">
                           ${avatarSpan(first3.author, annotationAuthorColor(thread))}
@@ -62165,6 +62166,7 @@ function renderCommentList() {
               </div>
             `;
     }).join("")}
+          </div>
             <!--
               \u8F93\u5165\u6846\u6C38\u8FDC\u5728\u5361\u7247\u672B\u5C3E (docx \u98CE\u683C, \u5BF9\u8BDD\u5F80\u4E0B\u8FFD\u52A0)
               - \u9996\u6761\u672A\u5199: placeholder "\u5F00\u59CB\u6279\u6CE8..." (\u65B0\u5EFA\u7B2C\u4E00\u53E5)
