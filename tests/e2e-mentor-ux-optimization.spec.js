@@ -131,9 +131,10 @@ const {
     });
     await page.waitForTimeout(60);
     const state = await page.evaluate(() => {
-      const tabs = [...document.querySelectorAll('#outline-pane [role="tab"], #outline-pane [data-outline-tab]')];
+      // 大纲|图片 live in left pane header (peers), not nested under #outline-pane
+      const tabs = [...document.querySelectorAll('#file-pane .pane-header [data-outline-tab]')];
       const imageTab =
-        document.querySelector('[data-outline-tab="images"]') ||
+        document.querySelector('#file-pane .pane-header [data-outline-tab="images"]') ||
         tabs.find((el) => /图片|image/i.test(el.textContent || ''));
       if (imageTab) imageTab.click();
       const items = [
@@ -145,16 +146,21 @@ const {
       const sel = window.__mdAnnotator.State.editor.state.selection;
       const nodeName = sel.node && sel.node.type ? sel.node.type.name : null;
       return {
-        tabCount: tabs.length || document.querySelectorAll('#outline-pane [data-outline-tab]').length,
+        tabCount: tabs.length,
         hasImageTab: !!imageTab,
+        labelsHeader: tabs.map((t) => (t.textContent || '').trim()),
         selected: imageTab ? imageTab.getAttribute('aria-selected') : null,
         labels: items.map((x) => (x.textContent || '').trim()),
         itemCount: items.length,
         node: nodeName,
+        mode: document.querySelector('#outline-pane')?.getAttribute('data-outline-mode'),
       };
     });
     if (!state.hasImageTab || state.tabCount < 2) {
       throw new Error('missing outline image tab: ' + JSON.stringify(state));
+    }
+    if (!state.labelsHeader.some((t) => /^大纲$/.test(t)) || !state.labelsHeader.some((t) => /图片/.test(t))) {
+      throw new Error('expected 大纲|图片 header labels: ' + JSON.stringify(state));
     }
     if (state.itemCount < 2) throw new Error('expected >=2 image items: ' + JSON.stringify(state));
     if (!state.labels.some((x) => /figure-two|two\.png|图片\s*2/i.test(x))) {
@@ -169,7 +175,7 @@ const {
       if (window.__mdAnnotator.renderOutline) window.__mdAnnotator.renderOutline();
     });
     const html = await page.evaluate(() => {
-      const imageTab = document.querySelector('[data-outline-tab="images"]');
+      const imageTab = document.querySelector('#file-pane .pane-header [data-outline-tab="images"]');
       if (imageTab) imageTab.click();
       return document.querySelector('#outline-pane')?.innerHTML || '';
     });

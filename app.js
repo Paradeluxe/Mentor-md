@@ -6440,8 +6440,17 @@ function renderOutline() {
   if (!pane) return;
   const editor2 = State.editor;
   const tab = State.outlineTab === "images" ? "images" : "headings";
+  // Header tabs live next to collapse — peer of 大纲/图片, not nested under content.
+  const headerTabs = document.querySelectorAll('#file-pane .pane-header [data-outline-tab]');
+  headerTabs.forEach((el) => {
+    const isOn = el.getAttribute("data-outline-tab") === tab;
+    el.classList.toggle("is-active", isOn);
+    el.setAttribute("aria-selected", isOn ? "true" : "false");
+  });
   if (!editor2) {
-    pane.innerHTML = '<p class="outline-empty">打开文档以查看大纲</p>';
+    pane.innerHTML = tab === "images"
+      ? '<p class="outline-empty">打开文档以查看图片</p>'
+      : '<p class="outline-empty">打开文档以查看大纲</p>';
     return;
   }
   const headings = [];
@@ -6469,12 +6478,13 @@ function renderOutline() {
     }
   });
 
-  const tabHtml = `
-    <div class="outline-tabs" role="tablist" aria-label="大纲">
-      <button type="button" class="outline-tab${tab === "headings" ? " is-active" : ""}" role="tab" data-outline-tab="headings" aria-selected="${tab === "headings" ? "true" : "false"}">标题</button>
-      <button type="button" class="outline-tab${tab === "images" ? " is-active" : ""}" role="tab" data-outline-tab="images" aria-selected="${tab === "images" ? "true" : "false"}">图片${images.length ? ` (${images.length})` : ""}</button>
-    </div>
-    <div class="outline-tab-panel" role="tabpanel">`;
+  // Optional count badge on 图片 tab
+  const imgTab = document.querySelector('#file-pane .pane-header [data-outline-tab="images"]');
+  if (imgTab) {
+    imgTab.textContent = images.length ? `图片 (${images.length})` : "图片";
+  }
+  const headTab = document.querySelector('#file-pane .pane-header [data-outline-tab="headings"]');
+  if (headTab) headTab.textContent = "大纲";
 
   let bodyHtml = "";
   if (tab === "images") {
@@ -6493,17 +6503,8 @@ function renderOutline() {
     ).join("");
   }
 
-  pane.innerHTML = tabHtml + bodyHtml + "</div>";
-
-  pane.querySelectorAll("[data-outline-tab]").forEach((el) => {
-    el.addEventListener("click", (e) => {
-      e.preventDefault();
-      const next = el.getAttribute("data-outline-tab") === "images" ? "images" : "headings";
-      if (State.outlineTab === next) return;
-      State.outlineTab = next;
-      renderOutline();
-    });
-  });
+  pane.innerHTML = bodyHtml;
+  pane.setAttribute("data-outline-mode", tab);
 
   const jumpOutline = (el) => {
     const pos = parseInt(el.dataset.pos, 10);
@@ -6545,6 +6546,22 @@ function renderOutline() {
         jumpOutline(el);
       }
     });
+  });
+}
+
+/** Wire 大纲|图片 header tabs once (delegated on file-pane header). */
+function setupOutlineModeTabs() {
+  const header = document.querySelector("#file-pane .pane-header");
+  if (!header || header.dataset.outlineTabsBound === "1") return;
+  header.dataset.outlineTabsBound = "1";
+  header.addEventListener("click", (e) => {
+    const el = e.target.closest("[data-outline-tab]");
+    if (!el || !header.contains(el)) return;
+    e.preventDefault();
+    const next = el.getAttribute("data-outline-tab") === "images" ? "images" : "headings";
+    if (State.outlineTab === next) return;
+    State.outlineTab = next;
+    renderOutline();
   });
 }
 function deepCloneAnnotations(arr) {
@@ -12549,6 +12566,7 @@ async function boot() {
   setupFileListDropdown();
   initReferencesPane();
   setupPaneResizer();
+  setupOutlineModeTabs();
   setupEditorSelectionObserver();
   setupAnnotationMarkClickObserver();
   setupTreeActionDelegation();

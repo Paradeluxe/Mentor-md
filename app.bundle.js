@@ -63067,8 +63067,14 @@ function renderOutline() {
   if (!pane) return;
   const editor2 = State2.editor;
   const tab = State2.outlineTab === "images" ? "images" : "headings";
+  const headerTabs = document.querySelectorAll("#file-pane .pane-header [data-outline-tab]");
+  headerTabs.forEach((el) => {
+    const isOn = el.getAttribute("data-outline-tab") === tab;
+    el.classList.toggle("is-active", isOn);
+    el.setAttribute("aria-selected", isOn ? "true" : "false");
+  });
   if (!editor2) {
-    pane.innerHTML = '<p class="outline-empty">\u6253\u5F00\u6587\u6863\u4EE5\u67E5\u770B\u5927\u7EB2</p>';
+    pane.innerHTML = tab === "images" ? '<p class="outline-empty">\u6253\u5F00\u6587\u6863\u4EE5\u67E5\u770B\u56FE\u7247</p>' : '<p class="outline-empty">\u6253\u5F00\u6587\u6863\u4EE5\u67E5\u770B\u5927\u7EB2</p>';
     return;
   }
   const headings = [];
@@ -63095,12 +63101,12 @@ function renderOutline() {
       images.push({ pos, src, alt, title, label, index: imageIndex, kind: "image" });
     }
   });
-  const tabHtml = `
-    <div class="outline-tabs" role="tablist" aria-label="\u5927\u7EB2">
-      <button type="button" class="outline-tab${tab === "headings" ? " is-active" : ""}" role="tab" data-outline-tab="headings" aria-selected="${tab === "headings" ? "true" : "false"}">\u6807\u9898</button>
-      <button type="button" class="outline-tab${tab === "images" ? " is-active" : ""}" role="tab" data-outline-tab="images" aria-selected="${tab === "images" ? "true" : "false"}">\u56FE\u7247${images.length ? ` (${images.length})` : ""}</button>
-    </div>
-    <div class="outline-tab-panel" role="tabpanel">`;
+  const imgTab = document.querySelector('#file-pane .pane-header [data-outline-tab="images"]');
+  if (imgTab) {
+    imgTab.textContent = images.length ? `\u56FE\u7247 (${images.length})` : "\u56FE\u7247";
+  }
+  const headTab = document.querySelector('#file-pane .pane-header [data-outline-tab="headings"]');
+  if (headTab) headTab.textContent = "\u5927\u7EB2";
   let bodyHtml = "";
   if (tab === "images") {
     if (!images.length) {
@@ -63117,16 +63123,8 @@ function renderOutline() {
       (it) => `<div class="outline-item outline-h${it.level}" role="treeitem" tabindex="0" data-pos="${it.pos}" data-kind="${it.kind || "heading"}" title="${escapeHtml(it.text)}"><span class="outline-text">${escapeHtml(it.text) || "(\u65E0\u6807\u9898)"}</span></div>`
     ).join("");
   }
-  pane.innerHTML = tabHtml + bodyHtml + "</div>";
-  pane.querySelectorAll("[data-outline-tab]").forEach((el) => {
-    el.addEventListener("click", (e) => {
-      e.preventDefault();
-      const next2 = el.getAttribute("data-outline-tab") === "images" ? "images" : "headings";
-      if (State2.outlineTab === next2) return;
-      State2.outlineTab = next2;
-      renderOutline();
-    });
-  });
+  pane.innerHTML = bodyHtml;
+  pane.setAttribute("data-outline-mode", tab);
   const jumpOutline = (el) => {
     const pos = parseInt(el.dataset.pos, 10);
     if (Number.isNaN(pos)) return;
@@ -63173,6 +63171,20 @@ function renderOutline() {
         jumpOutline(el);
       }
     });
+  });
+}
+function setupOutlineModeTabs() {
+  const header = document.querySelector("#file-pane .pane-header");
+  if (!header || header.dataset.outlineTabsBound === "1") return;
+  header.dataset.outlineTabsBound = "1";
+  header.addEventListener("click", (e) => {
+    const el = e.target.closest("[data-outline-tab]");
+    if (!el || !header.contains(el)) return;
+    e.preventDefault();
+    const next2 = el.getAttribute("data-outline-tab") === "images" ? "images" : "headings";
+    if (State2.outlineTab === next2) return;
+    State2.outlineTab = next2;
+    renderOutline();
   });
 }
 function deepCloneAnnotations2(arr) {
@@ -69073,6 +69085,7 @@ async function boot() {
   setupFileListDropdown();
   initReferencesPane();
   setupPaneResizer();
+  setupOutlineModeTabs();
   setupEditorSelectionObserver();
   setupAnnotationMarkClickObserver();
   setupTreeActionDelegation();

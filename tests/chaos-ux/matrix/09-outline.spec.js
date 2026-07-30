@@ -161,13 +161,13 @@ const {
       M.renderOutline();
     });
     const tabs = await page.evaluate(() => ({
-      n: document.querySelectorAll('#outline-pane [data-outline-tab]').length,
-      labels: [...document.querySelectorAll('#outline-pane [data-outline-tab]')].map((el) => el.textContent.trim()),
+      n: document.querySelectorAll('#file-pane .pane-header [data-outline-tab]').length,
+      labels: [...document.querySelectorAll('#file-pane .pane-header [data-outline-tab]')].map((el) => el.textContent.trim()),
     }));
-    if (tabs.n < 2 || !tabs.labels.some((t) => /图片/.test(t))) {
-      throw new Error('missing outline tabs: ' + JSON.stringify(tabs));
+    if (tabs.n < 2 || !tabs.labels.some((t) => /^大纲$/.test(t)) || !tabs.labels.some((t) => /图片/.test(t))) {
+      throw new Error('missing 大纲|图片 header tabs: ' + JSON.stringify(tabs));
     }
-    await page.locator('#outline-pane [data-outline-tab="images"]').click();
+    await page.locator('#file-pane .pane-header [data-outline-tab="images"]').click();
     await page.waitForTimeout(60);
     const imgs = await page.evaluate(() => {
       const items = [...document.querySelectorAll('#outline-pane .outline-item[data-kind="image"]')];
