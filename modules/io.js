@@ -72,13 +72,14 @@ function idbTxDone(tx) {
 }
 
 /**
- * HandleStore v3
+ * HandleStore v4
  * Primary key: documentId (UUID). Basename kept as secondary index for legacy reopen.
+ * v4 adds workspaceSessions for multi-tab reopen manifests.
  */
 export function createHandleStore(idbFactory = globalThis.indexedDB) {
   const store = {
     DB_NAME: "Mentor-handles",
-    DB_VERSION: 3,
+    DB_VERSION: 4,
     _db: null,
 
     async open() {
@@ -129,6 +130,11 @@ export function createHandleStore(idbFactory = globalThis.indexedDB) {
               } catch (_) {
                 /* migration best-effort */
               }
+            }
+          }
+          if (oldVersion < 4) {
+            if (!db.objectStoreNames.contains("workspaceSessions")) {
+              db.createObjectStore("workspaceSessions", { keyPath: "id" });
             }
           }
         };
@@ -293,6 +299,34 @@ export function createHandleStore(idbFactory = globalThis.indexedDB) {
       const tx = db.transaction("lastFile", "readwrite");
       tx.objectStore("lastFile").delete("last");
       await idbTxDone(tx);
+    },
+
+    /**
+     * Persist the current workspace manifest (open tabs) under a single
+     * "current" row. Single-row store — successive puts overwrite, with the
+     * most recent updatedAt winning on reload.
+     */
+    async putWorkspaceSession(session) {
+      if (!session || !Array.isArray(session.tabs)) {
+        throw new Error("putWorkspaceSession: tabs required");
+      }
+      return this._putInStore("workspaceSessions", {
+        ...session,
+        id: "current",
+        updatedAt: Date.now()
+      });
+    },
+    async getWorkspaceSession() {
+      const db = await this.open();
+      if (!db.objectStoreNames.contains("workspaceSessions")) return null;
+      return idbReq(
+        db.transaction("workspaceSessions", "readonly")
+          .objectStore("workspaceSessions")
+          .get("current")
+      );
+    },
+    async removeWorkspaceSession() {
+      return this._deleteFromStore("workspaceSessions", "current");
     },
 
     async _putInStore(storeName, record) {
