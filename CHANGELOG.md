@@ -4,6 +4,11 @@
 
 ## Unreleased
 
+### Fix annotation locate / false 失效
+- `scrollToThread`: reattach mark via quote/prefix/suffix (or matching saved range) before toasting 失效
+- light validate no longer stamps `invalid` for mark-missing (full pass decides)
+- card warning: live body mark heals sticky invalid/orphan banners
+
 ### Office-like AutoSave toggle
 - Toolbar **自动保存** switch next to Save (default **ON**, persisted `Mentor:autoSave`).
 - ON + authorized write handle → debounced disk write + `markClean` (Word/OneDrive-style).

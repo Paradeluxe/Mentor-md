@@ -60026,13 +60026,14 @@ function _validateMarksAfterEdit(editor2, opts) {
       }
     } else {
       if (phase === "light") {
-        if (!ann.fuzzy || !ann.invalid || ann.deleted) {
+        if (ann.deleted) {
           ann.deleted = false;
-          ann.fuzzy = true;
-          ann.invalid = true;
-          ann.invalidReason = ann.invalidReason || "mark-missing";
           changed = true;
           touchUi(ann);
+        }
+        if (!ann.fuzzy) {
+          ann.fuzzy = true;
+          changed = true;
         }
         continue;
       }
@@ -63079,6 +63080,22 @@ function ensureCommentCardVisible(threadId) {
   renderCommentList();
   return !!document.querySelector(`#comment-list .comment-thread[data-thread="${threadId}"]`);
 }
+function annotationHasLiveMark(threadId) {
+  const editor2 = State2.editor;
+  if (!editor2 || !threadId) return false;
+  const markType = editor2.schema.marks.annotation;
+  let found2 = false;
+  editor2.state.doc.descendants((node) => {
+    if (found2 || !node.isText || !node.marks) return;
+    for (const m of node.marks) {
+      if (m.type === markType && m.attrs && m.attrs.threadId === threadId) {
+        found2 = true;
+        return;
+      }
+    }
+  });
+  return found2;
+}
 function annotationWarningState(thread) {
   if (!thread || typeof thread !== "object") return null;
   const status = thread.anchor && thread.anchor.status;
@@ -63086,6 +63103,16 @@ function annotationWarningState(thread) {
   if (status === "ambiguous" || reason === "ambiguous") return { kind: "ambiguous" };
   if (status === "collision" || reason === "mark-collision" || reason === "collision") return { kind: "collision" };
   if (status === "image-missing" || reason === "image-deleted") return { kind: "image-missing" };
+  if (thread.threadId && annotationHasLiveMark(thread.threadId)) {
+    if (thread.deleted || thread.invalid) {
+      thread.deleted = false;
+      if (reason === "mark-missing" || reason === "mark-reattached-fuzzy" || !reason) {
+        thread.invalid = false;
+        if (reason === "mark-missing") thread.invalidReason = void 0;
+      }
+    }
+    return null;
+  }
   if (status === "orphaned" || thread.deleted || thread.invalid) return { kind: "orphaned" };
   return null;
 }
@@ -63848,6 +63875,99 @@ function scrollToThread(threadId) {
     } catch (e) {
     }
     return;
+  }
+  try {
+    let recovered = null;
+    try {
+      recovered = findAnnotationRange(editor2.state.doc, thread);
+    } catch (_) {
+      recovered = null;
+    }
+    if ((!recovered || typeof recovered.from !== "number") && thread.range && typeof thread.range.from === "number" && typeof thread.range.to === "number" && thread.range.from < thread.range.to) {
+      try {
+        const docSize = editor2.state.doc.content.size;
+        const f = Math.max(0, Math.min(thread.range.from, docSize));
+        const tt2 = Math.max(0, Math.min(thread.range.to, docSize));
+        if (f < tt2) {
+          const slice2 = editor2.state.doc.textBetween(f, tt2, " ");
+          if (slice2 && thread.text && (slice2 === thread.text || slice2.includes(thread.text) || thread.text.includes(slice2))) {
+            recovered = { from: f, to: tt2, fuzzy: slice2 !== thread.text };
+          }
+        }
+      } catch (_) {
+      }
+    }
+    if (recovered && typeof recovered.from === "number" && typeof recovered.to === "number" && recovered.from < recovered.to) {
+      const markType = editor2.schema.marks.annotation;
+      const tr2 = editor2.state.tr;
+      tr2.addMark(
+        recovered.from,
+        recovered.to,
+        markType.create(annotationMarkAttrs(thread, {
+          threadId,
+          resolved: !!thread.resolved,
+          authorColor: annotationAuthorColor(thread),
+          active: false
+        }))
+      );
+      tr2.setMeta("addToHistory", false);
+      tr2.setMeta("__activeMarkSync", true);
+      editor2.view.dispatch(tr2);
+      try {
+        syncThreadAnchorEvidence(thread, editor2.state.doc, recovered, {
+          exact: thread.text || "",
+          status: recovered.fuzzy ? "edited" : "attached",
+          confidence: recovered.fuzzy ? 0.5 : 1
+        });
+      } catch (_) {
+      }
+      thread.deleted = false;
+      thread.fuzzy = !!recovered.fuzzy;
+      thread.invalid = !!recovered.fuzzy;
+      thread.invalidReason = recovered.fuzzy ? thread.invalidReason || "mark-reattached-fuzzy" : void 0;
+      thread.range = { from: recovered.from, to: recovered.to };
+      try {
+        markDirty();
+      } catch (_) {
+      }
+      try {
+        renderCommentList();
+      } catch (_) {
+      }
+      const docSize = editor2.state.doc.content.size;
+      let from2 = Math.max(0, recovered.from);
+      let to = Math.min(docSize, recovered.to);
+      const MAX_JUMP_SEL = 800;
+      if (to - from2 > MAX_JUMP_SEL) to = from2 + 1;
+      try {
+        editor2.commands.focus(from2, { scrollIntoView: false });
+      } catch (e) {
+        try {
+          editor2.commands.focus(void 0, { scrollIntoView: false });
+        } catch (e2) {
+        }
+      }
+      try {
+        editor2.commands.setTextSelection({ from: from2, to });
+      } catch (e) {
+        try {
+          editor2.commands.setTextSelection(from2);
+        } catch (e2) {
+        }
+      }
+      activateAnnotationThread(threadId, { ensureCard: true });
+      scrollEditorPosIntoCenter(from2, { behavior: "smooth" });
+      try {
+        requestAnimationFrame(() => {
+          scrollEditorPosIntoCenter(from2, { behavior: "auto" });
+          requestAnimationFrame(() => scrollEditorPosIntoCenter(from2, { behavior: "auto" }));
+        });
+      } catch (_) {
+      }
+      return;
+    }
+  } catch (eRec) {
+    console.warn("[scrollToThread] recover failed", eRec);
   }
   showToast("\u6279\u6CE8\u4F4D\u7F6E\u5DF2\u5931\u6548\uFF08\u53EF\u80FD\u6587\u6863\u88AB\u4FEE\u6539\uFF09");
 }
