@@ -4,6 +4,14 @@
 
 ## Unreleased
 
+### Version history (Word-like auto versions)
+- Toolbar **版本** drawer: every successful disk save (manual + disk-AutoSave) and every「保存此版本」named pin leaves a recoverable IndexedDB snapshot (`Mentor-versions`).
+- Dedup by content fingerprint; retention: rolling autosave cap (default 40) + named pins (default 50); settings 版本历史 enable toggle + retention.
+- Restore loads body+批注 into editor and marks dirty (no auto disk write);「另存」exports a version as `.mentor`.
+- Draft-only AutoRecover never creates versions; capture never fails the save; media >8MB omitted with flag.
+- Gates: `tests/unit-version-history.spec.js`, `tests/unit-version-store.spec.js`, `tests/unit-version-capture.spec.js`, `tests/e2e-version-history.spec.js`.
+- Reference: `references/version-history-autosave.md`.
+
 ### Fix annotation locate / false 失效
 - `scrollToThread`: reattach mark via quote/prefix/suffix (or matching saved range) before toasting 失效
 - light validate no longer stamps `invalid` for mark-missing (full pass decides)

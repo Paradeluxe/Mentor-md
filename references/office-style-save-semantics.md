@@ -1,15 +1,16 @@
 # Office-style save (Mentor v1.47.3+)
 
 Two layers, controlled by the toolbar **自动保存** toggle (default **ON**, `localStorage Mentor:autoSave`).
+Version history (v1.48, Word-like auto versions) layers on top — see `version-history-autosave.md`.
 
 ## Model
 
 | Mode | Target | Clears dirty? |
 |------|--------|----------------|
-| AutoSave **ON** + write handle | Official `.mentor`/`.md` handle (debounced) + DraftStore | **Yes** (`markClean`) |
+| AutoSave **ON** + write handle | Official `.mentor`/`.md` handle (debounced) + DraftStore + **VersionStore** | **Yes** (`markClean`) |
 | AutoSave **ON** without handle | DraftStore only (AutoRecover) | **No** |
 | AutoSave **OFF** | DraftStore only (AutoRecover) | **No** |
-| Ctrl+S / Save (`runManualSave` / `reason:'manual'`) | Official handle or download | **Yes** |
+| Ctrl+S / Save (`runManualSave` / `reason:'manual'`) | Official handle or download + DraftStore + **VersionStore** | **Yes** |
 | Tab close / `beforeunload` | Prompt if `shouldPromptUnload()` | N/A |
 
 ## Code map
