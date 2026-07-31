@@ -37,6 +37,10 @@ import {
   createAnnotationStore
 } from './modules/io.js';
 import {
+  createWorkspaceSession,
+  normalizeWorkspaceSession
+} from './modules/workspace-session.js';
+import {
   singleNewlinesToParagraphBreaks,
   unwrapSoleImageParagraphs
 } from './modules/markdown-normalize.js';
@@ -2487,6 +2491,33 @@ async function persistAtomicDraftRecord(record) {
 /** Atomic body+ann draft write (DraftStore) + legacy AnnotationStore sidecar. */
 async function putAtomicDraftForCurrent(opts = {}) {
   return persistAtomicDraftRecord(captureAtomicDraftForCurrent());
+}
+let _workspacePersistTimer = null;
+let _restoringWorkspaceSession = false;
+function queueActiveDraftPersist() {
+  const record = captureAtomicDraftForCurrent();
+  return record ? persistAtomicDraftRecord(record) : Promise.resolve(null);
+}
+async function persistWorkspaceSessionNow() {
+  if (_restoringWorkspaceSession) return null;
+  try { snapshotActiveTab(); } catch (_) {}
+  const session = createWorkspaceSession({ tabs: State.tabs, activeTabId: State.activeTabId });
+  if (!session.tabs.length) {
+    await HandleStore.removeWorkspaceSession();
+    return session;
+  }
+  await HandleStore.putWorkspaceSession(session);
+  return session;
+}
+function scheduleWorkspaceSessionPersist() {
+  if (_restoringWorkspaceSession) return;
+  clearTimeout(_workspacePersistTimer);
+  _workspacePersistTimer = setTimeout(() => {
+    _workspacePersistTimer = null;
+    persistWorkspaceSessionNow().catch((error) =>
+      console.warn("[workspace] persist failed", error)
+    );
+  }, 50);
 }
 async function restoreDraftIfAny(documentId, name) {
   if (!documentId && !name) return null;
@@ -7251,12 +7282,18 @@ function switchToTab(tabId) {
     closeLiveSync();
   } catch {
   }
+  void queueActiveDraftPersist();
   snapshotActiveTab();
-  return restoreTab(target);
+  const ok = restoreTab(target);
+  scheduleWorkspaceSessionPersist();
+  return ok;
 }
 function closeTab(tabId) {
   if (!tabId) return false;
-  if (tabId === State.activeTabId) snapshotActiveTab();
+  if (tabId === State.activeTabId) {
+    void queueActiveDraftPersist();
+    snapshotActiveTab();
+  }
   const tab = State.tabs.find((t) => t && t.id === tabId);
   if (!tab) return false;
   if (tab.dirty) {
@@ -7295,9 +7332,15 @@ function closeTab(tabId) {
     }
   }
   renderDocTabs();
+  if (!State.tabs.length) {
+    HandleStore.removeWorkspaceSession().catch(() => {});
+  } else {
+    scheduleWorkspaceSessionPersist();
+  }
   return true;
 }
 function openNewTabBlank() {
+  void queueActiveDraftPersist();
   snapshotActiveTab();
   State.activeTabId = genTabId();
   stopAutosaveTimer();
@@ -7322,6 +7365,7 @@ function openNewTabBlank() {
   renderOutline();
   snapshotActiveTab();
   renderDocTabs();
+  scheduleWorkspaceSessionPersist();
   setStatus("\u65B0\u5EFA\u6807\u7B7E");
 }
 function findTabByName(name) {
@@ -7577,6 +7621,7 @@ async function activateOpenedDocument({
   if (!quiet) {
     renderFilePaneCurrent();
   }
+  scheduleWorkspaceSessionPersist();
   return { name, saveMode, documentId: resolvedDocumentId };
 }
 function renderDocTabs() {
@@ -9928,6 +9973,9 @@ function _closeDocChannelFull() {
   closeLiveSync();
 }
 window.addEventListener("beforeunload", onBeforeUnload);
+window.addEventListener("pagehide", () => {
+  try { void persistWorkspaceSessionNow(); } catch (_) {}
+});
 function _validateSidecar(annotations) {
   const report = { errors: [], warnings: [], duplicates: /* @__PURE__ */ new Set() };
   const safeId = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
@@ -13590,6 +13638,7 @@ window.__mdAnnotator = {
   DraftStore,
   AnnotationStore,
   putAtomicDraftForCurrent,
+  persistWorkspaceSessionNow,
   restoreDraftIfAny,
   resolveDraftConflict,
   scheduleIdbCacheWrite,
