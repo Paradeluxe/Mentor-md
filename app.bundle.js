@@ -63104,14 +63104,15 @@ function annotationWarningState(thread) {
   if (status === "collision" || reason === "mark-collision" || reason === "collision") return { kind: "collision" };
   if (status === "image-missing" || reason === "image-deleted") return { kind: "image-missing" };
   if (thread.threadId && annotationHasLiveMark(thread.threadId)) {
-    if (thread.deleted || thread.invalid) {
+    if (reason === "mark-missing" || reason === "mark-reattached-fuzzy") {
       thread.deleted = false;
-      if (reason === "mark-missing" || reason === "mark-reattached-fuzzy" || !reason) {
-        thread.invalid = false;
-        if (reason === "mark-missing") thread.invalidReason = void 0;
+      thread.invalid = false;
+      thread.invalidReason = void 0;
+      if (thread.anchor && thread.anchor.status === "orphaned") {
+        thread.anchor = { ...thread.anchor, status: "attached" };
       }
+      return null;
     }
-    return null;
   }
   if (status === "orphaned" || thread.deleted || thread.invalid) return { kind: "orphaned" };
   return null;
