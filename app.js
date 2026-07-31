@@ -5918,13 +5918,14 @@ function renderCommentList() {
       });
     });
     el.addEventListener("click", (e) => {
-      if (e.target.closest("button") || e.target.closest("textarea") || e.target.closest("details summary")) return;
+      if (e.target.closest("button") || e.target.closest("textarea") || e.target.closest("details summary") || e.target.closest("a") || e.target.closest("input")) return;
       const tid = el.dataset.thread;
       if (e.target.closest(".comment-quote")) {
         toggleManualCollapse(tid);
         closeAllCommentMenus();
         renderCommentList();
-      } else if (e.target.closest(".comment-body-wrap")) {
+      } else {
+        // Body / messages / empty chrome: jump body mark to editor center.
         scrollToCommentText(tid);
       }
     });
@@ -5958,6 +5959,32 @@ function toggleManualCollapse(tid) {
     }
   }
 }
+function scrollEditorPosIntoCenter(pos, { behavior = "smooth" } = {}) {
+  const editor2 = State.editor;
+  const pane = document.querySelector("#editor-pane");
+  if (!editor2 || !editor2.view || !pane || pos == null || !Number.isFinite(pos)) return false;
+  try {
+    const safePos = Math.max(0, Math.min(pos, editor2.state.doc.content.size));
+    const coords = editor2.view.coordsAtPos(safePos);
+    const paneRect = pane.getBoundingClientRect();
+    const yInContent = (coords.top - paneRect.top) + pane.scrollTop;
+    const next = Math.max(0, yInContent - (pane.clientHeight / 2));
+    if (typeof pane.scrollTo === "function") pane.scrollTo({ top: next, behavior });
+    else pane.scrollTop = next;
+    return true;
+  } catch (_) {
+    try {
+      const dom = editor2.view.domAtPos(pos);
+      let node = dom && dom.node;
+      if (node && node.nodeType === 3) node = node.parentElement;
+      if (node && typeof node.scrollIntoView === "function") {
+        node.scrollIntoView({ block: "center", behavior, inline: "nearest" });
+        return true;
+      }
+    } catch (__) {}
+    return false;
+  }
+}
 function scrollToCommentText(tid) {
   if (!activateAndRevealThread(tid)) return;
   scrollToThread(tid);
@@ -5989,7 +6016,12 @@ function scrollToThread(threadId) {
     if (to - from2 > MAX_JUMP_SEL) {
       to = from2 + 1;
     }
-    editor2.commands.focus(from2);
+    // Avoid ProseMirror default edge-scroll; we center in #editor-pane ourselves.
+    try {
+      editor2.commands.focus(from2, { scrollIntoView: false });
+    } catch (e) {
+      try { editor2.commands.focus(undefined, { scrollIntoView: false }); } catch (e2) {}
+    }
     try {
       editor2.commands.setTextSelection({ from: from2, to });
     } catch (e) {
@@ -5999,6 +6031,15 @@ function scrollToThread(threadId) {
       }
     }
     activateAnnotationThread(threadId, { ensureCard: true });
+    // Double-rAF: first after selection paint, second beats any late PM scrollIntoView.
+    const center = () => scrollEditorPosIntoCenter(from2, { behavior: "smooth" });
+    center();
+    try {
+      requestAnimationFrame(() => {
+        scrollEditorPosIntoCenter(from2, { behavior: "auto" });
+        requestAnimationFrame(() => scrollEditorPosIntoCenter(from2, { behavior: "auto" }));
+      });
+    } catch (_) {}
     return;
   }
   try {
@@ -6039,7 +6080,9 @@ function scrollToThread(threadId) {
       const dom = editor2.view.nodeDOM(imgPos);
       const el = dom && (dom.tagName === "IMG" ? dom : dom.querySelector && dom.querySelector("img"));
       if (el && el.scrollIntoView) el.scrollIntoView({ block: "center", behavior: "smooth" });
+      else scrollEditorPosIntoCenter(imgPos, { behavior: "smooth" });
     } catch (e) {
+      try { scrollEditorPosIntoCenter(imgPos, { behavior: "smooth" }); } catch (e2) {}
     }
     activateAnnotationThread(threadId, { ensureCard: true });
     try {
@@ -14052,6 +14095,7 @@ window.__mdAnnotator = {
   refreshAnnotationImageDecos,
   scrollToThread,
   scrollToCommentText,
+  scrollEditorPosIntoCenter,
   isImageNodeSelection,
   updateTableControls,
   runTableCommand,
