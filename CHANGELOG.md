@@ -2,7 +2,22 @@
 
 按时间倒序记录已发布的变化。最新条目在上方。
 
+## Unreleased — workspace F5 + refs pane + supervision pet
+
+### Behavior
+- **F5 多标签恢复**：IndexedDB 工作区会话记录打开中的标签顺序与激活文档；刷新后恢复全部可恢复标签，缺失授权/草稿的条目跳过并提示。
+- **文献栏信息架构**：主操作行 = 搜索 + 新建 + 更多（导入/导出）；文献列表设置改为可展开 disclosure；卡片改为作者/年/标题 + 图标操作。
+- **监管机器人锚点**：active 时优先当前 mark，否则 pending locked range / document fallback；inactive 清除 pet。标签切换会重绑 poller，且不持久化 token。
+
+### Tests
+- `tests/unit-workspace-session.spec.js`, `tests/unit-workspace-store.spec.js`
+- `tests/e2e-workspace-session-persistence.spec.js`, `e2e-workspace-restore-partial.spec.js`, `e2e-workspace-f5-restore.spec.js`
+- `tests/e2e-reference-pane-ux.spec.js`, `e2e-reference-pane-layout.spec.js`
+- `tests/e2e-supervision-f5.spec.js`
+
 ## v1.47.2 (2026-07-30) — supervision reliability + pet polish
+- Pet frameless owl: drop pill/chip frame; bare SVG + plain label; working-only bob.
+- Pet style refresh: rounder owl (belly/ears/beak/feet), light-paper cyan glass chip, softer bob, phase-tinted waiting/degraded, dark-theme variants.
 
 ### Behavior
 - Supervision protocol hardened: explicit `phase` / `health` / `error`; no auto-infer of `currentThreadId` from first pending.

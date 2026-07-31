@@ -89,6 +89,7 @@ python3 -m http.server 8787
 
 工具栏 **文献** 打开当前文档的文献库侧栏。支持：
 
+- **主操作行**：搜索 + 新建 +「更多」菜单（导入 / 导出）
 - **新建 / 编辑 / 删除** 单条文献（表单编辑 citekey、作者、标题、年份、DOI 等）
 - **导入文献** `.bib`、`.ris`、`.enw`、EndNote `.xml`、CSL `.json`（含 Zotero / Better BibTeX 导出）
   - **单条文件** → 预填确认表单后再写入（不会整库覆盖）
@@ -96,7 +97,7 @@ python3 -m http.server 8787
 - **导出 BibTeX** `*.references.bib` 给 Pandoc / Zotero
 - 卡片上 **插入 [@citekey]**；改 citekey 时会同步正文里的 Pandoc 标记
 - 点击有正文引用的文献卡片，会按正文顺序定位第 1 / 2 / … 处；反复点击循环，卡片显示当前位置
-- **文末文献列表（EndNote 式）**：侧栏「插入文献列表」放入只读字段；条目只在文献库改。`.mentor` 正文保存语义标记 `<!-- mentor:bibliography -->`，不写死 APA 文本。导出 MD/DOCX 时再物化为 `# References`。范围可选「仅正文引用 / 全部文献库」。「转换手写 References…」仅在手写段与库 1:1 安全匹配时启用，否则保留原文
+- **文末文献列表（EndNote 式）**：低频设置收在可展开区；「插入文献列表」放入只读字段；条目只在文献库改。`.mentor` 正文保存语义标记 `<!-- mentor:bibliography -->`，不写死 APA 文本。导出 MD/DOCX 时再物化为 `# References`。范围可选「仅正文引用 / 全部文献库」。「转换手写 References…」仅在手写段与库 1:1 安全匹配时启用，否则保留原文
 
 不直接读取 `zotero.sqlite`，无自动 live sync——以导出文件为边界。Mentor 正文显示轻量作者—年份，保存 Markdown 时仍保持 `[@citekey]`。文末 References 由文献库自动生成，不可直接编辑列表文字。
 
@@ -229,7 +230,9 @@ Mentor/
 
 ### 跨刷新重连
 
-`HandleStore.putFile(name, handle)` 持久化所选 .md 的 FS Access handle，刷新后 `tryReconnect()` 自动校验权限并恢复工作区。Chrome/Edge 在用户不主动撤销时，handle 永久可用。
+`HandleStore.putFile(name, handle)` 持久化所选 .md / .mentor 的 FS Access handle。刷新后 `tryReconnect()` 优先恢复 **工作区会话**（上次仍打开的全部标签、顺序与激活标签），再回退到单文件 `lastFile`。Chrome/Edge 在用户不主动撤销时，handle 永久可用；缺失授权或草稿的条目会被跳过并提示。
+
+监管（supervision）处于 active 时，正文机器人会尽量锚定当前批注；若精确 mark 尚未恢复，会降级到 pending 段或文档安全位置显示，**降级显示不会自动升级为整篇锁定**。
 
 ---
 
