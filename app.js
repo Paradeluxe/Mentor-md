@@ -41,6 +41,9 @@ import {
   contentFingerprint as contentFingerprintPure,
   shouldCaptureVersion as shouldCaptureVersionPure,
   pruneVersionList as pruneVersionListPure,
+  packMediaForVersion,
+  estimateVersionByteSize,
+  createVersionRow,
   DEFAULT_VERSION_POLICY
 } from './modules/version-history.js';
 import {
@@ -2975,6 +2978,27 @@ function getAutoSaveEnabled() {
     return true;
   }
 }
+/** Version-history master preference. Default ON (missing key => true). */
+function getVersionHistoryEnabled() {
+  try {
+    const v = localStorage.getItem("Mentor:versionHistory");
+    if (v == null || v === "") return true;
+    return v === "1" || v === "true" || v === "on";
+  } catch (_) {
+    return true;
+  }
+}
+/** Retention policy from settings (falls back to defaults). */
+function getVersionPolicyFromSettings() {
+  const pol = Object.assign({}, DEFAULT_VERSION_POLICY);
+  try {
+    const a = parseInt(localStorage.getItem("Mentor:versionMaxAutosave") || "", 10);
+    if (Number.isFinite(a) && a >= 0) pol.maxAutosave = a;
+    const n = parseInt(localStorage.getItem("Mentor:versionMaxNamed") || "", 10);
+    if (Number.isFinite(n) && n >= 0) pol.maxNamed = n;
+  } catch (_) {}
+  return pol;
+}
 function setAutoSaveEnabled(on, { silent = false } = {}) {
   const next = !!on;
   try { localStorage.setItem("Mentor:autoSave", next ? "1" : "0"); } catch (_) {}
@@ -3241,7 +3265,71 @@ async function writeCurrentToHandle({ reason = "manual", showProgress = false, f
     console.warn("[save] DraftStore sync failed:", eDraft);
   }
   if (showProgress) hideExportProgress("\u5DF2\u4FDD\u5B58");
+  // Version history: successful disk commit leaves a recoverable snapshot.
+  try {
+    await recordVersionFromSnapshot(snapshot, {
+      kind: reason === "autosave" ? "autosave" : "manual"
+    });
+  } catch (_) {}
   return { ok: true };
+}
+/**
+ * Capture a Word-like version row after a successful disk commit (or named
+ * pin). Never fails the caller: all storage errors are swallowed.
+ * @param {object} snapshot — createSaveSnapshot() output
+ * @param {{ kind?: 'manual'|'autosave'|'named', label?: string|null }} [opts]
+ * @returns {Promise<{ok: boolean, skipped?: boolean, deduped?: boolean, id?: string, error?: string}>}
+ */
+async function recordVersionFromSnapshot(snapshot, { kind = "manual", label = null } = {}) {
+  try {
+    if (!getVersionHistoryEnabled()) return { ok: false, skipped: true, error: "disabled" };
+    if (!snapshot || !snapshot.documentId) return { ok: false, skipped: true, error: "no-documentId" };
+    const packed = packMediaForVersion(snapshot.mediaFiles || {});
+    const hash = contentFingerprintPure({
+      body: snapshot.mdText,
+      annotations: (snapshot.sidecar && snapshot.sidecar.annotations) || [],
+      references: snapshot.references,
+      mediaManifest: mediaManifestForFingerprint(packed.mediaFiles)
+    });
+    const prev = await VersionStore.getLatestHash(snapshot.documentId);
+    if (!shouldCaptureVersionPure({ reason: kind, prevHash: prev, nextHash: hash })) {
+      return { ok: true, skipped: true, deduped: true };
+    }
+    const row = createVersionRow({
+      id: crypto.randomUUID(),
+      documentId: snapshot.documentId,
+      name: snapshot.name,
+      kind,
+      label,
+      createdAt: Date.now(),
+      hash,
+      body: snapshot.mdText,
+      annotations: (snapshot.sidecar && snapshot.sidecar.annotations) || [],
+      sidecar: snapshot.sidecar,
+      references: snapshot.references,
+      mediaFiles: packed.mediaFiles,
+      mediaOmitted: packed.mediaOmitted,
+      byteSize: estimateVersionByteSize({
+        body: snapshot.mdText,
+        annotations: (snapshot.sidecar && snapshot.sidecar.annotations) || [],
+        sidecar: snapshot.sidecar,
+        references: snapshot.references,
+        mediaBytes: packed.mediaBytes
+      })
+    });
+    await VersionStore.putVersion(row);
+    await VersionStore.pruneDocument(snapshot.documentId, getVersionPolicyFromSettings());
+    return { ok: true, id: row.id, hash };
+  } catch (e) {
+    console.warn("[versions] capture failed:", e);
+    return { ok: false, error: e && e.message ? e.message : String(e) };
+  }
+}
+/** Stable, cheap media manifest for dedup fingerprints: sorted path:size list. */
+function mediaManifestForFingerprint(mediaFiles) {
+  return Object.entries(mediaFiles || {})
+    .map(([path2, blob]) => [path2, (blob && (blob.size || blob.byteLength)) || 0])
+    .sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
 }
 function startAutosaveTimer() {
   stopAutosaveTimer();
@@ -10992,6 +11080,13 @@ async function downloadMentorSnapshot(snapshot, { markCleanOnSuccess = true } = 
       markClean();
     }
     try { snapshotActiveTab(); } catch {}
+    // Download-as-save is a user-confirmed commit: leave a version row.
+    // (markCleanOnSuccess=false paths are 另存副本/诊断下载 — do not pollute history.)
+    if (markCleanOnSuccess) {
+      try {
+        await recordVersionFromSnapshot(snapshot, { kind: "manual" });
+      } catch (_) {}
+    }
     const copy = buildSaveResultCopy({ kind: markCleanOnSuccess ? "save-download-mentor" : "save-copy", fileName: outName });
     setStatus(copy.status, copy.detail);
     showToast(markCleanOnSuccess ? `已保存 ${outName}` : `副本已下载 ${outName} · 原文件未改变`);
@@ -14143,6 +14238,7 @@ window.__mdAnnotator = {
   DraftStore,
   AnnotationStore,
   VersionStore,
+  recordVersionFromSnapshot,
   putAtomicDraftForCurrent,
   persistWorkspaceSessionNow,
   restoreDraftIfAny,

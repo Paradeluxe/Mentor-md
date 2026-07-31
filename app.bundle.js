@@ -54538,6 +54538,71 @@ function pruneVersionList(rows, policy = DEFAULT_VERSION_POLICY) {
   }
   return result;
 }
+var VERSION_MEDIA_MAX_BYTES = 8 * 1024 * 1024;
+function packMediaForVersion(mediaFiles, { maxBytes = VERSION_MEDIA_MAX_BYTES } = {}) {
+  const kept = {};
+  let total = 0;
+  let omitted = false;
+  for (const [key, blob] of Object.entries(mediaFiles || {})) {
+    const size = blob && (blob.size || blob.byteLength || 0) || 0;
+    if (total + size > maxBytes) {
+      omitted = true;
+      continue;
+    }
+    total += size;
+    kept[key] = blob;
+  }
+  return { mediaFiles: kept, mediaOmitted: omitted, mediaBytes: total };
+}
+function estimateVersionByteSize({ body, annotations, sidecar, references, mediaBytes = 0 }) {
+  let n = typeof body === "string" ? body.length : 0;
+  try {
+    n += JSON.stringify(annotations || []).length;
+  } catch (_) {
+  }
+  try {
+    n += JSON.stringify(sidecar || null).length;
+  } catch (_) {
+  }
+  try {
+    n += JSON.stringify(references || null).length;
+  } catch (_) {
+  }
+  return n + (mediaBytes || 0);
+}
+function createVersionRow({
+  id,
+  documentId,
+  name,
+  kind = "manual",
+  label = null,
+  createdAt = Date.now(),
+  hash = "",
+  body = "",
+  annotations = [],
+  sidecar = null,
+  references = null,
+  mediaFiles = null,
+  mediaOmitted = false,
+  byteSize = 0
+}) {
+  return {
+    id,
+    documentId,
+    name: name || documentId,
+    kind,
+    label,
+    createdAt,
+    hash,
+    byteSize,
+    body,
+    annotations,
+    sidecar,
+    references,
+    mediaFiles,
+    mediaOmitted
+  };
+}
 
 // modules/io.js
 function cloneReferences(value) {
@@ -54557,6 +54622,20 @@ function cloneReferences(value) {
       return Object.assign({}, entry);
     }
   });
+}
+function cloneMediaFiles(mediaFiles) {
+  if (mediaFiles == null) return null;
+  if (globalThis.structuredClone) {
+    try {
+      return structuredClone(mediaFiles);
+    } catch (_) {
+    }
+  }
+  const out = {};
+  for (const [key, value] of Object.entries(mediaFiles)) {
+    out[key] = value && typeof value === "object" && typeof value.size !== "number" ? Object.assign({}, value) : value;
+  }
+  return out;
 }
 function createSerialWriteQueue() {
   const chains = /* @__PURE__ */ new Map();
@@ -54984,7 +55063,7 @@ function createVersionStore(idbFactory = globalThis.indexedDB) {
           annotations: Array.isArray(row.annotations) ? row.annotations : [],
           sidecar: row.sidecar ? JSON.parse(JSON.stringify(row.sidecar)) : null,
           references: cloneReferences(row.references),
-          mediaFiles: row.mediaFiles ? JSON.parse(JSON.stringify(row.mediaFiles)) : null,
+          mediaFiles: cloneMediaFiles(row.mediaFiles),
           mediaOmitted: !!row.mediaOmitted,
           updatedAt: Date.now()
         };
@@ -60938,6 +61017,26 @@ function getAutoSaveEnabled() {
     return true;
   }
 }
+function getVersionHistoryEnabled() {
+  try {
+    const v = localStorage.getItem("Mentor:versionHistory");
+    if (v == null || v === "") return true;
+    return v === "1" || v === "true" || v === "on";
+  } catch (_) {
+    return true;
+  }
+}
+function getVersionPolicyFromSettings() {
+  const pol = Object.assign({}, DEFAULT_VERSION_POLICY);
+  try {
+    const a = parseInt(localStorage.getItem("Mentor:versionMaxAutosave") || "", 10);
+    if (Number.isFinite(a) && a >= 0) pol.maxAutosave = a;
+    const n = parseInt(localStorage.getItem("Mentor:versionMaxNamed") || "", 10);
+    if (Number.isFinite(n) && n >= 0) pol.maxNamed = n;
+  } catch (_) {
+  }
+  return pol;
+}
 function setAutoSaveEnabled(on, { silent = false } = {}) {
   const next2 = !!on;
   try {
@@ -61187,7 +61286,61 @@ async function writeCurrentToHandle({ reason = "manual", showProgress = false, f
     console.warn("[save] DraftStore sync failed:", eDraft);
   }
   if (showProgress) hideExportProgress("\u5DF2\u4FDD\u5B58");
+  try {
+    await recordVersionFromSnapshot(snapshot, {
+      kind: reason === "autosave" ? "autosave" : "manual"
+    });
+  } catch (_) {
+  }
   return { ok: true };
+}
+async function recordVersionFromSnapshot(snapshot, { kind = "manual", label = null } = {}) {
+  try {
+    if (!getVersionHistoryEnabled()) return { ok: false, skipped: true, error: "disabled" };
+    if (!snapshot || !snapshot.documentId) return { ok: false, skipped: true, error: "no-documentId" };
+    const packed = packMediaForVersion(snapshot.mediaFiles || {});
+    const hash = contentFingerprint({
+      body: snapshot.mdText,
+      annotations: snapshot.sidecar && snapshot.sidecar.annotations || [],
+      references: snapshot.references,
+      mediaManifest: mediaManifestForFingerprint(packed.mediaFiles)
+    });
+    const prev = await VersionStore.getLatestHash(snapshot.documentId);
+    if (!shouldCaptureVersion({ reason: kind, prevHash: prev, nextHash: hash })) {
+      return { ok: true, skipped: true, deduped: true };
+    }
+    const row = createVersionRow({
+      id: crypto.randomUUID(),
+      documentId: snapshot.documentId,
+      name: snapshot.name,
+      kind,
+      label,
+      createdAt: Date.now(),
+      hash,
+      body: snapshot.mdText,
+      annotations: snapshot.sidecar && snapshot.sidecar.annotations || [],
+      sidecar: snapshot.sidecar,
+      references: snapshot.references,
+      mediaFiles: packed.mediaFiles,
+      mediaOmitted: packed.mediaOmitted,
+      byteSize: estimateVersionByteSize({
+        body: snapshot.mdText,
+        annotations: snapshot.sidecar && snapshot.sidecar.annotations || [],
+        sidecar: snapshot.sidecar,
+        references: snapshot.references,
+        mediaBytes: packed.mediaBytes
+      })
+    });
+    await VersionStore.putVersion(row);
+    await VersionStore.pruneDocument(snapshot.documentId, getVersionPolicyFromSettings());
+    return { ok: true, id: row.id, hash };
+  } catch (e) {
+    console.warn("[versions] capture failed:", e);
+    return { ok: false, error: e && e.message ? e.message : String(e) };
+  }
+}
+function mediaManifestForFingerprint(mediaFiles) {
+  return Object.entries(mediaFiles || {}).map(([path2, blob]) => [path2, blob && (blob.size || blob.byteLength) || 0]).sort((a, b) => a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0);
 }
 function startAutosaveTimer() {
   stopAutosaveTimer();
@@ -68753,6 +68906,12 @@ async function downloadMentorSnapshot(snapshot, { markCleanOnSuccess = true } = 
       snapshotActiveTab();
     } catch {
     }
+    if (markCleanOnSuccess) {
+      try {
+        await recordVersionFromSnapshot(snapshot, { kind: "manual" });
+      } catch (_) {
+      }
+    }
     const copy2 = buildSaveResultCopy({ kind: markCleanOnSuccess ? "save-download-mentor" : "save-copy", fileName: outName });
     setStatus(copy2.status, copy2.detail);
     showToast(markCleanOnSuccess ? `\u5DF2\u4FDD\u5B58 ${outName}` : `\u526F\u672C\u5DF2\u4E0B\u8F7D ${outName} \xB7 \u539F\u6587\u4EF6\u672A\u6539\u53D8`);
@@ -71908,6 +72067,7 @@ window.__mdAnnotator = {
   DraftStore,
   AnnotationStore,
   VersionStore,
+  recordVersionFromSnapshot,
   putAtomicDraftForCurrent,
   persistWorkspaceSessionNow,
   restoreDraftIfAny,

@@ -89,3 +89,87 @@ export function pruneVersionList(rows, policy = DEFAULT_VERSION_POLICY) {
   }
   return result;
 }
+
+/** Media inlined into a version row is capped at this total byte size. */
+export const VERSION_MEDIA_MAX_BYTES = 8 * 1024 * 1024;
+
+/** Total byte size of media blobs (Blob.size / ArrayBuffer.byteLength). */
+export function estimateMediaSize(mediaFiles) {
+  let total = 0;
+  for (const v of Object.values(mediaFiles || {})) {
+    total += (v && (v.size || v.byteLength || 0)) || 0;
+  }
+  return total;
+}
+
+/**
+ * Size-gate media for version storage. Keeps blobs until maxBytes; anything
+ * past the cap is omitted (restore keeps current session media for those).
+ * @param {Object<string, Blob|ArrayBuffer>} [mediaFiles]
+ * @param {{ maxBytes?: number }} [opts]
+ * @returns {{ mediaFiles: Object, mediaOmitted: boolean, mediaBytes: number }}
+ */
+export function packMediaForVersion(mediaFiles, { maxBytes = VERSION_MEDIA_MAX_BYTES } = {}) {
+  const kept = {};
+  let total = 0;
+  let omitted = false;
+  for (const [key, blob] of Object.entries(mediaFiles || {})) {
+    const size = (blob && (blob.size || blob.byteLength || 0)) || 0;
+    if (total + size > maxBytes) {
+      omitted = true;
+      continue;
+    }
+    total += size;
+    kept[key] = blob;
+  }
+  return { mediaFiles: kept, mediaOmitted: omitted, mediaBytes: total };
+}
+
+/** Rough byte size of a version row payload (for quota accounting). */
+export function estimateVersionByteSize({ body, annotations, sidecar, references, mediaBytes = 0 }) {
+  let n = typeof body === "string" ? body.length : 0;
+  try { n += JSON.stringify(annotations || []).length; } catch (_) {}
+  try { n += JSON.stringify(sidecar || null).length; } catch (_) {}
+  try { n += JSON.stringify(references || null).length; } catch (_) {}
+  return n + (mediaBytes || 0);
+}
+
+/**
+ * Build a version row from a save snapshot (pure; storage-side clone happens
+ * inside VersionStore.putVersion).
+ * @param {object} args
+ * @returns {object} row ready for putVersion
+ */
+export function createVersionRow({
+  id,
+  documentId,
+  name,
+  kind = "manual",
+  label = null,
+  createdAt = Date.now(),
+  hash = "",
+  body = "",
+  annotations = [],
+  sidecar = null,
+  references = null,
+  mediaFiles = null,
+  mediaOmitted = false,
+  byteSize = 0,
+}) {
+  return {
+    id,
+    documentId,
+    name: name || documentId,
+    kind,
+    label,
+    createdAt,
+    hash,
+    byteSize,
+    body,
+    annotations,
+    sidecar,
+    references,
+    mediaFiles,
+    mediaOmitted,
+  };
+}

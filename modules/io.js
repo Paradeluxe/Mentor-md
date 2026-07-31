@@ -33,6 +33,27 @@ function cloneReferences(value) {
   });
 }
 
+/**
+ * Clone media maps. Blobs are immutable and structured-cloneable — keep them
+ * by reference (JSON.stringify would destroy them). Plain object values are
+ * shallow-copied.
+ */
+function cloneMediaFiles(mediaFiles) {
+  if (mediaFiles == null) return null;
+  if (globalThis.structuredClone) {
+    try {
+      return structuredClone(mediaFiles);
+    } catch (_) { /* fall through for non-cloneable */ }
+  }
+  const out = {};
+  for (const [key, value] of Object.entries(mediaFiles)) {
+    out[key] = value && typeof value === "object" && typeof value.size !== "number"
+      ? Object.assign({}, value)
+      : value;
+  }
+  return out;
+}
+
 /** @returns {{ enqueue: (documentId: string, fn: () => Promise<any>) => Promise<any> }} */
 export function createSerialWriteQueue() {
   const chains = new Map();
@@ -511,7 +532,7 @@ export function createVersionStore(idbFactory = globalThis.indexedDB) {
           annotations: Array.isArray(row.annotations) ? row.annotations : [],
           sidecar: row.sidecar ? JSON.parse(JSON.stringify(row.sidecar)) : null,
           references: cloneReferences(row.references),
-          mediaFiles: row.mediaFiles ? JSON.parse(JSON.stringify(row.mediaFiles)) : null,
+          mediaFiles: cloneMediaFiles(row.mediaFiles),
           mediaOmitted: !!row.mediaOmitted,
           updatedAt: Date.now()
         };
