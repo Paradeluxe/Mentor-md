@@ -424,6 +424,23 @@
         </div>
         <p class="settings-current" id="settings-autosave-debounce-current"></p>
       </div>
+      <div class="settings-section">
+        <label class="settings-label">版本历史</label>
+        <p class="settings-hint">每次成功保存（手动/自动）自动留档，可随时恢复；「保存此版本」命名固定。版本仅存本机浏览器，不随 .mentor 文件拷贝。关闭后不再记录新版本（已有版本仍可查看/恢复）。</p>
+        <div class="settings-options" id="settings-version-history-toggle">
+          <button data-vh="1" class="settings-opt">记录 (默认)</button>
+          <button data-vh="0" class="settings-opt settings-opt-warn">关闭</button>
+        </div>
+        <p class="settings-current" id="settings-version-history-current"></p>
+        <p class="settings-hint" style="margin-top:8px">自动版本保留数量</p>
+        <div class="settings-options" id="settings-version-max">
+          <button data-maxv="10" class="settings-opt">10</button>
+          <button data-maxv="20" class="settings-opt">20</button>
+          <button data-maxv="40" class="settings-opt">40 (默认)</button>
+          <button data-maxv="80" class="settings-opt">80</button>
+        </div>
+        <p class="settings-current" id="settings-version-max-current"></p>
+      </div>
   <div class="settings-section settings-section-version">
     <label class="settings-label">版本</label>
     <p class="settings-hint" id="settings-version-current">当前 —</p>

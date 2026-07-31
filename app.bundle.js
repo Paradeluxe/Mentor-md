@@ -61044,6 +61044,30 @@ function getVersionPolicyFromSettings() {
   }
   return pol;
 }
+function setVersionHistoryEnabled(on) {
+  const next2 = !!on;
+  try {
+    localStorage.setItem("Mentor:versionHistory", next2 ? "1" : "0");
+  } catch (_) {
+  }
+  try {
+    syncSettingsActiveState();
+  } catch (_) {
+  }
+  return next2;
+}
+function setVersionMaxAutosave(n) {
+  const v = Number.isFinite(n) && n > 0 ? Math.floor(n) : 40;
+  try {
+    localStorage.setItem("Mentor:versionMaxAutosave", String(v));
+  } catch (_) {
+  }
+  try {
+    syncSettingsActiveState();
+  } catch (_) {
+  }
+  return v;
+}
 function setAutoSaveEnabled(on, { silent = false } = {}) {
   const next2 = !!on;
   try {
@@ -70910,6 +70934,18 @@ function syncSettingsActiveState() {
   });
   const debCur = document.querySelector("#settings-autosave-debounce-current");
   if (debCur) debCur.textContent = `\u5F53\u524D: ${deb / 1e3}s \u505C\u624B\u540E\u81EA\u52A8\u4FDD\u5B58`;
+  const vhOn = getVersionHistoryEnabled();
+  popover.querySelectorAll("#settings-version-history-toggle .settings-opt").forEach((btn) => {
+    btn.classList.toggle("is-active", btn.dataset.vh === "1" === vhOn);
+  });
+  const vhCur = document.querySelector("#settings-version-history-current");
+  if (vhCur) vhCur.textContent = `\u5F53\u524D: ${vhOn ? "\u8BB0\u5F55\u7248\u672C\u5386\u53F2" : "\u5DF2\u5173\u95ED\uFF08\u4E0D\u8BB0\u5F55\u65B0\u7248\u672C\uFF09"}`;
+  const vhMax = getVersionPolicyFromSettings().maxAutosave;
+  popover.querySelectorAll("#settings-version-max .settings-opt").forEach((btn) => {
+    btn.classList.toggle("is-active", parseInt(btn.dataset.maxv, 10) === vhMax);
+  });
+  const vhMaxCur = document.querySelector("#settings-version-max-current");
+  if (vhMaxCur) vhMaxCur.textContent = `\u5F53\u524D: \u81EA\u52A8\u7248\u672C\u4FDD\u7559 ${vhMax} \u4E2A\uFF08\u547D\u540D\u7248\u672C\u4E0D\u53D7\u6B64\u9650\uFF09`;
   const theme = getTheme();
   popover.querySelectorAll("#settings-theme .settings-opt").forEach((btn) => {
     btn.classList.toggle("is-active", btn.dataset.theme === theme);
@@ -71538,6 +71574,16 @@ function updateToolbarState() {
     btn.addEventListener("click", () => {
       const v = parseInt(btn.dataset.ms, 10);
       setAutosaveDebounce(v);
+    });
+  });
+  document.querySelectorAll("#settings-version-history-toggle .settings-opt").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      setVersionHistoryEnabled(btn.dataset.vh === "1");
+    });
+  });
+  document.querySelectorAll("#settings-version-max .settings-opt").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      setVersionMaxAutosave(parseInt(btn.dataset.maxv, 10));
     });
   });
   document.querySelectorAll("#settings-theme .settings-opt").forEach((btn) => {
