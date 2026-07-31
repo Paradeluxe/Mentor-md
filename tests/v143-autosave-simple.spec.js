@@ -25,19 +25,25 @@ const { chromium } = require('playwright');
   });
 
   await t('APIs exported', async () => {
-    const r = await page.evaluate(() => {
-      const M = window.__mdAnnotator;
-      return {
-        has: typeof M.hasWriteHandle,
-        write: typeof M.writeCurrentToHandle,
-        low: typeof M.writeToHandle,
-        auto: typeof M.autosaveNow,
-      };
+      const r = await page.evaluate(() => {
+        const M = window.__mdAnnotator;
+        return {
+          has: typeof M.hasWriteHandle,
+          write: typeof M.writeCurrentToHandle,
+          low: typeof M.writeToHandle,
+          auto: typeof M.autosaveNow,
+          getAuto: typeof M.getAutoSaveEnabled,
+          setAuto: typeof M.setAutoSaveEnabled,
+          disk: typeof M.isAutoSaveDiskActive,
+        };
+      });
+      if (r.has !== 'function' || r.write !== 'function' || r.low !== 'function' || r.auto !== 'function') {
+        throw new Error(JSON.stringify(r));
+      }
+      if (r.getAuto !== 'function' || r.setAuto !== 'function' || r.disk !== 'function') {
+        throw new Error('autoSave APIs ' + JSON.stringify(r));
+      }
     });
-    if (r.has !== 'function' || r.write !== 'function' || r.low !== 'function' || r.auto !== 'function') {
-      throw new Error(JSON.stringify(r));
-    }
-  });
 
   await t('hasWriteHandle only for handle modes', async () => {
     const r = await page.evaluate(() => {
@@ -56,43 +62,90 @@ const { chromium } = require('playwright');
     if (!r.a || r.b || !r.c || r.d) throw new Error(JSON.stringify(r));
   });
 
-  await t('autosave mentor-handle dirty → draft only, stays dirty', async () => {
-      const r = await page.evaluate(async () => {
-        const M = window.__mdAnnotator;
-        let writes = 0;
-        M.State.saveMode = 'mentor-handle';
-        M.State.diskPathHint = '';
-        M.State.mediaFiles = {};
-        M.State.currentFile = {
-          name: 'notes.mentor',
-          dirty: true,
-          dirtyGen: 1,
-          handle: {
-            queryPermission: async () => 'granted',
-            requestPermission: async () => 'granted',
-            createWritable: async () => {
-              writes++;
-              return { write: async () => {}, close: async () => {}, abort: async () => {} };
+  await t('AutoSave OFF + handle → draft only, stays dirty', async () => {
+        const r = await page.evaluate(async () => {
+          const M = window.__mdAnnotator;
+          M.setAutoSaveEnabled(false, { silent: true });
+          let writes = 0;
+          M.State.saveMode = 'mentor-handle';
+          M.State.diskPathHint = '';
+          M.State.mediaFiles = {};
+          M.State.currentFile = {
+            name: 'notes.mentor',
+            dirty: true,
+            dirtyGen: 1,
+            handle: {
+              queryPermission: async () => 'granted',
+              requestPermission: async () => 'granted',
+              createWritable: async () => {
+                writes++;
+                return { write: async () => {}, close: async () => {}, abort: async () => {} };
+              },
+              getFile: async () => ({ lastModified: Date.now() }),
             },
-            getFile: async () => ({ lastModified: Date.now() }),
-          },
-        };
-        M.State.editor.commands.setContent('<p>hello autosave</p>', false);
-        await M.autosaveNow();
-        return {
-          writes,
-          dirty: M.State.currentFile.dirty,
-          shouldPrompt: typeof M.shouldPromptUnload === 'function' ? M.shouldPromptUnload() : null,
-        };
+          };
+          M.State.editor.commands.setContent('<p>hello autosave</p>', false);
+          await M.autosaveNow();
+          return {
+            writes,
+            dirty: M.State.currentFile.dirty,
+            shouldPrompt: typeof M.shouldPromptUnload === 'function' ? M.shouldPromptUnload() : null,
+            enabled: M.getAutoSaveEnabled(),
+          };
+        });
+        if (r.enabled !== false) throw new Error('pref should be off');
+        if (r.writes !== 0) throw new Error('writes=' + r.writes + ' (OFF must not touch disk)');
+        if (r.dirty !== true) throw new Error('dirty=' + r.dirty);
+        if (r.shouldPrompt !== true) throw new Error('shouldPromptUnload=' + r.shouldPrompt);
       });
-      if (r.writes !== 0) throw new Error('writes=' + r.writes + ' (autosave must not touch disk)');
-      if (r.dirty !== true) throw new Error('dirty=' + r.dirty);
-      if (r.shouldPrompt !== true) throw new Error('shouldPromptUnload=' + r.shouldPrompt);
-    });
+
+    await t('AutoSave ON + handle → disk write and markClean', async () => {
+        const r = await page.evaluate(async () => {
+          const M = window.__mdAnnotator;
+          M.setAutoSaveEnabled(true, { silent: true });
+          let writes = 0;
+          M.State.saveMode = 'mentor-handle';
+          M.State.diskPathHint = '';
+          M.State.mediaFiles = {};
+          M.State.fileMtime = null;
+          M.State.readOnlyMode = false;
+          M.State.currentFile = {
+            name: 'notes-on.mentor',
+            dirty: true,
+            dirtyGen: 5,
+            handle: {
+              queryPermission: async () => 'granted',
+              requestPermission: async () => 'granted',
+              createWritable: async () => {
+                writes++;
+                return { write: async () => {}, close: async () => {}, abort: async () => {} };
+              },
+              getFile: async () => ({ lastModified: Date.now() }),
+            },
+          };
+          M.State.editor.commands.setContent('<p>hello disk autosave</p>', false);
+          // keep dirty after setContent if onUpdate cleaned unexpectedly
+          M.State.currentFile.dirty = true;
+          const res = await M.autosaveNow();
+          return {
+            writes,
+            dirty: M.State.currentFile.dirty,
+            shouldPrompt: typeof M.shouldPromptUnload === 'function' ? M.shouldPromptUnload() : null,
+            res,
+            diskActive: M.isAutoSaveDiskActive(),
+          };
+        });
+        if (!r.diskActive) throw new Error('diskActive false ' + JSON.stringify(r));
+        if (r.writes < 1) throw new Error('writes=' + r.writes + ' (ON should write disk)');
+        if (r.dirty !== false) throw new Error('dirty=' + r.dirty + ' (ON should markClean)');
+        if (r.shouldPrompt !== false) throw new Error('shouldPromptUnload=' + r.shouldPrompt);
+        if (!r.res || !r.res.ok || !r.res.disk) throw new Error('res ' + JSON.stringify(r.res));
+      });
 
   await t('download mode autosave does not write', async () => {
     const r = await page.evaluate(async () => {
       const M = window.__mdAnnotator;
+      M.setAutoSaveEnabled(true, { silent: true });
       let writes = 0;
       M.State.saveMode = 'mentor-download';
       M.State.currentFile = {

@@ -56971,6 +56971,7 @@ function mediaRevision(mediaFiles) {
 var PRIMARY_TOOLBAR_ACTIONS = Object.freeze([
   { id: "new", label: "\u65B0\u5EFA" },
   { id: "open", label: "\u6253\u5F00" },
+  { id: "autoSave", label: "\u81EA\u52A8\u4FDD\u5B58" },
   { id: "save", label: "\u4FDD\u5B58" },
   { id: "saveAs", label: "\u53E6\u5B58" },
   { id: "exportMd", label: "MD" },
@@ -56989,6 +56990,8 @@ function getToolbarActionState(input = {}) {
   const renderMode = input.renderMode === "source" ? "source" : "rendered";
   const filePaneOpen = input.filePaneOpen !== false;
   const commentPaneOpen = input.commentPaneOpen !== false;
+  const autoSaveEnabled = input.autoSaveEnabled !== false;
+  const autoSaveDisk = !!input.autoSaveDisk;
   return {
     new: {
       label: "\u65B0\u5EFA",
@@ -56997,6 +57000,13 @@ function getToolbarActionState(input = {}) {
     open: {
       label: "\u6253\u5F00",
       disabled: busy
+    },
+    autoSave: {
+      label: "\u81EA\u52A8\u4FDD\u5B58",
+      disabled: busy || readOnly,
+      pressed: autoSaveEnabled,
+      intent: autoSaveDisk ? "disk-autosave" : autoSaveEnabled ? "draft-only" : "off",
+      detail: autoSaveDisk ? "\u5F00\u542F\uFF1A\u505C\u624B\u540E\u5199\u56DE\u5DF2\u6388\u6743\u6587\u4EF6" : autoSaveEnabled ? "\u5F00\u542F\uFF1A\u5C1A\u65E0\u5199\u56DE\u76EE\u6807\uFF0C\u4EC5\u81EA\u52A8\u4FDD\u5B58\u8349\u7A3F\uFF1B\u8BF7\u5148\u4FDD\u5B58\u5230\u672C\u5730\u6587\u4EF6" : "\u5173\u95ED\uFF1A\u4EC5\u624B\u52A8\u4FDD\u5B58\u5199\u56DE\u6587\u4EF6\uFF08\u4ECD\u4F1A\u4FDD\u5B58\u5D29\u6E83\u6062\u590D\u8349\u7A3F\uFF09"
     },
     save: {
       label: "\u4FDD\u5B58",
@@ -60728,6 +60738,65 @@ function getAutosaveDebounceMs() {
   const v = parseInt(localStorage.getItem("Mentor:autosaveDebounce") || "5000", 10);
   return AUTOSAVE_DEBOUNCE_ALLOWED.includes(v) ? v : 5e3;
 }
+function getAutoSaveEnabled() {
+  try {
+    const v = localStorage.getItem("Mentor:autoSave");
+    if (v == null || v === "") return true;
+    return v === "1" || v === "true" || v === "on";
+  } catch (_) {
+    return true;
+  }
+}
+function setAutoSaveEnabled(on, { silent = false } = {}) {
+  const next2 = !!on;
+  try {
+    localStorage.setItem("Mentor:autoSave", next2 ? "1" : "0");
+  } catch (_) {
+  }
+  try {
+    syncAutosaveToggleUi();
+  } catch (_) {
+  }
+  try {
+    syncToolbarActionState();
+  } catch (_) {
+  }
+  if (!silent) {
+    if (next2) {
+      const disk = isAutoSaveDiskActive();
+      setStatus(
+        disk ? "\u81EA\u52A8\u4FDD\u5B58\u5DF2\u5F00\u542F" : "\u81EA\u52A8\u4FDD\u5B58\u5DF2\u5F00\u542F\uFF08\u8349\u7A3F\uFF09",
+        disk ? "\u505C\u624B\u540E\u5199\u56DE\u5DF2\u6388\u6743\u6587\u4EF6" : "\u5C1A\u65E0\u5199\u56DE\u76EE\u6807 \xB7 \u5148\u4FDD\u5B58\u5230\u672C\u5730\u540E\u624D\u4F1A\u5199\u76D8"
+      );
+      if (!disk) {
+        try {
+          showToast("\u81EA\u52A8\u4FDD\u5B58\u5DF2\u5F00\uFF1A\u8BF7\u5148\u4FDD\u5B58\u5230\u672C\u5730\u6587\u4EF6\uFF0C\u4E4B\u540E\u624D\u4F1A\u5199\u56DE\u78C1\u76D8", 2800);
+        } catch (_) {
+        }
+      }
+    } else {
+      setStatus("\u81EA\u52A8\u4FDD\u5B58\u5DF2\u5173\u95ED", "\u4EC5\u624B\u52A8\u4FDD\u5B58\u5199\u56DE\u6587\u4EF6 \xB7 \u8349\u7A3F\u4ECD\u4F1A\u81EA\u52A8\u4FDD\u5B58");
+    }
+  }
+  return next2;
+}
+function isAutoSaveDiskActive() {
+  return getAutoSaveEnabled() && hasWriteHandle() && !State2.readOnlyMode && canWriteLiveDocument();
+}
+function syncAutosaveToggleUi() {
+  const btn = document.querySelector("#btn-autosave");
+  if (!btn) return;
+  const on = getAutoSaveEnabled();
+  const disk = isAutoSaveDiskActive();
+  btn.setAttribute("aria-pressed", on ? "true" : "false");
+  btn.setAttribute("data-disk", disk ? "true" : "false");
+  btn.setAttribute("data-intent", disk ? "disk-autosave" : on ? "draft-only" : "off");
+  const title = disk ? "\u81EA\u52A8\u4FDD\u5B58\uFF1A\u5F00 \xB7 \u505C\u624B\u540E\u5199\u56DE\u5DF2\u6388\u6743\u6587\u4EF6" : on ? "\u81EA\u52A8\u4FDD\u5B58\uFF1A\u5F00 \xB7 \u5C1A\u65E0\u5199\u56DE\u76EE\u6807\uFF08\u4EC5\u8349\u7A3F\uFF09\u3002\u5148\u300C\u4FDD\u5B58\u300D\u5230\u672C\u5730\u540E\u624D\u4F1A\u5199\u76D8" : "\u81EA\u52A8\u4FDD\u5B58\uFF1A\u5173 \xB7 \u4EC5\u624B\u52A8\u4FDD\u5B58\u5199\u56DE\u6587\u4EF6\uFF08\u4ECD\u4FDD\u5B58\u5D29\u6E83\u6062\u590D\u8349\u7A3F\uFF09";
+  btn.title = title;
+  btn.setAttribute("aria-label", on ? "\u81EA\u52A8\u4FDD\u5B58\uFF1A\u5F00" : "\u81EA\u52A8\u4FDD\u5B58\uFF1A\u5173");
+  const lab = btn.querySelector(".tb-label");
+  if (lab) lab.textContent = "\u81EA\u52A8\u4FDD\u5B58";
+}
 var AUTOSAVE_DEBOUNCE = getAutosaveDebounceMs();
 var _saveInFlight = false;
 var _saveQueued = false;
@@ -60872,9 +60941,7 @@ async function writeCurrentToHandle({ reason = "manual", showProgress = false, f
       }
     } catch {
     }
-    if (reason === "autosave") {
-      console.warn("[save] writeCurrentToHandle reason=autosave is deprecated; draft-only autosaveNow preferred");
-    } else if ((State2.currentFile.dirtyGen || 0) === snapshot.dirtyGen) {
+    if ((State2.currentFile.dirtyGen || 0) === snapshot.dirtyGen) {
       markClean();
     } else {
       _saveQueued = true;
@@ -60937,7 +61004,7 @@ function startAutosaveTimer() {
   _autosaveTimer = setInterval(() => {
     if (State2.currentFile && State2.currentFile.dirty) scheduleAutosaveDebounce();
   }, AUTOSAVE_INTERVAL);
-  console.log("[autosave] timer started (draft AutoRecover, debounce + 30s safety)");
+  console.log("[autosave] timer started (debounce + 30s; disk if AutoSave ON + handle)");
 }
 function stopAutosaveTimer() {
   if (_autosaveTimer) {
@@ -60966,12 +61033,40 @@ async function autosaveNow() {
   if (State2.externalWatch && State2.externalWatch.autosavePausedForExternal) {
     return { ok: false, skipped: true, error: "external-paused" };
   }
+  const time = (/* @__PURE__ */ new Date()).toLocaleTimeString();
+  const wantDisk = getAutoSaveEnabled() && hasWriteHandle();
+  if (wantDisk) {
+    try {
+      const wr = await writeCurrentToHandle({ reason: "autosave", showProgress: false });
+      if (wr && wr.ok) {
+        setStatus("\u5DF2\u81EA\u52A8\u4FDD\u5B58", time);
+        console.log(`[autosave] disk at ${time}`);
+        try {
+          syncAutosaveToggleUi();
+        } catch (_) {
+        }
+        try {
+          syncToolbarActionState();
+        } catch (_) {
+        }
+        return { ok: true, disk: true, draft: true };
+      }
+      if (wr && wr.skipped) {
+        console.log("[autosave] disk skipped:", wr.error || "skipped");
+      } else if (wr && wr.error === "need-permission") {
+        console.log("[autosave] disk needs permission; draft only");
+      } else if (wr && wr.error) {
+        console.warn("[autosave] disk failed:", wr.error);
+      }
+    } catch (eDisk) {
+      console.warn("[autosave] disk threw:", eDisk);
+    }
+  }
   try {
     await putAtomicDraftForCurrent();
-    const time = (/* @__PURE__ */ new Date()).toLocaleTimeString();
     setStatus("\u5DF2\u81EA\u52A8\u4FDD\u5B58\u8349\u7A3F", time);
     console.log(`[autosave] draft only at ${time}`);
-    return { ok: true, draft: true };
+    return { ok: true, draft: true, disk: false };
   } catch (e) {
     const err = e && e.message ? e.message : String(e);
     const now = Date.now();
@@ -64776,7 +64871,10 @@ function applyToolbarActionState(sel, state) {
   if ("expanded" in state) {
     el.setAttribute("aria-expanded", state.expanded ? "true" : "false");
   }
-  if (state.detail) el.setAttribute("data-detail", state.detail);
+  if (state.detail) {
+    el.setAttribute("data-detail", state.detail);
+    if (el.id === "btn-autosave") el.title = state.detail;
+  }
   if (state.intent) el.setAttribute("data-intent", state.intent);
   if ("dirty" in state && el.id === "btn-save") el.setAttribute("data-dirty", state.dirty ? "true" : "false");
 }
@@ -64792,6 +64890,8 @@ function syncToolbarActionState() {
   const referencesOpen = !!(refsPane && !refsPane.classList.contains("hidden"));
   const filePaneOpen = !document.body.classList.contains("file-pane-collapsed");
   const commentPaneOpen = !document.body.classList.contains("comment-pane-collapsed");
+  const autoSaveEnabled = getAutoSaveEnabled();
+  const autoSaveDisk = isAutoSaveDiskActive();
   const actionState = getToolbarActionState({
     hasDocument: !!State2.currentFile,
     hasWriteHandle: hasWriteHandle(),
@@ -64804,12 +64904,19 @@ function syncToolbarActionState() {
     canRedo,
     busy: !!State2._toolbarBusy,
     filePaneOpen,
-    commentPaneOpen
+    commentPaneOpen,
+    autoSaveEnabled,
+    autoSaveDisk
   });
   applyToolbarActionState("#btn-new", actionState.new);
   applyToolbarActionState("#btn-open-files", actionState.open);
+  applyToolbarActionState("#btn-autosave", actionState.autoSave);
   applyToolbarActionState("#btn-save", actionState.save);
   applyToolbarActionState("#btn-save-as", actionState.saveAs);
+  try {
+    syncAutosaveToggleUi();
+  } catch (_) {
+  }
   applyToolbarActionState("#btn-export-md", actionState.exportMd);
   applyToolbarActionState("#btn-export-docx", actionState.exportDocx);
   applyToolbarActionState("#btn-refs", actionState.references);
@@ -64989,6 +65096,10 @@ function restoreTab(tab) {
   }
   try {
     startAutosaveTimer();
+  } catch {
+  }
+  try {
+    syncAutosaveToggleUi();
   } catch {
   }
   try {
@@ -70282,6 +70393,17 @@ function runToolbarAction(id, fn) {
 function setupToolbar() {
   $("#btn-new").addEventListener("click", newDocument);
   $("#btn-open-files").addEventListener("click", openFiles);
+  try {
+    const autoBtn = document.querySelector("#btn-autosave");
+    if (autoBtn && !autoBtn.dataset.boundAutosave) {
+      autoBtn.dataset.boundAutosave = "1";
+      autoBtn.addEventListener("click", () => {
+        setAutoSaveEnabled(!getAutoSaveEnabled());
+      });
+    }
+    syncAutosaveToggleUi();
+  } catch (_) {
+  }
   $("#btn-save").addEventListener("click", () => runToolbarAction("save", saveCurrent));
   $("#btn-export-md").addEventListener("click", () => runToolbarAction("exportMd", exportMd));
   $("#btn-export-docx").addEventListener("click", () => runToolbarAction("exportDocx", exportDocx));
@@ -71722,6 +71844,10 @@ window.__mdAnnotator = {
   startAutosaveTimer,
   stopAutosaveTimer,
   autosaveNow,
+  getAutoSaveEnabled,
+  setAutoSaveEnabled,
+  isAutoSaveDiskActive,
+  syncAutosaveToggleUi,
   shouldPromptUnload,
   scheduleAutosaveDebounce,
   hasWriteHandle,

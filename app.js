@@ -2938,10 +2938,13 @@ function markClean() {
 //  1. Autosave = AutoRecover only: DraftStore/IDB draft. Never writes the
 //     official .mentor/.md handle and never markClean.
 //  2. Manual save (Ctrl+S / Save) = user-confirmed commit to disk handle
-//     (or download). Only that path markClean + last user baseline.
-//  3. Exit/close: dirty relative to last user-confirmed save → prompt.
-//  4. Disk writes remain single-flight; dirtyGen-safe on manual save.
-//  5. Draft autosave failures: throttle toast, keep timer.
+//     (or download). markClean + last user baseline.
+//  3. Office-like AutoSave toggle (default ON): when on + write handle,
+//     debounced autosave writes disk and markClean (OneDrive-style).
+//     When off or no handle: draft-only AutoRecover (dirty stays).
+//  4. Exit/close: dirty relative to last confirmed/disk-autosave baseline → prompt.
+//  5. Disk writes remain single-flight; dirtyGen-safe on save.
+//  6. Draft autosave failures: throttle toast, keep timer.
 // ---------------------------------------------------------------------------
 var _autosaveTimer = null;
 var AUTOSAVE_INTERVAL = 3e4;
@@ -2949,6 +2952,59 @@ var AUTOSAVE_DEBOUNCE_ALLOWED = [1e3, 3e3, 5e3, 1e4, 3e4];
 function getAutosaveDebounceMs() {
   const v = parseInt(localStorage.getItem("Mentor:autosaveDebounce") || "5000", 10);
   return AUTOSAVE_DEBOUNCE_ALLOWED.includes(v) ? v : 5e3;
+}
+/** Office AutoSave preference. Default ON (missing key => true). */
+function getAutoSaveEnabled() {
+  try {
+    const v = localStorage.getItem("Mentor:autoSave");
+    if (v == null || v === "") return true;
+    return v === "1" || v === "true" || v === "on";
+  } catch (_) {
+    return true;
+  }
+}
+function setAutoSaveEnabled(on, { silent = false } = {}) {
+  const next = !!on;
+  try { localStorage.setItem("Mentor:autoSave", next ? "1" : "0"); } catch (_) {}
+  try { syncAutosaveToggleUi(); } catch (_) {}
+  try { syncToolbarActionState(); } catch (_) {}
+  if (!silent) {
+    if (next) {
+      const disk = isAutoSaveDiskActive();
+      setStatus(
+        disk ? "自动保存已开启" : "自动保存已开启（草稿）",
+        disk ? "停手后写回已授权文件" : "尚无写回目标 · 先保存到本地后才会写盘"
+      );
+      if (!disk) {
+        try { showToast("自动保存已开：请先保存到本地文件，之后才会写回磁盘", 2800); } catch (_) {}
+      }
+    } else {
+      setStatus("自动保存已关闭", "仅手动保存写回文件 · 草稿仍会自动保存");
+    }
+  }
+  return next;
+}
+/** Preference ON and current doc can be written in place. */
+function isAutoSaveDiskActive() {
+  return getAutoSaveEnabled() && hasWriteHandle() && !State.readOnlyMode && canWriteLiveDocument();
+}
+function syncAutosaveToggleUi() {
+  const btn = document.querySelector("#btn-autosave");
+  if (!btn) return;
+  const on = getAutoSaveEnabled();
+  const disk = isAutoSaveDiskActive();
+  btn.setAttribute("aria-pressed", on ? "true" : "false");
+  btn.setAttribute("data-disk", disk ? "true" : "false");
+  btn.setAttribute("data-intent", disk ? "disk-autosave" : (on ? "draft-only" : "off"));
+  const title = disk
+    ? "自动保存：开 · 停手后写回已授权文件"
+    : (on
+      ? "自动保存：开 · 尚无写回目标（仅草稿）。先「保存」到本地后才会写盘"
+      : "自动保存：关 · 仅手动保存写回文件（仍保存崩溃恢复草稿）");
+  btn.title = title;
+  btn.setAttribute("aria-label", on ? "自动保存：开" : "自动保存：关");
+  const lab = btn.querySelector(".tb-label");
+  if (lab) lab.textContent = "自动保存";
 }
 var AUTOSAVE_DEBOUNCE = getAutosaveDebounceMs();
 var _saveInFlight = false;
@@ -3116,10 +3172,8 @@ async function writeCurrentToHandle({ reason = "manual", showProgress = false, f
       } catch (_) {}
     } catch {
     }
-    if (reason === "autosave") {
-      // Defensive: disk path no longer used for AutoRecover; keep dirty baseline.
-      console.warn("[save] writeCurrentToHandle reason=autosave is deprecated; draft-only autosaveNow preferred");
-    } else if ((State.currentFile.dirtyGen || 0) === snapshot.dirtyGen) {
+    if ((State.currentFile.dirtyGen || 0) === snapshot.dirtyGen) {
+      // Manual save and Office disk-AutoSave both advance the confirmed baseline.
       markClean();
     } else {
       _saveQueued = true;
@@ -3184,7 +3238,7 @@ function startAutosaveTimer() {
   _autosaveTimer = setInterval(() => {
     if (State.currentFile && State.currentFile.dirty) scheduleAutosaveDebounce();
   }, AUTOSAVE_INTERVAL);
-  console.log("[autosave] timer started (draft AutoRecover, debounce + 30s safety)");
+  console.log("[autosave] timer started (debounce + 30s; disk if AutoSave ON + handle)");
 }
 function stopAutosaveTimer() {
   if (_autosaveTimer) {
@@ -3207,8 +3261,11 @@ function scheduleAutosaveDebounce() {
   }, AUTOSAVE_DEBOUNCE);
 }
 /**
- * Office AutoRecover: persist draft only. Does NOT write the official file
- * and does NOT markClean — exit still uses last user-confirmed save.
+ * Autosave tick:
+ * - Always keep DraftStore AutoRecover.
+ * - When Office AutoSave toggle is ON and a write handle is available, also
+ *   write the official file and markClean (Word/OneDrive-style).
+ * - When toggle OFF or no handle: draft only; dirty stays until manual save.
  */
 async function autosaveNow() {
   if (!canWriteLiveDocument()) return { ok: false, skipped: true, error: "live-follower" };
@@ -3217,19 +3274,40 @@ async function autosaveNow() {
   if (State.externalWatch && State.externalWatch.autosavePausedForExternal) {
     return { ok: false, skipped: true, error: "external-paused" };
   }
+  const time = (/* @__PURE__ */ new Date()).toLocaleTimeString();
+  const wantDisk = getAutoSaveEnabled() && hasWriteHandle();
+  if (wantDisk) {
+    try {
+      const wr = await writeCurrentToHandle({ reason: "autosave", showProgress: false });
+      if (wr && wr.ok) {
+        setStatus("已自动保存", time);
+        console.log(`[autosave] disk at ${time}`);
+        try { syncAutosaveToggleUi(); } catch (_) {}
+        try { syncToolbarActionState(); } catch (_) {}
+        return { ok: true, disk: true, draft: true };
+      }
+      if (wr && wr.skipped) {
+        console.log("[autosave] disk skipped:", wr.error || "skipped");
+      } else if (wr && wr.error === "need-permission") {
+        console.log("[autosave] disk needs permission; draft only");
+      } else if (wr && wr.error) {
+        console.warn("[autosave] disk failed:", wr.error);
+      }
+    } catch (eDisk) {
+      console.warn("[autosave] disk threw:", eDisk);
+    }
+  }
   try {
     await putAtomicDraftForCurrent();
-    const time = (/* @__PURE__ */ new Date()).toLocaleTimeString();
-    // Keep dirty — disk commit requires user-confirmed save.
-    setStatus("\u5DF2\u81EA\u52A8\u4FDD\u5B58\u8349\u7A3F", time);
+    setStatus("已自动保存草稿", time);
     console.log(`[autosave] draft only at ${time}`);
-    return { ok: true, draft: true };
+    return { ok: true, draft: true, disk: false };
   } catch (e) {
     const err = e && e.message ? e.message : String(e);
     const now = Date.now();
     if (now - _autosaveFailToastAt > 15e3) {
       _autosaveFailToastAt = now;
-      showToast("\u81EA\u52A8\u4FDD\u5B58\u8349\u7A3F\u5931\u8D25: " + err, 3e3);
+      showToast("自动保存草稿失败: " + err, 3e3);
     }
     console.warn("[autosave] draft failed:", err);
     return { ok: false, error: err };
@@ -7138,7 +7216,10 @@ function applyToolbarActionState(sel, state) {
   if ("expanded" in state) {
     el.setAttribute("aria-expanded", state.expanded ? "true" : "false");
   }
-  if (state.detail) el.setAttribute("data-detail", state.detail);
+  if (state.detail) {
+    el.setAttribute("data-detail", state.detail);
+    if (el.id === "btn-autosave") el.title = state.detail;
+  }
   if (state.intent) el.setAttribute("data-intent", state.intent);
   if ("dirty" in state && el.id === "btn-save") el.setAttribute("data-dirty", state.dirty ? "true" : "false");
 }
@@ -7154,6 +7235,8 @@ function syncToolbarActionState() {
   const referencesOpen = !!(refsPane && !refsPane.classList.contains("hidden"));
   const filePaneOpen = !document.body.classList.contains("file-pane-collapsed");
   const commentPaneOpen = !document.body.classList.contains("comment-pane-collapsed");
+  const autoSaveEnabled = getAutoSaveEnabled();
+  const autoSaveDisk = isAutoSaveDiskActive();
   const actionState = getToolbarActionState({
     hasDocument: !!State.currentFile,
     hasWriteHandle: hasWriteHandle(),
@@ -7167,11 +7250,15 @@ function syncToolbarActionState() {
     busy: !!State._toolbarBusy,
     filePaneOpen,
     commentPaneOpen,
+    autoSaveEnabled,
+    autoSaveDisk,
   });
   applyToolbarActionState("#btn-new", actionState.new);
   applyToolbarActionState("#btn-open-files", actionState.open);
+  applyToolbarActionState("#btn-autosave", actionState.autoSave);
   applyToolbarActionState("#btn-save", actionState.save);
   applyToolbarActionState("#btn-save-as", actionState.saveAs);
+  try { syncAutosaveToggleUi(); } catch (_) {}
   applyToolbarActionState("#btn-export-md", actionState.exportMd);
   applyToolbarActionState("#btn-export-docx", actionState.exportDocx);
   applyToolbarActionState("#btn-refs", actionState.references);
@@ -7355,6 +7442,10 @@ function restoreTab(tab) {
   }
   try {
     startAutosaveTimer();
+  } catch {
+  }
+  try {
+    syncAutosaveToggleUi();
   } catch {
   }
   try {
@@ -12686,7 +12777,20 @@ function runToolbarAction(id, fn) {
 function setupToolbar() {
   $("#btn-new").addEventListener("click", newDocument);
   $("#btn-open-files").addEventListener("click", openFiles);
-  $("#btn-save").addEventListener("click", () => runToolbarAction("save", saveCurrent));
+  
+// Office AutoSave toggle (once)
+try {
+  const autoBtn = document.querySelector("#btn-autosave");
+  if (autoBtn && !autoBtn.dataset.boundAutosave) {
+    autoBtn.dataset.boundAutosave = "1";
+    autoBtn.addEventListener("click", () => {
+      setAutoSaveEnabled(!getAutoSaveEnabled());
+    });
+  }
+  syncAutosaveToggleUi();
+} catch (_) {}
+
+$("#btn-save").addEventListener("click", () => runToolbarAction("save", saveCurrent));
   $("#btn-export-md").addEventListener("click", () => runToolbarAction("exportMd", exportMd));
   $("#btn-export-docx").addEventListener("click", () => runToolbarAction("exportDocx", exportDocx));
   $("#btn-undo").addEventListener("click", () => {
@@ -14167,6 +14271,10 @@ window.__mdAnnotator = {
   startAutosaveTimer,
   stopAutosaveTimer,
   autosaveNow,
+  getAutoSaveEnabled,
+  setAutoSaveEnabled,
+  isAutoSaveDiskActive,
+  syncAutosaveToggleUi,
   shouldPromptUnload,
   scheduleAutosaveDebounce,
   hasWriteHandle,

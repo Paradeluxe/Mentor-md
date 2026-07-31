@@ -6,6 +6,7 @@
 export const PRIMARY_TOOLBAR_ACTIONS = Object.freeze([
   { id: 'new', label: '新建' },
   { id: 'open', label: '打开' },
+  { id: 'autoSave', label: '自动保存' },
   { id: 'save', label: '保存' },
   { id: 'saveAs', label: '另存' },
   { id: 'exportMd', label: 'MD' },
@@ -32,6 +33,8 @@ export const PRIMARY_TOOLBAR_ACTIONS = Object.freeze([
  * @param {boolean} [input.busy]
  * @param {boolean} [input.filePaneOpen] - true when outline/file drawer is open
  * @param {boolean} [input.commentPaneOpen] - true when comment drawer is open
+ * @param {boolean} [input.autoSaveEnabled] - user preference for Office-like AutoSave
+ * @param {boolean} [input.autoSaveDisk] - preference on AND write-back target available
  */
 export function getToolbarActionState(input = {}) {
   const hasDocument = !!input.hasDocument;
@@ -40,6 +43,8 @@ export function getToolbarActionState(input = {}) {
   const renderMode = input.renderMode === 'source' ? 'source' : 'rendered';
   const filePaneOpen = input.filePaneOpen !== false;
   const commentPaneOpen = input.commentPaneOpen !== false;
+  const autoSaveEnabled = input.autoSaveEnabled !== false; // default ON
+  const autoSaveDisk = !!input.autoSaveDisk;
 
   return {
     new: {
@@ -49,6 +54,17 @@ export function getToolbarActionState(input = {}) {
     open: {
       label: '打开',
       disabled: busy,
+    },
+    autoSave: {
+      label: '自动保存',
+      disabled: busy || readOnly,
+      pressed: autoSaveEnabled,
+      intent: autoSaveDisk ? 'disk-autosave' : (autoSaveEnabled ? 'draft-only' : 'off'),
+      detail: autoSaveDisk
+        ? '开启：停手后写回已授权文件'
+        : (autoSaveEnabled
+          ? '开启：尚无写回目标，仅自动保存草稿；请先保存到本地文件'
+          : '关闭：仅手动保存写回文件（仍会保存崩溃恢复草稿）'),
     },
     save: {
       label: '保存',

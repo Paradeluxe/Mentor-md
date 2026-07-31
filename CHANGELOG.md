@@ -2,9 +2,15 @@
 
 按时间倒序记录已发布的变化。最新条目在上方。
 
-## Unreleased — workspace F5 + refs pane + supervision pet
+## Unreleased
 
-### Behavior
+### Office-like AutoSave toggle
+- Toolbar **自动保存** switch next to Save (default **ON**, persisted `Mentor:autoSave`).
+- ON + authorized write handle → debounced disk write + `markClean` (Word/OneDrive-style).
+- OFF or no handle → draft-only AutoRecover (dirty stays until manual save).
+- Gates: `tests/e2e-autosave-toggle.spec.js`, `tests/v143-autosave-simple.spec.js`, `tests/unit-toolbar-actions.spec.js`.
+
+### Behavior (workspace F5 + refs pane + supervision pet)
 - **F5 多标签恢复**：IndexedDB 工作区会话记录打开中的标签顺序与激活文档；刷新后恢复全部可恢复标签，缺失授权/草稿的条目跳过并提示。
 - **文献栏信息架构**：主操作行 = 搜索 + 新建 + 更多（导入/导出）；文献列表设置改为可展开 disclosure；卡片改为作者/年/标题 + 图标操作。
 - **监管机器人锚点**：active 时优先当前 mark，否则 pending locked range / document fallback；inactive 清除 pet。标签切换会重绑 poller，且不持久化 token。

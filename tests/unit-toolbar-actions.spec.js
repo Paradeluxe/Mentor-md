@@ -12,7 +12,7 @@ const { pathToFileURL } = require('url');
 
   assert.deepStrictEqual(
     PRIMARY_TOOLBAR_ACTIONS.map((x) => x.id),
-    ['new', 'open', 'save', 'saveAs', 'exportMd', 'exportDocx', 'references', 'undo', 'redo', 'source', 'filePane', 'commentPane']
+    ['new', 'open', 'autoSave', 'save', 'saveAs', 'exportMd', 'exportDocx', 'references', 'undo', 'redo', 'source', 'filePane', 'commentPane']
   );
 
   const noHandle = getToolbarActionState({
@@ -24,6 +24,9 @@ const { pathToFileURL } = require('url');
     renderMode: 'rendered',
     referencesOpen: false,
   });
+  assert.strictEqual(noHandle.autoSave.label, '自动保存');
+  assert.strictEqual(noHandle.autoSave.pressed, true); // default ON
+  assert.strictEqual(noHandle.autoSave.intent, 'draft-only');
   assert.strictEqual(noHandle.save.label, '保存');
   assert.strictEqual(noHandle.save.intent, 'choose-save-target');
   assert.strictEqual(noHandle.save.disabled, false);
@@ -48,14 +51,27 @@ const { pathToFileURL } = require('url');
     referencesOpen: true,
     filePaneOpen: false,
     commentPaneOpen: true,
+    autoSaveEnabled: true,
+    autoSaveDisk: true,
   });
   assert.strictEqual(withHandle.save.intent, 'write-current');
+  assert.strictEqual(withHandle.autoSave.pressed, true);
+  assert.strictEqual(withHandle.autoSave.intent, 'disk-autosave');
   assert.strictEqual(withHandle.source.label, '预览');
   assert.strictEqual(withHandle.source.pressed, true);
   assert.strictEqual(withHandle.references.pressed, true);
   assert.strictEqual(withHandle.filePane.pressed, false);
   assert.strictEqual(withHandle.filePane.expanded, false);
   assert.strictEqual(withHandle.commentPane.pressed, true);
+
+  const autoOff = getToolbarActionState({
+    hasDocument: true,
+    hasWriteHandle: true,
+    autoSaveEnabled: false,
+    autoSaveDisk: false,
+  });
+  assert.strictEqual(autoOff.autoSave.pressed, false);
+  assert.strictEqual(autoOff.autoSave.intent, 'off');
 
   const readOnly = getToolbarActionState({
     hasDocument: true,
@@ -67,6 +83,7 @@ const { pathToFileURL } = require('url');
     referencesOpen: false,
   });
   assert.strictEqual(readOnly.save.disabled, true);
+  assert.strictEqual(readOnly.autoSave.disabled, true);
 
   const noDoc = getToolbarActionState({
     hasDocument: false,

@@ -4,10 +4,10 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Mentor — 像 docx 一样批注 Markdown</title>
-<meta name="build" content="v1.47.2 cache-bust v=220" />
+<meta name="build" content="v1.47.2 cache-bust v=221" />
 <!-- v1.43.37 offline: local fonts + KaTeX (no CDN) -->
 <link rel="stylesheet" href="vendor/fonts/local-fonts.css?v=1" />
-<link rel="stylesheet" href="styles.css?v=220" />
+<link rel="stylesheet" href="styles.css?v=221" />
 <link rel="stylesheet" href="vendor/katex/katex.min.css?v=1" />
 <!-- 字体：系统无衬线 + 等宽（侧栏时间戳、文件名） -->
 <style>
@@ -34,6 +34,7 @@
                   <button id="btn-open-files" title="打开 .mentor 或 Markdown" class="tb-icon-text"><span class="tb-icon"></span><span class="tb-label">打开</span></button>
                 </div>
                 <div class="tb-group" data-toolbar-group="save">
+                  <button id="btn-autosave" type="button" class="tb-icon-text tb-autosave" title="自动保存（开启后写回已授权文件）" aria-pressed="true" aria-label="自动保存"><span class="tb-autosave-track" aria-hidden="true"><span class="tb-autosave-knob"></span></span><span class="tb-label">自动保存</span></button>
                   <button id="btn-save" title="保存当前文档" class="tb-icon-text" aria-keyshortcuts="Control+S Meta+S"><span class="tb-icon"></span><span class="tb-label">保存</span></button>
                   <button id="btn-save-as" title="另存为 .mentor 副本" class="tb-icon-text"><span class="tb-icon"></span><span class="tb-label">另存</span></button>
                 </div>
@@ -357,7 +358,7 @@
 
 <!-- v1.43.37 offline: bundled app (esbuild) + local icons; no esm.sh -->
 <script src="icons.js?v=184"></script>
-<script type="module" src="app.bundle.js?v=220"></script>
+<script type="module" src="app.bundle.js?v=221"></script>
 <!-- 帮助 popover (浮在 body 顶层, 位置由 JS 动态计算) -->
 <div id="help-popover" class="help-popover hidden" role="tooltip">
   <div class="help-popover-arrow"></div>
@@ -412,7 +413,7 @@
       </div>
       <div class="settings-section">
         <label class="settings-label">自动保存延迟 (停手后)</label>
-        <p class="settings-hint">仅对已授权 .mentor 写回生效. 更短 = 更安全但更频繁写盘.</p>
+        <p class="settings-hint">顶栏「自动保存」开启且文件已授权写回时：延迟后写回磁盘并清除脏标记（类 Office AutoSave）。关闭时仅保存本地草稿（崩溃恢复），不写正式文件。更短 = 更安全但更频繁写盘。</p>
         <div class="settings-options" id="settings-autosave-debounce">
           <button data-ms="1000" class="settings-opt">1s</button>
           <button data-ms="3000" class="settings-opt">3s</button>
