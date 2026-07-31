@@ -2446,45 +2446,47 @@ function patchCommentCard(ann) {
 }
 var _idbCacheWriteTimer = null;
 var _idbCacheWriting = false;
-/** Atomic body+ann draft write (DraftStore) + legacy AnnotationStore sidecar. */
-async function putAtomicDraftForCurrent(opts = {}) {
+/** Sync snapshot of current doc draft — must run before any tab/state switch. */
+function captureAtomicDraftForCurrent() {
   if (!State.currentFile) return null;
   const documentId = State.currentFile.documentId || State.activeTabId || State.currentFile.name;
   const name = State.currentFile.name || "untitled.md";
-  // Snapshot inside the serial queue slot so the last write sees latest State.
-  return _idbDocWriteQueue.enqueue(documentId, async () => {
-    let body = "";
-    try {
-      const flushed = flushSourceView();
-      if (flushed !== null) body = flushed;
-      else if (State.editor) body = htmlToMarkdownMedia(State.editor.getHTML());
-      else body = (State.currentFile && State.currentFile.content) || "";
-    } catch (e) {
-      body = (State.currentFile && State.currentFile.content) || "";
-    }
-    const annotations = buildAnnotationsSidecar();
-    const sidecar = {
+  let body = State.currentFile.content || "";
+  try {
+    const flushed = flushSourceView();
+    body = flushed !== null ? flushed : (State.editor ? htmlToMarkdownMedia(State.editor.getHTML()) : body);
+  } catch (_) {}
+  const annotations = buildAnnotationsSidecar();
+  return {
+    documentId,
+    name,
+    body,
+    annotations,
+    sidecar: {
       version: "1",
       document: name,
       updatedAt: (/* @__PURE__ */ new Date()).toISOString(),
       author: { id: State.authorId, name: State.author },
       annotations
-    };
-    const references = JSON.parse(JSON.stringify(State.references || emptyReferenceManifest()));
-    const mem = { body, sidecar, annotations, references, updatedAt: Date.now(), documentId, name };
-    State.idbCache[documentId] = mem;
-    if (name) State.idbCache[name] = mem;
-    await DraftStore.putDraft({
-      documentId,
-      name,
-      body,
-      annotations,
-      sidecar,
-      references
-    });
-    await AnnotationStore.put(name, sidecar, documentId);
-    return mem;
+    },
+    references: JSON.parse(JSON.stringify(State.references || emptyReferenceManifest())),
+    updatedAt: Date.now()
+  };
+}
+/** Persist a previously captured draft record (never re-reads State.currentFile). */
+async function persistAtomicDraftRecord(record) {
+  if (!record?.documentId) return null;
+  return _idbDocWriteQueue.enqueue(record.documentId, async () => {
+    State.idbCache[record.documentId] = record;
+    if (record.name) State.idbCache[record.name] = record;
+    await DraftStore.putDraft(record);
+    await AnnotationStore.put(record.name, record.sidecar, record.documentId);
+    return record;
   });
+}
+/** Atomic body+ann draft write (DraftStore) + legacy AnnotationStore sidecar. */
+async function putAtomicDraftForCurrent(opts = {}) {
+  return persistAtomicDraftRecord(captureAtomicDraftForCurrent());
 }
 async function restoreDraftIfAny(documentId, name) {
   if (!documentId && !name) return null;
@@ -2859,39 +2861,20 @@ function activeDocumentMatches(snapshot) {
 }
 function scheduleIdbCacheWrite() {
   if (_idbCacheWriteTimer) clearTimeout(_idbCacheWriteTimer);
-  if (State.currentFile) {
-    const cacheKeys = [State.currentFile.documentId, State.currentFile.name].filter(Boolean);
-    let body = State.currentFile.content || "";
-    try {
-      if (State.editor && State.renderMode !== "source") {
-        body = htmlToMarkdownMedia(State.editor.getHTML());
-      }
-    } catch (_) {}
-    const curSidecar = {
-      version: "1",
-      document: State.currentFile.name,
-      updatedAt: (/* @__PURE__ */ new Date()).toISOString(),
-      author: { id: State.authorId, name: State.author },
-      annotations: buildAnnotationsSidecar()
-    };
+  const record = captureAtomicDraftForCurrent();
+  if (record) {
+    const cacheKeys = [record.documentId, record.name].filter(Boolean);
     for (const key of cacheKeys) {
-      State.idbCache[key] = {
-        body,
-        sidecar: curSidecar,
-        annotations: curSidecar.annotations,
-        references: JSON.parse(JSON.stringify(State.references || emptyReferenceManifest())),
-        updatedAt: Date.now(),
-        documentId: State.currentFile.documentId
-      };
+      State.idbCache[key] = record;
     }
   }
   _idbCacheWriteTimer = setTimeout(async () => {
     _idbCacheWriteTimer = null;
     if (_idbCacheWriting) return;
-    if (!State.currentFile) return;
+    if (!record) return;
     _idbCacheWriting = true;
     try {
-      await putAtomicDraftForCurrent();
+      await persistAtomicDraftRecord(record);
     } catch (e) {
       console.warn("[P-reload] debounce IDB put \u5931\u8D25:", e);
     } finally {
