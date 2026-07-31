@@ -62934,6 +62934,27 @@ function deleteThread(threadId) {
   emitAI("threadChange", { threadId, change: "delete" });
   refreshAnnotationImageDecos();
 }
+function threadHiddenByFilter(thread) {
+  if (!thread) return true;
+  if (State2.filterOpen && !State2.filterResolved && thread.resolved) return true;
+  if (State2.filterResolved && !State2.filterOpen && !thread.resolved) return true;
+  return false;
+}
+function ensureFilterIncludesThread(thread) {
+  if (!thread || !threadHiddenByFilter(thread)) return false;
+  if (thread.resolved) {
+    State2.filterOpen = false;
+    State2.filterResolved = true;
+  } else {
+    State2.filterOpen = true;
+    State2.filterResolved = false;
+  }
+  try {
+    syncFilterTabsFromCheckboxes();
+  } catch (_) {
+  }
+  return true;
+}
 function ensureCommentCardVisible(threadId) {
   if (!threadId) return false;
   const list = document.getElementById("comment-list");
@@ -63002,6 +63023,17 @@ function activateAndRevealThread(threadId, options = {}) {
   const thread = (State2.annotations || []).find((item) => item && item.threadId === threadId);
   if (!thread) return false;
   let needsRender = false;
+  try {
+    if (document.body.classList.contains("comment-pane-collapsed")) {
+      const toggles = window.__mdAnnotatorTogglePanes;
+      if (toggles && typeof toggles.toggleCommentPane === "function") toggles.toggleCommentPane();
+      else document.body.classList.remove("comment-pane-collapsed");
+    }
+  } catch (_) {
+  }
+  if (options.preserveFilter !== true && ensureFilterIncludesThread(thread)) {
+    needsRender = true;
+  }
   if (State2.manuallyCollapsedIds && State2.manuallyCollapsedIds[threadId]) {
     delete State2.manuallyCollapsedIds[threadId];
     needsRender = true;
@@ -63038,7 +63070,7 @@ function revealSupervisionThread(threadId) {
   }
   if (!filtered) {
     try {
-      activateAndRevealThread(id, { source: "supervision" });
+      activateAndRevealThread(id, { source: "supervision", preserveFilter: true });
     } catch (_) {
     }
   }
@@ -71920,6 +71952,8 @@ window.__mdAnnotator = {
   invokeAiForThread: (tid) => invokeAiForThread(tid),
   annotationWarningState: (thread) => annotationWarningState(thread),
   ensureCommentCardVisible: (tid) => ensureCommentCardVisible(tid),
+  ensureFilterIncludesThread: (th) => ensureFilterIncludesThread(th),
+  threadHiddenByFilter: (th) => threadHiddenByFilter(th),
   // highlightActiveMark exported as function ref above (DecorationSet path)
   // P-reload: 同步列出所有 IDB 缓存 (返回 Object 不返回 Promise, 方便 console.log 检查)
   listAnnotations() {

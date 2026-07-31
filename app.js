@@ -5261,6 +5261,30 @@ function deleteThread(threadId) {
   emitAI("threadChange", { threadId, change: "delete" });
   refreshAnnotationImageDecos();
 }
+function threadHiddenByFilter(thread) {
+  if (!thread) return true;
+  if (State.filterOpen && !State.filterResolved && thread.resolved) return true;
+  if (State.filterResolved && !State.filterOpen && !thread.resolved) return true;
+  return false;
+}
+/**
+ * Body/card navigation may target a thread outside the current filter tab.
+ * Switch filter so the card can render; do not change resolved state.
+ * Returns true when filter flags changed.
+ */
+function ensureFilterIncludesThread(thread) {
+  if (!thread || !threadHiddenByFilter(thread)) return false;
+  if (thread.resolved) {
+    // Prefer 已解决 tab when jumping to a resolved mark from 未解决.
+    State.filterOpen = false;
+    State.filterResolved = true;
+  } else {
+    State.filterOpen = true;
+    State.filterResolved = false;
+  }
+  try { syncFilterTabsFromCheckboxes(); } catch (_) {}
+  return true;
+}
 function ensureCommentCardVisible(threadId) {
   if (!threadId) return false;
   const list = document.getElementById("comment-list");
@@ -5335,6 +5359,18 @@ function activateAndRevealThread(threadId, options = {}) {
   const thread = (State.annotations || []).find((item) => item && item.threadId === threadId);
   if (!thread) return false;
   let needsRender = false;
+  // Open comment drawer so the target card can be scrolled into view.
+  try {
+    if (document.body.classList.contains("comment-pane-collapsed")) {
+      const toggles = window.__mdAnnotatorTogglePanes;
+      if (toggles && typeof toggles.toggleCommentPane === "function") toggles.toggleCommentPane();
+      else document.body.classList.remove("comment-pane-collapsed");
+    }
+  } catch (_) {}
+  // Body clicks on resolved marks must leave the default 未解决 filter.
+  if (options.preserveFilter !== true && ensureFilterIncludesThread(thread)) {
+    needsRender = true;
+  }
   if (State.manuallyCollapsedIds && State.manuallyCollapsedIds[threadId]) {
     delete State.manuallyCollapsedIds[threadId];
     needsRender = true;
@@ -5373,7 +5409,7 @@ function revealSupervisionThread(threadId) {
     }
   } catch (_) {}
   if (!filtered) {
-    try { activateAndRevealThread(id, { source: "supervision" }); } catch (_) {}
+    try { activateAndRevealThread(id, { source: "supervision", preserveFilter: true }); } catch (_) {}
   }
   return { found: true, filtered: Boolean(filtered) };
 }
@@ -14366,6 +14402,8 @@ window.__mdAnnotator = {
   invokeAiForThread: (tid) => invokeAiForThread(tid),
   annotationWarningState: (thread) => annotationWarningState(thread),
   ensureCommentCardVisible: (tid) => ensureCommentCardVisible(tid),
+  ensureFilterIncludesThread: (th) => ensureFilterIncludesThread(th),
+  threadHiddenByFilter: (th) => threadHiddenByFilter(th),
   // highlightActiveMark exported as function ref above (DecorationSet path)
   // P-reload: 同步列出所有 IDB 缓存 (返回 Object 不返回 Promise, 方便 console.log 检查)
   listAnnotations() {
