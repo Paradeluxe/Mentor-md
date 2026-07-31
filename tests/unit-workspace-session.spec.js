@@ -26,7 +26,9 @@ const { pathToFileURL } = require('url');
   const json = JSON.stringify(session);
   assert(!json.includes('SECRET BODY'));
   assert(!json.includes('SECRET_TOKEN'));
-  assert(!json.includes('handle'));
+  assert(!json.includes('"handle"'));
+  assert(!Object.prototype.hasOwnProperty.call(session, 'handle'));
+  assert.equal(session.tabs[0].saveMode, 'mentor-handle');
 
   const normalized = mod.normalizeWorkspaceSession({
     v: 1,
