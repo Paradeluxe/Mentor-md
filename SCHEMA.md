@@ -155,8 +155,9 @@ v1 读盘器必须 **拒绝** (报损坏):
 
 | 字段 | 说明 |
 | ---- | ---- |
-| `documentId` | 运行时 UUID；HandleStore / DraftStore 主键。basename 仅作兼容回退 |
+| `documentId` | 运行时 UUID；HandleStore / DraftStore / VersionStore 主键。basename 仅作兼容回退 |
 | DraftStore | IndexedDB `Mentor-drafts`：`{ documentId, name, body, annotations, sidecar, updatedAt }` 原子缓存，崩溃恢复正文+批注 |
+| VersionStore | IndexedDB `Mentor-versions`（DB_VERSION 1，store `versions`，keyPath `id`，index `documentId`/`createdAt`/`hash`）：`{ id, documentId, name, kind, label, createdAt, hash, byteSize, body, annotations, sidecar, references, mediaFiles, mediaOmitted }`。每次成功写盘（手动/磁盘自动保存）与「保存此版本」留一版；同名内容去重；保留策略见 `modules/version-history.js`（maxAutosave/maxNamed/maxTotal）。版本仅存本机浏览器，不随 .mentor 文件拷贝；恢复 = 载入编辑器并置 dirty，不自动写盘。mediaFiles 总大小 ≤8MB 才内嵌，超限置 `mediaOmitted: true`（恢复时图片从当前文件保留）。 |
 
 ## 版本升级路径
 

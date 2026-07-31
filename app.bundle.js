@@ -54481,6 +54481,64 @@ function sessionsMatch(a, b) {
   return !!(a.name && b.name && a.name === b.name);
 }
 
+// modules/version-history.js
+var DEFAULT_VERSION_POLICY = Object.freeze({
+  maxAutosave: 40,
+  // rolling automatic (autosave + manual unlabeled)
+  maxNamed: 50,
+  // hard cap named pins
+  maxTotal: 80,
+  // absolute rows per documentId
+  maxBytesHint: 200 * 1024 * 1024
+  // soft budget for prune ordering only
+});
+function contentFingerprint({ body, annotations, references, mediaManifest } = {}) {
+  const payload = JSON.stringify({
+    body: typeof body === "string" ? body : "",
+    annotations: Array.isArray(annotations) ? annotations : [],
+    references: references ?? null,
+    mediaManifest: mediaManifest ?? null
+  });
+  let h1 = 2166136261;
+  let h2 = 16777619;
+  for (let i = 0; i < payload.length; i++) {
+    const c = payload.charCodeAt(i);
+    h1 = Math.imul(h1 ^ c, 16777619) >>> 0;
+    h2 = Math.imul(h2 ^ c, 2246822507) >>> 0;
+  }
+  return ("00000000" + h1.toString(16)).slice(-8) + ("00000000" + h2.toString(16)).slice(-8);
+}
+function shouldCaptureVersion({ reason, prevHash, nextHash }) {
+  if (reason === "draft" || reason === "draft-only") return false;
+  if (reason === "named") return true;
+  if (reason !== "manual" && reason !== "autosave") return false;
+  if (!nextHash) return false;
+  if (prevHash && prevHash === nextHash) return false;
+  return true;
+}
+function pruneVersionList(rows, policy = DEFAULT_VERSION_POLICY) {
+  const p = { ...DEFAULT_VERSION_POLICY, ...policy || {} };
+  if (!Array.isArray(rows)) return [];
+  const sorted = [...rows].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+  const named = [];
+  const rolling = [];
+  for (const row of sorted) {
+    if (row.kind === "named") named.push(row);
+    else rolling.push(row);
+  }
+  const keptNamed = named.slice(0, p.maxNamed);
+  const keptRolling = rolling.slice(0, p.maxAutosave);
+  const merged = [...keptNamed, ...keptRolling].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+  if (merged.length <= p.maxTotal) return merged;
+  const result = [...merged];
+  for (let i = result.length - 1; i >= 0 && result.length > p.maxTotal; i--) {
+    if (result[i].kind !== "named") {
+      result.splice(i, 1);
+    }
+  }
+  return result;
+}
+
 // modules/io.js
 function cloneReferences(value) {
   if (value == null) return value;
@@ -54874,6 +54932,137 @@ function createDraftStore(idbFactory = globalThis.indexedDB) {
     }
   };
   return draft;
+}
+function createVersionStore(idbFactory = globalThis.indexedDB) {
+  const store = {
+    DB_NAME: "Mentor-versions",
+    DB_VERSION: 1,
+    _db: null,
+    writeQueue: createSerialWriteQueue(),
+    async open() {
+      if (this._db) return this._db;
+      return new Promise((resolve, reject) => {
+        const req = idbFactory.open(this.DB_NAME, this.DB_VERSION);
+        req.onupgradeneeded = (e) => {
+          const db = e.target.result;
+          if (!db.objectStoreNames.contains("versions")) {
+            const os2 = db.createObjectStore("versions", { keyPath: "id" });
+            os2.createIndex("documentId", "documentId", { unique: false });
+            os2.createIndex("createdAt", "createdAt", { unique: false });
+            os2.createIndex("hash", "hash", { unique: false });
+          }
+        };
+        req.onsuccess = () => {
+          this._db = req.result;
+          resolve(req.result);
+        };
+        req.onerror = () => reject(req.error);
+      });
+    },
+    /**
+     * Persist a version row. Mutable payload parts (annotations / sidecar /
+     * references / mediaFiles) are deep-cloned so callers cannot mutate
+     * persisted data afterwards.
+     * @param {object} row — id, documentId, name, kind, label, createdAt,
+     *   hash, byteSize, body, annotations, sidecar, references, mediaFiles, mediaOmitted
+     */
+    async putVersion(row) {
+      if (!row || !row.documentId || !row.id) throw new Error("putVersion: id+documentId required");
+      const documentId = row.documentId;
+      return this.writeQueue.enqueue(documentId, async () => {
+        const db = await this.open();
+        const record = {
+          id: row.id,
+          documentId,
+          name: row.name || documentId,
+          kind: row.kind || "manual",
+          label: row.label || null,
+          createdAt: typeof row.createdAt === "number" ? row.createdAt : Date.now(),
+          hash: row.hash || "",
+          byteSize: typeof row.byteSize === "number" ? row.byteSize : 0,
+          body: typeof row.body === "string" ? row.body : "",
+          annotations: Array.isArray(row.annotations) ? row.annotations : [],
+          sidecar: row.sidecar ? JSON.parse(JSON.stringify(row.sidecar)) : null,
+          references: cloneReferences(row.references),
+          mediaFiles: row.mediaFiles ? JSON.parse(JSON.stringify(row.mediaFiles)) : null,
+          mediaOmitted: !!row.mediaOmitted,
+          updatedAt: Date.now()
+        };
+        const tx = db.transaction("versions", "readwrite");
+        tx.objectStore("versions").put(record);
+        await idbTxDone(tx);
+        return record;
+      });
+    },
+    async getVersion(id) {
+      const db = await this.open();
+      return await idbReq(
+        db.transaction("versions", "readonly").objectStore("versions").get(id)
+      ) || null;
+    },
+    /**
+     * All versions for a document, newest first.
+     * @param {string} documentId
+     * @param {{ limit?: number }} [opts]
+     */
+    async listByDocumentId(documentId, opts = {}) {
+      const db = await this.open();
+      if (!db.objectStoreNames.contains("versions")) return [];
+      const rows = await idbReq(
+        db.transaction("versions", "readonly").objectStore("versions").getAll()
+      ) || [];
+      const filtered = rows.filter((r) => r.documentId === documentId).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+      return opts.limit ? filtered.slice(0, opts.limit) : filtered;
+    },
+    async deleteVersion(id) {
+      return this.writeQueue.enqueue(id, async () => {
+        const db = await this.open();
+        const tx = db.transaction("versions", "readwrite");
+        tx.objectStore("versions").delete(id);
+        await idbTxDone(tx);
+      });
+    },
+    async deleteAllForDocument(documentId) {
+      return this.writeQueue.enqueue(documentId, async () => {
+        const db = await this.open();
+        const rows = await idbReq(
+          db.transaction("versions", "readonly").objectStore("versions").getAll()
+        ) || [];
+        const tx = db.transaction("versions", "readwrite");
+        const os2 = tx.objectStore("versions");
+        for (const r of rows) {
+          if (r.documentId === documentId) os2.delete(r.id);
+        }
+        await idbTxDone(tx);
+      });
+    },
+    /**
+     * Apply retention policy; physically delete rows past the policy and
+     * return the kept rows (newest first).
+     */
+    async pruneDocument(documentId, policy = DEFAULT_VERSION_POLICY) {
+      const rows = await this.listByDocumentId(documentId);
+      const kept = pruneVersionList(rows, policy);
+      const keptIds = new Set(kept.map((r) => r.id));
+      const doomed = rows.filter((r) => !keptIds.has(r.id));
+      if (doomed.length) {
+        await this.writeQueue.enqueue(documentId, async () => {
+          const db = await this.open();
+          const tx = db.transaction("versions", "readwrite");
+          const os2 = tx.objectStore("versions");
+          for (const r of doomed) os2.delete(r.id);
+          await idbTxDone(tx);
+        });
+      }
+      return kept;
+    },
+    /** Newest version hash for a document (dedup baseline), or null. */
+    async getLatestHash(documentId) {
+      const rows = await this.listByDocumentId(documentId, { limit: 1 });
+      return rows.length ? rows[0].hash || null : null;
+    }
+  };
+  return store;
 }
 function createAnnotationStore(idbFactory = globalThis.indexedDB) {
   const store = {
@@ -58640,6 +58829,7 @@ function mentorBaseName(nameOrPath) {
 var HandleStore = createHandleStore();
 var AnnotationStore = createAnnotationStore();
 var DraftStore = createDraftStore();
+var VersionStore = createVersionStore();
 var _idbDocWriteQueue = createSerialWriteQueue();
 var md = new import_markdown_it.default({ html: false, linkify: true, breaks: false });
 var HTML_SUBSUP_RE = /^<(sup|sub)>([\s\S]*?)<\/>/i;
@@ -71717,6 +71907,7 @@ window.__mdAnnotator = {
   HandleStore,
   DraftStore,
   AnnotationStore,
+  VersionStore,
   putAtomicDraftForCurrent,
   persistWorkspaceSessionNow,
   restoreDraftIfAny,
@@ -71738,7 +71929,13 @@ window.__mdAnnotator = {
   activeHighlightKey,
   modules: {
     documentSession: { fingerprintDocument, createDocumentSession, sessionIdentity, sessionsMatch },
-    io: { createSerialWriteQueue, createHandleStore, createDraftStore, createAnnotationStore },
+    io: { createSerialWriteQueue, createHandleStore, createDraftStore, createAnnotationStore, createVersionStore },
+    versionHistory: {
+      contentFingerprint,
+      shouldCaptureVersion,
+      pruneVersionList,
+      DEFAULT_VERSION_POLICY
+    },
     annotations: {
       computeInverseAnnPatch,
       applyAnnPatch,

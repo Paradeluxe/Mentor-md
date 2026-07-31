@@ -34,8 +34,15 @@ import {
   createSerialWriteQueue,
   createHandleStore,
   createDraftStore,
-  createAnnotationStore
+  createAnnotationStore,
+  createVersionStore
 } from './modules/io.js';
+import {
+  contentFingerprint as contentFingerprintPure,
+  shouldCaptureVersion as shouldCaptureVersionPure,
+  pruneVersionList as pruneVersionListPure,
+  DEFAULT_VERSION_POLICY
+} from './modules/version-history.js';
 import {
   createWorkspaceSession,
   normalizeWorkspaceSession,
@@ -760,6 +767,8 @@ var HandleStore = createHandleStore();
 var AnnotationStore = createAnnotationStore();
 // Atomic body + annotations draft (crash recovery)
 var DraftStore = createDraftStore();
+// Multi-version snapshots (Word-like version history)
+var VersionStore = createVersionStore();
 var _idbDocWriteQueue = createSerialWriteQueue();
 var md = new MarkdownIt({ html: false, linkify: true, breaks: false });
 var HTML_SUBSUP_RE = /^<(sup|sub)>([\s\S]*?)<\/>/i;
@@ -14133,6 +14142,7 @@ window.__mdAnnotator = {
   HandleStore,
   DraftStore,
   AnnotationStore,
+  VersionStore,
   putAtomicDraftForCurrent,
   persistWorkspaceSessionNow,
   restoreDraftIfAny,
@@ -14154,7 +14164,13 @@ window.__mdAnnotator = {
   activeHighlightKey,
   modules: {
     documentSession: { fingerprintDocument: fingerprintDocumentPure, createDocumentSession, sessionIdentity, sessionsMatch },
-    io: { createSerialWriteQueue, createHandleStore, createDraftStore, createAnnotationStore },
+    io: { createSerialWriteQueue, createHandleStore, createDraftStore, createAnnotationStore, createVersionStore },
+    versionHistory: {
+      contentFingerprint: contentFingerprintPure,
+      shouldCaptureVersion: shouldCaptureVersionPure,
+      pruneVersionList: pruneVersionListPure,
+      DEFAULT_VERSION_POLICY
+    },
     annotations: {
       computeInverseAnnPatch,
       applyAnnPatch,

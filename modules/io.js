@@ -3,6 +3,11 @@
  * DraftStore (atomic body + annotations), serial write queue by documentId.
  */
 
+import {
+  pruneVersionList,
+  DEFAULT_VERSION_POLICY,
+} from './version-history.js';
+
 /**
  * Deep-clone an arbitrary references payload so persisted drafts cannot share
  * object identity with the caller's live array. Mirrors the helper exported
@@ -445,6 +450,154 @@ export function createDraftStore(idbFactory = globalThis.indexedDB) {
     }
   };
   return draft;
+}
+
+/**
+ * Version history store: multi-version snapshots per documentId.
+ * Rows are full save payloads captured after successful disk commits and
+ * named pins. Retention/prune policy lives in version-history.js.
+ * keyPath: id (uuid); index: documentId, createdAt, hash.
+ */
+export function createVersionStore(idbFactory = globalThis.indexedDB) {
+  const store = {
+    DB_NAME: "Mentor-versions",
+    DB_VERSION: 1,
+    _db: null,
+    writeQueue: createSerialWriteQueue(),
+
+    async open() {
+      if (this._db) return this._db;
+      return new Promise((resolve, reject) => {
+        const req = idbFactory.open(this.DB_NAME, this.DB_VERSION);
+        req.onupgradeneeded = (e) => {
+          const db = e.target.result;
+          if (!db.objectStoreNames.contains("versions")) {
+            const os = db.createObjectStore("versions", { keyPath: "id" });
+            os.createIndex("documentId", "documentId", { unique: false });
+            os.createIndex("createdAt", "createdAt", { unique: false });
+            os.createIndex("hash", "hash", { unique: false });
+          }
+        };
+        req.onsuccess = () => {
+          this._db = req.result;
+          resolve(req.result);
+        };
+        req.onerror = () => reject(req.error);
+      });
+    },
+
+    /**
+     * Persist a version row. Mutable payload parts (annotations / sidecar /
+     * references / mediaFiles) are deep-cloned so callers cannot mutate
+     * persisted data afterwards.
+     * @param {object} row — id, documentId, name, kind, label, createdAt,
+     *   hash, byteSize, body, annotations, sidecar, references, mediaFiles, mediaOmitted
+     */
+    async putVersion(row) {
+      if (!row || !row.documentId || !row.id) throw new Error("putVersion: id+documentId required");
+      const documentId = row.documentId;
+      return this.writeQueue.enqueue(documentId, async () => {
+        const db = await this.open();
+        const record = {
+          id: row.id,
+          documentId,
+          name: row.name || documentId,
+          kind: row.kind || "manual",
+          label: row.label || null,
+          createdAt: typeof row.createdAt === "number" ? row.createdAt : Date.now(),
+          hash: row.hash || "",
+          byteSize: typeof row.byteSize === "number" ? row.byteSize : 0,
+          body: typeof row.body === "string" ? row.body : "",
+          annotations: Array.isArray(row.annotations) ? row.annotations : [],
+          sidecar: row.sidecar ? JSON.parse(JSON.stringify(row.sidecar)) : null,
+          references: cloneReferences(row.references),
+          mediaFiles: row.mediaFiles ? JSON.parse(JSON.stringify(row.mediaFiles)) : null,
+          mediaOmitted: !!row.mediaOmitted,
+          updatedAt: Date.now()
+        };
+        const tx = db.transaction("versions", "readwrite");
+        tx.objectStore("versions").put(record);
+        await idbTxDone(tx);
+        return record;
+      });
+    },
+
+    async getVersion(id) {
+      const db = await this.open();
+      return (await idbReq(
+        db.transaction("versions", "readonly").objectStore("versions").get(id)
+      )) || null;
+    },
+
+    /**
+     * All versions for a document, newest first.
+     * @param {string} documentId
+     * @param {{ limit?: number }} [opts]
+     */
+    async listByDocumentId(documentId, opts = {}) {
+      const db = await this.open();
+      if (!db.objectStoreNames.contains("versions")) return [];
+      const rows = (await idbReq(
+        db.transaction("versions", "readonly").objectStore("versions").getAll()
+      )) || [];
+      const filtered = rows
+        .filter((r) => r.documentId === documentId)
+        .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+      return opts.limit ? filtered.slice(0, opts.limit) : filtered;
+    },
+
+    async deleteVersion(id) {
+      return this.writeQueue.enqueue(id, async () => {
+        const db = await this.open();
+        const tx = db.transaction("versions", "readwrite");
+        tx.objectStore("versions").delete(id);
+        await idbTxDone(tx);
+      });
+    },
+
+    async deleteAllForDocument(documentId) {
+      return this.writeQueue.enqueue(documentId, async () => {
+        const db = await this.open();
+        const rows = (await idbReq(
+          db.transaction("versions", "readonly").objectStore("versions").getAll()
+        )) || [];
+        const tx = db.transaction("versions", "readwrite");
+        const os = tx.objectStore("versions");
+        for (const r of rows) {
+          if (r.documentId === documentId) os.delete(r.id);
+        }
+        await idbTxDone(tx);
+      });
+    },
+
+    /**
+     * Apply retention policy; physically delete rows past the policy and
+     * return the kept rows (newest first).
+     */
+    async pruneDocument(documentId, policy = DEFAULT_VERSION_POLICY) {
+      const rows = await this.listByDocumentId(documentId);
+      const kept = pruneVersionList(rows, policy);
+      const keptIds = new Set(kept.map((r) => r.id));
+      const doomed = rows.filter((r) => !keptIds.has(r.id));
+      if (doomed.length) {
+        await this.writeQueue.enqueue(documentId, async () => {
+          const db = await this.open();
+          const tx = db.transaction("versions", "readwrite");
+          const os = tx.objectStore("versions");
+          for (const r of doomed) os.delete(r.id);
+          await idbTxDone(tx);
+        });
+      }
+      return kept;
+    },
+
+    /** Newest version hash for a document (dedup baseline), or null. */
+    async getLatestHash(documentId) {
+      const rows = await this.listByDocumentId(documentId, { limit: 1 });
+      return rows.length ? (rows[0].hash || null) : null;
+    }
+  };
+  return store;
 }
 
 /**
