@@ -40,8 +40,11 @@ function assert(cond, message) {
     await page.locator('#btn-refs').click();
     assert(await page.locator('#refs-pane').isVisible(), '引用栏打开');
     assert(await page.locator('#refs-add-btn').isVisible(), '添加入口可见');
+    await page.locator('#refs-more-btn').click();
+    assert(await page.locator('#refs-more-menu').isVisible(), '更多菜单打开');
     assert(await page.locator('#refs-import-btn').isVisible(), '导入入口可见');
     assert(await page.locator('#refs-export-btn').isVisible(), '导出入口可见');
+    await page.keyboard.press('Escape');
     await page.locator('#refs-add-btn').click();
     assert(await page.locator('#reference-editor-modal').isVisible(), '新增表单打开');
     assert(await page.locator('#reference-key').getAttribute('aria-required') === 'true', 'citekey required');
@@ -131,7 +134,10 @@ function assert(cond, message) {
 
     const [download] = await Promise.all([
       page.waitForEvent('download'),
-      page.locator('#refs-export-btn').click(),
+      (async () => {
+        await page.locator('#refs-more-btn').click();
+        await page.locator('#refs-export-btn').click();
+      })(),
     ]);
     const dlName = download.suggestedFilename();
     assert(/\.references\.bib$/i.test(dlName), `下载文件名 .references.bib (got ${dlName})`);

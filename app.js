@@ -11867,6 +11867,9 @@ function initReferencesPane() {
   const addBtn = document.querySelector("#refs-add-btn");
   const importBtn = document.querySelector("#refs-import-btn");
   const exportBtn = document.querySelector("#refs-export-btn");
+  const moreBtn = document.querySelector("#refs-more-btn");
+  const moreMenu = document.querySelector("#refs-more-menu");
+  const bibStatus = document.querySelector("#refs-bibliography-status");
   const modal = document.querySelector("#reference-editor-modal");
   const form = document.querySelector("#reference-editor-form");
   const cancelBtn = document.querySelector("#reference-cancel");
@@ -11875,11 +11878,28 @@ function initReferencesPane() {
   const bibScope = pane.querySelector("#refs-bibliography-scope");
   const convertLegacyBtn = pane.querySelector("#refs-convert-legacy-btn");
   let query = "";
+  const setMoreOpen = (open, { restoreFocus = false } = {}) => {
+    moreMenu?.classList.toggle("hidden", !open);
+    moreBtn?.setAttribute("aria-expanded", open ? "true" : "false");
+    if (restoreFocus) moreBtn?.focus();
+  };
+  moreBtn?.addEventListener("click", (event) => {
+    event.stopPropagation();
+    setMoreOpen(!!moreMenu?.classList.contains("hidden"));
+  });
+  moreMenu?.addEventListener("click", (event) => event.stopPropagation());
+  document.addEventListener("click", () => setMoreOpen(false));
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && moreMenu && !moreMenu.classList.contains("hidden")) {
+      setMoreOpen(false, { restoreFocus: true });
+    }
+  });
   const setOpen = (open) => {
     pane.classList.toggle("hidden", !open);
     main.classList.toggle("refs-pane-open", open);
     document.body.classList.toggle("refs-pane-collapsed", !open);
     expand?.classList.toggle("hidden", open || !(State.references.entries || []).length);
+    if (!open) setMoreOpen(false);
     try { syncToolbarActionState(); } catch {}
   };
   const renderBibControls = () => {
@@ -11894,6 +11914,10 @@ function initReferencesPane() {
       bibToggle.title = cfg.enabled
         ? "移除显示区（仅 atom），正文引用与文献库不变"
         : "在文档末尾插入文献列表字段（引用条目来自文献库）";
+    }
+    if (bibStatus) {
+      if (!cfg.enabled) bibStatus.textContent = "未插入";
+      else bibStatus.textContent = cfg.scope === "all" ? "已插入 · 全部" : "已插入 · 仅引用";
     }
     if (convertLegacyBtn) {
       const md = (State.currentFile && typeof State.currentFile.content === "string") ? State.currentFile.content : "";
@@ -11920,14 +11944,13 @@ function initReferencesPane() {
       missing.classList.toggle("hidden", !missingKeys.length);
       missing.textContent = missingKeys.length ? `缺失：${[...new Set(missingKeys)].map((k) => "@" + k).join("、")}` : "";
     }
+    try { renderBibControls(); } catch (_) {}
     if (!rows.length) {
-      list.innerHTML = `<div class="refs-empty">${entries.length ? "没有匹配的引用" : "点「添加」新建，或「导入」.bib / .ris / .enw / .xml / .json（支持 Zotero 单条导出）"}</div>`;
+      list.innerHTML = `<div class="refs-empty">${entries.length ? "没有匹配的引用" : "尚无文献"}</div>`;
       return;
     }
-    try { renderBibControls(); } catch (_) {}
     list.innerHTML = rows.map((entry) => {
       const key = escapeHtml(entry.key);
-      const meta = [entry.year, entry.journal].filter(Boolean).join(" · ");
       const n = usages[entry.key] || 0;
       const nav = State.citationNavigation || {};
       const isNavCard = !!(nav.key === entry.key && nav.total === n && n > 0 && nav.ordinal > 0);
@@ -11938,15 +11961,24 @@ function initReferencesPane() {
         ? `定位 @${entry.key} 的正文引用，共 ${n} 处`
         : `@${entry.key} 未在正文引用`;
       return `<article class="refs-card${isNavCard ? " is-active" : ""}" data-key="${key}" data-usage-count="${n}"${n ? ' role="button" tabindex="0"' : ""} aria-label="${escapeHtml(ariaLabel)}">
-        <div class="rc-key">@${key}</div>
-        <div class="rc-authors">${escapeHtml(entry.authors || "—")}</div>
-        ${entry.title ? `<div class="rc-title">${escapeHtml(entry.title)}</div>` : ""}
-        <div class="rc-meta">${escapeHtml(meta)}</div>
-        <div class="rc-usage${n ? "" : " is-unused"}" aria-live="polite">${usageText}</div>
-        <div class="rc-actions">
-          <button type="button" class="rc-insert-btn" data-act="insert-cite" data-key="${key}">插入 [@${key}]</button>
-          <button type="button" class="rc-edit-btn" data-act="edit-reference" data-key="${key}">编辑</button>
-          <button type="button" class="rc-delete-btn" data-act="delete-reference" data-key="${key}">删除</button>
+        <div class="rc-copy">
+          <div class="rc-heading">
+            <span class="rc-authors">${escapeHtml(entry.authors || "未知作者")}</span>
+            ${entry.year ? `<span class="rc-year">${escapeHtml(entry.year)}</span>` : ""}
+          </div>
+          ${entry.title ? `<div class="rc-title">${escapeHtml(entry.title)}</div>` : ""}
+          <div class="rc-foot">
+            <code class="rc-key">@${key}</code>
+            <span class="rc-usage${n ? "" : " is-unused"}" aria-live="polite">${usageText}</span>
+          </div>
+        </div>
+        <div class="rc-actions" aria-label="@${key} 操作">
+          <button type="button" class="rc-insert-btn" data-act="insert-cite" data-key="${key}"
+            aria-label="插入 @${key}" title="插入引用"><span aria-hidden="true"></span></button>
+          <button type="button" class="rc-edit-btn" data-act="edit-reference" data-key="${key}"
+            aria-label="编辑 @${key}" title="编辑文献"><span aria-hidden="true"></span></button>
+          <button type="button" class="rc-delete-btn" data-act="delete-reference" data-key="${key}"
+            aria-label="删除 @${key}" title="删除文献"><span aria-hidden="true"></span></button>
         </div>
       </article>`;
     }).join("");
@@ -11959,8 +11991,8 @@ function initReferencesPane() {
     if (open) render();
   });
   addBtn?.addEventListener("click", () => { setOpen(true); openReferenceEditor({ mode: "add" }); });
-  importBtn?.addEventListener("click", () => input.click());
-  exportBtn?.addEventListener("click", () => exportReferencesBib({ download: true }));
+  importBtn?.addEventListener("click", () => { setMoreOpen(false); input.click(); });
+  exportBtn?.addEventListener("click", () => { setMoreOpen(false); exportReferencesBib({ download: true }); });
   input.addEventListener("change", () => {
     const f = input.files?.[0];
     if (f) importReferenceFile(f).catch((e) => { console.error(e); showToast("引用库解析失败", 2500); });
