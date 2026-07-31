@@ -9308,6 +9308,9 @@ async function bindSupervisionToActiveDocument() {
     "";
   const documentId = supervisionDocumentId(path || name);
   if ((!path && !name) || !token || !documentId) return false;
+  // Auto-poll only for deep-link path or .mentor packages — plain .md opens stay local.
+  const isMentor = /\.mentor$/i.test(String(name || "")) || /\.mentor$/i.test(String(path || ""));
+  if (!path && !isMentor) return false;
   await poller.start({ path, name, token, documentId });
   return true;
 }
@@ -13683,6 +13686,10 @@ async function restoreWorkspaceSession() {
     _restoringWorkspaceSession = false;
   }
   await persistWorkspaceSessionNow();
+  try {
+    // After hydration finishes, rebind poller once for the active document.
+    startSupervisionPolling();
+  } catch (_) {}
   if (State.tabs.length > 0) {
     if (failed.length) {
       setStatus(
