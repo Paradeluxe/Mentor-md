@@ -65828,6 +65828,11 @@ function switchToTab(tabId) {
   snapshotActiveTab();
   const ok = restoreTab(target);
   scheduleWorkspaceSessionPersist();
+  try {
+    const drawer = document.querySelector("#version-history-drawer");
+    if (drawer && !drawer.classList.contains("hidden")) renderVersionHistory();
+  } catch (_) {
+  }
   return ok;
 }
 function closeTab(tabId) {
