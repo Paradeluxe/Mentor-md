@@ -463,6 +463,22 @@ async function main() {
     bad('index-aria-docx', e);
   }
 
+
+  // supervision source isolation on tab snapshot
+  try {
+    const tabsMod = await import(pathToFileURL(path.join(ROOT, 'modules', 'tabs.js')).href);
+    const snap = tabsMod.snapshotTabState({
+      id: 'tab-a', name: 'a.mentor',
+      currentFile: { documentId: 'doc-a', name: 'a.mentor' },
+      supervisionSource: { path: 'E:/papers/a.mentor', name: 'a.mentor', token: 'MUST_NOT_LEAK' }
+    });
+    assert.deepStrictEqual(snap.supervisionSource, { path: 'E:/papers/a.mentor', name: 'a.mentor' });
+    assert.ok(!JSON.stringify(snap).includes('MUST_NOT_LEAK'));
+    ok('tabs-supervisionSource-sanitized');
+  } catch (e) {
+    bad('tabs-supervisionSource-sanitized', e);
+  }
+
   console.log('\n=== unit-modules ===');
   for (const r of results) console.log((r.ok ? 'PASS' : 'FAIL') + ' ' + r.n + (r.e ? ' — ' + r.e : ''));
   const failed = results.filter((r) => !r.ok).length;

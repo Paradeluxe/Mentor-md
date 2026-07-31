@@ -46,6 +46,16 @@ export function findTabByDocument(tabs, documentId, name) {
   return null;
 }
 
+
+export function sanitizeSupervisionSource(source, fallbackName = "") {
+  return {
+    path: typeof source?.path === "string" ? source.path : "",
+    name: typeof source?.name === "string" && source.name
+      ? source.name
+      : (fallbackName || "")
+  };
+}
+
 export function snapshotTabState({
   id,
   name,
@@ -58,13 +68,22 @@ export function snapshotTabState({
   mediaFiles,
   currentFile,
   replyDrafts,
-  references
+  references,
+  supervisionSource
 }) {
   const clonedReferences =
     references === undefined ? undefined : cloneReferences(references);
+  const safeName = name || currentFile?.name || "untitled.md";
+  const source = sanitizeSupervisionSource(
+    supervisionSource || {
+      path: currentFile?.path || "",
+      name: currentFile?.name || safeName
+    },
+    safeName
+  );
   return {
     id,
-    name: name || currentFile?.name || "untitled.md",
+    name: safeName,
     html: html || "",
     annotations: annotations || [],
     dirty: !!dirty,
@@ -80,6 +99,7 @@ export function snapshotTabState({
           dirty: !!currentFile.dirty,
           dirtyGen: currentFile.dirtyGen || 0,
           handle: currentFile.handle || null,
+          path: currentFile.path || source.path || null,
           // Mirror references onto the per-document slice so a snapshot can
           // round-trip without depending on the top-level field. Undefined
           // stays undefined to keep the existing shape stable.
@@ -87,8 +107,9 @@ export function snapshotTabState({
             ? undefined
             : cloneReferences(currentFile.references)
         }
-      : { documentId: id, name: name || "untitled.md", content: "", dirty: !!dirty, dirtyGen: 0, handle: null },
+      : { documentId: id, name: safeName, content: "", dirty: !!dirty, dirtyGen: 0, handle: null, path: source.path || null },
     replyDrafts: replyDrafts || {},
+    supervisionSource: source,
     // Only include references when the caller actually passed it in; omitting
     // the key preserves the original snapshot shape for legacy callers.
     ...(clonedReferences === undefined ? {} : { references: clonedReferences })

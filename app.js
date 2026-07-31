@@ -65,7 +65,8 @@ import {
   genTabId as genTabIdPure,
   findTabByDocument as findTabByDocumentPure,
   snapshotTabState,
-  tabLabel
+  tabLabel,
+  sanitizeSupervisionSource
 } from './modules/tabs.js';
 import {
   parseReferenceFile,
@@ -7188,8 +7189,12 @@ function snapshotActiveTab() {
       dirty: !!State.currentFile.dirty,
       dirtyGen: State.currentFile.dirtyGen || 0,
       handle,
-      path: State.currentFile.path || null
-    } : { documentId: id, name, content: "", dirty: false, dirtyGen: 0, handle: null }
+      path: State.currentFile.path || State.externalWatchPath || null
+    } : { documentId: id, name, content: "", dirty: false, dirtyGen: 0, handle: null },
+    supervisionSource: sanitizeSupervisionSource({
+      path: State.externalWatchPath || (State.currentFile && State.currentFile.path) || "",
+      name: (State.currentFile && State.currentFile.name) || name
+    }, name)
   };
   const idx = State.tabs.findIndex((t) => t && t.id === id);
   if (idx >= 0) {
@@ -7273,6 +7278,22 @@ function restoreTab(tab) {
     startAutosaveTimer();
   } catch {
   }
+  try {
+    const src = sanitizeSupervisionSource(tab.supervisionSource || {
+      path: (tab.currentFile && tab.currentFile.path) || "",
+      name: tab.name || ""
+    }, tab.name || "");
+    State.externalWatchPath = src.path || "";
+    // Never restore tokens across tabs; re-fetch via /session.
+    State.externalWatchToken = "";
+  } catch {
+    State.externalWatchPath = "";
+    State.externalWatchToken = "";
+  }
+  try {
+    startSupervisionPolling();
+  } catch {
+  }
   return true;
 }
 function switchToTab(tabId) {
@@ -7281,6 +7302,14 @@ function switchToTab(tabId) {
   if (!target) return false;
   try {
     closeLiveSync();
+  } catch {
+  }
+  try {
+    getSupervisionPoller().stop();
+  } catch {
+  }
+  try {
+    clearSupervisionLocal();
   } catch {
   }
   void queueActiveDraftPersist();
@@ -8886,6 +8915,7 @@ async function openFromMentorHandle(fileHandle, options = {}) {
     archiveVerification: archive && archive.verification || null
   });
   if (!State.diskPathHint) State.diskPathHint = file.name;
+  try { startSupervisionPolling(); } catch (_) {}
   const mediaCount = Object.keys(mediaFiles || {}).length;
   const blobUrlCount = (mdText.match(/!\[[^\]]*\]\(blob:[^)]+\)/g) || []).length;
   if (mediaCount === 0 && blobUrlCount > 0) {
@@ -9175,14 +9205,40 @@ function clearSupervisionLocal() {
   applySupervisionPayload({ active: false }, { force: true });
 }
 
-async function fetchSupervisionStatus(path, token) {
-  if (!path || !token) return { active: false, health: "missing" };
-  const url =
-    location.origin +
-    "/supervision?path=" +
-    encodeURIComponent(path) +
-    "&token=" +
-    encodeURIComponent(token);
+async function ensureLocalSessionToken() {
+  if (State.externalWatchToken) return State.externalWatchToken;
+  try {
+    const host = location.hostname;
+    if (host !== "127.0.0.1" && host !== "localhost") return "";
+    const res = await fetch(location.origin + "/session", { cache: "no-store" });
+    if (!res.ok) return "";
+    const data = await res.json();
+    if (data && data.token) {
+      State.externalWatchToken = String(data.token);
+      return State.externalWatchToken;
+    }
+  } catch (_) {}
+  return "";
+}
+
+async function fetchSupervisionStatus(pathOrOpts, tokenArg) {
+  // Back-compat: (path, token) or ({ path, name, token })
+  let path = "";
+  let name = "";
+  let token = "";
+  if (pathOrOpts && typeof pathOrOpts === "object") {
+    path = pathOrOpts.path || "";
+    name = pathOrOpts.name || "";
+    token = pathOrOpts.token || tokenArg || "";
+  } else {
+    path = pathOrOpts || "";
+    token = tokenArg || "";
+  }
+  if ((!path && !name) || !token) return { active: false, health: "missing" };
+  const q = new URLSearchParams({ token: String(token) });
+  if (path) q.set("path", String(path));
+  else q.set("name", String(name));
+  const url = location.origin + "/supervision?" + q.toString();
   let res;
   try {
     res = await fetch(url, { cache: "no-store" });
@@ -9212,7 +9268,7 @@ function getSupervisionPoller() {
   if (_supervisionPoller) return _supervisionPoller;
   _supervisionPoller = createSupervisionPoller({
     pollMs: 1000,
-    fetchStatus: async ({ path, token }) => fetchSupervisionStatus(path, token),
+    fetchStatus: async (ctx) => fetchSupervisionStatus(ctx),
     onSnapshot: (snap) => {
       try {
         applySupervisionPayload(snap || { active: false });
@@ -9225,17 +9281,47 @@ function getSupervisionPoller() {
 }
 
 function supervisionDocumentId(path) {
-  return String(path || (State.externalWatchPath || "") || ((State.currentFile && State.currentFile.path) || ""));
+  return String(
+    path ||
+      (State.externalWatchPath || "") ||
+      ((State.currentFile && State.currentFile.name) || "") ||
+      ((State.currentFile && State.currentFile.path) || "") ||
+      (State.diskPathHint || "")
+  );
+}
+
+async function bindSupervisionToActiveDocument() {
+  const poller = getSupervisionPoller();
+  try { poller.stop(); } catch (_) {}
+  try { clearSupervisionLocal(); } catch (_) {}
+  const token = (State.externalWatchToken || "") || (await ensureLocalSessionToken());
+  const path = State.externalWatchPath || (State.currentFile && State.currentFile.path) || "";
+  const name =
+    (State.currentFile && State.currentFile.name) ||
+    (State.diskPathHint && (() => {
+      const s = String(State.diskPathHint);
+      const ia = s.lastIndexOf("/");
+      const ib = s.lastIndexOf("\\");
+      const i = ia > ib ? ia : ib;
+      return i >= 0 ? s.slice(i + 1) : s;
+    })()) ||
+    "";
+  const documentId = supervisionDocumentId(path || name);
+  if ((!path && !name) || !token || !documentId) return false;
+  await poller.start({ path, name, token, documentId });
+  return true;
 }
 
 function startSupervisionPolling() {
-  const path = State.externalWatchPath || "";
-  const token = State.externalWatchToken || "";
-  if (!path || !token) return;
-  const documentId = supervisionDocumentId(path);
-  if (!documentId) return;
+  // Fire-and-forget async: may need GET /session for normal Open (no deep-link token).
+  void bindSupervisionToActiveDocument().catch((error) =>
+    console.warn("[supervision] bind failed", error)
+  );
+}
+
+async function startSupervisionPollingAsync() {
   try {
-    getSupervisionPoller().start({ path, token, documentId });
+    await bindSupervisionToActiveDocument();
   } catch (e) {
     console.warn("[supervision] start failed", e);
   }
@@ -10326,6 +10412,7 @@ async function openFromMentorFile(file, options = {}) {
     structuralHtml: archive && archive.documentHtml || null,
     archiveVerification: archive && archive.verification || null
   });
+  try { startSupervisionPolling(); } catch (_) {}
   const mediaCount = Object.keys(mediaFiles || {}).length;
   const blobUrlCount = (mdText.match(/!\[[^\]]*\]\(blob:[^)]+\)/g) || []).length;
   if (mediaCount === 0 && blobUrlCount > 0) {
