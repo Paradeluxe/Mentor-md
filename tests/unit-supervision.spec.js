@@ -56,7 +56,7 @@ const { pathToFileURL } = require('url');
       createSupervisionPetElement,
       findThreadMarkRanges,
       findThreadMarkRange,
-    } = await import(modUrl);
+    resolveSupervisionPetAnchor} = await import(modUrl);
 
   let pass = 0;
   function check(name, fn) {
@@ -353,6 +353,59 @@ const { pathToFileURL } = require('url');
     const tr = { docChanged: true, steps: [{ from: 40, to: 45 }], doc: { content: { size: 500 } } };
     const state = { doc: { content: { size: 500 } } };
     assert.strictEqual(isFullDocumentLoad(tr, state), false);
+  });
+
+
+  check('resolveSupervisionPetAnchor prefers current range', () => {
+    const doc = { content: { size: 50 } };
+    const anchor = resolveSupervisionPetAnchor({
+      doc, active: true, phase: 'working', currentThreadId: 't1',
+      currentRange: { from: 12, to: 18 }, lockedRanges: [{ from: 2, to: 6, threadId: 'p' }]
+    });
+    assert.strictEqual(anchor.pos, 12);
+    assert.strictEqual(anchor.mode, 'current');
+  });
+
+  check('resolveSupervisionPetAnchor falls back to pending locked range', () => {
+    const doc = { content: { size: 50 } };
+    const anchor = resolveSupervisionPetAnchor({
+      doc, active: true, phase: 'working', currentThreadId: 'missing-thread',
+      currentRange: null, lockedRanges: [{ from: 8, to: 14, threadId: 'pending-thread' }]
+    });
+    assert.strictEqual(anchor.pos, 8);
+    assert.strictEqual(anchor.mode, 'pending-fallback');
+    assert.strictEqual(anchor.phase, 'degraded');
+  });
+
+  check('resolveSupervisionPetAnchor waiting uses document fallback', () => {
+    const doc = { content: { size: 50 } };
+    const anchor = resolveSupervisionPetAnchor({
+      doc, active: true, phase: 'waiting', currentThreadId: '',
+      currentRange: null, lockedRanges: []
+    });
+    assert.ok(anchor && anchor.pos >= 0);
+    assert.strictEqual(anchor.mode, 'document-fallback');
+    assert.strictEqual(anchor.phase, 'waiting');
+  });
+
+  check('inactive supervision clears petAnchor', () => {
+    const doc = { content: { size: 50 }, descendants() {} };
+    const s = materializeSupervisionState(doc, { name: 'annotation' }, {
+      v: 1, active: false
+    });
+    assert.strictEqual(s.petAnchor, null);
+    assert.strictEqual(s.active, false);
+  });
+
+  check('active waiting materialize keeps petAnchor without locking whole doc', () => {
+    const doc = { content: { size: 50 }, descendants() {} };
+    const s = materializeSupervisionState(doc, { name: 'annotation' }, {
+      v: 1, active: true, phase: 'waiting', pendingThreadIds: [], currentThreadId: ''
+    });
+    assert.ok(s.petAnchor);
+    assert.strictEqual(s.petAnchor.mode, 'document-fallback');
+    assert.strictEqual(s.lockMode, 'pending-paragraphs');
+    assert.deepStrictEqual(s.lockedRanges, []);
   });
 
   console.log(`=== RESULT: ${pass} pass / 0 fail ===`);

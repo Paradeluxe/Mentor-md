@@ -33,6 +33,7 @@ export function emptySupervisionState() {
     updatedAt: "",
     lockedRanges: [],
     currentRange: null,
+    petAnchor: null,
     missingThreadIds: [],
     decos: DecorationSet.empty,
   };
@@ -303,16 +304,55 @@ function stepSpan(step) {
   return null;
 }
 
-/** Tiny inline SVG critter (owl) — no external assets. */
+/** Frameless inline SVG owl — no chip/pill; document/task pointer only. */
+
+/**
+ * Resolve a stable pet widget anchor while supervision is active.
+ * Prefer current mark range; fall back to first locked pending range;
+ * finally fall back to a safe document position so the pet never vanishes.
+ */
+export function resolveSupervisionPetAnchor({
+  doc, active, phase, currentThreadId, currentRange, lockedRanges
+} = {}) {
+  if (!active || !doc || !doc.content) return null;
+  const max = Math.max(0, Number(doc.content.size) || 0);
+  const clamp = (pos) => Math.max(0, Math.min(Number(pos) || 0, max));
+  if (currentRange && currentRange.from != null) {
+    return {
+      pos: clamp(currentRange.from),
+      mode: 'current',
+      threadId: currentThreadId || currentRange.threadId || '',
+      phase: phase || 'working'
+    };
+  }
+  const pending = (lockedRanges || []).find((range) => range && range.from != null);
+  if (pending) {
+    return {
+      pos: clamp(pending.from),
+      mode: 'pending-fallback',
+      threadId: currentThreadId || pending.threadId || '',
+      phase: 'degraded'
+    };
+  }
+  return {
+    pos: clamp(max > 0 ? 1 : 0),
+    mode: 'document-fallback',
+    threadId: currentThreadId || '',
+    phase: currentThreadId ? 'degraded' : (phase === 'waiting' ? 'waiting' : 'degraded')
+  };
+}
+
 export function createSupervisionPetElement(opts = {}) {
   const phase = opts.phase || "working";
   const threadId = opts.threadId || "";
+  const anchorMode = opts.anchorMode || opts.mode || "";
   const el = document.createElement("span");
   el.className = `supervision-pet is-${phase}`;
   el.setAttribute("contenteditable", "false");
   el.setAttribute("role", "status");
   if (threadId) el.setAttribute("data-thread-id", String(threadId));
   el.setAttribute("data-phase", phase);
+  if (anchorMode) el.setAttribute("data-anchor-mode", String(anchorMode));
   const label =
     phase === "waiting" ? "等待中" : phase === "degraded" ? "未定位" : "改这里";
   const aria =
@@ -323,27 +363,26 @@ export function createSupervisionPetElement(opts = {}) {
         : "AI 正在处理这条批注";
   el.setAttribute("aria-label", aria);
   el.title = aria;
+  // Compact owl, no surrounding capsule. Soft fills + thin outline so it sits on cream paper.
   el.innerHTML =
     '<span class="supervision-pet-body" aria-hidden="true">' +
-    '<svg viewBox="0 0 32 28" width="22" height="19" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">' +
-    '<ellipse cx="16" cy="16" rx="12" ry="10" fill="#7dd3fc"/>' +
-    '<circle cx="11" cy="14" r="4" fill="#0c4a6e"/>' +
-    '<circle cx="21" cy="14" r="4" fill="#0c4a6e"/>' +
-    '<circle cx="12.2" cy="13.5" r="1.3" fill="#e0f2fe"/>' +
-    '<circle cx="22.2" cy="13.5" r="1.3" fill="#e0f2fe"/>' +
-    '<path d="M14 19 Q16 22 18 19" fill="none" stroke="#0369a1" stroke-width="1.4" stroke-linecap="round"/>' +
-    '<path d="M7 8 Q11 2 14 9" fill="#38bdf8"/>' +
-    '<path d="M25 8 Q21 2 18 9" fill="#38bdf8"/>' +
+    '<svg class="supervision-pet-face" viewBox="0 0 36 34" width="24" height="22" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">' +
+    '<ellipse class="pet-body" cx="18" cy="19" rx="12" ry="10.5" fill="#7dd3fc" stroke="#0284c7" stroke-width="1.1"/>' +
+    '<ellipse class="pet-belly" cx="18" cy="21.5" rx="7" ry="5.4" fill="#e0f2fe"/>' +
+    '<path class="pet-ear" d="M8.5 12.2 C9.6 5.2 14 7.6 14.8 12 Z" fill="#38bdf8" stroke="#0284c7" stroke-width="0.9" stroke-linejoin="round"/>' +
+    '<path class="pet-ear" d="M27.5 12.2 C26.4 5.2 22 7.6 21.2 12 Z" fill="#38bdf8" stroke="#0284c7" stroke-width="0.9" stroke-linejoin="round"/>' +
+    '<circle class="pet-eye" cx="13.4" cy="17.2" r="3.7" fill="#0c4a6e"/>' +
+    '<circle class="pet-eye" cx="22.6" cy="17.2" r="3.7" fill="#0c4a6e"/>' +
+    '<circle cx="14.5" cy="16.2" r="1.25" fill="#f0f9ff"/>' +
+    '<circle cx="23.7" cy="16.2" r="1.25" fill="#f0f9ff"/>' +
+    '<path class="pet-beak" d="M16.4 20 L18 22.6 L19.6 20 Z" fill="#f59e0b" stroke="#d97706" stroke-width="0.6" stroke-linejoin="round"/>' +
     "</svg>" +
     `<span class="supervision-pet-label">${label}</span>` +
     "</span>";
   return el;
 }
 
-/**
- * Build lock + current + pet decorations.
- */
-export function buildSupervisionDecos(doc, lockedRanges, lockMode, currentRange, currentThreadId, phase) {
+export function buildSupervisionDecos(doc, lockedRanges, lockMode, currentRange, currentThreadId, phase, petAnchor = null) {
   if (!doc) return DecorationSet.empty;
   const decos = [];
   if (lockMode === "document") {
@@ -376,28 +415,39 @@ export function buildSupervisionDecos(doc, lockedRanges, lockMode, currentRange,
     }
   }
 
-  // Pet widget at the start of the current mark range
-  if (currentRange && currentRange.from != null && currentThreadId) {
-    const pos = Math.max(0, Math.min(currentRange.from, doc.content.size));
+  // Pet widget: prefer explicit petAnchor; keep currentRange path as fallback.
+  const anchor = petAnchor || (currentRange && currentRange.from != null
+    ? { pos: currentRange.from, mode: 'current', threadId: currentThreadId || '', phase: phase || 'working' }
+    : null);
+  if (anchor && anchor.pos != null) {
+    const pos = Math.max(0, Math.min(Number(anchor.pos) || 0, doc.content.size));
+    const petPhase = anchor.phase || phase || "working";
+    const petThread = anchor.threadId || currentThreadId || "";
     decos.push(
       Decoration.widget(
         pos,
         () =>
           createSupervisionPetElement({
-            phase: phase || "working",
-            threadId: currentThreadId,
+            phase: petPhase,
+            threadId: petThread,
+            anchorMode: anchor.mode || "",
           }),
         {
           side: -1,
           ignoreSelection: true,
           stopEvent: () => true,
-          key: `supervision-pet-${currentThreadId}-${phase || "working"}`,
+          key: `supervision-pet-${petThread || "none"}-${petPhase}-${anchor.mode || "current"}`,
         }
       )
     );
   }
 
-  return DecorationSet.create(doc, decos);
+  try {
+    return DecorationSet.create(doc, decos);
+  } catch (_) {
+    // Unit fakes and half-built docs can lack PM tree walkers; never crash materialize.
+    return DecorationSet.empty;
+  }
 }
 
 export function materializeSupervisionState(doc, markType, payload) {
@@ -428,11 +478,16 @@ export function materializeSupervisionState(doc, markType, payload) {
   let currentRange = null;
   if (base.currentThreadId && doc && markType) {
     currentRange = findThreadMarkRange(doc, markType, base.currentThreadId);
-    // Explicit document-lock only: pin pet near top if mark missing.
-    if (!currentRange && base.lockMode === "document" && doc.content.size > 1) {
-      currentRange = { from: 1, to: Math.min(8, doc.content.size) };
-    }
   }
+
+  const petAnchor = resolveSupervisionPetAnchor({
+    doc,
+    active: base.active,
+    phase: base.phase,
+    currentThreadId: base.currentThreadId,
+    currentRange,
+    lockedRanges,
+  });
 
   const decos = buildSupervisionDecos(
     doc,
@@ -440,9 +495,10 @@ export function materializeSupervisionState(doc, markType, payload) {
     base.lockMode,
     currentRange,
     base.currentThreadId,
-    base.phase
+    base.phase,
+    petAnchor
   );
-  return { ...base, lockedRanges, currentRange, missingThreadIds, decos };
+  return { ...base, lockedRanges, currentRange, missingThreadIds, petAnchor, decos };
 }
 
 export function supervisionBannerText(state) {
