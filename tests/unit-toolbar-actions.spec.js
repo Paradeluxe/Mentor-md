@@ -12,7 +12,7 @@ const { pathToFileURL } = require('url');
 
   assert.deepStrictEqual(
     PRIMARY_TOOLBAR_ACTIONS.map((x) => x.id),
-    ['new', 'open', 'autoSave', 'save', 'saveAs', 'exportMd', 'exportDocx', 'references', 'undo', 'redo', 'source', 'filePane', 'commentPane']
+    ['new', 'open', 'autoSave', 'save', 'saveAs', 'versionHistory', 'exportMd', 'exportDocx', 'references', 'undo', 'redo', 'source', 'filePane', 'commentPane']
   );
 
   const noHandle = getToolbarActionState({
@@ -31,6 +31,9 @@ const { pathToFileURL } = require('url');
   assert.strictEqual(noHandle.save.intent, 'choose-save-target');
   assert.strictEqual(noHandle.save.disabled, false);
   assert.strictEqual(noHandle.saveAs.label, '另存');
+  assert.strictEqual(noHandle.versionHistory.label, '版本');
+  assert.strictEqual(noHandle.versionHistory.disabled, false);
+  assert.strictEqual(noHandle.versionHistory.pressed, false);
   assert.strictEqual(noHandle.exportDocx.detail, '仅正文，不含批注与引用库元数据');
   assert.strictEqual(noHandle.references.label, '文献');
   assert.strictEqual(noHandle.references.pressed, false);

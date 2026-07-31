@@ -57242,6 +57242,7 @@ var PRIMARY_TOOLBAR_ACTIONS = Object.freeze([
   { id: "autoSave", label: "\u81EA\u52A8\u4FDD\u5B58" },
   { id: "save", label: "\u4FDD\u5B58" },
   { id: "saveAs", label: "\u53E6\u5B58" },
+  { id: "versionHistory", label: "\u7248\u672C" },
   { id: "exportMd", label: "MD" },
   { id: "exportDocx", label: "DOCX" },
   { id: "references", label: "\u6587\u732E" },
@@ -57285,6 +57286,12 @@ function getToolbarActionState(input = {}) {
     saveAs: {
       label: "\u53E6\u5B58",
       disabled: !hasDocument || busy
+    },
+    versionHistory: {
+      label: "\u7248\u672C",
+      disabled: !hasDocument || busy,
+      pressed: !!input.versionPaneOpen,
+      detail: "\u81EA\u52A8\u7248\u672C\u5FEB\u7167 \xB7 \u53EF\u6062\u590D"
     },
     exportMd: {
       label: "MD",
@@ -61341,6 +61348,200 @@ async function recordVersionFromSnapshot(snapshot, { kind = "manual", label = nu
 }
 function mediaManifestForFingerprint(mediaFiles) {
   return Object.entries(mediaFiles || {}).map(([path2, blob]) => [path2, blob && (blob.size || blob.byteLength) || 0]).sort((a, b) => a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0);
+}
+var _versionPaneOpen = false;
+function openVersionHistory() {
+  if (!State2.currentFile) return;
+  _versionPaneOpen = true;
+  const drawer = document.querySelector("#version-history-drawer");
+  if (drawer) drawer.classList.remove("hidden");
+  renderVersionHistory();
+  try {
+    syncToolbarActionState();
+  } catch (_) {
+  }
+}
+function closeVersionHistory() {
+  _versionPaneOpen = false;
+  const drawer = document.querySelector("#version-history-drawer");
+  if (drawer) drawer.classList.add("hidden");
+  try {
+    syncToolbarActionState();
+  } catch (_) {
+  }
+}
+async function renderVersionHistory() {
+  const list = document.querySelector("#version-history-list");
+  const empty4 = document.querySelector("#version-history-empty");
+  if (!list) return;
+  const docId = State2.currentFile && State2.currentFile.documentId || State2.activeTabId;
+  let rows = [];
+  try {
+    rows = await VersionStore.listByDocumentId(docId);
+  } catch (e) {
+    console.warn("[versions] list failed:", e);
+  }
+  list.innerHTML = "";
+  if (empty4) empty4.classList.toggle("hidden", rows.length > 0);
+  const count = document.querySelector("#version-history-count");
+  if (count) count.textContent = rows.length ? rows.length + " \u4E2A\u7248\u672C" : "";
+  for (const row of rows) {
+    list.appendChild(renderVersionRow(row));
+  }
+}
+function renderVersionRow(row) {
+  const item = document.createElement("div");
+  item.className = "version-item";
+  const kindLabel = row.kind === "named" ? "\u547D\u540D" : row.kind === "manual" ? "\u624B\u52A8" : "\u81EA\u52A8";
+  const time = new Date(row.createdAt).toLocaleString();
+  const label = row.label ? `<span class="version-label">${escapeHtml(row.label)}</span>` : "";
+  const size = row.byteSize ? ` \xB7 ${formatBytes(row.byteSize)}` : "";
+  const omitted = row.mediaOmitted ? " \xB7 \u56FE\u7247\u672A\u542B" : "";
+  item.innerHTML = `<div class="version-item-head">
+       <span class="version-kind">${kindLabel}</span>
+       <span class="version-time">${time}</span>
+     </div>
+     <div class="version-item-sub">${label}${size}${omitted}</div>
+     <div class="version-item-actions">
+       <button type="button" class="version-act version-act-restore" data-version-restore="${row.id}">\u6062\u590D\u6B64\u7248\u672C</button>
+       <button type="button" class="version-act" data-version-export="${row.id}">\u53E6\u5B58</button>
+       <button type="button" class="version-act version-act-delete" data-version-delete="${row.id}">\u5220\u9664</button>
+     </div>`;
+  item.querySelector("[data-version-restore]").addEventListener("click", () => restoreVersion(row.id));
+  item.querySelector("[data-version-export]").addEventListener("click", () => exportVersionAsMentor(row.id));
+  item.querySelector("[data-version-delete]").addEventListener("click", () => deleteVersion(row.id));
+  return item;
+}
+function formatBytes(n) {
+  if (!n || n < 1024) return (n || 0) + " B";
+  if (n < 1048576) return (n / 1024).toFixed(1) + " KB";
+  return (n / 1048576).toFixed(1) + " MB";
+}
+async function restoreVersion(id) {
+  let row = null;
+  try {
+    row = await VersionStore.getVersion(id);
+  } catch (e) {
+    showToast("\u8BFB\u53D6\u7248\u672C\u5931\u8D25", 3e3);
+    return;
+  }
+  if (!row) {
+    showToast("\u7248\u672C\u4E0D\u5B58\u5728", 3e3);
+    return;
+  }
+  if (State2.currentFile && State2.currentFile.dirty) {
+    const ok = confirm("\u5F53\u524D\u6709\u672A\u4FDD\u5B58\u4FEE\u6539\uFF0C\u6062\u590D\u7248\u672C\u5C06\u8986\u76D6\u7F16\u8F91\u5668\u5185\u5BB9\uFF08\u53EF\u4FDD\u5B58\u524D\u53D6\u6D88\uFF09\u3002\u7EE7\u7EED\uFF1F");
+    if (!ok) return;
+  }
+  try {
+    const refs = row.references ? normalizeReferenceManifest(row.references) : emptyReferenceManifest();
+    const docId = State2.currentFile && State2.currentFile.documentId || State2.activeTabId;
+    loadMarkdownIntoEditor(
+      row.name || State2.currentFile && State2.currentFile.name || "untitled.md",
+      row.body || "",
+      { annotations: row.annotations || [], version: "1" },
+      {
+        handle: State2.currentFile ? State2.currentFile.handle : null,
+        saveMode: State2.saveMode,
+        documentId: docId,
+        alreadyPrepared: true,
+        preferDraft: false,
+        forceDisk: false,
+        references: refs
+      }
+    );
+    if (row.mediaFiles && Object.keys(row.mediaFiles).length) {
+      try {
+        await injectMediaFiles(row.mediaFiles);
+      } catch (_) {
+      }
+    }
+    try {
+      markDirty();
+    } catch (_) {
+    }
+    try {
+      resetHistory();
+    } catch (_) {
+    }
+    try {
+      clearPmHistory();
+    } catch (_) {
+    }
+    setStatus("\u5DF2\u6062\u590D\u7248\u672C", row.label || new Date(row.createdAt).toLocaleString());
+    showToast("\u5DF2\u6062\u590D\u5230\u5386\u53F2\u7248\u672C\uFF08\u672A\u5199\u76D8\uFF0C\u4FDD\u5B58\u540E\u751F\u6548\uFF09", 3200);
+    closeVersionHistory();
+  } catch (e) {
+    showToast("\u6062\u590D\u5931\u8D25: " + (e && e.message ? e.message : e), 4e3);
+  }
+}
+async function deleteVersion(id) {
+  const ok = confirm("\u5220\u9664\u8FD9\u4E2A\u7248\u672C\uFF1F\u6B64\u64CD\u4F5C\u4E0D\u53EF\u64A4\u9500\u3002");
+  if (!ok) return;
+  try {
+    await VersionStore.deleteVersion(id);
+    renderVersionHistory();
+  } catch (e) {
+    showToast("\u5220\u9664\u5931\u8D25", 3e3);
+  }
+}
+async function exportVersionAsMentor(id) {
+  let row = null;
+  try {
+    row = await VersionStore.getVersion(id);
+  } catch (_) {
+  }
+  if (!row) {
+    showToast("\u7248\u672C\u4E0D\u5B58\u5728", 3e3);
+    return;
+  }
+  try {
+    const outName = /\.mentor$/i.test(row.name) ? row.name : String(row.name || "version").replace(/\.md$/i, "") + ".mentor";
+    const sidecar = row.sidecar || {
+      version: "1",
+      document: row.name,
+      updatedAt: (/* @__PURE__ */ new Date()).toISOString(),
+      author: { id: State2.authorId, name: State2.author },
+      annotations: row.annotations || []
+    };
+    showExportProgress("\u6B63\u5728\u6253\u5305 .mentor\u2026");
+    const blob = await buildMentorZipBlob(
+      row.body || "",
+      sidecar,
+      row.mediaFiles || {},
+      row.references || emptyReferenceManifest(),
+      { documentHtml: void 0 }
+    );
+    downloadBlob(outName, blob);
+    hideExportProgress("\u5DF2\u4E0B\u8F7D");
+    showToast(`\u5DF2\u5BFC\u51FA\u7248\u672C ${outName}`, 2500);
+  } catch (e) {
+    hideExportProgress("\u5BFC\u51FA\u5931\u8D25");
+    showToast("\u5BFC\u51FA\u5931\u8D25: " + (e && e.message ? e.message : e), 4e3);
+  }
+}
+async function runNamedVersionPin() {
+  if (!State2.currentFile) return;
+  let snapshot;
+  try {
+    snapshot = createSaveSnapshot();
+  } catch (e) {
+    showToast("\u4FDD\u5B58\u5931\u8D25: " + (e && e.message ? e.message : e), 4e3);
+    return;
+  }
+  const defaultLabel = "\u7248\u672C " + (/* @__PURE__ */ new Date()).toLocaleString();
+  let label = prompt("\u7248\u672C\u540D\u79F0\uFF08\u7559\u7A7A\u4F7F\u7528\u9ED8\u8BA4\uFF09", defaultLabel);
+  if (label === null) return;
+  label = (label || defaultLabel).trim();
+  const res = await recordVersionFromSnapshot(snapshot, { kind: "named", label });
+  if (res && res.ok) {
+    showToast("\u5DF2\u4FDD\u5B58\u6B64\u7248\u672C \u2713", 2e3);
+    renderVersionHistory();
+  } else if (res && res.error === "disabled") {
+    showToast("\u7248\u672C\u5386\u53F2\u5DF2\u5173\u95ED\uFF08\u8BBE\u7F6E\u4E2D\u5F00\u542F\uFF09", 3e3);
+  } else {
+    showToast("\u4FDD\u5B58\u7248\u672C\u5931\u8D25", 3e3);
+  }
 }
 function startAutosaveTimer() {
   stopAutosaveTimer();
@@ -70972,6 +71173,24 @@ function setupToolbar() {
       showToast("\u53E6\u5B58\u5931\u8D25: " + (e && e.message ? e.message : e), 4e3);
     }
   }));
+  const vhBtn = document.querySelector("#btn-version-history");
+  if (vhBtn && !vhBtn.dataset.boundVersionHistory) {
+    vhBtn.dataset.boundVersionHistory = "1";
+    vhBtn.addEventListener("click", () => {
+      if (!State2.currentFile) return;
+      runToolbarAction("versionHistory", openVersionHistory);
+    });
+  }
+  const vhPin = document.querySelector("#version-history-pin");
+  if (vhPin && !vhPin.dataset.boundVersionPin) {
+    vhPin.dataset.boundVersionPin = "1";
+    vhPin.addEventListener("click", runNamedVersionPin);
+  }
+  const vhClose = document.querySelector("#version-history-close");
+  if (vhClose && !vhClose.dataset.boundVersionClose) {
+    vhClose.dataset.boundVersionClose = "1";
+    vhClose.addEventListener("click", closeVersionHistory);
+  }
   $$("#format-toolbar button[data-cmd]").forEach((btn) => {
     btn.addEventListener("click", () => {
       const cmd = btn.dataset.cmd;
@@ -72068,6 +72287,13 @@ window.__mdAnnotator = {
   AnnotationStore,
   VersionStore,
   recordVersionFromSnapshot,
+  openVersionHistory,
+  closeVersionHistory,
+  renderVersionHistory,
+  restoreVersion,
+  deleteVersion,
+  exportVersionAsMentor,
+  runNamedVersionPin,
   putAtomicDraftForCurrent,
   persistWorkspaceSessionNow,
   restoreDraftIfAny,

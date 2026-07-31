@@ -37,6 +37,7 @@
                   <button id="btn-autosave" type="button" class="tb-icon-text tb-autosave" title="自动保存（开启后写回已授权文件）" aria-pressed="true" aria-label="自动保存"><span class="tb-autosave-track" aria-hidden="true"><span class="tb-autosave-knob"></span></span><span class="tb-label">自动保存</span></button>
                   <button id="btn-save" title="保存当前文档" class="tb-icon-text" aria-keyshortcuts="Control+S Meta+S"><span class="tb-icon"></span><span class="tb-label">保存</span></button>
                   <button id="btn-save-as" title="另存为 .mentor 副本" class="tb-icon-text"><span class="tb-icon"></span><span class="tb-label">另存</span></button>
+                  <button id="btn-version-history" type="button" title="版本历史" aria-label="版本历史" aria-haspopup="dialog"><span class="tb-icon"></span><span class="tb-label">版本</span></button>
                 </div>
                 <div class="tb-group" data-toolbar-group="export">
                   <button id="btn-export-md" title="导出 Markdown 副本" class="tb-icon-text"><span class="tb-icon"></span><span class="tb-label">MD</span></button>
@@ -433,6 +434,21 @@
     </div>
   </div>
       <button class="settings-popover-close" data-act="close-settings" aria-label="关闭">×</button>
+</div>
+
+<!-- v1.48: 版本历史 drawer -->
+<div id="version-history-drawer" class="version-history-drawer hidden" role="dialog" aria-label="版本历史">
+  <div class="version-history-header">
+    <h3>版本历史</h3>
+    <span class="version-history-count" id="version-history-count"></span>
+    <div class="version-history-header-actions">
+      <button type="button" class="version-history-pin" id="version-history-pin" title="保存此版本（命名）">保存此版本</button>
+      <button type="button" class="version-history-close" id="version-history-close" aria-label="关闭">×</button>
+    </div>
+  </div>
+  <p class="version-history-hint">每次成功保存（手动/自动）自动留档；同名内容不重复记录。版本存于本机浏览器，可用「另存」导出为 .mentor。</p>
+  <div class="version-history-empty hidden" id="version-history-empty">尚无版本。开启自动保存并写回文件后，每次成功保存会自动留下版本。</div>
+  <div class="version-history-list" id="version-history-list"></div>
 </div>
 </body>
 </html>

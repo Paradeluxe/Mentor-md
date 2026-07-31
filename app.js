@@ -3331,6 +3331,192 @@ function mediaManifestForFingerprint(mediaFiles) {
     .map(([path2, blob]) => [path2, (blob && (blob.size || blob.byteLength)) || 0])
     .sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
 }
+// ---------------------------------------------------------------------------
+// Version history drawer (Word-like): list / restore / export / delete / pin
+// ---------------------------------------------------------------------------
+var _versionPaneOpen = false;
+function openVersionHistory() {
+  if (!State.currentFile) return;
+  _versionPaneOpen = true;
+  const drawer = document.querySelector("#version-history-drawer");
+  if (drawer) drawer.classList.remove("hidden");
+  renderVersionHistory();
+  try { syncToolbarActionState(); } catch (_) {}
+}
+function closeVersionHistory() {
+  _versionPaneOpen = false;
+  const drawer = document.querySelector("#version-history-drawer");
+  if (drawer) drawer.classList.add("hidden");
+  try { syncToolbarActionState(); } catch (_) {}
+}
+async function renderVersionHistory() {
+  const list = document.querySelector("#version-history-list");
+  const empty = document.querySelector("#version-history-empty");
+  if (!list) return;
+  const docId = (State.currentFile && State.currentFile.documentId) || State.activeTabId;
+  let rows = [];
+  try {
+    rows = await VersionStore.listByDocumentId(docId);
+  } catch (e) {
+    console.warn("[versions] list failed:", e);
+  }
+  list.innerHTML = "";
+  if (empty) empty.classList.toggle("hidden", rows.length > 0);
+  const count = document.querySelector("#version-history-count");
+  if (count) count.textContent = rows.length ? rows.length + " 个版本" : "";
+  for (const row of rows) {
+    list.appendChild(renderVersionRow(row));
+  }
+}
+function renderVersionRow(row) {
+  const item = document.createElement("div");
+  item.className = "version-item";
+  const kindLabel = row.kind === "named" ? "命名" : row.kind === "manual" ? "手动" : "自动";
+  const time = new Date(row.createdAt).toLocaleString();
+  const label = row.label ? `<span class="version-label">${escapeHtml(row.label)}</span>` : "";
+  const size = row.byteSize ? ` · ${formatBytes(row.byteSize)}` : "";
+  const omitted = row.mediaOmitted ? " · 图片未含" : "";
+  item.innerHTML =
+    `<div class="version-item-head">
+       <span class="version-kind">${kindLabel}</span>
+       <span class="version-time">${time}</span>
+     </div>
+     <div class="version-item-sub">${label}${size}${omitted}</div>
+     <div class="version-item-actions">
+       <button type="button" class="version-act version-act-restore" data-version-restore="${row.id}">恢复此版本</button>
+       <button type="button" class="version-act" data-version-export="${row.id}">另存</button>
+       <button type="button" class="version-act version-act-delete" data-version-delete="${row.id}">删除</button>
+     </div>`;
+  item.querySelector('[data-version-restore]').addEventListener("click", () => restoreVersion(row.id));
+  item.querySelector('[data-version-export]').addEventListener("click", () => exportVersionAsMentor(row.id));
+  item.querySelector('[data-version-delete]').addEventListener("click", () => deleteVersion(row.id));
+  return item;
+}
+function formatBytes(n) {
+  if (!n || n < 1024) return (n || 0) + " B";
+  if (n < 1048576) return (n / 1024).toFixed(1) + " KB";
+  return (n / 1048576).toFixed(1) + " MB";
+}
+async function restoreVersion(id) {
+  let row = null;
+  try {
+    row = await VersionStore.getVersion(id);
+  } catch (e) {
+    showToast("读取版本失败", 3000);
+    return;
+  }
+  if (!row) {
+    showToast("版本不存在", 3000);
+    return;
+  }
+  if (State.currentFile && State.currentFile.dirty) {
+    const ok = confirm("当前有未保存修改，恢复版本将覆盖编辑器内容（可保存前取消）。继续？");
+    if (!ok) return;
+  }
+  try {
+    const refs = row.references
+      ? normalizeReferenceManifest(row.references)
+      : emptyReferenceManifest();
+    const docId = (State.currentFile && State.currentFile.documentId) || State.activeTabId;
+    loadMarkdownIntoEditor(
+      row.name || (State.currentFile && State.currentFile.name) || "untitled.md",
+      row.body || "",
+      { annotations: row.annotations || [], version: "1" },
+      {
+        handle: State.currentFile ? State.currentFile.handle : null,
+        saveMode: State.saveMode,
+        documentId: docId,
+        alreadyPrepared: true,
+        preferDraft: false,
+        forceDisk: false,
+        references: refs
+      }
+    );
+    if (row.mediaFiles && Object.keys(row.mediaFiles).length) {
+      try {
+        await injectMediaFiles(row.mediaFiles);
+      } catch (_) {}
+    }
+    // Restore never writes disk: mark dirty so only a subsequent save commits.
+    try { markDirty(); } catch (_) {}
+    try { resetHistory(); } catch (_) {}
+    try { clearPmHistory(); } catch (_) {}
+    setStatus("已恢复版本", row.label || new Date(row.createdAt).toLocaleString());
+    showToast("已恢复到历史版本（未写盘，保存后生效）", 3200);
+    closeVersionHistory();
+  } catch (e) {
+    showToast("恢复失败: " + (e && e.message ? e.message : e), 4000);
+  }
+}
+async function deleteVersion(id) {
+  const ok = confirm("删除这个版本？此操作不可撤销。");
+  if (!ok) return;
+  try {
+    await VersionStore.deleteVersion(id);
+    renderVersionHistory();
+  } catch (e) {
+    showToast("删除失败", 3000);
+  }
+}
+async function exportVersionAsMentor(id) {
+  let row = null;
+  try {
+    row = await VersionStore.getVersion(id);
+  } catch (_) {}
+  if (!row) {
+    showToast("版本不存在", 3000);
+    return;
+  }
+  try {
+    const outName = /\.mentor$/i.test(row.name)
+      ? row.name
+      : String(row.name || "version").replace(/\.md$/i, "") + ".mentor";
+    const sidecar = row.sidecar || {
+      version: "1",
+      document: row.name,
+      updatedAt: new Date().toISOString(),
+      author: { id: State.authorId, name: State.author },
+      annotations: row.annotations || []
+    };
+    showExportProgress("正在打包 .mentor…");
+    const blob = await buildMentorZipBlob(
+      row.body || "",
+      sidecar,
+      row.mediaFiles || {},
+      row.references || emptyReferenceManifest(),
+      { documentHtml: undefined }
+    );
+    downloadBlob(outName, blob);
+    hideExportProgress("已下载");
+    showToast(`已导出版本 ${outName}`, 2500);
+  } catch (e) {
+    hideExportProgress("导出失败");
+    showToast("导出失败: " + (e && e.message ? e.message : e), 4000);
+  }
+}
+async function runNamedVersionPin() {
+  if (!State.currentFile) return;
+  let snapshot;
+  try {
+    snapshot = createSaveSnapshot();
+  } catch (e) {
+    showToast("保存失败: " + (e && e.message ? e.message : e), 4000);
+    return;
+  }
+  const defaultLabel = "版本 " + new Date().toLocaleString();
+  let label = prompt("版本名称（留空使用默认）", defaultLabel);
+  if (label === null) return;
+  label = (label || defaultLabel).trim();
+  const res = await recordVersionFromSnapshot(snapshot, { kind: "named", label });
+  if (res && res.ok) {
+    showToast("已保存此版本 ✓", 2000);
+    renderVersionHistory();
+  } else if (res && res.error === "disabled") {
+    showToast("版本历史已关闭（设置中开启）", 3000);
+  } else {
+    showToast("保存版本失败", 3000);
+  }
+}
 function startAutosaveTimer() {
   stopAutosaveTimer();
   if (!canWriteLiveDocument()) return;
@@ -13099,6 +13285,24 @@ $("#btn-save").addEventListener("click", () => runToolbarAction("save", saveCurr
       showToast("另存失败: " + (e && e.message ? e.message : e), 4e3);
     }
   }));
+  const vhBtn = document.querySelector("#btn-version-history");
+  if (vhBtn && !vhBtn.dataset.boundVersionHistory) {
+    vhBtn.dataset.boundVersionHistory = "1";
+    vhBtn.addEventListener("click", () => {
+      if (!State.currentFile) return;
+      runToolbarAction("versionHistory", openVersionHistory);
+    });
+  }
+  const vhPin = document.querySelector("#version-history-pin");
+  if (vhPin && !vhPin.dataset.boundVersionPin) {
+    vhPin.dataset.boundVersionPin = "1";
+    vhPin.addEventListener("click", runNamedVersionPin);
+  }
+  const vhClose = document.querySelector("#version-history-close");
+  if (vhClose && !vhClose.dataset.boundVersionClose) {
+    vhClose.dataset.boundVersionClose = "1";
+    vhClose.addEventListener("click", closeVersionHistory);
+  }
   $$("#format-toolbar button[data-cmd]").forEach((btn) => {
     btn.addEventListener("click", () => {
       const cmd = btn.dataset.cmd;
@@ -14239,6 +14443,13 @@ window.__mdAnnotator = {
   AnnotationStore,
   VersionStore,
   recordVersionFromSnapshot,
+  openVersionHistory,
+  closeVersionHistory,
+  renderVersionHistory,
+  restoreVersion,
+  deleteVersion,
+  exportVersionAsMentor,
+  runNamedVersionPin,
   putAtomicDraftForCurrent,
   persistWorkspaceSessionNow,
   restoreDraftIfAny,

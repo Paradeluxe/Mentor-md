@@ -9,6 +9,7 @@ export const PRIMARY_TOOLBAR_ACTIONS = Object.freeze([
   { id: 'autoSave', label: '自动保存' },
   { id: 'save', label: '保存' },
   { id: 'saveAs', label: '另存' },
+  { id: 'versionHistory', label: '版本' },
   { id: 'exportMd', label: 'MD' },
   { id: 'exportDocx', label: 'DOCX' },
   { id: 'references', label: '文献' },
@@ -75,6 +76,12 @@ export function getToolbarActionState(input = {}) {
     saveAs: {
       label: '另存',
       disabled: !hasDocument || busy,
+    },
+    versionHistory: {
+      label: '版本',
+      disabled: !hasDocument || busy,
+      pressed: !!input.versionPaneOpen,
+      detail: '自动版本快照 · 可恢复',
     },
     exportMd: {
       label: 'MD',
