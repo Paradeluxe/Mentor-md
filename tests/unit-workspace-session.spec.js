@@ -37,6 +37,24 @@ const { pathToFileURL } = require('url');
   });
   assert.equal(normalized.tabs.length, 1);
   assert.equal(normalized.activeDocumentId, 'doc-a');
+
+  const ordered = mod.orderRestoredTabs(
+    [
+      { id: 'runtime-b', currentFile: { documentId: 'doc-b' } },
+      { id: 'runtime-a', currentFile: { documentId: 'doc-a' } }
+    ],
+    {
+      tabs: [
+        { documentId: 'doc-a', order: 0 },
+        { documentId: 'doc-missing', order: 1 },
+        { documentId: 'doc-b', order: 2 }
+      ],
+      activeDocumentId: 'doc-missing'
+    }
+  );
+  assert.deepEqual(ordered.tabs.map((t) => t.currentFile.documentId), ['doc-a', 'doc-b']);
+  assert.equal(ordered.activeDocumentId, 'doc-b');
+
   console.log('PASS workspace-session');
 })().catch((error) => {
   console.error(error.stack || error);

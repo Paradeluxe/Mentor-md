@@ -47,3 +47,16 @@ export function createWorkspaceSession({ tabs = [], activeTabId = '' } = {}) {
     updatedAt: Date.now()
   });
 }
+
+export function orderRestoredTabs(runtimeTabs, session) {
+  const rank = new Map((session?.tabs || []).map((entry, index) => [entry.documentId, index]));
+  const tabs = [...(runtimeTabs || [])].sort((a, b) =>
+    (rank.get(a?.currentFile?.documentId) ?? Number.MAX_SAFE_INTEGER) -
+    (rank.get(b?.currentFile?.documentId) ?? Number.MAX_SAFE_INTEGER)
+  );
+  const ids = new Set(tabs.map((tab) => tab?.currentFile?.documentId).filter(Boolean));
+  const activeDocumentId = ids.has(session?.activeDocumentId)
+    ? session.activeDocumentId
+    : (tabs[tabs.length - 1]?.currentFile?.documentId || '');
+  return { tabs, activeDocumentId };
+}

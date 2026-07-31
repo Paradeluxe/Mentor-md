@@ -38,7 +38,8 @@ import {
 } from './modules/io.js';
 import {
   createWorkspaceSession,
-  normalizeWorkspaceSession
+  normalizeWorkspaceSession,
+  orderRestoredTabs
 } from './modules/workspace-session.js';
 import {
   singleNewlinesToParagraphBreaks,
@@ -13500,6 +13501,82 @@ async function boot() {
   }
 }
 async function tryReconnect() {
+  try {
+    const restored = await restoreWorkspaceSession();
+    if (restored) return;
+    await tryReconnectLastFile();
+  } catch (e) {
+    console.warn("\u91CD\u8FDE\u5931\u8D25:", e);
+  }
+}
+async function restoreWorkspaceEntry(entry) {
+  if (!entry || !entry.documentId) return false;
+  const handle = await HandleStore.getFile(entry.documentId);
+  if (handle) {
+    let permission = "prompt";
+    try { permission = await handle.queryPermission({ mode: "readwrite" }); } catch (_) {}
+    if (permission === "granted") {
+      await openFromMentorHandle(handle, {
+        quiet: true,
+        preferDraft: true,
+        documentId: entry.documentId
+      });
+      return true;
+    }
+  }
+  const draft = await restoreDraftIfAny(entry.documentId, entry.name);
+  if (!draft) return false;
+  await activateOpenedDocument({
+    name: entry.name || draft.name || "untitled.md",
+    content: draft.body || "",
+    annotations: draft.sidecar || { annotations: draft.annotations || [] },
+    references: draft.references,
+    documentId: entry.documentId,
+    saveMode: entry.saveMode || "mentor-download",
+    quiet: true,
+    preferDraft: false,
+    forceDisk: true
+  });
+  return true;
+}
+async function restoreWorkspaceSession() {
+  const session = normalizeWorkspaceSession(await HandleStore.getWorkspaceSession());
+  if (!session.tabs.length) return false;
+  _restoringWorkspaceSession = true;
+  const failed = [];
+  try {
+    for (const entry of session.tabs) {
+      try {
+        if (!(await restoreWorkspaceEntry(entry))) failed.push(entry.name || entry.documentId);
+      } catch (error) {
+        failed.push(entry.name || entry.documentId);
+        console.warn("[workspace] restore entry failed", entry && entry.name, error);
+      }
+    }
+    const ordered = orderRestoredTabs(State.tabs, session);
+    State.tabs = ordered.tabs;
+    const active = State.tabs.find((tab) =>
+      tab && tab.currentFile && tab.currentFile.documentId === ordered.activeDocumentId
+    );
+    if (active && active.id !== State.activeTabId) restoreTab(active);
+    renderDocTabs();
+  } finally {
+    _restoringWorkspaceSession = false;
+  }
+  await persistWorkspaceSessionNow();
+  if (State.tabs.length > 0) {
+    if (failed.length) {
+      setStatus(
+        `\u5DF2\u6062\u590D ${State.tabs.length} \u4E2A\u6807\u7B7E`,
+        `${failed.length} \u4E2A\u6587\u4EF6\u9700\u8981\u91CD\u65B0\u6388\u6743\u6216\u91CD\u65B0\u6253\u5F00`
+      );
+    } else {
+      setStatus(`\u5DF2\u6062\u590D ${State.tabs.length} \u4E2A\u6807\u7B7E`, "F5 \u5DE5\u4F5C\u533A\u5DF2\u6062\u590D");
+    }
+  }
+  return State.tabs.length > 0;
+}
+async function tryReconnectLastFile() {
   try {
     const last = await HandleStore.getLastFile();
     if (!last || !last.fileName) return;
