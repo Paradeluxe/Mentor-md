@@ -3024,12 +3024,16 @@ function setAutoSaveEnabled(on, { silent = false } = {}) {
       const disk = isAutoSaveDiskActive();
       setStatus(
         disk ? "自动保存已开启" : "自动保存已开启（草稿）",
-        disk ? "停手后写回已授权文件" : "尚无写回权限，仅缓存草稿"
+        disk ? "停手后写回已授权文件" : "尚无写回目标 · 先保存到本地后才会写盘"
       );
+      if (!disk) {
+        try { showToast("自动保存已开：请先保存到本地文件，之后才会写回磁盘", 2800); } catch (_) {}
+      }
     } else {
-      setStatus("自动保存已关闭", "仅手动保存");
+      setStatus("自动保存已关闭", "仅手动保存写回文件 · 草稿仍会自动保存");
     }
   }
+  return next;
 }
 /** Preference ON and current doc can be written in place. */
 function isAutoSaveDiskActive() {

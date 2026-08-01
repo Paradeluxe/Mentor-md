@@ -61202,12 +61202,19 @@ function setAutoSaveEnabled(on, { silent = false } = {}) {
       const disk = isAutoSaveDiskActive();
       setStatus(
         disk ? "\u81EA\u52A8\u4FDD\u5B58\u5DF2\u5F00\u542F" : "\u81EA\u52A8\u4FDD\u5B58\u5DF2\u5F00\u542F\uFF08\u8349\u7A3F\uFF09",
-        disk ? "\u505C\u624B\u540E\u5199\u56DE\u5DF2\u6388\u6743\u6587\u4EF6" : "\u5C1A\u65E0\u5199\u56DE\u6743\u9650\uFF0C\u4EC5\u7F13\u5B58\u8349\u7A3F"
+        disk ? "\u505C\u624B\u540E\u5199\u56DE\u5DF2\u6388\u6743\u6587\u4EF6" : "\u5C1A\u65E0\u5199\u56DE\u76EE\u6807 \xB7 \u5148\u4FDD\u5B58\u5230\u672C\u5730\u540E\u624D\u4F1A\u5199\u76D8"
       );
+      if (!disk) {
+        try {
+          showToast("\u81EA\u52A8\u4FDD\u5B58\u5DF2\u5F00\uFF1A\u8BF7\u5148\u4FDD\u5B58\u5230\u672C\u5730\u6587\u4EF6\uFF0C\u4E4B\u540E\u624D\u4F1A\u5199\u56DE\u78C1\u76D8", 2800);
+        } catch (_) {
+        }
+      }
     } else {
-      setStatus("\u81EA\u52A8\u4FDD\u5B58\u5DF2\u5173\u95ED", "\u4EC5\u624B\u52A8\u4FDD\u5B58");
+      setStatus("\u81EA\u52A8\u4FDD\u5B58\u5DF2\u5173\u95ED", "\u4EC5\u624B\u52A8\u4FDD\u5B58\u5199\u56DE\u6587\u4EF6 \xB7 \u8349\u7A3F\u4ECD\u4F1A\u81EA\u52A8\u4FDD\u5B58");
     }
   }
+  return next2;
 }
 function isAutoSaveDiskActive() {
   return getAutoSaveEnabled() && hasWriteHandle() && !State2.readOnlyMode && canWriteLiveDocument();
