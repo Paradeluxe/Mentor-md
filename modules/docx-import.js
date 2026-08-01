@@ -11,6 +11,9 @@
  */
 import JSZip from 'jszip';
 
+/** Soft cap for DOCX import (25MB). */
+export const DOCX_MAX_BYTES = 25 * 1024 * 1024;
+
 // ------------------------------------------------------------
 // Minimal XML helpers (no DOMParser — works in Node unit tests)
 // ------------------------------------------------------------
@@ -238,8 +241,15 @@ export function parseDocumentXml(docXml) {
         mdAcc.push(runToMd(node));
         continue;
       }
-      if (n === 'hyperlink' || n === 'sdt' || n === 'sdtContent' || n === 'smartTag') {
+      if (n === 'del') {
+        // Tracked deletions: exclude from body + anchors
+        continue;
+      }
+      if (n === 'ins' || n === 'hyperlink' || n === 'sdt' || n === 'sdtContent' || n === 'smartTag') {
         walkInline(node.children, mdAcc);
+        continue;
+      }
+      if (n === 'proofErr' || n === 'bookmarkStart' || n === 'bookmarkEnd' || n === 'sectPr') {
         continue;
       }
       // nested
@@ -494,7 +504,8 @@ export function assembleMentorAnnotations({ comments, extended, people, rangesBy
     }
 
     const threadId = uuid();
-    annotations.push({
+    const orphan = mdFrom < 0;
+    const thread = {
       threadId,
       text,
       prefix,
@@ -509,11 +520,16 @@ export function assembleMentorAnnotations({ comments, extended, people, rangesBy
         version: '1',
         quote: { exact: text, prefix, suffix },
         position: null,
-        status: mdFrom >= 0 ? 'attached' : 'orphan',
-        confidence: mdFrom >= 0 ? 1 : 0,
+        status: orphan ? 'orphan' : 'attached',
+        confidence: orphan ? 0 : 1,
         updatedAt: new Date().toISOString(),
       },
-    });
+    };
+    if (orphan) {
+      thread.invalid = true;
+      thread.invalidReason = range ? 'quote-not-in-md' : 'orphaned';
+    }
+    annotations.push(thread);
   }
 
   return { annotations, warnings };
@@ -522,18 +538,88 @@ export function assembleMentorAnnotations({ comments, extended, people, rangesBy
 // ------------------------------------------------------------
 // Top-level
 // ------------------------------------------------------------
-export async function parseDocxToMentor(input) {
+export async function parseDocxToMentor(input, options = {}) {
   const warnings = [];
-  const zip = await JSZip.loadAsync(input);
+  const maxBytes = options.maxBytes != null ? options.maxBytes : DOCX_MAX_BYTES;
+
+  // Size guard before unzip
+  let byteLength = 0;
+  if (input && typeof input.byteLength === 'number') byteLength = input.byteLength;
+  else if (input && typeof input.length === 'number') byteLength = input.length;
+  if (byteLength > maxBytes) {
+    const err = new Error(
+      'DOCX 过大（>' + Math.round(maxBytes / (1024 * 1024)) + 'MB），请拆分后再导入',
+    );
+    err.code = 'DOCX_TOO_LARGE';
+    throw err;
+  }
+
+  let zip;
+  try {
+    zip = await JSZip.loadAsync(input);
+  } catch (e) {
+    const err = new Error('无法读取 DOCX（不是有效的 ZIP/OOXML 文件）');
+    err.code = 'DOCX_NOT_ZIP';
+    err.cause = e;
+    throw err;
+  }
+
   const read = async (path) => {
     const f = zip.file(path);
     if (!f) return null;
     return f.async('string');
   };
 
-  const docXml = await read('word/document.xml');
+  let docXml = await read('word/document.xml');
   if (!docXml) {
     throw new Error('DOCX missing word/document.xml');
+  }
+
+  // --- media extraction via document.xml.rels ---
+  const mediaFiles = {};
+  const rIdToMediaPath = {};
+  const relsXml = await read('word/_rels/document.xml.rels');
+  if (relsXml) {
+    const relTree = parseXml(relsXml);
+    const rels = findDescendants(relTree, 'Relationship');
+    let imgN = 0;
+    for (const rel of rels) {
+      const type = attr(rel, 'Type', 'type') || '';
+      if (!/\/image$/i.test(type)) continue;
+      const rId = attr(rel, 'Id', 'Id', 'id');
+      let target = attr(rel, 'Target', 'target') || '';
+      if (!rId || !target) continue;
+      target = target.replace(/\\/g, '/');
+      let zipPath = target.startsWith('/')
+        ? target.slice(1)
+        : ('word/' + target.replace(/^\.\//, ''));
+      zipPath = zipPath.replace(/word\/word\//, 'word/');
+      const file = zip.file(zipPath) || zip.file(target);
+      if (!file) {
+        warnings.push('missing media target: ' + target);
+        continue;
+      }
+      const nameLower = zipPath.toLowerCase();
+      if (/\.(emf|wmf)$/i.test(nameLower)) {
+        warnings.push('skipped unsupported vector image: ' + zipPath);
+        continue;
+      }
+      const extMatch = /\.([a-z0-9]+)$/i.exec(zipPath);
+      const ext = (extMatch ? extMatch[1] : 'png').toLowerCase();
+      imgN += 1;
+      const mentorKey = 'media/image' + imgN + '.' + ext;
+      try {
+        const u8 = await file.async('uint8array');
+        mediaFiles[mentorKey] = u8;
+        rIdToMediaPath[rId] = mentorKey;
+      } catch (e) {
+        warnings.push('failed to read media ' + zipPath + ': ' + (e && e.message));
+      }
+    }
+  }
+
+  if (Object.keys(rIdToMediaPath).length) {
+    docXml = injectImageMarkdownPlaceholders(docXml, rIdToMediaPath, warnings);
   }
 
   const { contentMd, rangesByCommentId, plainText } = parseDocumentXml(docXml);
@@ -561,17 +647,38 @@ export async function parseDocxToMentor(input) {
   });
   warnings.push(...w2);
 
-  // media: Task 4 fills this; for now empty object
-  const mediaFiles = {};
-
   return {
     contentMd,
     annotations,
     mediaFiles,
     warnings,
     plainText,
-    _debug: { rangesByCommentId, commentCount: parts.comments.length },
+    _debug: { rangesByCommentId, commentCount: parts.comments.length, mediaCount: Object.keys(mediaFiles).length },
   };
 }
 
-export default { parseDocxToMentor, parseDocumentXml, parseCommentsParts, assembleMentorAnnotations, parseXml };
+/**
+ * Replace each w:drawing containing a:blip r:embed="rIdN" with a run carrying
+ * markdown image syntax. Comment range markers outside drawings are preserved.
+ */
+export function injectImageMarkdownPlaceholders(docXml, rIdToMediaPath, warnings = []) {
+  return String(docXml || '').replace(/<w:drawing\b[\s\S]*?<\/w:drawing>/gi, (block) => {
+    const m = /r:embed\s*=\s*"([^"]+)"/i.exec(block) || /r:embed\s*=\s*'([^']+)'/i.exec(block);
+    if (!m) {
+      warnings.push('drawing without r:embed skipped');
+      return '';
+    }
+    const rId = m[1];
+    const path = rIdToMediaPath[rId];
+    if (!path) {
+      warnings.push('drawing rId not mapped: ' + rId);
+      return '';
+    }
+    const md = '![](' + path + ')';
+    const esc = md.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    return '<w:r><w:t xml:space="preserve">' + esc + '</w:t></w:r>';
+  });
+}
+
+
+export default { parseDocxToMentor, parseDocumentXml, parseCommentsParts, assembleMentorAnnotations, parseXml, injectImageMarkdownPlaceholders, DOCX_MAX_BYTES };
