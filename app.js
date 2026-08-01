@@ -148,6 +148,10 @@ import {
   buildSaveDialogModel,
   buildSaveResultCopy
 } from './modules/save-dialog.js';
+import {
+  classifySaveOutcome,
+  shouldPromptForUnsavedChanges as shouldPromptForUnsavedChangesPure
+} from './modules/save-lifecycle.js';
 import { createExternalChangeWatcher } from './modules/external-change-watcher.js';
 import { createExternalRevisionWatcher } from './modules/external-revision-watcher.js';
 import { decideExternalRefresh } from './modules/external-change-reconcile.js';
@@ -3207,49 +3211,24 @@ async function writeCurrentToHandle({ reason = "manual", showProgress = false, f
     if (showProgress) hideExportProgress("\u4FDD\u5B58\u5931\u8D25");
     return wr;
   }
-  // Success path: only mark clean on USER-confirmed saves (never autosave-as-draft).
-  // Legacy callers of writeCurrentToHandle({reason:'autosave'}) must not clear dirty.
-  if (activeDocumentMatches(snapshot)) {
-    State.currentFile.content = snapshot.mdText;
-    State.currentFile.annotations = snapshot.sidecar;
-    try {
-      const newFile = await handle.getFile();
-      State.fileMtime = newFile.lastModified;
-      try {
-        noteExternalOwnWrite(newFile.lastModified);
-      } catch (_) {}
-    } catch {
-    }
-    if ((State.currentFile.dirtyGen || 0) === snapshot.dirtyGen) {
-      // Manual save and Office disk-AutoSave both advance the confirmed baseline.
-      markClean();
-    } else {
-      _saveQueued = true;
-      if (!_saveInFlight) {
-        _saveQueued = false;
-        scheduleAutosaveDebounce();
-      }
-    }
-    try {
-      snapshotActiveTab();
-    } catch {
-    }
-  } else {
-    const savedTab = State.tabs.find((tab) => tab && tab.id === snapshot.tabId);
-    if (savedTab && (savedTab.currentFile?.dirtyGen || 0) === snapshot.dirtyGen) {
-      savedTab.dirty = false;
-      if (savedTab.currentFile) {
-        savedTab.currentFile.dirty = false;
-        savedTab.currentFile.content = snapshot.mdText;
-      }
-    }
-  }
+  let diskMtime = 0;
   try {
-    await AnnotationStore.put(snapshot.name, snapshot.sidecar);
-  } catch (e) {
-    console.warn("[save] IDB put 失败:", e);
-  }
-  // Align crash-recovery draft with what just hit disk (prevents stale draft fighting newer disk)
+    const newFile = await handle.getFile();
+    diskMtime = newFile.lastModified || 0;
+  } catch (_) {}
+  const finalized = await finalizeOfficialCommit(snapshot, {
+    reason,
+    diskMtime,
+    captureVersion: true,
+  });
+  if (showProgress) hideExportProgress("已保存");
+  return { ok: true, warnings: finalized.warnings || [], version: finalized.version || null };
+}
+/**
+ * Align DraftStore + idbCache with a committed official snapshot.
+ * Returns warning code or null.
+ */
+async function alignDraftWithCommittedSnapshot(snapshot) {
   try {
     const docId = snapshot.documentId || snapshot.name;
     const mem = {
@@ -3273,25 +3252,97 @@ async function writeCurrentToHandle({ reason = "manual", showProgress = false, f
       sidecar: snapshot.sidecar,
       references: snapshot.references
     });
-  } catch (eDraft) {
-    console.warn("[save] DraftStore sync failed:", eDraft);
+    return null;
+  } catch (e) {
+    console.warn("[save] DraftStore sync failed:", e);
+    return "draft-sync";
   }
-  if (showProgress) hideExportProgress("\u5DF2\u4FDD\u5B58");
-  // Version history: successful disk commit leaves a recoverable snapshot.
-  try {
-    await recordVersionFromSnapshot(snapshot, {
-      kind: reason === "autosave" ? "autosave" : "manual"
-    });
-  } catch (_) {}
-  return { ok: true };
 }
+
+function applyCommittedSnapshotToActiveDocument(snapshot, diskMtime, outcome) {
+  if (!State.currentFile) return;
+  State.currentFile.content = snapshot.mdText;
+  State.currentFile.annotations = snapshot.sidecar;
+  if (diskMtime) {
+    State.fileMtime = diskMtime;
+    try { noteExternalOwnWrite(diskMtime); } catch (_) {}
+  }
+  if (outcome.markClean) {
+    markClean();
+  } else if (outcome.queueFollowup) {
+    _saveQueued = true;
+    if (!_saveInFlight) {
+      _saveQueued = false;
+      scheduleAutosaveDebounce();
+    }
+  }
+  try { snapshotActiveTab(); } catch (_) {}
+}
+
+
 /**
- * Capture a Word-like version row after a successful disk commit (or named
- * pin). Never fails the caller: all storage errors are swallowed.
- * @param {object} snapshot — createSaveSnapshot() output
- * @param {{ kind?: 'manual'|'autosave'|'named', label?: string|null }} [opts]
- * @returns {Promise<{ok: boolean, skipped?: boolean, deduped?: boolean, id?: string, error?: string}>}
+ * One coordinator for official commits (handle write or user-confirmed download-as-save).
+ * Draft-only AutoRecover never calls this.
  */
+async function finalizeOfficialCommit(snapshot, {
+  reason = "manual",
+  diskMtime = 0,
+  captureVersion = true,
+} = {}) {
+  const warnings = [];
+  const active = activeDocumentMatches(snapshot);
+  const currentGen = active ? (State.currentFile.dirtyGen || 0) : null;
+  const outcome = classifySaveOutcome({
+    officialCommit: true,
+    snapshotGen: snapshot.dirtyGen,
+    currentGen,
+    activeDocument: active,
+  });
+
+  if (active) {
+    applyCommittedSnapshotToActiveDocument(snapshot, diskMtime, outcome);
+  } else {
+    // Inactive tab save: clear dirty only when gen matches.
+    const savedTab = State.tabs.find((tab) => tab && tab.id === snapshot.tabId);
+    if (savedTab && (savedTab.currentFile?.dirtyGen || 0) === snapshot.dirtyGen) {
+      savedTab.dirty = false;
+      if (savedTab.currentFile) {
+        savedTab.currentFile.dirty = false;
+        savedTab.currentFile.content = snapshot.mdText;
+      }
+    }
+  }
+
+  try {
+    await AnnotationStore.put(snapshot.name, snapshot.sidecar);
+  } catch (e) {
+    console.warn("[save] IDB AnnotationStore put 失败:", e);
+  }
+
+  if (outcome.syncDraft) {
+    const draftWarn = await alignDraftWithCommittedSnapshot(snapshot);
+    if (draftWarn) warnings.push(draftWarn);
+  }
+
+  let version = null;
+  if (captureVersion && outcome.captureVersion) {
+    try {
+      version = await recordVersionFromSnapshot(snapshot, {
+        kind: reason === "autosave" ? "autosave" : "manual",
+      });
+      if (version && version.ok === false && !version.skipped) {
+        warnings.push("version-history");
+      }
+    } catch (e) {
+      console.warn("[save] version capture failed:", e);
+      warnings.push("version-history");
+      version = { ok: false, error: e && e.message ? e.message : String(e) };
+    }
+  }
+
+  return { ok: true, outcome, warnings, version };
+}
+
 async function recordVersionFromSnapshot(snapshot, { kind = "manual", label = null } = {}) {
   try {
     if (!getVersionHistoryEnabled()) return { ok: false, skipped: true, error: "disabled" };
@@ -3363,13 +3414,17 @@ async function renderVersionHistory() {
   const list = document.querySelector("#version-history-list");
   const empty = document.querySelector("#version-history-empty");
   if (!list) return;
-  const docId = (State.currentFile && State.currentFile.documentId) || State.activeTabId;
+  const requestedDocumentId = (State.currentFile && State.currentFile.documentId) || State.activeTabId;
   let rows = [];
   try {
-    rows = await VersionStore.listByDocumentId(docId);
+    rows = await VersionStore.listByDocumentId(requestedDocumentId);
   } catch (e) {
     console.warn("[versions] list failed:", e);
   }
+  // Stale async: tab switched while IDB listed another document.
+  // Still allow programmatic render when drawer is closed (tests / reopen).
+  const liveDocumentId = (State.currentFile && State.currentFile.documentId) || State.activeTabId;
+  if (liveDocumentId !== requestedDocumentId) return;
   list.innerHTML = "";
   if (empty) empty.classList.toggle("hidden", rows.length > 0);
   const count = document.querySelector("#version-history-count");
@@ -3408,64 +3463,83 @@ function formatBytes(n) {
   return (n / 1048576).toFixed(1) + " MB";
 }
 async function restoreVersion(id) {
+  const requestedDocumentId = (State.currentFile && State.currentFile.documentId) || State.activeTabId || null;
   let row = null;
   try {
     row = await VersionStore.getVersion(id);
   } catch (e) {
     showToast("读取版本失败", 3000);
-    return;
+    return { ok: false, error: "read-failed" };
   }
   if (!row) {
     showToast("版本不存在", 3000);
-    return;
+    return { ok: false, error: "missing" };
+  }
+  const activeDocumentId = (State.currentFile && State.currentFile.documentId) || State.activeTabId || null;
+  if (requestedDocumentId && activeDocumentId && requestedDocumentId !== activeDocumentId) {
+    return { ok: false, error: "document-mismatch" };
+  }
+  if (row.documentId && activeDocumentId && row.documentId !== activeDocumentId) {
+    showToast("版本属于其他文档", 3000);
+    return { ok: false, error: "document-mismatch" };
   }
   if (State.currentFile && State.currentFile.dirty) {
     const ok = confirm("当前有未保存修改，恢复版本将覆盖编辑器内容（可保存前取消）。继续？");
-    if (!ok) return;
+    if (!ok) return { ok: false, cancelled: true };
   }
   try {
+    const current = State.currentFile || {};
     const refs = row.references
       ? normalizeReferenceManifest(row.references)
       : emptyReferenceManifest();
-    const docId = (State.currentFile && State.currentFile.documentId) || State.activeTabId;
-    loadMarkdownIntoEditor(
-      row.name || (State.currentFile && State.currentFile.name) || "untitled.md",
-      row.body || "",
-      { annotations: row.annotations || [], version: "1" },
-      {
-        handle: State.currentFile ? State.currentFile.handle : null,
-        saveMode: State.saveMode,
-        documentId: docId,
-        alreadyPrepared: true,
-        preferDraft: false,
-        forceDisk: false,
-        references: refs
-      }
-    );
-    if (row.mediaFiles && Object.keys(row.mediaFiles).length) {
-      try {
-        await injectMediaFiles(row.mediaFiles);
-      } catch (_) {}
-    }
+    const sidecar = row.sidecar || { annotations: row.annotations || [], version: "1" };
+    await activateOpenedDocument({
+      name: row.name || current.name || "untitled.md",
+      content: row.body || "",
+      annotations: sidecar,
+      references: refs,
+      mediaFiles: row.mediaFiles || {},
+      handle: current.handle || null,
+      saveMode: State.saveMode,
+      documentId: current.documentId || row.documentId || State.activeTabId,
+      forceDisk: true,
+      preferDraft: false,
+      quiet: true,
+    });
     // Restore never writes disk: mark dirty so only a subsequent save commits.
     try { markDirty(); } catch (_) {}
+    try { await putAtomicDraftForCurrent(); } catch (_) {}
+    try { snapshotActiveTab(); } catch (_) {}
     try { resetHistory(); } catch (_) {}
     try { clearPmHistory(); } catch (_) {}
     setStatus("已恢复版本", row.label || new Date(row.createdAt).toLocaleString());
     showToast("已恢复到历史版本（未写盘，保存后生效）", 3200);
     closeVersionHistory();
+    return { ok: true };
   } catch (e) {
     showToast("恢复失败: " + (e && e.message ? e.message : e), 4000);
+    return { ok: false, error: e && e.message ? e.message : String(e) };
   }
 }
 async function deleteVersion(id) {
   const ok = confirm("删除这个版本？此操作不可撤销。");
-  if (!ok) return;
+  if (!ok) return { ok: false, cancelled: true };
   try {
-    await VersionStore.deleteVersion(id);
+    let row = null;
+    try { row = await VersionStore.getVersion(id); } catch (_) {}
+    const activeDocumentId = (State.currentFile && State.currentFile.documentId) || State.activeTabId;
+    if (row && row.documentId && activeDocumentId && row.documentId !== activeDocumentId) {
+      showToast("版本属于其他文档", 3000);
+      return { ok: false, error: "document-mismatch" };
+    }
+    const documentId = (row && row.documentId) || activeDocumentId;
+    if (documentId) await VersionStore.deleteVersion(documentId, id);
+    else await VersionStore.deleteVersion(id);
     renderVersionHistory();
+    return { ok: true };
   } catch (e) {
     showToast("删除失败", 3000);
+    return { ok: false, error: "delete-failed" };
   }
 }
 async function exportVersionAsMentor(id) {
@@ -7655,12 +7729,14 @@ function syncToolbarActionState() {
     commentPaneOpen,
     autoSaveEnabled,
     autoSaveDisk,
+    versionPaneOpen: !!_versionPaneOpen,
   });
   applyToolbarActionState("#btn-new", actionState.new);
   applyToolbarActionState("#btn-open-files", actionState.open);
   applyToolbarActionState("#btn-autosave", actionState.autoSave);
   applyToolbarActionState("#btn-save", actionState.save);
   applyToolbarActionState("#btn-save-as", actionState.saveAs);
+  applyToolbarActionState("#btn-version-history", actionState.versionHistory);
   try { syncAutosaveToggleUi(); } catch (_) {}
   applyToolbarActionState("#btn-export-md", actionState.exportMd);
   applyToolbarActionState("#btn-export-docx", actionState.exportDocx);
@@ -11277,21 +11353,25 @@ async function downloadMentorSnapshot(snapshot, { markCleanOnSuccess = true } = 
     const outName = /\.mentor$/i.test(snapshot.name) ? snapshot.name : mentorExportName(snapshot.name);
     downloadBlob(outName, blob);
     hideExportProgress("已下载");
-    if (markCleanOnSuccess && activeDocumentMatches(snapshot) && (State.currentFile.dirtyGen || 0) === snapshot.dirtyGen) {
-      markClean();
-    }
-    try { snapshotActiveTab(); } catch {}
-    // Download-as-save is a user-confirmed commit: leave a version row.
-    // (markCleanOnSuccess=false paths are 另存副本/诊断下载 — do not pollute history.)
+    let warnings = [];
     if (markCleanOnSuccess) {
-      try {
-        await recordVersionFromSnapshot(snapshot, { kind: "manual" });
-      } catch (_) {}
+      // User-confirmed download-as-save: same official-commit lifecycle as handle write.
+      const finalized = await finalizeOfficialCommit(snapshot, {
+        reason: "manual",
+        diskMtime: 0,
+        captureVersion: true,
+      });
+      warnings = finalized.warnings || [];
     }
     const copy = buildSaveResultCopy({ kind: markCleanOnSuccess ? "save-download-mentor" : "save-copy", fileName: outName });
-    setStatus(copy.status, copy.detail);
-    showToast(markCleanOnSuccess ? `已保存 ${outName}` : `副本已下载 ${outName} · 原文件未改变`);
-    return { ok: true, name: outName };
+    if (markCleanOnSuccess && warnings.length) {
+      setStatus("已保存", "文件已保存，但本地恢复记录不完整");
+      showToast(`已保存 ${outName}（恢复点未完整写入）`, 3200);
+    } else {
+      setStatus(copy.status, copy.detail);
+      showToast(markCleanOnSuccess ? `已保存 ${outName}` : `副本已下载 ${outName} · 原文件未改变`);
+    }
+    return { ok: true, name: outName, warnings };
   } catch (e) {
     hideExportProgress("导出失败");
     showToast("保存失败: " + (e && e.message ? e.message : e), 4000);
@@ -11346,8 +11426,16 @@ async function runManualSave() {
       }
       if (result.ok) {
         const copy = buildSaveResultCopy({ kind: "write-current", fileName: State.currentFile.name });
-        setStatus(copy.status, copy.detail);
-        showToast(isMentorPackMode() ? "已保存到原位置 ✓ (.mentor)" : "已保存到原位置 ✓");
+        const warnings = result.warnings || [];
+        if (warnings.length) {
+          setStatus("已保存", "文件已保存，但本地恢复记录不完整");
+          showToast(isMentorPackMode()
+            ? "已保存到原位置 ✓ (.mentor) · 恢复点未完整写入"
+            : "已保存到原位置 ✓ · 恢复点未完整写入", 3200);
+        } else {
+          setStatus(copy.status, copy.detail);
+          showToast(isMentorPackMode() ? "已保存到原位置 ✓ (.mentor)" : "已保存到原位置 ✓");
+        }
         try { snapshotActiveTab(); } catch {}
         return result;
       }
@@ -11439,29 +11527,87 @@ async function saveCurrent() {
  * Prefer saveCurrent / writeCurrentToHandle for normal UI paths.
  */
 async function tryWriteBackMentor(mdText, sidecar, mentorName) {
+  // Compatibility wrapper: prefer the canonical official-commit path when the
+  // active document is a mentor handle. Still returns { handle: true|false }.
   if (!(State.saveMode === "mentor-handle" && State.currentFile && State.currentFile.handle)) {
-    return { handle: false };
+    return { handle: false, deprecated: true };
   }
   try {
+    // If caller supplied arbitrary payload that differs from the live editor,
+    // still write bytes then finalize from a synthetic snapshot so draft/version
+    // stay aligned with what hit disk.
+    const liveSnap = (() => {
+      try { return createSaveSnapshot(); } catch (_) { return null; }
+    })();
+    const payloadMatchesLive = !!(
+      liveSnap &&
+      typeof mdText === "string" &&
+      liveSnap.mdText === mdText
+    );
+    if (payloadMatchesLive) {
+      const result = await writeCurrentToHandle({ reason: "manual", showProgress: true });
+      return {
+        handle: !!result.ok,
+        deprecated: true,
+        ok: !!result.ok,
+        warnings: result.warnings || [],
+        error: result.error,
+      };
+    }
     const handle = State.currentFile.handle;
     const perm = await ensureWritePermission(handle);
-    if (perm === "denied") return { handle: false, error: "\u6743\u9650\u88AB\u62D2" };
-    showExportProgress("\u6B63\u5728\u6253\u5305 .mentor\u2026");
-    const blob = await buildMentorZipBlob(mdText, sidecar, State.mediaFiles, State.references, { documentHtml: State.editor ? htmlWithMediaPaths(State.editor.getHTML(), State.mediaUrls) : undefined });
+    if (perm === "denied") return { handle: false, deprecated: true, error: "权限被拒" };
+    showExportProgress("正在打包 .mentor…");
+    const blob = await buildMentorZipBlob(
+      mdText,
+      sidecar,
+      State.mediaFiles,
+      State.references,
+      { documentHtml: State.editor ? htmlWithMediaPaths(State.editor.getHTML(), State.mediaUrls) : undefined }
+    );
     const wr = await writeToHandle(handle, blob);
     if (!wr.ok) {
-      hideExportProgress("\u4FDD\u5B58\u5931\u8D25");
-      return { handle: false, error: wr.error || "\u5199\u76D8\u5931\u8D25" };
+      hideExportProgress("保存失败");
+      return { handle: false, deprecated: true, error: wr.error || "写盘失败" };
     }
-    hideExportProgress("\u5DF2\u4FDD\u5B58");
-    return { handle: true };
+    let diskMtime = 0;
+    try {
+      const nf = await handle.getFile();
+      diskMtime = nf.lastModified || 0;
+    } catch (_) {}
+    const snapshot = {
+      tabId: State.activeTabId,
+      documentId: State.currentFile.documentId || State.activeTabId,
+      name: mentorName || State.currentFile.name,
+      handle,
+      dirtyGen: State.currentFile.dirtyGen || 0,
+      saveMode: State.saveMode,
+      fileMtime: State.fileMtime,
+      mdText: typeof mdText === "string" ? mdText : "",
+      documentHtml: State.editor ? htmlWithMediaPaths(State.editor.getHTML(), State.mediaUrls) : "",
+      sidecar: sidecar || { version: "1", annotations: [] },
+      mediaFiles: State.mediaFiles || {},
+      references: State.references || emptyReferenceManifest(),
+    };
+    const finalized = await finalizeOfficialCommit(snapshot, {
+      reason: "manual",
+      diskMtime,
+      captureVersion: true,
+    });
+    hideExportProgress("已保存");
+    return {
+      handle: true,
+      deprecated: true,
+      ok: true,
+      warnings: finalized.warnings || [],
+    };
   } catch (e) {
-    hideExportProgress("\u4FDD\u5B58\u5931\u8D25");
-    if (e && e.name === "NotAllowedError") return { handle: false, error: "\u6743\u9650\u88AB\u62D2" };
-    return { handle: false, error: e && e.message ? e.message : String(e) };
+    hideExportProgress("保存失败");
+    if (e && e.name === "NotAllowedError") return { handle: false, deprecated: true, error: "权限被拒" };
+    return { handle: false, deprecated: true, error: e && e.message ? e.message : String(e) };
   }
 }
-/** Legacy API: write plain md text to current handle. */
+
 async function tryWriteBack(mdText, sidecarText, sidecarName) {
   if (!(State.currentFile && State.currentFile.handle)) {
     return { handle: false };
@@ -14492,6 +14638,7 @@ window.__mdAnnotator = {
   restoreDraftIfAny,
   resolveDraftConflict,
   scheduleIdbCacheWrite,
+  markDirty,
   commitHistoryIfNeeded,
   pushHistory,
   undo2,
@@ -14608,6 +14755,8 @@ window.__mdAnnotator = {
   resolveDocumentId,
   openMultipleHandles,
   saveCurrent,
+  downloadMentorSnapshot,
+  exportMarkdownSnapshot,
   tryWriteBack,
   tryReconnect,
   promptAuthor,
@@ -14750,6 +14899,8 @@ window.__mdAnnotator = {
   hasWriteHandle,
   writeCurrentToHandle,
   writeToHandle,
+  finalizeOfficialCommit,
+  classifySaveOutcome,
   // v1.43.14
   get AUTOSAVE_DEBOUNCE() {
     return getAutosaveDebounceMs();

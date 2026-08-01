@@ -34,6 +34,16 @@ const { pathToFileURL } = require('url');
   assert.strictEqual(noHandle.versionHistory.label, '版本');
   assert.strictEqual(noHandle.versionHistory.disabled, false);
   assert.strictEqual(noHandle.versionHistory.pressed, false);
+
+  const openPane = getToolbarActionState({
+    hasDocument: true,
+    hasWriteHandle: true,
+    dirty: false,
+    readOnly: false,
+    versionPaneOpen: true,
+  });
+  assert.strictEqual(openPane.versionHistory.pressed, true);
+
   assert.strictEqual(noHandle.exportDocx.detail, '仅正文，不含批注与引用库元数据');
   assert.strictEqual(noHandle.references.label, '文献');
   assert.strictEqual(noHandle.references.pressed, false);

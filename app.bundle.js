@@ -55093,8 +55093,23 @@ function createVersionStore(idbFactory = globalThis.indexedDB) {
       const filtered = rows.filter((r) => r.documentId === documentId).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
       return opts.limit ? filtered.slice(0, opts.limit) : filtered;
     },
-    async deleteVersion(id) {
-      return this.writeQueue.enqueue(id, async () => {
+    /**
+     * Delete one version. Prefer deleteVersion(documentId, id) so the op
+     * shares the document write queue with capture/prune.
+     * Compatibility: deleteVersion(id) looks up the row first.
+     * @param {string} documentIdOrId
+     * @param {string} [maybeId]
+     */
+    async deleteVersion(documentIdOrId, maybeId) {
+      let documentId = documentIdOrId;
+      let id = maybeId;
+      if (maybeId == null) {
+        id = documentIdOrId;
+        const existing = await this.getVersion(id);
+        documentId = existing && existing.documentId || id;
+      }
+      if (!id) throw new Error("deleteVersion: id required");
+      return this.writeQueue.enqueue(documentId || "__default__", async () => {
         const db = await this.open();
         const tx = db.transaction("versions", "readwrite");
         tx.objectStore("versions").delete(id);
@@ -55117,23 +55132,89 @@ function createVersionStore(idbFactory = globalThis.indexedDB) {
     },
     /**
      * Apply retention policy; physically delete rows past the policy and
-     * return the kept rows (newest first).
+     * return the kept rows (newest first). Entire list+prune is one queue op.
      */
     async pruneDocument(documentId, policy = DEFAULT_VERSION_POLICY) {
-      const rows = await this.listByDocumentId(documentId);
-      const kept = pruneVersionList(rows, policy);
-      const keptIds = new Set(kept.map((r) => r.id));
-      const doomed = rows.filter((r) => !keptIds.has(r.id));
-      if (doomed.length) {
-        await this.writeQueue.enqueue(documentId, async () => {
-          const db = await this.open();
+      return this.writeQueue.enqueue(documentId, async () => {
+        const db = await this.open();
+        if (!db.objectStoreNames.contains("versions")) return [];
+        const all = await idbReq(
+          db.transaction("versions", "readonly").objectStore("versions").getAll()
+        ) || [];
+        const rows = all.filter((r) => r.documentId === documentId).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+        const kept = pruneVersionList(rows, policy);
+        const keptIds = new Set(kept.map((r) => r.id));
+        const doomed = rows.filter((r) => !keptIds.has(r.id));
+        if (doomed.length) {
           const tx = db.transaction("versions", "readwrite");
           const os2 = tx.objectStore("versions");
           for (const r of doomed) os2.delete(r.id);
           await idbTxDone(tx);
-        });
+        }
+        return kept;
+      });
+    },
+    /**
+     * Atomic compare-and-write capture for one document:
+     * list → hash dedup (except named) → put → prune, one queue entry.
+     * Prevents concurrent equal captures from both inserting.
+     * @param {object} row
+     * @param {object} [policy]
+     * @returns {Promise<{ok:boolean, skipped?:boolean, deduped?:boolean, id?:string, hash?:string}>}
+     */
+    async captureVersionAtomic(row, policy = DEFAULT_VERSION_POLICY) {
+      if (!row || !row.documentId || !row.id) {
+        throw new Error("captureVersionAtomic: id+documentId required");
       }
-      return kept;
+      const documentId = row.documentId;
+      return this.writeQueue.enqueue(documentId, async () => {
+        const db = await this.open();
+        const all = await idbReq(
+          db.transaction("versions", "readonly").objectStore("versions").getAll()
+        ) || [];
+        const rows = all.filter((r) => r.documentId === documentId).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+        const newest = rows[0] || null;
+        const kind = row.kind || "manual";
+        if (kind !== "named" && newest && row.hash && newest.hash === row.hash) {
+          return { ok: true, skipped: true, deduped: true, id: newest.id, hash: newest.hash };
+        }
+        const record = {
+          id: row.id,
+          documentId,
+          name: row.name || documentId,
+          kind,
+          label: row.label || null,
+          createdAt: typeof row.createdAt === "number" ? row.createdAt : Date.now(),
+          hash: row.hash || "",
+          byteSize: typeof row.byteSize === "number" ? row.byteSize : 0,
+          body: typeof row.body === "string" ? row.body : "",
+          annotations: Array.isArray(row.annotations) ? row.annotations.slice() : [],
+          sidecar: row.sidecar ? JSON.parse(JSON.stringify(row.sidecar)) : null,
+          references: cloneReferences(row.references),
+          mediaFiles: cloneMediaFiles(row.mediaFiles),
+          mediaOmitted: !!row.mediaOmitted,
+          updatedAt: Date.now()
+        };
+        {
+          const tx = db.transaction("versions", "readwrite");
+          tx.objectStore("versions").put(record);
+          await idbTxDone(tx);
+        }
+        const afterAll = await idbReq(
+          db.transaction("versions", "readonly").objectStore("versions").getAll()
+        ) || [];
+        const afterRows = afterAll.filter((r) => r.documentId === documentId).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+        const kept = pruneVersionList(afterRows, policy);
+        const keptIds = new Set(kept.map((r) => r.id));
+        const doomed = afterRows.filter((r) => !keptIds.has(r.id));
+        if (doomed.length) {
+          const tx = db.transaction("versions", "readwrite");
+          const os2 = tx.objectStore("versions");
+          for (const r of doomed) os2.delete(r.id);
+          await idbTxDone(tx);
+        }
+        return { ok: true, id: record.id, hash: record.hash };
+      });
     },
     /** Newest version hash for a document (dedup baseline), or null. */
     async getLatestHash(documentId) {
@@ -57420,6 +57501,17 @@ function buildSaveResultCopy({ kind, fileName } = {}) {
     return { status: "DOCX \u5DF2\u5BFC\u51FA", detail: "\u4EC5\u6B63\u6587\uFF1B\u6279\u6CE8\u4E0E\u6587\u732E\u5E93\u672A\u5BFC\u51FA", clearsDirty: false };
   }
   return { status: "\u5DF2\u5B8C\u6210", detail: "", clearsDirty: false };
+}
+
+// modules/save-lifecycle.js
+function classifySaveOutcome({ officialCommit, snapshotGen, currentGen, activeDocument }) {
+  const sameGeneration = !!activeDocument && snapshotGen === currentGen;
+  return {
+    markClean: !!officialCommit && sameGeneration,
+    syncDraft: !!officialCommit,
+    captureVersion: !!officialCommit,
+    queueFollowup: !!officialCommit && !!activeDocument && !sameGeneration
+  };
 }
 
 // modules/external-change-watcher.js
@@ -61250,46 +61342,21 @@ async function writeCurrentToHandle({ reason = "manual", showProgress = false, f
     if (showProgress) hideExportProgress("\u4FDD\u5B58\u5931\u8D25");
     return wr;
   }
-  if (activeDocumentMatches(snapshot)) {
-    State2.currentFile.content = snapshot.mdText;
-    State2.currentFile.annotations = snapshot.sidecar;
-    try {
-      const newFile = await handle.getFile();
-      State2.fileMtime = newFile.lastModified;
-      try {
-        noteExternalOwnWrite(newFile.lastModified);
-      } catch (_) {
-      }
-    } catch {
-    }
-    if ((State2.currentFile.dirtyGen || 0) === snapshot.dirtyGen) {
-      markClean();
-    } else {
-      _saveQueued = true;
-      if (!_saveInFlight) {
-        _saveQueued = false;
-        scheduleAutosaveDebounce();
-      }
-    }
-    try {
-      snapshotActiveTab();
-    } catch {
-    }
-  } else {
-    const savedTab = State2.tabs.find((tab) => tab && tab.id === snapshot.tabId);
-    if (savedTab && (savedTab.currentFile?.dirtyGen || 0) === snapshot.dirtyGen) {
-      savedTab.dirty = false;
-      if (savedTab.currentFile) {
-        savedTab.currentFile.dirty = false;
-        savedTab.currentFile.content = snapshot.mdText;
-      }
-    }
-  }
+  let diskMtime = 0;
   try {
-    await AnnotationStore.put(snapshot.name, snapshot.sidecar);
-  } catch (e) {
-    console.warn("[save] IDB put \u5931\u8D25:", e);
+    const newFile = await handle.getFile();
+    diskMtime = newFile.lastModified || 0;
+  } catch (_) {
   }
+  const finalized = await finalizeOfficialCommit(snapshot, {
+    reason,
+    diskMtime,
+    captureVersion: true
+  });
+  if (showProgress) hideExportProgress("\u5DF2\u4FDD\u5B58");
+  return { ok: true, warnings: finalized.warnings || [], version: finalized.version || null };
+}
+async function alignDraftWithCommittedSnapshot(snapshot) {
   try {
     const docId = snapshot.documentId || snapshot.name;
     const mem = {
@@ -61313,17 +61380,88 @@ async function writeCurrentToHandle({ reason = "manual", showProgress = false, f
       sidecar: snapshot.sidecar,
       references: snapshot.references
     });
-  } catch (eDraft) {
-    console.warn("[save] DraftStore sync failed:", eDraft);
+    return null;
+  } catch (e) {
+    console.warn("[save] DraftStore sync failed:", e);
+    return "draft-sync";
   }
-  if (showProgress) hideExportProgress("\u5DF2\u4FDD\u5B58");
+}
+function applyCommittedSnapshotToActiveDocument(snapshot, diskMtime, outcome) {
+  if (!State2.currentFile) return;
+  State2.currentFile.content = snapshot.mdText;
+  State2.currentFile.annotations = snapshot.sidecar;
+  if (diskMtime) {
+    State2.fileMtime = diskMtime;
+    try {
+      noteExternalOwnWrite(diskMtime);
+    } catch (_) {
+    }
+  }
+  if (outcome.markClean) {
+    markClean();
+  } else if (outcome.queueFollowup) {
+    _saveQueued = true;
+    if (!_saveInFlight) {
+      _saveQueued = false;
+      scheduleAutosaveDebounce();
+    }
+  }
   try {
-    await recordVersionFromSnapshot(snapshot, {
-      kind: reason === "autosave" ? "autosave" : "manual"
-    });
+    snapshotActiveTab();
   } catch (_) {
   }
-  return { ok: true };
+}
+async function finalizeOfficialCommit(snapshot, {
+  reason = "manual",
+  diskMtime = 0,
+  captureVersion = true
+} = {}) {
+  const warnings = [];
+  const active = activeDocumentMatches(snapshot);
+  const currentGen = active ? State2.currentFile.dirtyGen || 0 : null;
+  const outcome = classifySaveOutcome({
+    officialCommit: true,
+    snapshotGen: snapshot.dirtyGen,
+    currentGen,
+    activeDocument: active
+  });
+  if (active) {
+    applyCommittedSnapshotToActiveDocument(snapshot, diskMtime, outcome);
+  } else {
+    const savedTab = State2.tabs.find((tab) => tab && tab.id === snapshot.tabId);
+    if (savedTab && (savedTab.currentFile?.dirtyGen || 0) === snapshot.dirtyGen) {
+      savedTab.dirty = false;
+      if (savedTab.currentFile) {
+        savedTab.currentFile.dirty = false;
+        savedTab.currentFile.content = snapshot.mdText;
+      }
+    }
+  }
+  try {
+    await AnnotationStore.put(snapshot.name, snapshot.sidecar);
+  } catch (e) {
+    console.warn("[save] IDB AnnotationStore put \u5931\u8D25:", e);
+  }
+  if (outcome.syncDraft) {
+    const draftWarn = await alignDraftWithCommittedSnapshot(snapshot);
+    if (draftWarn) warnings.push(draftWarn);
+  }
+  let version = null;
+  if (captureVersion && outcome.captureVersion) {
+    try {
+      version = await recordVersionFromSnapshot(snapshot, {
+        kind: reason === "autosave" ? "autosave" : "manual"
+      });
+      if (version && version.ok === false && !version.skipped) {
+        warnings.push("version-history");
+      }
+    } catch (e) {
+      console.warn("[save] version capture failed:", e);
+      warnings.push("version-history");
+      version = { ok: false, error: e && e.message ? e.message : String(e) };
+    }
+  }
+  return { ok: true, outcome, warnings, version };
 }
 async function recordVersionFromSnapshot(snapshot, { kind = "manual", label = null } = {}) {
   try {
@@ -61336,9 +61474,8 @@ async function recordVersionFromSnapshot(snapshot, { kind = "manual", label = nu
       references: snapshot.references,
       mediaManifest: mediaManifestForFingerprint(packed.mediaFiles)
     });
-    const prev = await VersionStore.getLatestHash(snapshot.documentId);
-    if (!shouldCaptureVersion({ reason: kind, prevHash: prev, nextHash: hash })) {
-      return { ok: true, skipped: true, deduped: true };
+    if (!shouldCaptureVersion({ reason: kind, prevHash: null, nextHash: hash })) {
+      return { ok: true, skipped: true };
     }
     const row = createVersionRow({
       id: crypto.randomUUID(),
@@ -61362,9 +61499,7 @@ async function recordVersionFromSnapshot(snapshot, { kind = "manual", label = nu
         mediaBytes: packed.mediaBytes
       })
     });
-    await VersionStore.putVersion(row);
-    await VersionStore.pruneDocument(snapshot.documentId, getVersionPolicyFromSettings());
-    return { ok: true, id: row.id, hash };
+    return await VersionStore.captureVersionAtomic(row, getVersionPolicyFromSettings());
   } catch (e) {
     console.warn("[versions] capture failed:", e);
     return { ok: false, error: e && e.message ? e.message : String(e) };
@@ -61398,13 +61533,15 @@ async function renderVersionHistory() {
   const list = document.querySelector("#version-history-list");
   const empty4 = document.querySelector("#version-history-empty");
   if (!list) return;
-  const docId = State2.currentFile && State2.currentFile.documentId || State2.activeTabId;
+  const requestedDocumentId = State2.currentFile && State2.currentFile.documentId || State2.activeTabId;
   let rows = [];
   try {
-    rows = await VersionStore.listByDocumentId(docId);
+    rows = await VersionStore.listByDocumentId(requestedDocumentId);
   } catch (e) {
     console.warn("[versions] list failed:", e);
   }
+  const liveDocumentId = State2.currentFile && State2.currentFile.documentId || State2.activeTabId;
+  if (liveDocumentId !== requestedDocumentId) return;
   list.innerHTML = "";
   if (empty4) empty4.classList.toggle("hidden", rows.length > 0);
   const count = document.querySelector("#version-history-count");
@@ -61442,46 +61579,57 @@ function formatBytes(n) {
   return (n / 1048576).toFixed(1) + " MB";
 }
 async function restoreVersion(id) {
+  const requestedDocumentId = State2.currentFile && State2.currentFile.documentId || State2.activeTabId || null;
   let row = null;
   try {
     row = await VersionStore.getVersion(id);
   } catch (e) {
     showToast("\u8BFB\u53D6\u7248\u672C\u5931\u8D25", 3e3);
-    return;
+    return { ok: false, error: "read-failed" };
   }
   if (!row) {
     showToast("\u7248\u672C\u4E0D\u5B58\u5728", 3e3);
-    return;
+    return { ok: false, error: "missing" };
+  }
+  const activeDocumentId = State2.currentFile && State2.currentFile.documentId || State2.activeTabId || null;
+  if (requestedDocumentId && activeDocumentId && requestedDocumentId !== activeDocumentId) {
+    return { ok: false, error: "document-mismatch" };
+  }
+  if (row.documentId && activeDocumentId && row.documentId !== activeDocumentId) {
+    showToast("\u7248\u672C\u5C5E\u4E8E\u5176\u4ED6\u6587\u6863", 3e3);
+    return { ok: false, error: "document-mismatch" };
   }
   if (State2.currentFile && State2.currentFile.dirty) {
     const ok = confirm("\u5F53\u524D\u6709\u672A\u4FDD\u5B58\u4FEE\u6539\uFF0C\u6062\u590D\u7248\u672C\u5C06\u8986\u76D6\u7F16\u8F91\u5668\u5185\u5BB9\uFF08\u53EF\u4FDD\u5B58\u524D\u53D6\u6D88\uFF09\u3002\u7EE7\u7EED\uFF1F");
-    if (!ok) return;
+    if (!ok) return { ok: false, cancelled: true };
   }
   try {
+    const current = State2.currentFile || {};
     const refs = row.references ? normalizeReferenceManifest(row.references) : emptyReferenceManifest();
-    const docId = State2.currentFile && State2.currentFile.documentId || State2.activeTabId;
-    loadMarkdownIntoEditor(
-      row.name || State2.currentFile && State2.currentFile.name || "untitled.md",
-      row.body || "",
-      { annotations: row.annotations || [], version: "1" },
-      {
-        handle: State2.currentFile ? State2.currentFile.handle : null,
-        saveMode: State2.saveMode,
-        documentId: docId,
-        alreadyPrepared: true,
-        preferDraft: false,
-        forceDisk: false,
-        references: refs
-      }
-    );
-    if (row.mediaFiles && Object.keys(row.mediaFiles).length) {
-      try {
-        await injectMediaFiles(row.mediaFiles);
-      } catch (_) {
-      }
-    }
+    const sidecar = row.sidecar || { annotations: row.annotations || [], version: "1" };
+    await activateOpenedDocument({
+      name: row.name || current.name || "untitled.md",
+      content: row.body || "",
+      annotations: sidecar,
+      references: refs,
+      mediaFiles: row.mediaFiles || {},
+      handle: current.handle || null,
+      saveMode: State2.saveMode,
+      documentId: current.documentId || row.documentId || State2.activeTabId,
+      forceDisk: true,
+      preferDraft: false,
+      quiet: true
+    });
     try {
       markDirty();
+    } catch (_) {
+    }
+    try {
+      await putAtomicDraftForCurrent();
+    } catch (_) {
+    }
+    try {
+      snapshotActiveTab();
     } catch (_) {
     }
     try {
@@ -61495,18 +61643,34 @@ async function restoreVersion(id) {
     setStatus("\u5DF2\u6062\u590D\u7248\u672C", row.label || new Date(row.createdAt).toLocaleString());
     showToast("\u5DF2\u6062\u590D\u5230\u5386\u53F2\u7248\u672C\uFF08\u672A\u5199\u76D8\uFF0C\u4FDD\u5B58\u540E\u751F\u6548\uFF09", 3200);
     closeVersionHistory();
+    return { ok: true };
   } catch (e) {
     showToast("\u6062\u590D\u5931\u8D25: " + (e && e.message ? e.message : e), 4e3);
+    return { ok: false, error: e && e.message ? e.message : String(e) };
   }
 }
 async function deleteVersion(id) {
   const ok = confirm("\u5220\u9664\u8FD9\u4E2A\u7248\u672C\uFF1F\u6B64\u64CD\u4F5C\u4E0D\u53EF\u64A4\u9500\u3002");
-  if (!ok) return;
+  if (!ok) return { ok: false, cancelled: true };
   try {
-    await VersionStore.deleteVersion(id);
+    let row = null;
+    try {
+      row = await VersionStore.getVersion(id);
+    } catch (_) {
+    }
+    const activeDocumentId = State2.currentFile && State2.currentFile.documentId || State2.activeTabId;
+    if (row && row.documentId && activeDocumentId && row.documentId !== activeDocumentId) {
+      showToast("\u7248\u672C\u5C5E\u4E8E\u5176\u4ED6\u6587\u6863", 3e3);
+      return { ok: false, error: "document-mismatch" };
+    }
+    const documentId = row && row.documentId || activeDocumentId;
+    if (documentId) await VersionStore.deleteVersion(documentId, id);
+    else await VersionStore.deleteVersion(id);
     renderVersionHistory();
+    return { ok: true };
   } catch (e) {
     showToast("\u5220\u9664\u5931\u8D25", 3e3);
+    return { ok: false, error: "delete-failed" };
   }
 }
 async function exportVersionAsMentor(id) {
@@ -65595,13 +65759,15 @@ function syncToolbarActionState() {
     filePaneOpen,
     commentPaneOpen,
     autoSaveEnabled,
-    autoSaveDisk
+    autoSaveDisk,
+    versionPaneOpen: !!_versionPaneOpen
   });
   applyToolbarActionState("#btn-new", actionState.new);
   applyToolbarActionState("#btn-open-files", actionState.open);
   applyToolbarActionState("#btn-autosave", actionState.autoSave);
   applyToolbarActionState("#btn-save", actionState.save);
   applyToolbarActionState("#btn-save-as", actionState.saveAs);
+  applyToolbarActionState("#btn-version-history", actionState.versionHistory);
   try {
     syncAutosaveToggleUi();
   } catch (_) {
@@ -69129,23 +69295,24 @@ async function downloadMentorSnapshot(snapshot, { markCleanOnSuccess = true } = 
     const outName = /\.mentor$/i.test(snapshot.name) ? snapshot.name : mentorExportName(snapshot.name);
     downloadBlob(outName, blob);
     hideExportProgress("\u5DF2\u4E0B\u8F7D");
-    if (markCleanOnSuccess && activeDocumentMatches(snapshot) && (State2.currentFile.dirtyGen || 0) === snapshot.dirtyGen) {
-      markClean();
-    }
-    try {
-      snapshotActiveTab();
-    } catch {
-    }
+    let warnings = [];
     if (markCleanOnSuccess) {
-      try {
-        await recordVersionFromSnapshot(snapshot, { kind: "manual" });
-      } catch (_) {
-      }
+      const finalized = await finalizeOfficialCommit(snapshot, {
+        reason: "manual",
+        diskMtime: 0,
+        captureVersion: true
+      });
+      warnings = finalized.warnings || [];
     }
     const copy2 = buildSaveResultCopy({ kind: markCleanOnSuccess ? "save-download-mentor" : "save-copy", fileName: outName });
-    setStatus(copy2.status, copy2.detail);
-    showToast(markCleanOnSuccess ? `\u5DF2\u4FDD\u5B58 ${outName}` : `\u526F\u672C\u5DF2\u4E0B\u8F7D ${outName} \xB7 \u539F\u6587\u4EF6\u672A\u6539\u53D8`);
-    return { ok: true, name: outName };
+    if (markCleanOnSuccess && warnings.length) {
+      setStatus("\u5DF2\u4FDD\u5B58", "\u6587\u4EF6\u5DF2\u4FDD\u5B58\uFF0C\u4F46\u672C\u5730\u6062\u590D\u8BB0\u5F55\u4E0D\u5B8C\u6574");
+      showToast(`\u5DF2\u4FDD\u5B58 ${outName}\uFF08\u6062\u590D\u70B9\u672A\u5B8C\u6574\u5199\u5165\uFF09`, 3200);
+    } else {
+      setStatus(copy2.status, copy2.detail);
+      showToast(markCleanOnSuccess ? `\u5DF2\u4FDD\u5B58 ${outName}` : `\u526F\u672C\u5DF2\u4E0B\u8F7D ${outName} \xB7 \u539F\u6587\u4EF6\u672A\u6539\u53D8`);
+    }
+    return { ok: true, name: outName, warnings };
   } catch (e) {
     hideExportProgress("\u5BFC\u51FA\u5931\u8D25");
     showToast("\u4FDD\u5B58\u5931\u8D25: " + (e && e.message ? e.message : e), 4e3);
@@ -69203,8 +69370,14 @@ async function runManualSave() {
       }
       if (result.ok) {
         const copy2 = buildSaveResultCopy({ kind: "write-current", fileName: State2.currentFile.name });
-        setStatus(copy2.status, copy2.detail);
-        showToast(isMentorPackMode() ? "\u5DF2\u4FDD\u5B58\u5230\u539F\u4F4D\u7F6E \u2713 (.mentor)" : "\u5DF2\u4FDD\u5B58\u5230\u539F\u4F4D\u7F6E \u2713");
+        const warnings = result.warnings || [];
+        if (warnings.length) {
+          setStatus("\u5DF2\u4FDD\u5B58", "\u6587\u4EF6\u5DF2\u4FDD\u5B58\uFF0C\u4F46\u672C\u5730\u6062\u590D\u8BB0\u5F55\u4E0D\u5B8C\u6574");
+          showToast(isMentorPackMode() ? "\u5DF2\u4FDD\u5B58\u5230\u539F\u4F4D\u7F6E \u2713 (.mentor) \xB7 \u6062\u590D\u70B9\u672A\u5B8C\u6574\u5199\u5165" : "\u5DF2\u4FDD\u5B58\u5230\u539F\u4F4D\u7F6E \u2713 \xB7 \u6062\u590D\u70B9\u672A\u5B8C\u6574\u5199\u5165", 3200);
+        } else {
+          setStatus(copy2.status, copy2.detail);
+          showToast(isMentorPackMode() ? "\u5DF2\u4FDD\u5B58\u5230\u539F\u4F4D\u7F6E \u2713 (.mentor)" : "\u5DF2\u4FDD\u5B58\u5230\u539F\u4F4D\u7F6E \u2713");
+        }
         try {
           snapshotActiveTab();
         } catch {
@@ -69296,25 +69469,79 @@ async function saveCurrent() {
 }
 async function tryWriteBackMentor(mdText, sidecar, mentorName) {
   if (!(State2.saveMode === "mentor-handle" && State2.currentFile && State2.currentFile.handle)) {
-    return { handle: false };
+    return { handle: false, deprecated: true };
   }
   try {
+    const liveSnap = (() => {
+      try {
+        return createSaveSnapshot();
+      } catch (_) {
+        return null;
+      }
+    })();
+    const payloadMatchesLive = !!(liveSnap && typeof mdText === "string" && liveSnap.mdText === mdText);
+    if (payloadMatchesLive) {
+      const result = await writeCurrentToHandle({ reason: "manual", showProgress: true });
+      return {
+        handle: !!result.ok,
+        deprecated: true,
+        ok: !!result.ok,
+        warnings: result.warnings || [],
+        error: result.error
+      };
+    }
     const handle = State2.currentFile.handle;
     const perm = await ensureWritePermission(handle);
-    if (perm === "denied") return { handle: false, error: "\u6743\u9650\u88AB\u62D2" };
+    if (perm === "denied") return { handle: false, deprecated: true, error: "\u6743\u9650\u88AB\u62D2" };
     showExportProgress("\u6B63\u5728\u6253\u5305 .mentor\u2026");
-    const blob = await buildMentorZipBlob(mdText, sidecar, State2.mediaFiles, State2.references, { documentHtml: State2.editor ? htmlWithMediaPaths(State2.editor.getHTML(), State2.mediaUrls) : void 0 });
+    const blob = await buildMentorZipBlob(
+      mdText,
+      sidecar,
+      State2.mediaFiles,
+      State2.references,
+      { documentHtml: State2.editor ? htmlWithMediaPaths(State2.editor.getHTML(), State2.mediaUrls) : void 0 }
+    );
     const wr = await writeToHandle(handle, blob);
     if (!wr.ok) {
       hideExportProgress("\u4FDD\u5B58\u5931\u8D25");
-      return { handle: false, error: wr.error || "\u5199\u76D8\u5931\u8D25" };
+      return { handle: false, deprecated: true, error: wr.error || "\u5199\u76D8\u5931\u8D25" };
     }
+    let diskMtime = 0;
+    try {
+      const nf = await handle.getFile();
+      diskMtime = nf.lastModified || 0;
+    } catch (_) {
+    }
+    const snapshot = {
+      tabId: State2.activeTabId,
+      documentId: State2.currentFile.documentId || State2.activeTabId,
+      name: mentorName || State2.currentFile.name,
+      handle,
+      dirtyGen: State2.currentFile.dirtyGen || 0,
+      saveMode: State2.saveMode,
+      fileMtime: State2.fileMtime,
+      mdText: typeof mdText === "string" ? mdText : "",
+      documentHtml: State2.editor ? htmlWithMediaPaths(State2.editor.getHTML(), State2.mediaUrls) : "",
+      sidecar: sidecar || { version: "1", annotations: [] },
+      mediaFiles: State2.mediaFiles || {},
+      references: State2.references || emptyReferenceManifest()
+    };
+    const finalized = await finalizeOfficialCommit(snapshot, {
+      reason: "manual",
+      diskMtime,
+      captureVersion: true
+    });
     hideExportProgress("\u5DF2\u4FDD\u5B58");
-    return { handle: true };
+    return {
+      handle: true,
+      deprecated: true,
+      ok: true,
+      warnings: finalized.warnings || []
+    };
   } catch (e) {
     hideExportProgress("\u4FDD\u5B58\u5931\u8D25");
-    if (e && e.name === "NotAllowedError") return { handle: false, error: "\u6743\u9650\u88AB\u62D2" };
-    return { handle: false, error: e && e.message ? e.message : String(e) };
+    if (e && e.name === "NotAllowedError") return { handle: false, deprecated: true, error: "\u6743\u9650\u88AB\u62D2" };
+    return { handle: false, deprecated: true, error: e && e.message ? e.message : String(e) };
   }
 }
 async function tryWriteBack(mdText, sidecarText, sidecarName) {
@@ -72350,6 +72577,7 @@ window.__mdAnnotator = {
   restoreDraftIfAny,
   resolveDraftConflict,
   scheduleIdbCacheWrite,
+  markDirty,
   commitHistoryIfNeeded,
   pushHistory,
   undo2,
@@ -72468,6 +72696,8 @@ window.__mdAnnotator = {
   resolveDocumentId,
   openMultipleHandles,
   saveCurrent,
+  downloadMentorSnapshot,
+  exportMarkdownSnapshot,
   tryWriteBack,
   tryReconnect,
   promptAuthor,
@@ -72608,6 +72838,8 @@ window.__mdAnnotator = {
   hasWriteHandle,
   writeCurrentToHandle,
   writeToHandle,
+  finalizeOfficialCommit,
+  classifySaveOutcome,
   // v1.43.14
   get AUTOSAVE_DEBOUNCE() {
     return getAutosaveDebounceMs();
