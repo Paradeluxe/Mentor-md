@@ -142,4 +142,59 @@ assert.deepStrictEqual(ids, ['a2', 'a3', 'n1'].sort(), 'prune keeps newest 2 aut
 assert.strictEqual(await vs2.getVersion('a1'), null, 'oldest autosave pruned');
 assert.strictEqual(await vs2.getVersion('n1') != null, true, 'named survives');
 
+// captureVersionAtomic: concurrent equal hashes → one row + one deduped
+const vs3 = createVersionStore(buildFakeIDB());
+const baseA = {
+  documentId: 'doc-a',
+  name: 'a.mentor',
+  kind: 'manual',
+  label: null,
+  createdAt: 2000,
+  hash: 'same',
+  byteSize: 4,
+  body: '# same',
+  annotations: [],
+  sidecar: null,
+  references: null,
+  mediaFiles: null,
+  mediaOmitted: false,
+};
+const results = await Promise.all([
+  vs3.captureVersionAtomic({ ...baseA, id: 'v1', createdAt: 2001 }),
+  vs3.captureVersionAtomic({ ...baseA, id: 'v2', createdAt: 2002 }),
+]);
+const rowsA = await vs3.listByDocumentId('doc-a');
+assert.strictEqual(rowsA.length, 1, 'concurrent equal captures keep one row');
+assert.strictEqual(results.filter((x) => x.deduped).length, 1, 'one result is deduped');
+assert.strictEqual(results.filter((x) => x.ok && !x.deduped).length, 1, 'one result is insert');
+
+// named pin always inserts even with same hash
+const named = await vs3.captureVersionAtomic({
+  ...baseA,
+  id: 'vn',
+  kind: 'named',
+  label: 'pin',
+  createdAt: 3000,
+  hash: 'same',
+});
+assert.strictEqual(named.ok, true);
+assert.strictEqual(named.deduped, undefined);
+assert.strictEqual((await vs3.listByDocumentId('doc-a')).length, 2, 'named not deduped');
+
+// deleteVersion(documentId, id) shares document queue with prune
+const keepId = (await vs3.listByDocumentId('doc-a')).find((r) => r.kind === 'named').id;
+const delId = (await vs3.listByDocumentId('doc-a')).find((r) => r.kind !== 'named').id;
+await Promise.all([
+  vs3.deleteVersion('doc-a', delId),
+  vs3.pruneDocument('doc-a', { maxAutosave: 1, maxNamed: 10, maxTotal: 20 }),
+]);
+const afterRace = await vs3.listByDocumentId('doc-a');
+assert.strictEqual(afterRace.length, 1, 'delete+prune race leaves named');
+assert.strictEqual(afterRace[0].id, keepId);
+
+// legacy deleteVersion(id) overload still works
+await vs3.captureVersionAtomic({ ...baseA, id: 'vlegacy', hash: 'other', body: '# o', createdAt: 4000 });
+await vs3.deleteVersion('vlegacy');
+assert.strictEqual(await vs3.getVersion('vlegacy'), null, 'legacy deleteVersion(id) works');
+
 console.log('unit-version-store: PASS');

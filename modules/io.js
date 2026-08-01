@@ -567,8 +567,23 @@ export function createVersionStore(idbFactory = globalThis.indexedDB) {
       return opts.limit ? filtered.slice(0, opts.limit) : filtered;
     },
 
-    async deleteVersion(id) {
-      return this.writeQueue.enqueue(id, async () => {
+    /**
+     * Delete one version. Prefer deleteVersion(documentId, id) so the op
+     * shares the document write queue with capture/prune.
+     * Compatibility: deleteVersion(id) looks up the row first.
+     * @param {string} documentIdOrId
+     * @param {string} [maybeId]
+     */
+    async deleteVersion(documentIdOrId, maybeId) {
+      let documentId = documentIdOrId;
+      let id = maybeId;
+      if (maybeId == null) {
+        id = documentIdOrId;
+        const existing = await this.getVersion(id);
+        documentId = (existing && existing.documentId) || id;
+      }
+      if (!id) throw new Error("deleteVersion: id required");
+      return this.writeQueue.enqueue(documentId || "__default__", async () => {
         const db = await this.open();
         const tx = db.transaction("versions", "readwrite");
         tx.objectStore("versions").delete(id);
@@ -593,23 +608,97 @@ export function createVersionStore(idbFactory = globalThis.indexedDB) {
 
     /**
      * Apply retention policy; physically delete rows past the policy and
-     * return the kept rows (newest first).
+     * return the kept rows (newest first). Entire list+prune is one queue op.
      */
     async pruneDocument(documentId, policy = DEFAULT_VERSION_POLICY) {
-      const rows = await this.listByDocumentId(documentId);
-      const kept = pruneVersionList(rows, policy);
-      const keptIds = new Set(kept.map((r) => r.id));
-      const doomed = rows.filter((r) => !keptIds.has(r.id));
-      if (doomed.length) {
-        await this.writeQueue.enqueue(documentId, async () => {
-          const db = await this.open();
+      return this.writeQueue.enqueue(documentId, async () => {
+        const db = await this.open();
+        if (!db.objectStoreNames.contains("versions")) return [];
+        const all = (await idbReq(
+          db.transaction("versions", "readonly").objectStore("versions").getAll()
+        )) || [];
+        const rows = all
+          .filter((r) => r.documentId === documentId)
+          .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+        const kept = pruneVersionList(rows, policy);
+        const keptIds = new Set(kept.map((r) => r.id));
+        const doomed = rows.filter((r) => !keptIds.has(r.id));
+        if (doomed.length) {
           const tx = db.transaction("versions", "readwrite");
           const os = tx.objectStore("versions");
           for (const r of doomed) os.delete(r.id);
           await idbTxDone(tx);
-        });
+        }
+        return kept;
+      });
+    },
+
+    /**
+     * Atomic compare-and-write capture for one document:
+     * list → hash dedup (except named) → put → prune, one queue entry.
+     * Prevents concurrent equal captures from both inserting.
+     * @param {object} row
+     * @param {object} [policy]
+     * @returns {Promise<{ok:boolean, skipped?:boolean, deduped?:boolean, id?:string, hash?:string}>}
+     */
+    async captureVersionAtomic(row, policy = DEFAULT_VERSION_POLICY) {
+      if (!row || !row.documentId || !row.id) {
+        throw new Error("captureVersionAtomic: id+documentId required");
       }
-      return kept;
+      const documentId = row.documentId;
+      return this.writeQueue.enqueue(documentId, async () => {
+        const db = await this.open();
+        const all = (await idbReq(
+          db.transaction("versions", "readonly").objectStore("versions").getAll()
+        )) || [];
+        const rows = all
+          .filter((r) => r.documentId === documentId)
+          .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+        const newest = rows[0] || null;
+        const kind = row.kind || "manual";
+        // Named pins always insert; manual/autosave dedupe on content hash.
+        if (kind !== "named" && newest && row.hash && newest.hash === row.hash) {
+          return { ok: true, skipped: true, deduped: true, id: newest.id, hash: newest.hash };
+        }
+        const record = {
+          id: row.id,
+          documentId,
+          name: row.name || documentId,
+          kind,
+          label: row.label || null,
+          createdAt: typeof row.createdAt === "number" ? row.createdAt : Date.now(),
+          hash: row.hash || "",
+          byteSize: typeof row.byteSize === "number" ? row.byteSize : 0,
+          body: typeof row.body === "string" ? row.body : "",
+          annotations: Array.isArray(row.annotations) ? row.annotations.slice() : [],
+          sidecar: row.sidecar ? JSON.parse(JSON.stringify(row.sidecar)) : null,
+          references: cloneReferences(row.references),
+          mediaFiles: cloneMediaFiles(row.mediaFiles),
+          mediaOmitted: !!row.mediaOmitted,
+          updatedAt: Date.now()
+        };
+        {
+          const tx = db.transaction("versions", "readwrite");
+          tx.objectStore("versions").put(record);
+          await idbTxDone(tx);
+        }
+        const afterAll = (await idbReq(
+          db.transaction("versions", "readonly").objectStore("versions").getAll()
+        )) || [];
+        const afterRows = afterAll
+          .filter((r) => r.documentId === documentId)
+          .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+        const kept = pruneVersionList(afterRows, policy);
+        const keptIds = new Set(kept.map((r) => r.id));
+        const doomed = afterRows.filter((r) => !keptIds.has(r.id));
+        if (doomed.length) {
+          const tx = db.transaction("versions", "readwrite");
+          const os = tx.objectStore("versions");
+          for (const r of doomed) os.delete(r.id);
+          await idbTxDone(tx);
+        }
+        return { ok: true, id: record.id, hash: record.hash };
+      });
     },
 
     /** Newest version hash for a document (dedup baseline), or null. */

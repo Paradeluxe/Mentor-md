@@ -3303,9 +3303,9 @@ async function recordVersionFromSnapshot(snapshot, { kind = "manual", label = nu
       references: snapshot.references,
       mediaManifest: mediaManifestForFingerprint(packed.mediaFiles)
     });
-    const prev = await VersionStore.getLatestHash(snapshot.documentId);
-    if (!shouldCaptureVersionPure({ reason: kind, prevHash: prev, nextHash: hash })) {
-      return { ok: true, skipped: true, deduped: true };
+    // Policy gate only (draft vs named/manual/autosave). Hash dedup is atomic inside the store.
+    if (!shouldCaptureVersionPure({ reason: kind, prevHash: null, nextHash: hash })) {
+      return { ok: true, skipped: true };
     }
     const row = createVersionRow({
       id: crypto.randomUUID(),
@@ -3329,9 +3329,7 @@ async function recordVersionFromSnapshot(snapshot, { kind = "manual", label = nu
         mediaBytes: packed.mediaBytes
       })
     });
-    await VersionStore.putVersion(row);
-    await VersionStore.pruneDocument(snapshot.documentId, getVersionPolicyFromSettings());
-    return { ok: true, id: row.id, hash };
+    return await VersionStore.captureVersionAtomic(row, getVersionPolicyFromSettings());
   } catch (e) {
     console.warn("[versions] capture failed:", e);
     return { ok: false, error: e && e.message ? e.message : String(e) };
