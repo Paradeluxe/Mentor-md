@@ -77,6 +77,18 @@ function assert(cond, message) {
       'view group shares editor row vertical band with format');
 
     console.log('\n=== Two-row toolbar geometry ===');
+    // adversarial identity text must stay single-line and not inflate toolbar height
+    await page.evaluate(() => {
+      const nameEl = document.querySelector('#current-file-name');
+      const authorEl = document.querySelector('#author-chip-name');
+      if (nameEl) {
+        nameEl.textContent =
+          'toolbar-contract-extremely-long-manuscript-filename-with-revision-notes.mentor';
+      }
+      if (authorEl) {
+        authorEl.textContent = 'toolbar-contract-very-long-author-name';
+      }
+    });
     async function readToolbarGeometry(width) {
       await page.setViewportSize({ width, height: 900 });
       await page.waitForTimeout(80);
@@ -104,23 +116,28 @@ function assert(cond, message) {
         const format = box('#format-toolbar');
         const view = box('[data-toolbar-group="view"]');
         const history = box('[data-toolbar-group="history"]');
+        const fileName = document.querySelector('#current-file-name');
+        const authorName = document.querySelector('#author-chip-name');
         return {
           toolbarHeight: toolbar.getBoundingClientRect().height,
           document: box('[data-toolbar-row="document"]'),
           editor: box('[data-toolbar-row="editor"]'),
           documentOverflow: documentRow.scrollWidth > documentRow.clientWidth + 1,
           editorOverflow: editorRow.scrollWidth > editorRow.clientWidth + 1,
+          toolbarOverflow: toolbar.scrollWidth > toolbar.clientWidth + 1,
           titleFormatOverlap: overlaps(title, format),
           titleViewOverlap: overlaps(title, view),
           formatViewOverlap: overlaps(format, view),
           historyViewOverlap: overlaps(history, view),
           titleRightGap: documentRow.getBoundingClientRect().right - title.right,
           viewOnEditorRow: view && editorRow.contains(document.querySelector('[data-toolbar-group="view"]')),
+          fileSingleLine: !fileName || fileName.scrollHeight <= fileName.clientHeight + 1,
+          authorSingleLine: !authorName || authorName.scrollHeight <= authorName.clientHeight + 1,
         };
       });
     }
 
-    for (const width of [1500, 1024, 900]) {
+    for (const width of [1500, 1024, 900, 640]) {
       const g = await readToolbarGeometry(width);
       assert(g.toolbarHeight >= 64 && g.toolbarHeight <= 74,
         `${width}px toolbar stays compact (got ${g.toolbarHeight})`);
@@ -128,13 +145,15 @@ function assert(cond, message) {
         `${width}px has two visible rows`);
       assert(g.document.bottom <= g.editor.top + 1,
         `${width}px document row is above editor row`);
-      assert(!g.documentOverflow && !g.editorOverflow,
-        `${width}px rows have no horizontal overflow`);
+      assert(!g.toolbarOverflow && !g.documentOverflow && !g.editorOverflow,
+        `${width}px toolbar has no horizontal overflow`);
       assert(!g.titleFormatOverlap && !g.formatViewOverlap && !g.titleViewOverlap && !g.historyViewOverlap,
         `${width}px toolbar groups do not overlap`);
       assert(g.viewOnEditorRow, `${width}px view group stays on editor row`);
       assert(Math.abs(g.titleRightGap) <= 1,
         `${width}px title/author stays right aligned (gap ${g.titleRightGap})`);
+      assert(g.fileSingleLine && g.authorSingleLine,
+        `${width}px file and author stay single-line`);
     }
     // restore default viewport used by later checks
     await page.setViewportSize({ width: 1400, height: 900 });
