@@ -47,11 +47,6 @@
                   <button id="btn-refs" title="打开文献库" class="tb-icon-text" aria-controls="refs-pane" aria-expanded="false" aria-pressed="false"><span class="tb-icon"></span><span class="tb-label">文献</span></button>
                   <input type="file" id="refs-file-input" accept=".bib,.ris,.enw,.xml,.json,.txt" style="display:none">
                 </div>
-                <div class="tb-group" data-toolbar-group="view">
-                  <button id="btn-toggle-render" title="切换源码/渲染视图" class="tb-icon-text tb-toggle" data-mode="rendered" aria-pressed="false"><span class="tb-icon"></span><span class="tb-label">源码</span></button>
-                  <button id="btn-toggle-file-pane" title="显示/隐藏 大纲栏 (Ctrl+[)" class="tb-icon-text tb-pane-toggle" data-act="toggle-file-pane" aria-keyshortcuts="Control+[ Meta+[" aria-pressed="true" aria-label="大纲栏"><span class="tb-icon"></span><span class="tb-label">大纲栏</span></button>
-                  <button id="btn-toggle-comment-pane" title="显示/隐藏 批注栏 (Ctrl+])" class="tb-icon-text tb-pane-toggle" data-act="toggle-comment-pane" aria-keyshortcuts="Control+] Meta+]" aria-pressed="true" aria-label="批注栏"><span class="tb-icon"></span><span class="tb-label">批注栏</span></button>
-                </div>
                 <div class="tb-group" id="title-group" data-toolbar-group="title">
                   <div id="file-list-wrap" class="file-list-wrap">
                     <button type="button" id="file-list-trigger" class="file-list-trigger" title="最近文件 / 切换文档" aria-haspopup="listbox" aria-expanded="false">
@@ -109,6 +104,11 @@
                       <button data-cmd="codeBlock" title="代码块" class="tb-format" aria-label="代码块"></button>
                     </div>
                   </div>
+                </div>
+                <div class="tb-group" data-toolbar-group="view">
+                  <button id="btn-toggle-render" title="切换源码/渲染视图" class="tb-icon-text tb-toggle" data-mode="rendered" aria-pressed="false"><span class="tb-icon"></span><span class="tb-label">源码</span></button>
+                  <button id="btn-toggle-file-pane" title="显示/隐藏 大纲栏 (Ctrl+[)" class="tb-icon-text tb-pane-toggle" data-act="toggle-file-pane" aria-keyshortcuts="Control+[ Meta+[" aria-pressed="true" aria-label="大纲栏"><span class="tb-icon"></span><span class="tb-label">大纲栏</span></button>
+                  <button id="btn-toggle-comment-pane" title="显示/隐藏 批注栏 (Ctrl+])" class="tb-icon-text tb-pane-toggle" data-act="toggle-comment-pane" aria-keyshortcuts="Control+] Meta+]" aria-pressed="true" aria-label="批注栏"><span class="tb-icon"></span><span class="tb-label">批注栏</span></button>
                 </div>
               </div>
             </header>
