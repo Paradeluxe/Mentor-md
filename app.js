@@ -6752,7 +6752,25 @@ async function createDisplayObjectURL(blob, path2 = "") {
   }
 }
 async function injectMediaFiles(mediaFiles) {
-  for (const [path2, blob] of Object.entries(mediaFiles || {})) {
+  for (const [path2, raw] of Object.entries(mediaFiles || {})) {
+    let blob = raw;
+    if (raw && !(typeof Blob !== "undefined" && raw instanceof Blob)) {
+      // Accept Uint8Array / ArrayBuffer from importers
+      const ext = (/\.([a-z0-9]+)$/i.exec(path2) || [])[1] || "bin";
+      const mime =
+        ext === "png" ? "image/png" :
+        ext === "jpg" || ext === "jpeg" ? "image/jpeg" :
+        ext === "gif" ? "image/gif" :
+        ext === "webp" ? "image/webp" :
+        ext === "svg" ? "image/svg+xml" :
+        "application/octet-stream";
+      try {
+        blob = new Blob([raw], { type: mime });
+      } catch (e) {
+        console.warn("[injectMediaFiles] coerce failed:", path2, e);
+        continue;
+      }
+    }
     State.mediaFiles[path2] = blob;
     State.mediaUrls[path2] = await createDisplayObjectURL(blob, path2);
   }
@@ -9516,11 +9534,29 @@ async function openFromDocxFile(file, options = {}) {
       author: { id: State.authorId, name: State.author },
       annotations: anns,
     };
+    // parseDocxToMentor returns Uint8Array media — injectMediaFiles needs Blob
+    const mediaFiles = {};
+    for (const [k, v] of Object.entries(parsed.mediaFiles || {})) {
+      if (!v) continue;
+      if (typeof Blob !== "undefined" && v instanceof Blob) {
+        mediaFiles[k] = v;
+      } else {
+        const ext = (/\.([a-z0-9]+)$/i.exec(k) || [])[1] || "bin";
+        const mime =
+          ext === "png" ? "image/png" :
+          ext === "jpg" || ext === "jpeg" ? "image/jpeg" :
+          ext === "gif" ? "image/gif" :
+          ext === "webp" ? "image/webp" :
+          ext === "svg" ? "image/svg+xml" :
+          "application/octet-stream";
+        mediaFiles[k] = new Blob([v], { type: mime });
+      }
+    }
     await activateOpenedDocument({
       name,
       content: parsed.contentMd || "",
       annotations: sidecar,
-      mediaFiles: parsed.mediaFiles || null,
+      mediaFiles: Object.keys(mediaFiles).length ? mediaFiles : null,
       handle: null,
       saveMode: "download",
       quiet,
