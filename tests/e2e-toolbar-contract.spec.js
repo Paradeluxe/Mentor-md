@@ -159,6 +159,10 @@ function assert(cond, message) {
         saveAsTitle: document.querySelector('#btn-save-as')?.getAttribute('title') || null,
         exportDocxTitle: document.querySelector('#btn-export-docx')?.getAttribute('title') || null,
         blockquoteTitle: document.querySelector('[data-cmd="blockquote"]')?.getAttribute('title') || null,
+        versionClass: document.querySelector('#btn-version-history')?.classList.contains('tb-icon-text'),
+        versionControls: document.querySelector('#btn-version-history')?.getAttribute('aria-controls'),
+        versionPressed: document.querySelector('#btn-version-history')?.getAttribute('aria-pressed'),
+        versionExpanded: document.querySelector('#btn-version-history')?.getAttribute('aria-expanded'),
       };
     });
 
@@ -175,6 +179,10 @@ function assert(cond, message) {
     assert(staticState.saveAsTitle.includes('.mentor'), `save-as title mentions .mentor (got ${staticState.saveAsTitle})`);
     assert(staticState.exportDocxTitle.includes('仅正文'), `docx title 仅正文 (got ${staticState.exportDocxTitle})`);
     assert(staticState.blockquoteTitle === '块引用', `blockquote title (got ${staticState.blockquoteTitle})`);
+    assert(staticState.versionClass === true, 'version uses standard toolbar button class');
+    assert(staticState.versionControls === 'version-history-drawer', 'version controls drawer');
+    assert(staticState.versionPressed === 'false', 'version initial pressed false');
+    assert(staticState.versionExpanded === 'false', 'version initial expanded false');
 
     console.log('\n=== After load document: dirty/save state ===');
     await page.evaluate(() => {
