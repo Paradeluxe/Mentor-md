@@ -255,6 +255,7 @@ function assert(cond, message) {
       const cs = getComputedStyle(btn);
       return {
         pressed: btn.getAttribute('aria-pressed'),
+        expanded: btn.getAttribute('aria-expanded'),
         versionHeight: btn.getBoundingClientRect().height,
         saveHeight: save.getBoundingClientRect().height,
         background: cs.backgroundColor,
@@ -262,6 +263,7 @@ function assert(cond, message) {
       };
     });
     assert(versionVisual.pressed === 'true', 'version pressed when drawer open');
+    assert(versionVisual.expanded === 'true', 'version expanded when drawer open');
     assert(Math.abs(versionVisual.versionHeight - versionVisual.saveHeight) <= 1,
       'version matches standard toolbar height');
     assert(versionVisual.background !== 'rgba(0, 0, 0, 0)' && versionVisual.background !== 'transparent',
@@ -270,6 +272,55 @@ function assert(cond, message) {
       window.__mdAnnotator.closeVersionHistory();
       window.__mdAnnotator.syncToolbarActionState();
     });
+    const versionClosed = await page.evaluate(() => {
+      const btn = document.querySelector('#btn-version-history');
+      return {
+        pressed: btn.getAttribute('aria-pressed'),
+        expanded: btn.getAttribute('aria-expanded'),
+      };
+    });
+    assert(versionClosed.pressed === 'false' && versionClosed.expanded === 'false',
+      'version renderer closes pressed and expanded state');
+
+    console.log('\n=== Source toggle via action model ===');
+    await page.locator('#btn-toggle-render').click();
+    await page.waitForTimeout(80);
+    const sourceState = await page.locator('#btn-toggle-render').evaluate((el) => ({
+      pressed: el.getAttribute('aria-pressed'),
+      mode: el.dataset.mode,
+      label: el.querySelector('.tb-label')?.textContent,
+      title: el.title,
+    }));
+    assert(sourceState.pressed === 'true', 'source pressed true');
+    assert(sourceState.mode === 'source', `source data-mode source (got ${sourceState.mode})`);
+    assert(sourceState.label === '预览', `source label 预览 (got ${sourceState.label})`);
+    assert(sourceState.title === '切换为渲染视图', `source title from model (got ${sourceState.title})`);
+    await page.locator('#btn-toggle-render').click();
+    await page.waitForTimeout(80);
+
+    console.log('\n=== Pane toggles via action model ===');
+        // Normalize to open, then collapse once and assert renderer state.
+        await page.evaluate(() => {
+          if (document.body.classList.contains('file-pane-collapsed')) {
+            window.__mdAnnotatorTogglePanes.toggleFilePane();
+          }
+        });
+        const paneToggle = await page.evaluate(() => {
+          const before = document.body.classList.contains('file-pane-collapsed');
+          window.__mdAnnotatorTogglePanes.toggleFilePane();
+          return {
+            before,
+            after: document.body.classList.contains('file-pane-collapsed'),
+            pressed: document.querySelector('#btn-toggle-file-pane')?.getAttribute('aria-pressed'),
+            expanded: document.querySelector('#btn-toggle-file-pane')?.getAttribute('aria-expanded'),
+          };
+        });
+        assert(paneToggle.before === false, `file pane starts open (got ${JSON.stringify(paneToggle)})`);
+        assert(paneToggle.after === true, `file pane collapsed class (got ${JSON.stringify(paneToggle)})`);
+        assert(paneToggle.pressed === 'false' && paneToggle.expanded === 'false',
+          'file pane toolbar reflects collapsed');
+        await page.evaluate(() => window.__mdAnnotatorTogglePanes.toggleFilePane());
+        await page.waitForTimeout(50);
 
     assert(pageErrors.length === 0, `no page errors: ${pageErrors.join(' | ')}`);
     console.log('\nPASS e2e-toolbar-contract');

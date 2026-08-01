@@ -57336,84 +57336,111 @@ var PRIMARY_TOOLBAR_ACTIONS = Object.freeze([
 function getToolbarActionState(input = {}) {
   const hasDocument = !!input.hasDocument;
   const readOnly = !!input.readOnly;
-  const busy = !!input.busy;
+  const busyAction = typeof input.busyAction === "string" ? input.busyAction : "";
+  const busy = !!input.busy || !!busyAction;
   const renderMode = input.renderMode === "source" ? "source" : "rendered";
   const filePaneOpen = input.filePaneOpen !== false;
   const commentPaneOpen = input.commentPaneOpen !== false;
   const autoSaveEnabled = input.autoSaveEnabled !== false;
   const autoSaveDisk = !!input.autoSaveDisk;
+  const versionPaneOpen = !!input.versionPaneOpen;
+  const referencesOpen = !!input.referencesOpen;
+  const autoSaveIntent = autoSaveDisk ? "disk-autosave" : autoSaveEnabled ? "draft-only" : "off";
+  const autoSaveDetail = autoSaveDisk ? "\u5F00\u542F\uFF1A\u505C\u624B\u540E\u5199\u56DE\u5DF2\u6388\u6743\u6587\u4EF6" : autoSaveEnabled ? "\u5F00\u542F\uFF1A\u5C1A\u65E0\u5199\u56DE\u76EE\u6807\uFF0C\u4EC5\u81EA\u52A8\u4FDD\u5B58\u8349\u7A3F\uFF1B\u8BF7\u5148\u4FDD\u5B58\u5230\u672C\u5730\u6587\u4EF6" : "\u5173\u95ED\uFF1A\u4EC5\u624B\u52A8\u4FDD\u5B58\u5199\u56DE\u6587\u4EF6\uFF08\u4ECD\u4F1A\u4FDD\u5B58\u5D29\u6E83\u6062\u590D\u8349\u7A3F\uFF09";
+  const isBusy = (id) => busyAction === id;
   return {
     new: {
       label: "\u65B0\u5EFA",
-      disabled: busy
+      disabled: busy,
+      busy: isBusy("new")
     },
     open: {
       label: "\u6253\u5F00",
-      disabled: busy
+      disabled: busy,
+      busy: isBusy("open")
     },
     autoSave: {
       label: "\u81EA\u52A8\u4FDD\u5B58",
       disabled: busy || readOnly,
       pressed: autoSaveEnabled,
-      intent: autoSaveDisk ? "disk-autosave" : autoSaveEnabled ? "draft-only" : "off",
-      detail: autoSaveDisk ? "\u5F00\u542F\uFF1A\u505C\u624B\u540E\u5199\u56DE\u5DF2\u6388\u6743\u6587\u4EF6" : autoSaveEnabled ? "\u5F00\u542F\uFF1A\u5C1A\u65E0\u5199\u56DE\u76EE\u6807\uFF0C\u4EC5\u81EA\u52A8\u4FDD\u5B58\u8349\u7A3F\uFF1B\u8BF7\u5148\u4FDD\u5B58\u5230\u672C\u5730\u6587\u4EF6" : "\u5173\u95ED\uFF1A\u4EC5\u624B\u52A8\u4FDD\u5B58\u5199\u56DE\u6587\u4EF6\uFF08\u4ECD\u4F1A\u4FDD\u5B58\u5D29\u6E83\u6062\u590D\u8349\u7A3F\uFF09"
+      disk: autoSaveDisk,
+      intent: autoSaveIntent,
+      detail: autoSaveDetail,
+      ariaLabel: autoSaveEnabled ? "\u81EA\u52A8\u4FDD\u5B58\uFF1A\u5F00" : "\u81EA\u52A8\u4FDD\u5B58\uFF1A\u5173",
+      title: autoSaveDetail,
+      busy: isBusy("autoSave")
     },
     save: {
       label: "\u4FDD\u5B58",
       disabled: !hasDocument || readOnly || busy,
       intent: input.hasWriteHandle ? "write-current" : "choose-save-target",
-      dirty: !!input.dirty
+      dirty: !!input.dirty,
+      busy: isBusy("save")
     },
     saveAs: {
       label: "\u53E6\u5B58",
-      disabled: !hasDocument || busy
+      disabled: !hasDocument || busy,
+      busy: isBusy("saveAs")
     },
     versionHistory: {
       label: "\u7248\u672C",
       disabled: !hasDocument || busy,
-      pressed: !!input.versionPaneOpen,
-      detail: "\u81EA\u52A8\u7248\u672C\u5FEB\u7167 \xB7 \u53EF\u6062\u590D"
+      pressed: versionPaneOpen,
+      expanded: versionPaneOpen,
+      detail: "\u81EA\u52A8\u7248\u672C\u5FEB\u7167 \xB7 \u53EF\u6062\u590D",
+      busy: isBusy("versionHistory")
     },
     exportMd: {
       label: "MD",
-      disabled: !hasDocument || busy
+      disabled: !hasDocument || busy,
+      busy: isBusy("exportMd")
     },
     exportDocx: {
       label: "DOCX",
       disabled: !hasDocument || busy,
-      detail: "\u4EC5\u6B63\u6587\uFF0C\u4E0D\u542B\u6279\u6CE8\u4E0E\u5F15\u7528\u5E93\u5143\u6570\u636E"
+      detail: "\u4EC5\u6B63\u6587\uFF0C\u4E0D\u542B\u6279\u6CE8\u4E0E\u5F15\u7528\u5E93\u5143\u6570\u636E",
+      busy: isBusy("exportDocx")
     },
     references: {
       label: "\u6587\u732E",
       // Always allow opening the library (import / manage) even with no doc
       // or while a save/export is busy — blocking this felt like a dead button.
       disabled: false,
-      pressed: !!input.referencesOpen
+      pressed: referencesOpen,
+      expanded: referencesOpen,
+      busy: false
     },
     undo: {
       label: "\u64A4\u9500",
-      disabled: !hasDocument || !input.canUndo || busy
+      disabled: !hasDocument || !input.canUndo || busy,
+      busy: isBusy("undo")
     },
     redo: {
       label: "\u91CD\u505A",
-      disabled: !hasDocument || !input.canRedo || busy
+      disabled: !hasDocument || !input.canRedo || busy,
+      busy: isBusy("redo")
     },
     source: {
       label: renderMode === "source" ? "\u9884\u89C8" : "\u6E90\u7801",
+      title: renderMode === "source" ? "\u5207\u6362\u4E3A\u6E32\u67D3\u89C6\u56FE" : "\u5207\u6362\u4E3A\u6E90\u7801\u89C6\u56FE",
+      mode: renderMode,
       disabled: !hasDocument || busy,
-      pressed: renderMode === "source"
+      pressed: renderMode === "source",
+      busy: isBusy("source")
     },
     filePane: {
       label: "\u5927\u7EB2\u680F",
       disabled: false,
       pressed: filePaneOpen,
-      expanded: filePaneOpen
+      expanded: filePaneOpen,
+      busy: false
     },
     commentPane: {
       label: "\u6279\u6CE8\u680F",
       disabled: false,
       pressed: commentPaneOpen,
-      expanded: commentPaneOpen
+      expanded: commentPaneOpen,
+      busy: false
     }
   };
 }
@@ -61167,10 +61194,6 @@ function setAutoSaveEnabled(on, { silent = false } = {}) {
   } catch (_) {
   }
   try {
-    syncAutosaveToggleUi();
-  } catch (_) {
-  }
-  try {
     syncToolbarActionState();
   } catch (_) {
   }
@@ -61179,36 +61202,21 @@ function setAutoSaveEnabled(on, { silent = false } = {}) {
       const disk = isAutoSaveDiskActive();
       setStatus(
         disk ? "\u81EA\u52A8\u4FDD\u5B58\u5DF2\u5F00\u542F" : "\u81EA\u52A8\u4FDD\u5B58\u5DF2\u5F00\u542F\uFF08\u8349\u7A3F\uFF09",
-        disk ? "\u505C\u624B\u540E\u5199\u56DE\u5DF2\u6388\u6743\u6587\u4EF6" : "\u5C1A\u65E0\u5199\u56DE\u76EE\u6807 \xB7 \u5148\u4FDD\u5B58\u5230\u672C\u5730\u540E\u624D\u4F1A\u5199\u76D8"
+        disk ? "\u505C\u624B\u540E\u5199\u56DE\u5DF2\u6388\u6743\u6587\u4EF6" : "\u5C1A\u65E0\u5199\u56DE\u6743\u9650\uFF0C\u4EC5\u7F13\u5B58\u8349\u7A3F"
       );
-      if (!disk) {
-        try {
-          showToast("\u81EA\u52A8\u4FDD\u5B58\u5DF2\u5F00\uFF1A\u8BF7\u5148\u4FDD\u5B58\u5230\u672C\u5730\u6587\u4EF6\uFF0C\u4E4B\u540E\u624D\u4F1A\u5199\u56DE\u78C1\u76D8", 2800);
-        } catch (_) {
-        }
-      }
     } else {
-      setStatus("\u81EA\u52A8\u4FDD\u5B58\u5DF2\u5173\u95ED", "\u4EC5\u624B\u52A8\u4FDD\u5B58\u5199\u56DE\u6587\u4EF6 \xB7 \u8349\u7A3F\u4ECD\u4F1A\u81EA\u52A8\u4FDD\u5B58");
+      setStatus("\u81EA\u52A8\u4FDD\u5B58\u5DF2\u5173\u95ED", "\u4EC5\u624B\u52A8\u4FDD\u5B58");
     }
   }
-  return next2;
 }
 function isAutoSaveDiskActive() {
   return getAutoSaveEnabled() && hasWriteHandle() && !State2.readOnlyMode && canWriteLiveDocument();
 }
 function syncAutosaveToggleUi() {
-  const btn = document.querySelector("#btn-autosave");
-  if (!btn) return;
-  const on = getAutoSaveEnabled();
-  const disk = isAutoSaveDiskActive();
-  btn.setAttribute("aria-pressed", on ? "true" : "false");
-  btn.setAttribute("data-disk", disk ? "true" : "false");
-  btn.setAttribute("data-intent", disk ? "disk-autosave" : on ? "draft-only" : "off");
-  const title = disk ? "\u81EA\u52A8\u4FDD\u5B58\uFF1A\u5F00 \xB7 \u505C\u624B\u540E\u5199\u56DE\u5DF2\u6388\u6743\u6587\u4EF6" : on ? "\u81EA\u52A8\u4FDD\u5B58\uFF1A\u5F00 \xB7 \u5C1A\u65E0\u5199\u56DE\u76EE\u6807\uFF08\u4EC5\u8349\u7A3F\uFF09\u3002\u5148\u300C\u4FDD\u5B58\u300D\u5230\u672C\u5730\u540E\u624D\u4F1A\u5199\u76D8" : "\u81EA\u52A8\u4FDD\u5B58\uFF1A\u5173 \xB7 \u4EC5\u624B\u52A8\u4FDD\u5B58\u5199\u56DE\u6587\u4EF6\uFF08\u4ECD\u4FDD\u5B58\u5D29\u6E83\u6062\u590D\u8349\u7A3F\uFF09";
-  btn.title = title;
-  btn.setAttribute("aria-label", on ? "\u81EA\u52A8\u4FDD\u5B58\uFF1A\u5F00" : "\u81EA\u52A8\u4FDD\u5B58\uFF1A\u5173");
-  const lab = btn.querySelector(".tb-label");
-  if (lab) lab.textContent = "\u81EA\u52A8\u4FDD\u5B58";
+  try {
+    syncToolbarActionState();
+  } catch (_) {
+  }
 }
 var AUTOSAVE_DEBOUNCE = getAutosaveDebounceMs();
 var _saveInFlight = false;
@@ -65103,7 +65111,6 @@ function flushSourceView() {
 function setRenderMode(mode) {
   if (mode !== "rendered" && mode !== "source") return;
   if (mode === State2.renderMode) return;
-  const btn = $("#btn-toggle-render");
   const editorPane = $("#editor-pane");
   const tiptapEl = $("#editor");
   let sourceEl = $("#source-view");
@@ -65162,9 +65169,6 @@ function setRenderMode(mode) {
     sourceEl.innerHTML = highlightSelectionInSource(md2, State2.savedSelection?.text);
     tiptapEl.style.display = "none";
     sourceEl.style.display = "block";
-    btn.dataset.mode = "source";
-    btn.title = "\u5207\u6362\u4E3A\u6E32\u67D3\u89C6\u56FE";
-    btn.querySelector("span:last-child").textContent = "\u6E32\u67D3";
     const selInfo = State2.savedSelection ? `\u5DF2\u5207\u6362 (${md2.length} \u5B57\u7B26, \u9009\u533A\u9AD8\u4EAE: ${State2.savedSelection.text.length} \u5B57)` : `\u5DF2\u5207\u6362 (${md2.length} \u5B57\u7B26)`;
     setStatus("\u6E90\u7801\u6A21\u5F0F", selInfo);
   } else {
@@ -65176,9 +65180,6 @@ function setRenderMode(mode) {
     }
     State2.renderMode = mode;
     tiptapEl.style.display = "";
-    btn.dataset.mode = "rendered";
-    btn.title = "\u5207\u6362\u4E3A\u6E90\u7801\u89C6\u56FE";
-    btn.querySelector("span:last-child").textContent = "\u6E90\u7801";
     let restored = false;
     if (savedText && State2.savedSelection) {
       try {
@@ -65212,6 +65213,10 @@ function setRenderMode(mode) {
     State2.savedSelection = null;
     setStatus("\u6E32\u67D3\u6A21\u5F0F", restored ? "\u5DF2\u5207\u6362\u56DE WYSIWYG, \u9009\u533A\u5DF2\u6062\u590D" : "\u5DF2\u5207\u6362\u56DE WYSIWYG");
   }
+  try {
+    syncToolbarActionState();
+  } catch {
+  }
 }
 function highlightSelectionInSource(md2, selectedText) {
   const chip = '<span class="source-bibliography-marker" contenteditable="false" data-source-token="bibliography">References\uFF08\u7531\u6587\u732E\u5E93\u751F\u6210\uFF09</span>';
@@ -65228,13 +65233,6 @@ function highlightSelectionInSource(md2, selectedText) {
   return escaped.split(token).join(chip);
 }
 function updateToggleBtnIcon() {
-  const btn = $("#btn-toggle-render");
-  if (!btn) return;
-  const source = State2.renderMode === "source";
-  btn.dataset.mode = source ? "source" : "rendered";
-  btn.setAttribute("aria-pressed", source ? "true" : "false");
-  const label = btn.querySelector(".tb-label") || btn.querySelector("span:not(.tb-icon)");
-  if (label) label.textContent = source ? "\u9884\u89C8" : "\u6E90\u7801";
   try {
     syncToolbarActionState();
   } catch {
@@ -65700,36 +65698,46 @@ function rebuildAnnotationMarks(markSnapshot) {
   return rebuilt;
 }
 function updateHistoryButtons() {
-  const undoBtn = $("#btn-undo");
-  const redoBtn = $("#btn-redo");
-  if (undoBtn) undoBtn.disabled = State2.history.past.length === 0;
-  if (redoBtn) redoBtn.disabled = State2.history.future.length === 0;
   try {
     syncToolbarActionState();
   } catch {
   }
 }
-function applyToolbarActionState(sel, state) {
-  const el = typeof sel === "string" ? document.querySelector(sel) : sel;
+var TOOLBAR_ACTION_SELECTORS = Object.freeze({
+  new: "#btn-new",
+  open: "#btn-open-files",
+  autoSave: "#btn-autosave",
+  save: "#btn-save",
+  saveAs: "#btn-save-as",
+  versionHistory: "#btn-version-history",
+  exportMd: "#btn-export-md",
+  exportDocx: "#btn-export-docx",
+  references: "#btn-refs",
+  undo: "#btn-undo",
+  redo: "#btn-redo",
+  source: "#btn-toggle-render",
+  filePane: "#btn-toggle-file-pane",
+  commentPane: "#btn-toggle-comment-pane"
+});
+function applyToolbarActionState(target, state) {
+  const el = typeof target === "string" ? document.querySelector(target) : target;
   if (!el || !state) return;
   if ("disabled" in state) el.disabled = !!state.disabled;
   if ("label" in state) {
     const lab = el.querySelector(".tb-label");
     if (lab) lab.textContent = state.label;
   }
-  if ("pressed" in state) {
-    el.setAttribute("aria-pressed", state.pressed ? "true" : "false");
-    if (el.id === "btn-refs") el.setAttribute("aria-expanded", state.pressed ? "true" : "false");
-  }
-  if ("expanded" in state) {
-    el.setAttribute("aria-expanded", state.expanded ? "true" : "false");
-  }
-  if (state.detail) {
-    el.setAttribute("data-detail", state.detail);
-    if (el.id === "btn-autosave") el.title = state.detail;
-  }
-  if (state.intent) el.setAttribute("data-intent", state.intent);
-  if ("dirty" in state && el.id === "btn-save") el.setAttribute("data-dirty", state.dirty ? "true" : "false");
+  if ("pressed" in state) el.setAttribute("aria-pressed", state.pressed ? "true" : "false");
+  if ("expanded" in state) el.setAttribute("aria-expanded", state.expanded ? "true" : "false");
+  if ("ariaLabel" in state) el.setAttribute("aria-label", state.ariaLabel);
+  if ("title" in state) el.title = state.title;
+  if ("intent" in state) el.dataset.intent = state.intent;
+  if ("mode" in state) el.dataset.mode = state.mode;
+  if ("disk" in state) el.dataset.disk = state.disk ? "true" : "false";
+  if ("dirty" in state) el.dataset.dirty = state.dirty ? "true" : "false";
+  if (state.detail) el.dataset.detail = state.detail;
+  if (state.busy) el.setAttribute("aria-busy", "true");
+  else el.removeAttribute("aria-busy");
 }
 function syncToolbarActionState() {
   let canUndo = State2.history.past.length > 0;
@@ -65745,6 +65753,7 @@ function syncToolbarActionState() {
   const commentPaneOpen = !document.body.classList.contains("comment-pane-collapsed");
   const autoSaveEnabled = getAutoSaveEnabled();
   const autoSaveDisk = isAutoSaveDiskActive();
+  const busyAction = typeof State2._toolbarBusyAction === "string" ? State2._toolbarBusyAction : "";
   const actionState = getToolbarActionState({
     hasDocument: !!State2.currentFile,
     hasWriteHandle: hasWriteHandle(),
@@ -65755,33 +65764,17 @@ function syncToolbarActionState() {
     referencesOpen,
     canUndo,
     canRedo,
-    busy: !!State2._toolbarBusy,
+    busy: !!State2._toolbarBusy && !busyAction,
+    busyAction,
     filePaneOpen,
     commentPaneOpen,
     autoSaveEnabled,
     autoSaveDisk,
     versionPaneOpen: !!_versionPaneOpen
   });
-  applyToolbarActionState("#btn-new", actionState.new);
-  applyToolbarActionState("#btn-open-files", actionState.open);
-  applyToolbarActionState("#btn-autosave", actionState.autoSave);
-  applyToolbarActionState("#btn-save", actionState.save);
-  applyToolbarActionState("#btn-save-as", actionState.saveAs);
-  applyToolbarActionState("#btn-version-history", actionState.versionHistory);
-  try {
-    syncAutosaveToggleUi();
-  } catch (_) {
+  for (const [id, selector] of Object.entries(TOOLBAR_ACTION_SELECTORS)) {
+    applyToolbarActionState(selector, actionState[id]);
   }
-  applyToolbarActionState("#btn-export-md", actionState.exportMd);
-  applyToolbarActionState("#btn-export-docx", actionState.exportDocx);
-  applyToolbarActionState("#btn-refs", actionState.references);
-  applyToolbarActionState("#btn-undo", actionState.undo);
-  applyToolbarActionState("#btn-redo", actionState.redo);
-  applyToolbarActionState("#btn-toggle-render", actionState.source);
-  applyToolbarActionState("#btn-toggle-file-pane", actionState.filePane);
-  applyToolbarActionState("#btn-toggle-comment-pane", actionState.commentPane);
-  const saveBtn = document.querySelector("#btn-save");
-  if (saveBtn) saveBtn.setAttribute("data-dirty", String(!!(State2.currentFile && State2.currentFile.dirty)));
 }
 function resetHistory() {
   State2.history = createPatchHistory(100);
@@ -71298,29 +71291,16 @@ function runToolbarAction(id, fn) {
   const key = String(id || "");
   if (!key || typeof fn !== "function") return Promise.resolve();
   if (_toolbarActionInflight[key]) return _toolbarActionInflight[key];
-  const btnMap = {
-    save: "#btn-save",
-    saveAs: "#btn-save-as",
-    exportMd: "#btn-export-md",
-    exportDocx: "#btn-export-docx"
-  };
-  const sel = btnMap[key];
-  const el = sel ? document.querySelector(sel) : null;
+  State2._toolbarBusyAction = key;
   State2._toolbarBusy = true;
-  if (el) {
-    el.setAttribute("aria-busy", "true");
-    el.disabled = true;
-  }
   try {
     syncToolbarActionState();
   } catch {
   }
   const p = Promise.resolve().then(fn).finally(() => {
     delete _toolbarActionInflight[key];
+    State2._toolbarBusyAction = Object.keys(_toolbarActionInflight)[0] || "";
     State2._toolbarBusy = Object.keys(_toolbarActionInflight).length > 0;
-    if (el) {
-      el.removeAttribute("aria-busy");
-    }
     try {
       syncToolbarActionState();
     } catch {
@@ -71593,19 +71573,15 @@ function setupToolbar() {
   });
   $("#btn-toggle-render").addEventListener("click", () => {
     setRenderMode(State2.renderMode === "rendered" ? "source" : "rendered");
-    updateToggleBtnIcon();
   });
   updateToggleBtnIcon();
   function syncPaneControls(kind, open2) {
     const action = kind === "outline" ? "toggle-file-pane" : "toggle-comment-pane";
     const label = kind === "outline" ? "\u5927\u7EB2\u680F" : "\u6279\u6CE8\u680F";
     document.querySelectorAll(`[data-act="${action}"]`).forEach((btn) => {
-      btn.setAttribute("aria-expanded", open2 ? "true" : "false");
+      if (btn.classList.contains("tb-pane-toggle") || btn.closest("#toolbar")) return;
       const inPane = Boolean(btn.closest("aside"));
-      if (btn.classList.contains("tb-pane-toggle")) {
-        btn.setAttribute("aria-pressed", open2 ? "true" : "false");
-        return;
-      }
+      btn.setAttribute("aria-expanded", open2 ? "true" : "false");
       btn.setAttribute("aria-label", `${inPane ? "\u6536\u8D77" : "\u5C55\u5F00"}${label}`);
     });
   }

@@ -3018,45 +3018,26 @@ function setVersionMaxAutosave(n) {
 function setAutoSaveEnabled(on, { silent = false } = {}) {
   const next = !!on;
   try { localStorage.setItem("Mentor:autoSave", next ? "1" : "0"); } catch (_) {}
-  try { syncAutosaveToggleUi(); } catch (_) {}
   try { syncToolbarActionState(); } catch (_) {}
   if (!silent) {
     if (next) {
       const disk = isAutoSaveDiskActive();
       setStatus(
         disk ? "自动保存已开启" : "自动保存已开启（草稿）",
-        disk ? "停手后写回已授权文件" : "尚无写回目标 · 先保存到本地后才会写盘"
+        disk ? "停手后写回已授权文件" : "尚无写回权限，仅缓存草稿"
       );
-      if (!disk) {
-        try { showToast("自动保存已开：请先保存到本地文件，之后才会写回磁盘", 2800); } catch (_) {}
-      }
     } else {
-      setStatus("自动保存已关闭", "仅手动保存写回文件 · 草稿仍会自动保存");
+      setStatus("自动保存已关闭", "仅手动保存");
     }
   }
-  return next;
 }
 /** Preference ON and current doc can be written in place. */
 function isAutoSaveDiskActive() {
   return getAutoSaveEnabled() && hasWriteHandle() && !State.readOnlyMode && canWriteLiveDocument();
 }
 function syncAutosaveToggleUi() {
-  const btn = document.querySelector("#btn-autosave");
-  if (!btn) return;
-  const on = getAutoSaveEnabled();
-  const disk = isAutoSaveDiskActive();
-  btn.setAttribute("aria-pressed", on ? "true" : "false");
-  btn.setAttribute("data-disk", disk ? "true" : "false");
-  btn.setAttribute("data-intent", disk ? "disk-autosave" : (on ? "draft-only" : "off"));
-  const title = disk
-    ? "自动保存：开 · 停手后写回已授权文件"
-    : (on
-      ? "自动保存：开 · 尚无写回目标（仅草稿）。先「保存」到本地后才会写盘"
-      : "自动保存：关 · 仅手动保存写回文件（仍保存崩溃恢复草稿）");
-  btn.title = title;
-  btn.setAttribute("aria-label", on ? "自动保存：开" : "自动保存：关");
-  const lab = btn.querySelector(".tb-label");
-  if (lab) lab.textContent = "自动保存";
+  // Compatibility shim: AutoSave visuals come from the single toolbar renderer.
+  try { syncToolbarActionState(); } catch (_) {}
 }
 var AUTOSAVE_DEBOUNCE = getAutosaveDebounceMs();
 var _saveInFlight = false;
@@ -7057,7 +7038,6 @@ function flushSourceView() {
 function setRenderMode(mode) {
   if (mode !== "rendered" && mode !== "source") return;
   if (mode === State.renderMode) return;
-  const btn = $("#btn-toggle-render");
   const editorPane = $("#editor-pane");
   const tiptapEl = $("#editor");
   let sourceEl = $("#source-view");
@@ -7114,9 +7094,6 @@ function setRenderMode(mode) {
         sourceEl.innerHTML = highlightSelectionInSource(md2, State.savedSelection?.text);
         tiptapEl.style.display = "none";
         sourceEl.style.display = "block";
-        btn.dataset.mode = "source";
-        btn.title = "\u5207\u6362\u4E3A\u6E32\u67D3\u89C6\u56FE";
-        btn.querySelector("span:last-child").textContent = "\u6E32\u67D3";
         const selInfo = State.savedSelection ? `\u5DF2\u5207\u6362 (${md2.length} \u5B57\u7B26, \u9009\u533A\u9AD8\u4EAE: ${State.savedSelection.text.length} \u5B57)` : `\u5DF2\u5207\u6362 (${md2.length} \u5B57\u7B26)`;
         setStatus("\u6E90\u7801\u6A21\u5F0F", selInfo);
   } else {
@@ -7129,9 +7106,6 @@ function setRenderMode(mode) {
     }
     State.renderMode = mode;
     tiptapEl.style.display = "";
-    btn.dataset.mode = "rendered";
-    btn.title = "\u5207\u6362\u4E3A\u6E90\u7801\u89C6\u56FE";
-    btn.querySelector("span:last-child").textContent = "\u6E90\u7801";
     let restored = false;
     if (savedText && State.savedSelection) {
       try {
@@ -7165,6 +7139,7 @@ function setRenderMode(mode) {
     State.savedSelection = null;
     setStatus("\u6E32\u67D3\u6A21\u5F0F", restored ? "\u5DF2\u5207\u6362\u56DE WYSIWYG, \u9009\u533A\u5DF2\u6062\u590D" : "\u5DF2\u5207\u6362\u56DE WYSIWYG");
   }
+  try { syncToolbarActionState(); } catch {}
 }
 function highlightSelectionInSource(md2, selectedText) {
   // Escape first, then inject protected bibliography chip (after escape so markup stays live).
@@ -7182,13 +7157,7 @@ function highlightSelectionInSource(md2, selectedText) {
   return escaped.split(token).join(chip);
 }
 function updateToggleBtnIcon() {
-  const btn = $("#btn-toggle-render");
-  if (!btn) return;
-  const source = State.renderMode === "source";
-  btn.dataset.mode = source ? "source" : "rendered";
-  btn.setAttribute("aria-pressed", source ? "true" : "false");
-  const label = btn.querySelector(".tb-label") || btn.querySelector("span:not(.tb-icon)");
-  if (label) label.textContent = source ? "预览" : "源码";
+  // Compatibility shim: source/preview button state is owned by syncToolbarActionState.
   try { syncToolbarActionState(); } catch {}
 }
 var _renderOutlineTimer = null;
@@ -7671,34 +7640,45 @@ function rebuildAnnotationMarks(markSnapshot) {
   return rebuilt;
 }
 function updateHistoryButtons() {
-  const undoBtn = $("#btn-undo");
-  const redoBtn = $("#btn-redo");
-  if (undoBtn) undoBtn.disabled = State.history.past.length === 0;
-  if (redoBtn) redoBtn.disabled = State.history.future.length === 0;
   try { syncToolbarActionState(); } catch {}
 }
 
-function applyToolbarActionState(sel, state) {
-  const el = typeof sel === "string" ? document.querySelector(sel) : sel;
+const TOOLBAR_ACTION_SELECTORS = Object.freeze({
+  new: "#btn-new",
+  open: "#btn-open-files",
+  autoSave: "#btn-autosave",
+  save: "#btn-save",
+  saveAs: "#btn-save-as",
+  versionHistory: "#btn-version-history",
+  exportMd: "#btn-export-md",
+  exportDocx: "#btn-export-docx",
+  references: "#btn-refs",
+  undo: "#btn-undo",
+  redo: "#btn-redo",
+  source: "#btn-toggle-render",
+  filePane: "#btn-toggle-file-pane",
+  commentPane: "#btn-toggle-comment-pane",
+});
+
+function applyToolbarActionState(target, state) {
+  const el = typeof target === "string" ? document.querySelector(target) : target;
   if (!el || !state) return;
   if ("disabled" in state) el.disabled = !!state.disabled;
   if ("label" in state) {
     const lab = el.querySelector(".tb-label");
     if (lab) lab.textContent = state.label;
   }
-  if ("pressed" in state) {
-    el.setAttribute("aria-pressed", state.pressed ? "true" : "false");
-    if (el.id === "btn-refs") el.setAttribute("aria-expanded", state.pressed ? "true" : "false");
-  }
-  if ("expanded" in state) {
-    el.setAttribute("aria-expanded", state.expanded ? "true" : "false");
-  }
-  if (state.detail) {
-    el.setAttribute("data-detail", state.detail);
-    if (el.id === "btn-autosave") el.title = state.detail;
-  }
-  if (state.intent) el.setAttribute("data-intent", state.intent);
-  if ("dirty" in state && el.id === "btn-save") el.setAttribute("data-dirty", state.dirty ? "true" : "false");
+  if ("pressed" in state) el.setAttribute("aria-pressed", state.pressed ? "true" : "false");
+  if ("expanded" in state) el.setAttribute("aria-expanded", state.expanded ? "true" : "false");
+  if ("ariaLabel" in state) el.setAttribute("aria-label", state.ariaLabel);
+  if ("title" in state) el.title = state.title;
+  if ("intent" in state) el.dataset.intent = state.intent;
+  if ("mode" in state) el.dataset.mode = state.mode;
+  if ("disk" in state) el.dataset.disk = state.disk ? "true" : "false";
+  if ("dirty" in state) el.dataset.dirty = state.dirty ? "true" : "false";
+  if (state.detail) el.dataset.detail = state.detail;
+  if (state.busy) el.setAttribute("aria-busy", "true");
+  else el.removeAttribute("aria-busy");
 }
 
 function syncToolbarActionState() {
@@ -7714,6 +7694,7 @@ function syncToolbarActionState() {
   const commentPaneOpen = !document.body.classList.contains("comment-pane-collapsed");
   const autoSaveEnabled = getAutoSaveEnabled();
   const autoSaveDisk = isAutoSaveDiskActive();
+  const busyAction = typeof State._toolbarBusyAction === "string" ? State._toolbarBusyAction : "";
   const actionState = getToolbarActionState({
     hasDocument: !!State.currentFile,
     hasWriteHandle: hasWriteHandle(),
@@ -7724,30 +7705,17 @@ function syncToolbarActionState() {
     referencesOpen,
     canUndo,
     canRedo,
-    busy: !!State._toolbarBusy,
+    busy: !!State._toolbarBusy && !busyAction,
+    busyAction,
     filePaneOpen,
     commentPaneOpen,
     autoSaveEnabled,
     autoSaveDisk,
     versionPaneOpen: !!_versionPaneOpen,
   });
-  applyToolbarActionState("#btn-new", actionState.new);
-  applyToolbarActionState("#btn-open-files", actionState.open);
-  applyToolbarActionState("#btn-autosave", actionState.autoSave);
-  applyToolbarActionState("#btn-save", actionState.save);
-  applyToolbarActionState("#btn-save-as", actionState.saveAs);
-  applyToolbarActionState("#btn-version-history", actionState.versionHistory);
-  try { syncAutosaveToggleUi(); } catch (_) {}
-  applyToolbarActionState("#btn-export-md", actionState.exportMd);
-  applyToolbarActionState("#btn-export-docx", actionState.exportDocx);
-  applyToolbarActionState("#btn-refs", actionState.references);
-  applyToolbarActionState("#btn-undo", actionState.undo);
-  applyToolbarActionState("#btn-redo", actionState.redo);
-  applyToolbarActionState("#btn-toggle-render", actionState.source);
-  applyToolbarActionState("#btn-toggle-file-pane", actionState.filePane);
-  applyToolbarActionState("#btn-toggle-comment-pane", actionState.commentPane);
-  const saveBtn = document.querySelector("#btn-save");
-  if (saveBtn) saveBtn.setAttribute("data-dirty", String(!!(State.currentFile && State.currentFile.dirty)));
+  for (const [id, selector] of Object.entries(TOOLBAR_ACTION_SELECTORS)) {
+    applyToolbarActionState(selector, actionState[id]);
+  }
 }
 
 function resetHistory() {
@@ -13320,27 +13288,13 @@ function runToolbarAction(id, fn) {
   const key = String(id || "");
   if (!key || typeof fn !== "function") return Promise.resolve();
   if (_toolbarActionInflight[key]) return _toolbarActionInflight[key];
-  const btnMap = {
-    save: "#btn-save",
-    saveAs: "#btn-save-as",
-    exportMd: "#btn-export-md",
-    exportDocx: "#btn-export-docx",
-  };
-  const sel = btnMap[key];
-  const el = sel ? document.querySelector(sel) : null;
+  State._toolbarBusyAction = key;
   State._toolbarBusy = true;
-  if (el) {
-    el.setAttribute("aria-busy", "true");
-    el.disabled = true;
-  }
   try { syncToolbarActionState(); } catch {}
   const p = Promise.resolve().then(fn).finally(() => {
     delete _toolbarActionInflight[key];
+    State._toolbarBusyAction = Object.keys(_toolbarActionInflight)[0] || "";
     State._toolbarBusy = Object.keys(_toolbarActionInflight).length > 0;
-    if (el) {
-      el.removeAttribute("aria-busy");
-      // leave disabled state to syncToolbarActionState
-    }
     try { syncToolbarActionState(); } catch {}
   });
   _toolbarActionInflight[key] = p;
@@ -13610,20 +13564,16 @@ $("#btn-save").addEventListener("click", () => runToolbarAction("save", saveCurr
   });
   $("#btn-toggle-render").addEventListener("click", () => {
     setRenderMode(State.renderMode === "rendered" ? "source" : "rendered");
-    updateToggleBtnIcon();
   });
   updateToggleBtnIcon();
   function syncPaneControls(kind, open) {
     const action = kind === 'outline' ? 'toggle-file-pane' : 'toggle-comment-pane';
     const label = kind === 'outline' ? '大纲栏' : '批注栏';
     document.querySelectorAll(`[data-act="${action}"]`).forEach((btn) => {
-      btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+      // Toolbar toggles are owned by syncToolbarActionState; only aside expand/collapse buttons stay here.
+      if (btn.classList.contains('tb-pane-toggle') || btn.closest('#toolbar')) return;
       const inPane = Boolean(btn.closest('aside'));
-      // 顶栏 toggle 按钮: aria-pressed 跟随栏可见状态; aria-label 固定(不加 展开收起 前缀)
-      if (btn.classList.contains('tb-pane-toggle')) {
-        btn.setAttribute('aria-pressed', open ? 'true' : 'false');
-        return;
-      }
+      btn.setAttribute('aria-expanded', open ? 'true' : 'false');
       btn.setAttribute('aria-label', `${inPane ? '收起' : '展开'}${label}`);
     });
   }
