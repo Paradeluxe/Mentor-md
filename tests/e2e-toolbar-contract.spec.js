@@ -236,6 +236,31 @@ function assert(cond, message) {
     assert(refsOpen.pressed === 'true', `refs pressed true (got ${refsOpen.pressed})`);
     assert(refsOpen.expanded === 'true', `refs expanded true (got ${refsOpen.expanded})`);
 
+    console.log('\n=== Version button visual state ===');
+    const versionVisual = await page.evaluate(() => {
+      const M = window.__mdAnnotator;
+      M.openVersionHistory();
+      M.syncToolbarActionState();
+      const btn = document.querySelector('#btn-version-history');
+      const save = document.querySelector('#btn-save');
+      const cs = getComputedStyle(btn);
+      return {
+        pressed: btn.getAttribute('aria-pressed'),
+        versionHeight: btn.getBoundingClientRect().height,
+        saveHeight: save.getBoundingClientRect().height,
+        background: cs.backgroundColor,
+      };
+    });
+    assert(versionVisual.pressed === 'true', 'version pressed when drawer open');
+    assert(Math.abs(versionVisual.versionHeight - versionVisual.saveHeight) <= 1,
+      'version matches standard toolbar height');
+    assert(versionVisual.background !== 'rgba(0, 0, 0, 0)' && versionVisual.background !== 'transparent',
+      `pressed version has visible background (got ${versionVisual.background})`);
+    await page.evaluate(() => {
+      window.__mdAnnotator.closeVersionHistory();
+      window.__mdAnnotator.syncToolbarActionState();
+    });
+
     assert(pageErrors.length === 0, `no page errors: ${pageErrors.join(' | ')}`);
     console.log('\nPASS e2e-toolbar-contract');
   } finally {

@@ -365,11 +365,14 @@ code {
 .tb-icon-text.is-active { background: var(--accent-soft); color: var(--accent); }
 .tb-icon-text.is-active .tb-icon { color: var(--accent); }
 /* H-undo: undo/redo 按钮无历史时 disabled (灰) */
+#toolbar .tb-icon-text:disabled,
+#toolbar .tb-icon-text:disabled:hover,
 .tb-icon-text:disabled,
 .tb-icon-text:disabled:hover {
   background: transparent;
+  color: var(--text-3);
   cursor: not-allowed;
-  opacity: 0.4;
+  opacity: 0.42;
 }
 .tb-icon-text:disabled .tb-icon { color: var(--text-3); }
 
@@ -441,18 +444,25 @@ code {
   cursor: not-allowed;
 }
 
-#btn-refs[aria-pressed="true"],
-#btn-toggle-render[aria-pressed="true"],
-#btn-toggle-file-pane[aria-pressed="true"],
-#btn-toggle-comment-pane[aria-pressed="true"] {
+/* Shared pressed/busy styles for all standard toolbar buttons */
+#toolbar .tb-icon-text[aria-pressed="true"] {
   background: var(--accent-soft);
   color: var(--accent);
 }
-#btn-refs[aria-pressed="true"] .tb-icon,
-#btn-toggle-render[aria-pressed="true"] .tb-icon,
-#btn-toggle-file-pane[aria-pressed="true"] .tb-icon,
-#btn-toggle-comment-pane[aria-pressed="true"] .tb-icon { color: var(--accent); }
-.tb-icon-text[aria-busy="true"] { opacity: 0.7; cursor: progress; }
+#toolbar .tb-icon-text[aria-pressed="true"] .tb-icon {
+  color: var(--accent);
+}
+#toolbar .tb-icon-text[aria-busy="true"],
+.tb-icon-text[aria-busy="true"] {
+  opacity: 0.7;
+  cursor: progress;
+}
+.help-btn.is-active,
+.settings-btn.is-active {
+  background: var(--action-primary);
+  border-color: var(--action-primary);
+  color: var(--text-on-strong);
+}
 
 /* (legacy toolbar masks removed → v1.43.34 block at end) */
 
