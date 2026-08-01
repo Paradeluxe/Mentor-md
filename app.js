@@ -149,6 +149,7 @@ import {
   buildSaveResultCopy
 } from './modules/save-dialog.js';
 import { buildCommentsParts } from './modules/docx-export-comments.js';
+import { parseDocxToMentor } from './modules/docx-import.js';
 import {
   classifySaveOutcome,
   shouldPromptForUnsavedChanges as shouldPromptForUnsavedChangesPure
@@ -9338,6 +9339,9 @@ function _isMentorName(name) {
 function _isMdName(name) {
   return /\.md(markdown)?$/i.test(name || "");
 }
+function _isDocxName(name) {
+  return /\.docx$/i.test(name || "");
+}
 function _findSidecarHandle(handles, mdHandle) {
   if (!mdHandle || !handles) return null;
   const base = mdHandle.name.replace(/\.md(markdown)?$/i, "").toLowerCase();
@@ -9349,9 +9353,10 @@ function _findSidecarHandle(handles, mdHandle) {
 async function openMultipleHandles(handles) {
   if (!handles || handles.length === 0) return;
   const mentors = handles.filter((h) => _isMentorName(h.name));
+  const docxs = handles.filter((h) => _isDocxName(h.name));
   const mds = handles.filter((h) => _isMdName(h.name));
-  // Prefer .mentor packages; else .md; else first pick
-  const targets = mentors.length ? mentors : mds.length ? mds : [handles[0]];
+  // Prefer .mentor packages; else .docx; else .md; else first pick
+  const targets = mentors.length ? mentors : docxs.length ? docxs : mds.length ? mds : [handles[0]];
   const multi = targets.length > 1;
   let opened = 0;
   let lastName = "";
@@ -9359,6 +9364,9 @@ async function openMultipleHandles(handles) {
     try {
       if (_isMentorName(h.name)) {
         await openFromMentorHandle(h, { quiet: multi });
+      } else if (_isDocxName(h.name)) {
+        const file = await h.getFile();
+        await openFromDocxFile(file, { quiet: multi });
       } else {
         await openFromHandle(h, _findSidecarHandle(handles, h), { quiet: multi });
       }
@@ -9366,18 +9374,18 @@ async function openMultipleHandles(handles) {
       lastName = h.name;
     } catch (e) {
       console.error("[openMultipleHandles] failed:", h.name, e);
-      showToast(`\u6253\u5F00\u5931\u8D25 ${h.name}: ${e.message || e}`, 4e3);
+      showToast(`打开失败 ${h.name}: ${e.message || e}`, 4e3);
     }
   }
   renderFilePaneCurrent();
   updateDocMeta({ immediate: true });
   if (opened === 0) {
-    setStatus("\u6253\u5F00\u5931\u8D25", "");
+    setStatus("打开失败", "");
     return;
   }
   if (opened > 1) {
-    setStatus(`\u5DF2\u6253\u5F00 ${opened} \u4E2A\u6587\u6863`, lastName);
-    showToast(`\u5DF2\u6253\u5F00 ${opened} \u4E2A\u6807\u7B7E`, 2500);
+    setStatus(`已打开 ${opened} 个文档`, lastName);
+    showToast(`已打开 ${opened} 个标签`, 2500);
   }
 }
 async function openFiles() {
@@ -9385,11 +9393,16 @@ async function openFiles() {
     try {
       const handles = await window.showOpenFilePicker({
         multiple: true,
-        // v2 锁死 .mentor: 旧 .md + .json 侧车不再从文件选择器进入, 避免半新半旧体验
+        // .mentor primary; .docx import-with-comments also allowed
         types: [{
-          description: "Mentor \u5355\u6587\u4EF6\u5305 (.mentor)",
+          description: "Mentor 单文件包 (.mentor)",
           accept: {
             "application/zip": [".mentor"]
+          }
+        }, {
+          description: "Word 文档 (.docx)",
+          accept: {
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document": [".docx"]
           }
         }],
         excludeAcceptAllOption: false
@@ -9399,7 +9412,7 @@ async function openFiles() {
       return;
     } catch (e) {
       if (e.name === "AbortError") return;
-      console.error("showOpenFilePicker \u5931\u8D25:", e);
+      console.error("showOpenFilePicker 失败:", e);
     }
   }
   await openFilesLegacy();
@@ -9408,14 +9421,16 @@ async function openFilesLegacy() {
   const input = document.createElement("input");
   input.type = "file";
   input.multiple = true;
-  input.accept = ".mentor";
+  input.accept = ".mentor,.docx";
   input.onchange = async () => {
     const files = Array.from(input.files || []);
     if (files.length === 0) return;
-    // Collect .mentor (by extension or zip sniff)
+    // Collect .mentor (by extension or zip sniff) and .docx
     const mentors = [];
+    const docxs = [];
     for (const f of files) {
-      if (_isMentorName(f.name) || await isMentorZip(f)) mentors.push(f);
+      if (_isDocxName(f.name)) docxs.push(f);
+      else if (_isMentorName(f.name) || await isMentorZip(f)) mentors.push(f);
     }
     if (mentors.length > 0) {
       const multi = mentors.length > 1;
@@ -9426,42 +9441,110 @@ async function openFilesLegacy() {
           opened++;
         } catch (e) {
           console.error("[openFilesLegacy] mentor failed:", f.name, e);
-          showToast(`\u6253\u5F00\u5931\u8D25 ${f.name}: ${e.message || e}`, 4e3);
+          showToast(`打开失败 ${f.name}: ${e.message || e}`, 4e3);
         }
       }
       renderFilePaneCurrent();
+      updateDocMeta({ immediate: true });
+      if (opened === 0) {
+        setStatus("打开失败", "");
+        return;
+      }
       if (opened > 1) {
-        setStatus(`\u5DF2\u6253\u5F00 ${opened} \u4E2A\u6587\u6863`, mentors[mentors.length - 1].name);
-        showToast(`\u5DF2\u6253\u5F00 ${opened} \u4E2A\u6807\u7B7E`, 2500);
+        setStatus(`已打开 ${opened} 个文档`, mentors[mentors.length - 1].name);
+        showToast(`已打开 ${opened} 个标签`, 2500);
       }
       return;
     }
-    // Fallback: first non-mentor file as download-mode md
-    const file = files[0];
-    const content = await file.text();
-    let annotations = await tryLoadSidecar(file.name, file);
-    if (!annotations) {
-      try {
-        const cached = await AnnotationStore.get(file.name);
-        if (cached?.sidecar?.annotations) {
-          annotations = cached.sidecar;
-          console.log(`[IDB] legacy \u6D41\u7A0B\u6062\u590D ${annotations.annotations.length} \u4E2A\u6279\u6CE8`);
+    if (docxs.length > 0) {
+      const multi = docxs.length > 1;
+      let opened = 0;
+      let lastName = "";
+      for (const f of docxs) {
+        try {
+          await openFromDocxFile(f, { quiet: multi });
+          opened++;
+          lastName = f.name;
+        } catch (e) {
+          console.error("[openFilesLegacy] docx failed:", f.name, e);
+          showToast(`打开失败 ${f.name}: ${e.message || e}`, 4e3);
         }
-      } catch (e) {
-        console.warn("AnnotationStore.get \u5931\u8D25:", e);
       }
+      renderFilePaneCurrent();
+      updateDocMeta({ immediate: true });
+      if (opened === 0) {
+        setStatus("打开失败", "");
+        return;
+      }
+      if (opened > 1) {
+        setStatus(`已打开 ${opened} 个文档`, lastName);
+        showToast(`已打开 ${opened} 个标签`, 2500);
+      }
+      return;
     }
-    await activateOpenedDocument({
-      name: file.name,
-      content,
-      annotations,
-      handle: null,
-      saveMode: "download"
-    });
-    setStatus("\u5DF2\u52A0\u8F7D", `${file.name} (Ctrl+S \u4E0B\u8F7D\u4FDD\u5B58)`);
+    // No mentor/docx — leave legacy path empty (md no longer primary)
+    showToast("请选择 .mentor 或 .docx 文件", 3200);
   };
   input.click();
 }
+
+/**
+ * Import a .docx (optionally with Word comments) into a download-mode Mentor tab.
+ * saveMode is always "download" — user should Save As .mentor to persist comments.
+ */
+async function openFromDocxFile(file, options = {}) {
+  const quiet = !!(options && options.quiet);
+  if (!file) throw new Error("openFromDocxFile: file required");
+  if (typeof JSZip === "undefined" && typeof parseDocxToMentor !== "function") {
+    throw new Error("DOCX import unavailable");
+  }
+  try {
+    if (!quiet) {
+      try { showToast("正在导入 .docx…", 1800); } catch (_) {}
+    }
+    const buf = await file.arrayBuffer();
+    const parsed = await parseDocxToMentor(buf);
+    const rawName = file.name || "document.docx";
+    const base = rawName.replace(/\.docx$/i, "") || "document";
+    // Keep a .md working name so save-as-mentor flow is natural
+    const name = base + ".md";
+    const anns = Array.isArray(parsed.annotations) ? parsed.annotations : [];
+    const sidecar = {
+      version: "1",
+      document: name,
+      updatedAt: new Date().toISOString(),
+      author: { id: State.authorId, name: State.author },
+      annotations: anns,
+    };
+    await activateOpenedDocument({
+      name,
+      content: parsed.contentMd || "",
+      annotations: sidecar,
+      mediaFiles: parsed.mediaFiles || null,
+      handle: null,
+      saveMode: "download",
+      quiet,
+      forceDisk: true,
+    });
+    const n = anns.length;
+    if (!quiet) {
+      const detail = n > 0
+        ? `${rawName} · ${n} 条批注（请另存为 .mentor）`
+        : `${rawName} · 无批注（请另存为 .mentor）`;
+      setStatus("已导入 DOCX", detail);
+      showToast(n > 0 ? `已导入 ${n} 条 Word 批注` : "已导入 DOCX 正文", 2800);
+    }
+    if (parsed.warnings && parsed.warnings.length) {
+      console.warn("[openFromDocxFile] warnings:", parsed.warnings);
+    }
+    return true;
+  } catch (e) {
+    console.error("[openFromDocxFile]", e);
+    if (!quiet) showToast(`DOCX 导入失败: ${e.message || e}`, 4500);
+    throw e;
+  }
+}
+
 async function ensureWritePermission(fileHandle) {
   if (!fileHandle || !fileHandle.requestPermission) return "unknown";
   try {
@@ -14907,6 +14990,9 @@ window.__mdAnnotator = {
   openFiles,
   openFilesLegacy,
   openFromMentorFile,
+  openFromDocxFile,
+  parseDocxToMentor,
+  buildCommentsParts,
   toggleHelp,
   // v1.32: 暴露 help toggle 备用入口, 让 inline onclick 用
   // .mentor 包帮助函数 (给 e2e 测试 + 第三方插件使用)

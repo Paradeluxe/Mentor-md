@@ -186,6 +186,9 @@ export function buildCommentsParts(annotations) {
     const rootAuthorInitials = authorInitials(rootAuthorName);
     const rootCreated = toIsoDate((rootComment && rootComment.createdAt) || thread.createdAt);
 
+    rootEntry.paraId = rootParaId;
+    rootEntry.durableId = rootDurableId;
+
     commentItems.push({
       id: rootEntry.commentId,
       author: rootAuthorName,
@@ -247,6 +250,10 @@ export function buildCommentsParts(annotations) {
       const replyAuthorId = getAuthorId(reply);
       const replyAuthorInitials = authorInitials(replyAuthorName);
       const replyCreated = toIsoDate(reply.createdAt);
+
+      replyEntry.paraId = replyParaId;
+      replyEntry.durableId = replyDurableId;
+      replyEntry.parentParaId = rootParaId;
 
       commentItems.push({
         id: replyEntry.commentId,

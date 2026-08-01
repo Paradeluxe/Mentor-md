@@ -244,11 +244,10 @@ function assertCommentsPart(commentsXml, opts) {
   }
   // Body text: extract everything between this comment's open and matching </w:comment>
   const startIdx = m.index + m[0].length;
-  const endRe = new RegExp('</w:comment>');
-  endRe.lastIndex = startIdx;
-  const endMatch = endRe.exec(commentsXml);
-  if (!endMatch) fail('comment id=' + id + ': no matching </w:comment>');
-  const body = commentsXml.slice(startIdx, endMatch.index);
+  const closeTag = '</w:comment>';
+  const endIdx = commentsXml.indexOf(closeTag, startIdx);
+  if (endIdx < 0) fail('comment id=' + id + ': no matching </w:comment>');
+  const body = commentsXml.slice(startIdx, endIdx);
   if (opts.text != null && !body.includes(opts.text)) {
     fail('comment id=' + id + ': expected body text ' + JSON.stringify(opts.text) + ', got ' + JSON.stringify(body.slice(0, 200)));
   }

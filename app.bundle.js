@@ -9593,10 +9593,10 @@ function checkForDeadEnds(match, stream) {
 function defaultAttrs(attrs) {
   let defaults2 = /* @__PURE__ */ Object.create(null);
   for (let attrName in attrs) {
-    let attr = attrs[attrName];
-    if (!attr.hasDefault)
+    let attr2 = attrs[attrName];
+    if (!attr2.hasDefault)
       return null;
-    defaults2[attrName] = attr.default;
+    defaults2[attrName] = attr2.default;
   }
   return defaults2;
 }
@@ -9605,9 +9605,9 @@ function computeAttrs(attrs, value) {
   for (let name in attrs) {
     let given = value && value[name];
     if (given === void 0) {
-      let attr = attrs[name];
-      if (attr.hasDefault)
-        given = attr.default;
+      let attr2 = attrs[name];
+      if (attr2.hasDefault)
+        given = attr2.default;
       else
         throw new RangeError("No value supplied for attribute " + name);
     }
@@ -9616,12 +9616,12 @@ function computeAttrs(attrs, value) {
   return built;
 }
 function checkAttrs(attrs, values, type, name) {
-  for (let attr in values)
-    if (!(attr in attrs))
-      throw new RangeError(`Unsupported attribute ${attr} for ${type} of type ${name}`);
-  for (let attr in attrs) {
-    if (attrs[attr].validate)
-      attrs[attr].validate(values[attr]);
+  for (let attr2 in values)
+    if (!(attr2 in attrs))
+      throw new RangeError(`Unsupported attribute ${attr2} for ${type} of type ${name}`);
+  for (let attr2 in attrs) {
+    if (attrs[attr2].validate)
+      attrs[attr2].validate(values[attr2]);
   }
 }
 function initAttrs(typeName, attrs) {
@@ -12405,10 +12405,10 @@ var AttrStep = class _AttrStep extends Step {
   /**
   Construct an attribute step.
   */
-  constructor(pos, attr, value) {
+  constructor(pos, attr2, value) {
     super();
     this.pos = pos;
-    this.attr = attr;
+    this.attr = attr2;
     this.value = value;
   }
   apply(doc5) {
@@ -12446,9 +12446,9 @@ var DocAttrStep = class _DocAttrStep extends Step {
   /**
   Construct an attribute step.
   */
-  constructor(attr, value) {
+  constructor(attr2, value) {
     super();
-    this.attr = attr;
+    this.attr = attr2;
     this.value = value;
   }
   apply(doc5) {
@@ -12683,15 +12683,15 @@ var Transform = class {
   The `pos` addresses the document content. Use `setDocAttribute`
   to set attributes on the document itself.
   */
-  setNodeAttribute(pos, attr, value) {
-    this.step(new AttrStep(pos, attr, value));
+  setNodeAttribute(pos, attr2, value) {
+    this.step(new AttrStep(pos, attr2, value));
     return this;
   }
   /**
   Set a single attribute on the document to a new value.
   */
-  setDocAttribute(attr, value) {
-    this.step(new DocAttrStep(attr, value));
+  setDocAttribute(attr2, value) {
+    this.step(new DocAttrStep(attr2, value));
     return this;
   }
   /**
@@ -18921,13 +18921,13 @@ function computeDocDeco(view) {
     if (typeof value == "function")
       value = value(view.state);
     if (value)
-      for (let attr in value) {
-        if (attr == "class")
-          attrs.class += " " + value[attr];
-        else if (attr == "style")
-          attrs.style = (attrs.style ? attrs.style + ";" : "") + value[attr];
-        else if (!attrs[attr] && attr != "contenteditable" && attr != "nodeName")
-          attrs[attr] = String(value[attr]);
+      for (let attr2 in value) {
+        if (attr2 == "class")
+          attrs.class += " " + value[attr2];
+        else if (attr2 == "style")
+          attrs.style = (attrs.style ? attrs.style + ";" : "") + value[attr2];
+        else if (!attrs[attr2] && attr2 != "contenteditable" && attr2 != "nodeName")
+          attrs[attr2] = String(value[attr2]);
       }
   });
   if (!attrs.translate)
@@ -37089,13 +37089,13 @@ function computeDocDeco2(view) {
     if (typeof value == "function")
       value = value(view.state);
     if (value)
-      for (let attr in value) {
-        if (attr == "class")
-          attrs.class += " " + value[attr];
-        else if (attr == "style")
-          attrs.style = (attrs.style ? attrs.style + ";" : "") + value[attr];
-        else if (!attrs[attr] && attr != "contenteditable" && attr != "nodeName")
-          attrs[attr] = String(value[attr]);
+      for (let attr2 in value) {
+        if (attr2 == "class")
+          attrs.class += " " + value[attr2];
+        else if (attr2 == "style")
+          attrs.style = (attrs.style ? attrs.style + ";" : "") + value[attr2];
+        else if (!attrs[attr2] && attr2 != "contenteditable" && attr2 != "nodeName")
+          attrs[attr2] = String(value[attr2]);
       }
   });
   if (!attrs.translate)
@@ -42645,9 +42645,9 @@ var toNode = function toNode2(tagName) {
       node.style[style2] = this.style[style2];
     }
   }
-  for (var attr in this.attributes) {
-    if (this.attributes.hasOwnProperty(attr)) {
-      node.setAttribute(attr, this.attributes[attr]);
+  for (var attr2 in this.attributes) {
+    if (this.attributes.hasOwnProperty(attr2)) {
+      node.setAttribute(attr2, this.attributes[attr2]);
     }
   }
   for (var i = 0; i < this.children.length; i++) {
@@ -42669,9 +42669,9 @@ var toMarkup = function toMarkup2(tagName) {
   if (styles2) {
     markup += ' style="' + utils.escape(styles2) + '"';
   }
-  for (var attr in this.attributes) {
-    if (this.attributes.hasOwnProperty(attr)) {
-      markup += " " + attr + '="' + utils.escape(this.attributes[attr]) + '"';
+  for (var attr2 in this.attributes) {
+    if (this.attributes.hasOwnProperty(attr2)) {
+      markup += " " + attr2 + '="' + utils.escape(this.attributes[attr2]) + '"';
     }
   }
   markup += ">";
@@ -42894,9 +42894,9 @@ var SvgNode = class {
   toNode() {
     var svgNS = "http://www.w3.org/2000/svg";
     var node = document.createElementNS(svgNS, "svg");
-    for (var attr in this.attributes) {
-      if (Object.prototype.hasOwnProperty.call(this.attributes, attr)) {
-        node.setAttribute(attr, this.attributes[attr]);
+    for (var attr2 in this.attributes) {
+      if (Object.prototype.hasOwnProperty.call(this.attributes, attr2)) {
+        node.setAttribute(attr2, this.attributes[attr2]);
       }
     }
     for (var i = 0; i < this.children.length; i++) {
@@ -42906,9 +42906,9 @@ var SvgNode = class {
   }
   toMarkup() {
     var markup = '<svg xmlns="http://www.w3.org/2000/svg"';
-    for (var attr in this.attributes) {
-      if (Object.prototype.hasOwnProperty.call(this.attributes, attr)) {
-        markup += " " + attr + "='" + this.attributes[attr] + "'";
+    for (var attr2 in this.attributes) {
+      if (Object.prototype.hasOwnProperty.call(this.attributes, attr2)) {
+        markup += " " + attr2 + "='" + this.attributes[attr2] + "'";
       }
     }
     markup += ">";
@@ -42952,18 +42952,18 @@ var LineNode = class {
   toNode() {
     var svgNS = "http://www.w3.org/2000/svg";
     var node = document.createElementNS(svgNS, "line");
-    for (var attr in this.attributes) {
-      if (Object.prototype.hasOwnProperty.call(this.attributes, attr)) {
-        node.setAttribute(attr, this.attributes[attr]);
+    for (var attr2 in this.attributes) {
+      if (Object.prototype.hasOwnProperty.call(this.attributes, attr2)) {
+        node.setAttribute(attr2, this.attributes[attr2]);
       }
     }
     return node;
   }
   toMarkup() {
     var markup = "<line";
-    for (var attr in this.attributes) {
-      if (Object.prototype.hasOwnProperty.call(this.attributes, attr)) {
-        markup += " " + attr + "='" + this.attributes[attr] + "'";
+    for (var attr2 in this.attributes) {
+      if (Object.prototype.hasOwnProperty.call(this.attributes, attr2)) {
+        markup += " " + attr2 + "='" + this.attributes[attr2] + "'";
       }
     }
     markup += "/>";
@@ -44668,9 +44668,9 @@ var MathNode = class {
    */
   toNode() {
     var node = document.createElementNS("http://www.w3.org/1998/Math/MathML", this.type);
-    for (var attr in this.attributes) {
-      if (Object.prototype.hasOwnProperty.call(this.attributes, attr)) {
-        node.setAttribute(attr, this.attributes[attr]);
+    for (var attr2 in this.attributes) {
+      if (Object.prototype.hasOwnProperty.call(this.attributes, attr2)) {
+        node.setAttribute(attr2, this.attributes[attr2]);
       }
     }
     if (this.classes.length > 0) {
@@ -44686,10 +44686,10 @@ var MathNode = class {
    */
   toMarkup() {
     var markup = "<" + this.type;
-    for (var attr in this.attributes) {
-      if (Object.prototype.hasOwnProperty.call(this.attributes, attr)) {
-        markup += " " + attr + '="';
-        markup += utils.escape(this.attributes[attr]);
+    for (var attr2 in this.attributes) {
+      if (Object.prototype.hasOwnProperty.call(this.attributes, attr2)) {
+        markup += " " + attr2 + '="';
+        markup += utils.escape(this.attributes[attr2]);
         markup += '"';
       }
     }
@@ -49172,9 +49172,9 @@ defineFunction({
       classes.push(...group.attributes.class.trim().split(/\s+/));
     }
     var span = buildCommon.makeSpan(classes, elements, options);
-    for (var attr in group.attributes) {
-      if (attr !== "class" && group.attributes.hasOwnProperty(attr)) {
-        span.setAttribute(attr, group.attributes[attr]);
+    for (var attr2 in group.attributes) {
+      if (attr2 !== "class" && group.attributes.hasOwnProperty(attr2)) {
+        span.setAttribute(attr2, group.attributes[attr2]);
       }
     }
     return span;
@@ -50530,9 +50530,9 @@ defineFunction({
       "script": ["1", "false"],
       "scriptscript": ["2", "false"]
     };
-    var attr = styleAttributes[group.style];
-    node.setAttribute("scriptlevel", attr[0]);
-    node.setAttribute("displaystyle", attr[1]);
+    var attr2 = styleAttributes[group.style];
+    node.setAttribute("scriptlevel", attr2[0]);
+    node.setAttribute("displaystyle", attr2[1]);
     return node;
   }
 });
@@ -54433,7 +54433,7 @@ function canConvert(input) {
 var turndown_browser_es_default = TurndownService;
 
 // app.js
-var import_jszip = __toESM(require_jszip_min());
+var import_jszip2 = __toESM(require_jszip_min());
 
 // modules/document-session.js
 function fingerprintDocument(name, content) {
@@ -57645,6 +57645,8 @@ function buildCommentsParts(annotations) {
     const rootAuthorId = getAuthorId(rootComment);
     const rootAuthorInitials = authorInitials(rootAuthorName);
     const rootCreated = toIsoDate(rootComment && rootComment.createdAt || thread.createdAt);
+    rootEntry.paraId = rootParaId;
+    rootEntry.durableId = rootDurableId;
     commentItems.push({
       id: rootEntry.commentId,
       author: rootAuthorName,
@@ -57696,6 +57698,9 @@ function buildCommentsParts(annotations) {
       const replyAuthorId = getAuthorId(reply);
       const replyAuthorInitials = authorInitials(replyAuthorName);
       const replyCreated = toIsoDate(reply.createdAt);
+      replyEntry.paraId = replyParaId;
+      replyEntry.durableId = replyDurableId;
+      replyEntry.parentParaId = rootParaId;
       commentItems.push({
         id: replyEntry.commentId,
         author: replyAuthorName,
@@ -57780,6 +57785,472 @@ function renderPeopleXml(peopleMap) {
     (p) => `<w15:person w:author="${escXml(p.author)}"><w15:presenceInfo w15:providerId="None" w15:userId="${escXml(p.userId)}"/></w15:person>`
   ).join("");
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w15:people xmlns:w15="${NS_W15}" xmlns:w="${NS_W}">${inner2}</w15:people>`;
+}
+
+// modules/docx-import.js
+var import_jszip = __toESM(require_jszip_min());
+function decodeEntities(s) {
+  return String(s || "").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n))).replace(/&#x([0-9a-fA-F]+);/g, (_, h) => String.fromCharCode(parseInt(h, 16))).replace(/&amp;/g, "&");
+}
+function parseAttrs(tagInner) {
+  const attrs = {};
+  const re = /([:\w.-]+)\s*=\s*"([^"]*)"/g;
+  let m;
+  while ((m = re.exec(tagInner)) !== null) attrs[m[1]] = m[2];
+  return attrs;
+}
+function localName(tag) {
+  const t = String(tag || "");
+  const i = t.indexOf(":");
+  return i >= 0 ? t.slice(i + 1) : t;
+}
+function parseXml(xml) {
+  const root2 = { tag: "#document", attrs: {}, children: [], text: "" };
+  const stack = [root2];
+  const re = /<!--[\s\S]*?-->|<!\[CDATA\[([\s\S]*?)\]\]>|<\/([:\w.-]+)>|<([:\w.-]+)([^>]*?)\s*\/>|<([:\w.-]+)([^>]*)>|([^<]+)/g;
+  let m;
+  const src = String(xml || "").replace(/^\uFEFF/, "");
+  while ((m = re.exec(src)) !== null) {
+    if (m[0].startsWith("<!--")) continue;
+    if (m[1] != null) {
+      stack[stack.length - 1].text += m[1];
+      continue;
+    }
+    if (m[2] != null) {
+      if (stack.length > 1) stack.pop();
+      continue;
+    }
+    if (m[3] != null) {
+      const node = { tag: m[3], attrs: parseAttrs(m[4] || ""), children: [], text: "" };
+      stack[stack.length - 1].children.push(node);
+      continue;
+    }
+    if (m[5] != null) {
+      const node = { tag: m[5], attrs: parseAttrs(m[6] || ""), children: [], text: "" };
+      stack[stack.length - 1].children.push(node);
+      stack.push(node);
+      continue;
+    }
+    if (m[7] != null) {
+      stack[stack.length - 1].text += decodeEntities(m[7]);
+    }
+  }
+  return root2;
+}
+function findChildren(node, name) {
+  const want = localName(name);
+  return (node.children || []).filter((c) => localName(c.tag) === want);
+}
+function findDescendants(node, name, out = []) {
+  const want = localName(name);
+  for (const c of node.children || []) {
+    if (localName(c.tag) === want) out.push(c);
+    findDescendants(c, name, out);
+  }
+  return out;
+}
+function textOf(node) {
+  let t = node.text || "";
+  for (const c of node.children || []) t += textOf(c);
+  return t;
+}
+function attr(node, ...keys3) {
+  for (const k of keys3) {
+    if (node.attrs && node.attrs[k] != null) return node.attrs[k];
+    const local = k.includes(":") ? k.split(":")[1] : k;
+    for (const [ak, av] of Object.entries(node.attrs || {})) {
+      if (localName(ak) === local) return av;
+    }
+  }
+  return "";
+}
+function uuid() {
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+    const r = Math.random() * 16 | 0;
+    const v = c === "x" ? r : r & 3 | 8;
+    return v.toString(16);
+  });
+}
+function pStyleToMdPrefix(pPr) {
+  if (!pPr) return { prefix: "", kind: "p" };
+  const styles2 = findDescendants(pPr, "pStyle");
+  const val = styles2.length ? attr(styles2[0], "w:val", "val") : "";
+  const heading = /^Heading([1-6])$/i.exec(val || "");
+  if (heading) return { prefix: "#".repeat(Number(heading[1])) + " ", kind: "h" };
+  if (/^Quote$/i.test(val || "") || /^BlockText$/i.test(val || "")) {
+    return { prefix: "> ", kind: "quote" };
+  }
+  const numPr = findDescendants(pPr, "numPr");
+  if (numPr.length) {
+    const ilvl = findDescendants(numPr[0], "ilvl");
+    const lvl = ilvl.length ? Number(attr(ilvl[0], "w:val", "val") || 0) : 0;
+    const indent = "  ".repeat(Math.max(0, lvl));
+    return { prefix: `${indent}- `, kind: "li" };
+  }
+  return { prefix: "", kind: "p" };
+}
+function runToMd(run3) {
+  if (findDescendants(run3, "instrText").length) return "";
+  const rPrList = findChildren(run3, "rPr");
+  const rPr = rPrList[0] || null;
+  let bold = false;
+  let italic = false;
+  let code = false;
+  if (rPr) {
+    bold = findDescendants(rPr, "b").length > 0 || findDescendants(rPr, "bCs").length > 0;
+    italic = findDescendants(rPr, "i").length > 0 || findDescendants(rPr, "iCs").length > 0;
+    const fonts = findDescendants(rPr, "rFonts");
+    if (fonts.length) {
+      const ascii2 = attr(fonts[0], "w:ascii", "ascii") || "";
+      if (/consolas|courier|mono/i.test(ascii2)) code = true;
+    }
+  }
+  let text3 = "";
+  for (const c of run3.children || []) {
+    const n = localName(c.tag);
+    if (n === "t") text3 += c.text || "";
+    else if (n === "tab") text3 += "	";
+    else if (n === "br" || n === "cr") text3 += "\n";
+    else if (n === "drawing") text3 += "";
+    else text3 += textOf(c);
+  }
+  if (!text3) return "";
+  let out = text3;
+  if (code) out = "`" + out.replace(/`/g, "\\`") + "`";
+  else {
+    if (bold) out = "**" + out + "**";
+    if (italic) out = "*" + out + "*";
+  }
+  return out;
+}
+function parseDocumentXml(docXml) {
+  const tree = parseXml(docXml);
+  const bodies = findDescendants(tree, "body");
+  const body = bodies[0] || tree;
+  const mdParts = [];
+  const plainParts = [];
+  const ranges = {};
+  let plainPos = 0;
+  const openStarts = [];
+  function emitPlain(s) {
+    plainParts.push(s);
+    plainPos += s.length;
+  }
+  function walkInline(nodes, mdAcc) {
+    for (const node of nodes || []) {
+      const n = localName(node.tag);
+      if (n === "commentRangeStart") {
+        const id = attr(node, "w:id", "id");
+        ranges[id] = ranges[id] || { start: plainPos, end: null, quote: "" };
+        ranges[id].start = plainPos;
+        openStarts.push(id);
+        continue;
+      }
+      if (n === "commentRangeEnd") {
+        const id = attr(node, "w:id", "id");
+        if (ranges[id]) {
+          ranges[id].end = plainPos;
+          const plainAll = plainParts.join("");
+          ranges[id].quote = plainAll.slice(ranges[id].start, ranges[id].end);
+        }
+        const idx = openStarts.lastIndexOf(id);
+        if (idx >= 0) openStarts.splice(idx, 1);
+        continue;
+      }
+      if (n === "commentReference") continue;
+      if (n === "r") {
+        let plain = "";
+        for (const c of node.children || []) {
+          const cn = localName(c.tag);
+          if (cn === "t") plain += c.text || "";
+          else if (cn === "tab") plain += "	";
+          else if (cn === "br" || cn === "cr") plain += "\n";
+        }
+        emitPlain(plain);
+        mdAcc.push(runToMd(node));
+        continue;
+      }
+      if (n === "hyperlink" || n === "sdt" || n === "sdtContent" || n === "smartTag") {
+        walkInline(node.children, mdAcc);
+        continue;
+      }
+      if (node.children && node.children.length) walkInline(node.children, mdAcc);
+    }
+  }
+  function tableToMd(tbl) {
+    const rows = [];
+    for (const tr2 of findDescendants(tbl, "tr")) {
+      const cells = [];
+      for (const tc of findChildren(tr2, "tc")) {
+        let cellPlain = "";
+        let cellMd = "";
+        for (const p of findChildren(tc, "p")) {
+          const mdAcc = [];
+          const before = plainPos;
+          walkInline(p.children, mdAcc);
+          const chunk = mdAcc.join("");
+          cellMd += (cellMd ? " " : "") + chunk;
+          cellPlain += plainParts.join("").slice(before);
+        }
+        cells.push(cellMd.replace(/\|/g, "\\|").trim());
+      }
+      if (cells.length) rows.push(cells);
+    }
+    if (!rows.length) return "";
+    const width = Math.max(...rows.map((r) => r.length));
+    const norm = rows.map((r) => {
+      const x = r.slice();
+      while (x.length < width) x.push("");
+      return x;
+    });
+    const header = norm[0];
+    const sep = header.map(() => "---");
+    const lines = [
+      "| " + header.join(" | ") + " |",
+      "| " + sep.join(" | ") + " |",
+      ...norm.slice(1).map((r) => "| " + r.join(" | ") + " |")
+    ];
+    return lines.join("\n");
+  }
+  for (const child of body.children || []) {
+    const n = localName(child.tag);
+    if (n === "sectPr") continue;
+    if (n === "tbl") {
+      const tmd = tableToMd(child);
+      if (tmd) {
+        if (mdParts.length) mdParts.push("");
+        mdParts.push(tmd);
+        emitPlain("\n");
+      }
+      continue;
+    }
+    if (n !== "p") continue;
+    const pPrList = findChildren(child, "pPr");
+    const { prefix, kind } = pStyleToMdPrefix(pPrList[0] || null);
+    const mdAcc = [];
+    walkInline(child.children, mdAcc);
+    let line = mdAcc.join("");
+    if (kind === "h") line = line.trim();
+    const mdLine = prefix + line;
+    mdParts.push(mdLine);
+    emitPlain("\n");
+  }
+  const plainText = plainParts.join("");
+  for (const id of Object.keys(ranges)) {
+    if (ranges[id].end == null) {
+      ranges[id].end = plainText.length;
+      ranges[id].quote = plainText.slice(ranges[id].start, ranges[id].end);
+    }
+  }
+  const contentMd = normalizeMdBlocks(mdParts);
+  return { contentMd, rangesByCommentId: ranges, plainText };
+}
+function normalizeMdBlocks(parts) {
+  const out = [];
+  for (let i = 0; i < parts.length; i++) {
+    const line = parts[i];
+    out.push(line);
+    const next2 = parts[i + 1];
+    if (next2 == null) continue;
+    const curList = /^\s*([-*+] |\d+\. )/.test(line);
+    const nextList = /^\s*([-*+] |\d+\. )/.test(next2);
+    const curTable = /^\|/.test(line);
+    const nextTable = /^\|/.test(next2);
+    if (curList && nextList || curTable && nextTable) {
+      continue;
+    }
+    out.push("");
+  }
+  return out.join("\n").replace(/\n{3,}/g, "\n\n").replace(/^\n+|\n+$/g, "") + (parts.length ? "\n" : "");
+}
+function parseCommentsParts({
+  commentsXml,
+  commentsExtendedXml,
+  commentsIdsXml,
+  commentsExtensibleXml,
+  peopleXml
+} = {}) {
+  const comments = [];
+  if (commentsXml) {
+    const tree = parseXml(commentsXml);
+    for (const c of findDescendants(tree, "comment")) {
+      const id = attr(c, "w:id", "id");
+      const author = attr(c, "w:author", "author") || "";
+      const initials = attr(c, "w:initials", "initials") || "";
+      const date = attr(c, "w:date", "date") || "";
+      const ps = findChildren(c, "p");
+      const paraId = ps.length ? attr(ps[0], "w14:paraId", "paraId") : "";
+      const text3 = findDescendants(c, "t").map((t) => t.text || "").join("") || textOf(c).trim();
+      comments.push({ id, author, initials, date, text: text3, paraId });
+    }
+  }
+  const extended = [];
+  if (commentsExtendedXml) {
+    const tree = parseXml(commentsExtendedXml);
+    for (const ex of findDescendants(tree, "commentEx")) {
+      extended.push({
+        paraId: attr(ex, "w15:paraId", "paraId"),
+        parentParaId: attr(ex, "w15:paraIdParent", "paraIdParent") || "",
+        done: attr(ex, "w15:done", "done") === "1"
+      });
+    }
+  }
+  const ids = [];
+  if (commentsIdsXml) {
+    const tree = parseXml(commentsIdsXml);
+    for (const x of findDescendants(tree, "commentId")) {
+      ids.push({
+        paraId: attr(x, "w16cid:paraId", "paraId"),
+        durableId: attr(x, "w16cid:durableId", "durableId")
+      });
+    }
+  }
+  const people = [];
+  if (peopleXml) {
+    const tree = parseXml(peopleXml);
+    for (const p of findDescendants(tree, "person")) {
+      const author = attr(p, "w:author", "author");
+      const info = findDescendants(p, "presenceInfo")[0];
+      people.push({
+        author,
+        providerId: info ? attr(info, "w15:providerId", "providerId") : "",
+        userId: info ? attr(info, "w15:userId", "userId") : ""
+      });
+    }
+  }
+  return { comments, extended, ids, people };
+}
+function authorPayload(name, people) {
+  const n = String(name || "").trim() || "\u533F\u540D";
+  const hit = (people || []).find((p) => p.author === n || p.userId === n);
+  return {
+    id: hit && hit.userId || "",
+    name: n
+  };
+}
+function assembleMentorAnnotations({ comments, extended, people, rangesByCommentId, contentMd }) {
+  const warnings = [];
+  const byPara = /* @__PURE__ */ new Map();
+  for (const c of comments) {
+    if (c.paraId) byPara.set(c.paraId, c);
+  }
+  const extByPara = /* @__PURE__ */ new Map();
+  for (const e of extended) extByPara.set(e.paraId, e);
+  const roots = [];
+  const repliesByParentPara = /* @__PURE__ */ new Map();
+  for (const c of comments) {
+    const ex = c.paraId ? extByPara.get(c.paraId) : null;
+    const parent = ex && ex.parentParaId ? ex.parentParaId : "";
+    if (!parent) roots.push(c);
+    else {
+      if (!repliesByParentPara.has(parent)) repliesByParentPara.set(parent, []);
+      repliesByParentPara.get(parent).push(c);
+    }
+  }
+  if (!extended.length && comments.length) {
+    roots.length = 0;
+    for (const c of comments) roots.push(c);
+  }
+  const annotations = [];
+  for (const root2 of roots) {
+    const range = rangesByCommentId[String(root2.id)] || null;
+    const quote = range && range.quote || "";
+    let text3 = quote;
+    let mdFrom = -1;
+    let mdTo = -1;
+    if (text3 && contentMd) {
+      mdFrom = contentMd.indexOf(text3);
+      if (mdFrom >= 0) mdTo = mdFrom + text3.length;
+    }
+    const prefix = mdFrom > 0 ? contentMd.slice(Math.max(0, mdFrom - 32), mdFrom) : "";
+    const suffix = mdTo >= 0 ? contentMd.slice(mdTo, mdTo + 32) : "";
+    const ex = root2.paraId ? extByPara.get(root2.paraId) : null;
+    const resolved = !!(ex && ex.done);
+    const commentEntries = [];
+    commentEntries.push({
+      id: uuid(),
+      author: authorPayload(root2.author, people),
+      body: root2.text || "",
+      createdAt: root2.date || (/* @__PURE__ */ new Date()).toISOString()
+    });
+    const replies = root2.paraId ? repliesByParentPara.get(root2.paraId) || [] : [];
+    for (const r of replies) {
+      commentEntries.push({
+        id: uuid(),
+        author: authorPayload(r.author, people),
+        body: r.text || "",
+        createdAt: r.date || (/* @__PURE__ */ new Date()).toISOString()
+      });
+    }
+    if (!range) {
+      warnings.push(`comment id=${root2.id} has no range in document.xml`);
+    }
+    const threadId = uuid();
+    annotations.push({
+      threadId,
+      text: text3,
+      prefix,
+      suffix,
+      range: mdFrom >= 0 ? { from: mdFrom, to: mdTo } : { from: 0, to: 0 },
+      mdRange: mdFrom >= 0 ? { from: mdFrom, to: mdTo } : null,
+      resolved,
+      pending: false,
+      createdAt: root2.date || (/* @__PURE__ */ new Date()).toISOString(),
+      comments: commentEntries,
+      anchor: {
+        version: "1",
+        quote: { exact: text3, prefix, suffix },
+        position: null,
+        status: mdFrom >= 0 ? "attached" : "orphan",
+        confidence: mdFrom >= 0 ? 1 : 0,
+        updatedAt: (/* @__PURE__ */ new Date()).toISOString()
+      }
+    });
+  }
+  return { annotations, warnings };
+}
+async function parseDocxToMentor(input) {
+  const warnings = [];
+  const zip = await import_jszip.default.loadAsync(input);
+  const read = async (path2) => {
+    const f = zip.file(path2);
+    if (!f) return null;
+    return f.async("string");
+  };
+  const docXml = await read("word/document.xml");
+  if (!docXml) {
+    throw new Error("DOCX missing word/document.xml");
+  }
+  const { contentMd, rangesByCommentId, plainText } = parseDocumentXml(docXml);
+  const commentsXml = await read("word/comments.xml");
+  const commentsExtendedXml = await read("word/commentsExtended.xml");
+  const commentsIdsXml = await read("word/commentsIds.xml");
+  const commentsExtensibleXml = await read("word/commentsExtensible.xml");
+  const peopleXml = await read("word/people.xml");
+  const parts = parseCommentsParts({
+    commentsXml,
+    commentsExtendedXml,
+    commentsIdsXml,
+    commentsExtensibleXml,
+    peopleXml
+  });
+  const { annotations, warnings: w2 } = assembleMentorAnnotations({
+    comments: parts.comments,
+    extended: parts.extended,
+    people: parts.people,
+    rangesByCommentId,
+    contentMd
+  });
+  warnings.push(...w2);
+  const mediaFiles = {};
+  return {
+    contentMd,
+    annotations,
+    mediaFiles,
+    warnings,
+    plainText,
+    _debug: { rangesByCommentId, commentCount: parts.comments.length }
+  };
 }
 
 // modules/save-lifecycle.js
@@ -60034,7 +60505,7 @@ function refreshAnnotationImageDecos() {
 }
 var $ = (sel) => document.querySelector(sel);
 var $$ = (sel) => Array.from(document.querySelectorAll(sel));
-function uuid() {
+function uuid2() {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
     return crypto.randomUUID();
   }
@@ -63502,7 +63973,7 @@ function createAnnotationThread(from2, to, text22, opts = null) {
     setStatus("\u63D0\u793A", `\u8303\u56F4 ${from2}-${to} \u5DF2\u6709\u6279\u6CE8\uFF0C\u8BF7\u9009\u62E9\u4E0D\u540C\u7684\u8303\u56F4`);
     return null;
   }
-  const threadId = uuid();
+  const threadId = uuid2();
   const { prefix, suffix } = computeContextAt(State2.editor.state.doc, from2, to);
   const anchorEv = {
     version: "1",
@@ -63584,8 +64055,8 @@ function handleCreateMultiCellAnnotation(cellSel, opts = {}) {
     return;
   }
   const text22 = totalText.trim() || "(\u7A7A)";
-  const threadId = uuid();
-  const commentId = uuid();
+  const threadId = uuid2();
+  const commentId = uuid2();
   const { prefix, suffix } = computeContextAt(State2.editor.state.doc, ranges[0].from, ranges[0].to);
   const thread = {
     threadId,
@@ -63750,8 +64221,8 @@ function handleCreateMultiParagraphAnnotation(from2, to, opts = {}) {
       type: options.type
     });
   }
-  const threadId = uuid();
-  const commentId = uuid();
+  const threadId = uuid2();
+  const commentId = uuid2();
   const { prefix, suffix } = computeContextAt(ed.state.doc, ranges[0].from, ranges[0].to);
   const thread = {
     threadId,
@@ -63833,7 +64304,7 @@ function addReply(threadId, body) {
   if (!thread || !body.trim()) return;
   pushHistory();
   const comment = {
-    id: uuid(),
+    id: uuid2(),
     author: currentAuthorPayload(),
     body: body.trim(),
     createdAt: nowISO()
@@ -66376,7 +66847,7 @@ async function resolveDocumentId({ name, content, handle, documentId } = {}) {
       } catch {
       }
     }
-    return uuid();
+    return uuid2();
   }
   return fingerprintDocument2(name, content);
 }
@@ -66411,7 +66882,7 @@ async function rememberOpenedFile(handleOrName, handle = null) {
   const name = typeof handleOrName === "string" ? handleOrName : handleOrName && handleOrName.name;
   const h = handle || (handleOrName && typeof handleOrName !== "string" ? handleOrName : null);
   if (!name) return;
-  const documentId = State2.currentFile?.documentId || uuid();
+  const documentId = State2.currentFile?.documentId || uuid2();
   if (State2.currentFile && !State2.currentFile.documentId) {
     State2.currentFile.documentId = documentId;
   }
@@ -66633,9 +67104,9 @@ function sanitizeStructuralHtml(html) {
     const doc5 = new DOMParser().parseFromString(String(html), "text/html");
     doc5.querySelectorAll("script,style,iframe,object,embed").forEach((el) => el.remove());
     doc5.querySelectorAll("*").forEach((el) => {
-      for (const attr of Array.from(el.attributes || [])) {
-        const n = String(attr.name || "").toLowerCase();
-        if (n.startsWith("on") || n === "srcdoc") el.removeAttribute(attr.name);
+      for (const attr2 of Array.from(el.attributes || [])) {
+        const n = String(attr2.name || "").toLowerCase();
+        if (n.startsWith("on") || n === "srcdoc") el.removeAttribute(attr2.name);
       }
     });
     return doc5.body ? doc5.body.innerHTML : "";
@@ -67581,6 +68052,9 @@ function _isMentorName(name) {
 function _isMdName(name) {
   return /\.md(markdown)?$/i.test(name || "");
 }
+function _isDocxName(name) {
+  return /\.docx$/i.test(name || "");
+}
 function _findSidecarHandle(handles, mdHandle) {
   if (!mdHandle || !handles) return null;
   const base2 = mdHandle.name.replace(/\.md(markdown)?$/i, "").toLowerCase();
@@ -67591,8 +68065,9 @@ function _findSidecarHandle(handles, mdHandle) {
 async function openMultipleHandles(handles) {
   if (!handles || handles.length === 0) return;
   const mentors = handles.filter((h) => _isMentorName(h.name));
+  const docxs = handles.filter((h) => _isDocxName(h.name));
   const mds = handles.filter((h) => _isMdName(h.name));
-  const targets = mentors.length ? mentors : mds.length ? mds : [handles[0]];
+  const targets = mentors.length ? mentors : docxs.length ? docxs : mds.length ? mds : [handles[0]];
   const multi = targets.length > 1;
   let opened = 0;
   let lastName = "";
@@ -67600,6 +68075,9 @@ async function openMultipleHandles(handles) {
     try {
       if (_isMentorName(h.name)) {
         await openFromMentorHandle(h, { quiet: multi });
+      } else if (_isDocxName(h.name)) {
+        const file = await h.getFile();
+        await openFromDocxFile(file, { quiet: multi });
       } else {
         await openFromHandle(h, _findSidecarHandle(handles, h), { quiet: multi });
       }
@@ -67626,11 +68104,16 @@ async function openFiles() {
     try {
       const handles = await window.showOpenFilePicker({
         multiple: true,
-        // v2 锁死 .mentor: 旧 .md + .json 侧车不再从文件选择器进入, 避免半新半旧体验
+        // .mentor primary; .docx import-with-comments also allowed
         types: [{
           description: "Mentor \u5355\u6587\u4EF6\u5305 (.mentor)",
           accept: {
             "application/zip": [".mentor"]
+          }
+        }, {
+          description: "Word \u6587\u6863 (.docx)",
+          accept: {
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document": [".docx"]
           }
         }],
         excludeAcceptAllOption: false
@@ -67649,13 +68132,15 @@ async function openFilesLegacy() {
   const input = document.createElement("input");
   input.type = "file";
   input.multiple = true;
-  input.accept = ".mentor";
+  input.accept = ".mentor,.docx";
   input.onchange = async () => {
     const files = Array.from(input.files || []);
     if (files.length === 0) return;
     const mentors = [];
+    const docxs = [];
     for (const f of files) {
-      if (_isMentorName(f.name) || await isMentorZip(f)) mentors.push(f);
+      if (_isDocxName(f.name)) docxs.push(f);
+      else if (_isMentorName(f.name) || await isMentorZip(f)) mentors.push(f);
     }
     if (mentors.length > 0) {
       const multi = mentors.length > 1;
@@ -67670,36 +68155,98 @@ async function openFilesLegacy() {
         }
       }
       renderFilePaneCurrent();
+      updateDocMeta({ immediate: true });
+      if (opened === 0) {
+        setStatus("\u6253\u5F00\u5931\u8D25", "");
+        return;
+      }
       if (opened > 1) {
         setStatus(`\u5DF2\u6253\u5F00 ${opened} \u4E2A\u6587\u6863`, mentors[mentors.length - 1].name);
         showToast(`\u5DF2\u6253\u5F00 ${opened} \u4E2A\u6807\u7B7E`, 2500);
       }
       return;
     }
-    const file = files[0];
-    const content = await file.text();
-    let annotations = await tryLoadSidecar(file.name, file);
-    if (!annotations) {
-      try {
-        const cached = await AnnotationStore.get(file.name);
-        if (cached?.sidecar?.annotations) {
-          annotations = cached.sidecar;
-          console.log(`[IDB] legacy \u6D41\u7A0B\u6062\u590D ${annotations.annotations.length} \u4E2A\u6279\u6CE8`);
+    if (docxs.length > 0) {
+      const multi = docxs.length > 1;
+      let opened = 0;
+      let lastName = "";
+      for (const f of docxs) {
+        try {
+          await openFromDocxFile(f, { quiet: multi });
+          opened++;
+          lastName = f.name;
+        } catch (e) {
+          console.error("[openFilesLegacy] docx failed:", f.name, e);
+          showToast(`\u6253\u5F00\u5931\u8D25 ${f.name}: ${e.message || e}`, 4e3);
         }
-      } catch (e) {
-        console.warn("AnnotationStore.get \u5931\u8D25:", e);
       }
+      renderFilePaneCurrent();
+      updateDocMeta({ immediate: true });
+      if (opened === 0) {
+        setStatus("\u6253\u5F00\u5931\u8D25", "");
+        return;
+      }
+      if (opened > 1) {
+        setStatus(`\u5DF2\u6253\u5F00 ${opened} \u4E2A\u6587\u6863`, lastName);
+        showToast(`\u5DF2\u6253\u5F00 ${opened} \u4E2A\u6807\u7B7E`, 2500);
+      }
+      return;
     }
-    await activateOpenedDocument({
-      name: file.name,
-      content,
-      annotations,
-      handle: null,
-      saveMode: "download"
-    });
-    setStatus("\u5DF2\u52A0\u8F7D", `${file.name} (Ctrl+S \u4E0B\u8F7D\u4FDD\u5B58)`);
+    showToast("\u8BF7\u9009\u62E9 .mentor \u6216 .docx \u6587\u4EF6", 3200);
   };
   input.click();
+}
+async function openFromDocxFile(file, options = {}) {
+  const quiet = !!(options && options.quiet);
+  if (!file) throw new Error("openFromDocxFile: file required");
+  if (typeof import_jszip2.default === "undefined" && typeof parseDocxToMentor !== "function") {
+    throw new Error("DOCX import unavailable");
+  }
+  try {
+    if (!quiet) {
+      try {
+        showToast("\u6B63\u5728\u5BFC\u5165 .docx\u2026", 1800);
+      } catch (_) {
+      }
+    }
+    const buf = await file.arrayBuffer();
+    const parsed = await parseDocxToMentor(buf);
+    const rawName = file.name || "document.docx";
+    const base2 = rawName.replace(/\.docx$/i, "") || "document";
+    const name = base2 + ".md";
+    const anns = Array.isArray(parsed.annotations) ? parsed.annotations : [];
+    const sidecar = {
+      version: "1",
+      document: name,
+      updatedAt: (/* @__PURE__ */ new Date()).toISOString(),
+      author: { id: State2.authorId, name: State2.author },
+      annotations: anns
+    };
+    await activateOpenedDocument({
+      name,
+      content: parsed.contentMd || "",
+      annotations: sidecar,
+      mediaFiles: parsed.mediaFiles || null,
+      handle: null,
+      saveMode: "download",
+      quiet,
+      forceDisk: true
+    });
+    const n = anns.length;
+    if (!quiet) {
+      const detail = n > 0 ? `${rawName} \xB7 ${n} \u6761\u6279\u6CE8\uFF08\u8BF7\u53E6\u5B58\u4E3A .mentor\uFF09` : `${rawName} \xB7 \u65E0\u6279\u6CE8\uFF08\u8BF7\u53E6\u5B58\u4E3A .mentor\uFF09`;
+      setStatus("\u5DF2\u5BFC\u5165 DOCX", detail);
+      showToast(n > 0 ? `\u5DF2\u5BFC\u5165 ${n} \u6761 Word \u6279\u6CE8` : "\u5DF2\u5BFC\u5165 DOCX \u6B63\u6587", 2800);
+    }
+    if (parsed.warnings && parsed.warnings.length) {
+      console.warn("[openFromDocxFile] warnings:", parsed.warnings);
+    }
+    return true;
+  } catch (e) {
+    console.error("[openFromDocxFile]", e);
+    if (!quiet) showToast(`DOCX \u5BFC\u5165\u5931\u8D25: ${e.message || e}`, 4500);
+    throw e;
+  }
 }
 async function ensureWritePermission(fileHandle) {
   if (!fileHandle || !fileHandle.requestPermission) return "unknown";
@@ -69055,20 +69602,6 @@ function setupTreeSearch() {
     }
   });
 }
-async function tryLoadSidecar(mdFileName, mdFile) {
-  const sidecarName = mdFileName.replace(/\.md$/i, "") + ".annotations.json";
-  if (State2.fileList) {
-    const sidecar = State2.fileList.find((f) => f.name === sidecarName);
-    if (sidecar) {
-      try {
-        return JSON.parse(await sidecar.text());
-      } catch (e) {
-        showToast(`\u4FA7\u8F66 JSON \u89E3\u6790\u5931\u8D25: ${e.message}`);
-      }
-    }
-  }
-  return null;
-}
 var MENTOR_MD_NAME = "content.md";
 var MENTOR_ANN_NAME = "annotations.json";
 var MENTOR_HTML_NAME = STRUCTURAL_HTML_NAME;
@@ -69189,7 +69722,7 @@ async function readMentorZip(file) {
       });
     }
   }
-  const zip = await import_jszip.default.loadAsync(rawBuf);
+  const zip = await import_jszip2.default.loadAsync(rawBuf);
   assertMentorZipBudget(file, zip);
   const mdEntry = zip.file(MENTOR_MD_NAME), annEntry = zip.file(MENTOR_ANN_NAME);
   const htmlEntry = zip.file(MENTOR_HTML_NAME), manifestEntry = zip.file(MENTOR_MANIFEST_NAME);
@@ -69324,7 +69857,7 @@ async function buildMentorZipBlob(mdText, annotations, mediaFiles, references = 
       });
     }
   }
-  const zip = new import_jszip.default();
+  const zip = new import_jszip2.default();
   zip.file(MENTOR_MD_NAME, mdText);
   zip.file(MENTOR_ANN_NAME, annotationsText);
   if (typeof documentHtml === "string" && typeof manifestText === "string") {
@@ -69884,7 +70417,7 @@ async function exportDocx() {
     showToast("\u8BF7\u5148\u6253\u5F00\u6587\u6863");
     return;
   }
-  if (typeof import_jszip.default === "undefined") {
+  if (typeof import_jszip2.default === "undefined") {
     showToast("JSZip \u672A\u52A0\u8F7D, \u65E0\u6CD5\u5BFC\u51FA docx", 3e3);
     return;
   }
@@ -69966,8 +70499,8 @@ function injectCommentRangeMarkers(bodyXml, commentsParts) {
   return parts.map((p) => p.xml).join("");
 }
 async function buildDocxBlob(html, mediaFiles, annotations = []) {
-  if (typeof import_jszip.default === "undefined") throw new Error("JSZip not loaded");
-  const zip = new import_jszip.default();
+  if (typeof import_jszip2.default === "undefined") throw new Error("JSZip not loaded");
+  const zip = new import_jszip2.default();
   const now = (/* @__PURE__ */ new Date()).toISOString();
   function esc(s) {
     return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -71357,7 +71890,7 @@ function loadDemoDocument() {
     const t1 = createAnnotationThread(r1.from, r1.to, "\u793A\u4F8B\u6587\u5B57");
     if (t1) {
       t1.comments.push({
-        id: uuid(),
+        id: uuid2(),
         author: State2.author || "Mentor",
         body: "\u{1F44B} \u8FD9\u662F\u4E00\u6761\u793A\u4F8B\u6279\u6CE8. \u8BD5\u7740\u56DE\u590D\u6211, \u6216\u8005\u6807\u4E3A\u5DF2\u89E3\u51B3.",
         createdAt: nowISO()
@@ -71370,7 +71903,7 @@ function loadDemoDocument() {
     if (t2) {
       t2.resolved = true;
       t2.comments.push({
-        id: uuid(),
+        id: uuid2(),
         author: State2.author || "Mentor",
         body: '\u8FD9\u662F\u4E00\u6761\u5DF2\u89E3\u51B3\u7684\u793A\u4F8B\u6279\u6CE8 (\u70B9 "\u91CD\u65B0\u6253\u5F00" \u53EF\u6062\u590D).',
         createdAt: nowISO()
@@ -72660,7 +73193,7 @@ async function boot() {
     chip.addEventListener("click", () => promptAuthor({ firstTime: false }));
   }
   if (!State2.authorId) {
-    State2.authorId = uuid();
+    State2.authorId = uuid2();
     localStorage.setItem("Mentor:authorId", State2.authorId);
   }
   renderAuthorChip();
@@ -72706,7 +73239,7 @@ async function boot() {
     console.warn("[P-reload] IDB \u9884\u70ED\u5931\u8D25 (\u975E\u963B\u585E):", e);
   }
   try {
-    new import_jszip.default();
+    new import_jszip2.default();
     State2.jszipPrewarmed = true;
     console.log("[P-zip] JSZip \u9884\u70ED\u5B8C\u6210");
   } catch (e) {
@@ -73096,6 +73629,9 @@ window.__mdAnnotator = {
   openFiles,
   openFilesLegacy,
   openFromMentorFile,
+  openFromDocxFile,
+  parseDocxToMentor,
+  buildCommentsParts,
   toggleHelp,
   // v1.32: 暴露 help toggle 备用入口, 让 inline onclick 用
   // .mentor 包帮助函数 (给 e2e 测试 + 第三方插件使用)
@@ -73415,7 +73951,7 @@ window.__mdAnnotator = {
             }
             const author = opts.author && typeof opts.author === "string" && opts.author.trim() ? opts.author.trim() : AI_AUTHOR;
             const comment = {
-              id: uuid(),
+              id: uuid2(),
               author,
               body: trimmed,
               createdAt: nowISO()
