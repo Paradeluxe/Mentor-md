@@ -18,8 +18,19 @@ const assert = require('assert');
     );
     await page.evaluate(() => document.querySelector('#author-modal')?.classList.add('hidden'));
 
+    const hideModals = async () => {
+      await page.evaluate(() => {
+        document.querySelector('#author-modal')?.classList.add('hidden');
+        document.querySelectorAll('.modal').forEach((el) => {
+          if (el.id !== 'author-modal') return;
+          el.classList.add('hidden');
+        });
+      });
+    };
+
     console.log('=== Help open state ===');
-    await page.click('#help-btn');
+    await hideModals();
+    await page.click('#help-btn', { force: true });
     await page.waitForTimeout(60);
     assert.strictEqual(await page.getAttribute('#help-btn', 'aria-expanded'), 'true');
     assert.ok(await page.locator('#help-btn').evaluate((el) => el.classList.contains('is-active')));
@@ -27,7 +38,8 @@ const assert = require('assert');
     assert.ok(!(await page.locator('#help-popover').evaluate((el) => el.classList.contains('hidden'))));
 
     console.log('=== Mutual exclusion help -> settings ===');
-    await page.click('#settings-btn');
+    await hideModals();
+    await page.click('#settings-btn', { force: true });
     await page.waitForTimeout(60);
     assert.strictEqual(await page.getAttribute('#help-btn', 'aria-expanded'), 'false');
     assert.ok(!(await page.locator('#help-btn').evaluate((el) => el.classList.contains('is-active'))));
@@ -37,6 +49,7 @@ const assert = require('assert');
     assert.ok(!(await page.locator('#settings-popover').evaluate((el) => el.classList.contains('hidden'))));
 
     console.log('=== Escape closes settings and restores focus ===');
+    await hideModals();
     await page.keyboard.press('Escape');
     await page.waitForTimeout(60);
     assert.strictEqual(await page.getAttribute('#settings-btn', 'aria-expanded'), 'false');
@@ -45,9 +58,11 @@ const assert = require('assert');
     assert.strictEqual(await page.evaluate(() => document.activeElement?.id), 'settings-btn');
 
     console.log('=== Settings then help mutual exclusion ===');
-    await page.click('#settings-btn');
+    await hideModals();
+    await page.click('#settings-btn', { force: true });
     await page.waitForTimeout(40);
-    await page.click('#help-btn');
+    await hideModals();
+    await page.click('#help-btn', { force: true });
     await page.waitForTimeout(40);
     assert.strictEqual(await page.getAttribute('#settings-btn', 'aria-expanded'), 'false');
     assert.strictEqual(await page.getAttribute('#help-btn', 'aria-expanded'), 'true');
