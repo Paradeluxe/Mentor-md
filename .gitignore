@@ -39,6 +39,9 @@ dist/
 .mentor-session
 .mentor-pending-open.json
 .supervision-index.json
+
+# 本地演示产物（含本机路径/token，勿入库）
+examples/_pet_demo_*
 server.log
 *.log
 example.mentor
