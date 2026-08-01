@@ -28,6 +28,38 @@ export function findOccurrences(text, exact) {
   return out;
 }
 
+/**
+ * Map markdown emphasis/escapes to plain text as rendered into ProseMirror
+ * (markdown-it + textBetween). Lets quote triples stored as md literals
+ * reattach after external /fm drops document.html.
+ *
+ * Examples:
+ *   "_p_ = .19"              → "p = .19"
+ *   "Bonferroni-corrected _p_ = .19" → "Bonferroni-corrected p = .19"
+ *   "n\_init = 10"          → "n_init = 10"
+ *   "_F_(1, 65)"             → "F(1, 65)"
+ *   "Fisher's _r_-to-_z_"    → "Fisher's r-to-z"
+ */
+export function mdEmphasisToPlain(s) {
+  if (s == null || s === '') return '';
+  let out = String(s);
+  // CommonMark escapes: \_ \* etc.
+  out = out.replace(/\\([\\`*_{}\\[\\]()#+\\-.!|])/g, '$1');
+  // Bold before italic
+  out = out.replace(/\*\*([^*]+)\*\*/g, '$1');
+  out = out.replace(/__([^_]+)__/g, '$1');
+  out = out.replace(/\*([^*]+)\*/g, '$1');
+  // Underscore italics: _token_ not mid-identifier (n_init stays)
+  out = out.replace(/(^|[^A-Za-z0-9])_([^_\s][^_]*)_(?![A-Za-z0-9])/g, '$1$2');
+  return out;
+}
+
+function samePlain(a, b) {
+  if (a === b) return true;
+  if (a == null || b == null) return false;
+  return mdEmphasisToPlain(a) === mdEmphasisToPlain(b) || mdEmphasisToPlain(a) === b || a === mdEmphasisToPlain(b);
+}
+
 function localContext(doc, from, to, maxLen = DEFAULT_CONTEXT) {
   const preFrom = Math.max(0, from - maxLen);
   const sufTo = Math.min(doc.length, to + maxLen);
@@ -54,29 +86,44 @@ export function scoreCandidate(doc, candidate, anchor) {
     : (doc ? localContext(doc, candidate.from, candidate.to).localSuffix : '');
 
   let score = 0;
-  const exactQuote = !!(text && exact === text);
-  if (exactQuote) score += 100 + text.length;
+  const plainText = mdEmphasisToPlain(text);
+  const exactQuote = !!(text && (exact === text || exact === plainText || samePlain(exact, text)));
+  if (exactQuote) score += 100 + (exact ? exact.length : text.length);
 
+  const plainPrefix = mdEmphasisToPlain(prefix);
   let prefixScore = 0;
   if (prefix) {
-    if (localPrefix.endsWith(prefix)) {
-      prefixScore = 100 + prefix.length;
-    } else if (prefix.length >= 2 && localPrefix.endsWith(prefix.slice(-Math.min(prefix.length, 12)))) {
-      prefixScore = 40;
-    } else if (prefix.length >= 4 && localPrefix.includes(prefix.slice(-8))) {
-      prefixScore = 15;
+    if (localPrefix.endsWith(prefix) || (plainPrefix && localPrefix.endsWith(plainPrefix))) {
+      prefixScore = 100 + Math.max(prefix.length, plainPrefix.length);
+    } else {
+      const tail = prefix.slice(-Math.min(prefix.length, 12));
+      const plainTail = plainPrefix.slice(-Math.min(plainPrefix.length, 12));
+      if ((prefix.length >= 2 && localPrefix.endsWith(tail)) ||
+          (plainTail.length >= 2 && localPrefix.endsWith(plainTail))) {
+        prefixScore = 40;
+      } else if ((prefix.length >= 4 && localPrefix.includes(prefix.slice(-8))) ||
+                 (plainPrefix.length >= 4 && localPrefix.includes(plainPrefix.slice(-8)))) {
+        prefixScore = 15;
+      }
     }
   }
   score += prefixScore;
 
+  const plainSuffix = mdEmphasisToPlain(suffix);
   let suffixScore = 0;
   if (suffix) {
-    if (localSuffix.startsWith(suffix)) {
-      suffixScore = 100 + suffix.length;
-    } else if (suffix.length >= 2 && localSuffix.startsWith(suffix.slice(0, Math.min(suffix.length, 12)))) {
-      suffixScore = 40;
-    } else if (suffix.length >= 4 && localSuffix.includes(suffix.slice(0, 8))) {
-      suffixScore = 15;
+    if (localSuffix.startsWith(suffix) || (plainSuffix && localSuffix.startsWith(plainSuffix))) {
+      suffixScore = 100 + Math.max(suffix.length, plainSuffix.length);
+    } else {
+      const head = suffix.slice(0, Math.min(suffix.length, 12));
+      const plainHead = plainSuffix.slice(0, Math.min(plainSuffix.length, 12));
+      if ((suffix.length >= 2 && localSuffix.startsWith(head)) ||
+          (plainHead.length >= 2 && localSuffix.startsWith(plainHead))) {
+        suffixScore = 40;
+      } else if ((suffix.length >= 4 && localSuffix.includes(suffix.slice(0, 8))) ||
+                 (plainSuffix.length >= 4 && localSuffix.includes(plainSuffix.slice(0, 8)))) {
+        suffixScore = 15;
+      }
     }
   }
   score += suffixScore;
@@ -113,18 +160,38 @@ function normalizeAnchorInput(anchor) {
 function buildCandidates(doc, norm) {
   const text = norm.text || '';
   if (!text || !doc) return [];
-  const offs = findOccurrences(doc, text);
-  return offs.map((from) => {
-    const to = from + text.length;
-    const ctx = localContext(doc, from, to);
-    return {
-      from,
-      to,
-      exact: text,
-      localPrefix: ctx.localPrefix,
-      localSuffix: ctx.localSuffix
-    };
-  });
+  const needles = [];
+  const seenNeedle = new Set();
+  const pushNeedle = (needle, matchSource) => {
+    if (!needle || seenNeedle.has(needle)) return;
+    seenNeedle.add(needle);
+    needles.push({ needle, matchSource });
+  };
+  pushNeedle(text, 'exact');
+  const plain = mdEmphasisToPlain(text);
+  if (plain && plain !== text) pushNeedle(plain, 'md-plain');
+
+  const out = [];
+  const seenRange = new Set();
+  for (const { needle, matchSource } of needles) {
+    const offs = findOccurrences(doc, needle);
+    for (const from of offs) {
+      const to = from + needle.length;
+      const key = from + ':' + to;
+      if (seenRange.has(key)) continue;
+      seenRange.add(key);
+      const ctx = localContext(doc, from, to);
+      out.push({
+        from,
+        to,
+        exact: doc.slice(from, to),
+        matchSource,
+        localPrefix: ctx.localPrefix,
+        localSuffix: ctx.localSuffix
+      });
+    }
+  }
+  return out;
 }
 
 /**
@@ -528,6 +595,7 @@ export function applyStatusToThread(thread, status) {
 
 export default {
   findOccurrences,
+  mdEmphasisToPlain,
   scoreCandidate,
   resolveAnchor,
   mapAnchorRange,

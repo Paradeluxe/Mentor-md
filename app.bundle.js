@@ -56682,6 +56682,21 @@ function findOccurrences(text3, exact) {
   }
   return out;
 }
+function mdEmphasisToPlain(s) {
+  if (s == null || s === "") return "";
+  let out = String(s);
+  out = out.replace(/\\([\\`*_{}\\[\\]()#+\\-.!|])/g, "$1");
+  out = out.replace(/\*\*([^*]+)\*\*/g, "$1");
+  out = out.replace(/__([^_]+)__/g, "$1");
+  out = out.replace(/\*([^*]+)\*/g, "$1");
+  out = out.replace(/(^|[^A-Za-z0-9])_([^_\s][^_]*)_(?![A-Za-z0-9])/g, "$1$2");
+  return out;
+}
+function samePlain(a, b) {
+  if (a === b) return true;
+  if (a == null || b == null) return false;
+  return mdEmphasisToPlain(a) === mdEmphasisToPlain(b) || mdEmphasisToPlain(a) === b || a === mdEmphasisToPlain(b);
+}
 function localContext(doc5, from2, to, maxLen = DEFAULT_CONTEXT) {
   const preFrom = Math.max(0, from2 - maxLen);
   const sufTo = Math.min(doc5.length, to + maxLen);
@@ -56698,27 +56713,38 @@ function scoreCandidate(doc5, candidate, anchor) {
   const localPrefix = candidate.localPrefix != null ? candidate.localPrefix : doc5 ? localContext(doc5, candidate.from, candidate.to).localPrefix : "";
   const localSuffix = candidate.localSuffix != null ? candidate.localSuffix : doc5 ? localContext(doc5, candidate.from, candidate.to).localSuffix : "";
   let score = 0;
-  const exactQuote = !!(text3 && exact === text3);
-  if (exactQuote) score += 100 + text3.length;
+  const plainText = mdEmphasisToPlain(text3);
+  const exactQuote = !!(text3 && (exact === text3 || exact === plainText || samePlain(exact, text3)));
+  if (exactQuote) score += 100 + (exact ? exact.length : text3.length);
+  const plainPrefix = mdEmphasisToPlain(prefix);
   let prefixScore = 0;
   if (prefix) {
-    if (localPrefix.endsWith(prefix)) {
-      prefixScore = 100 + prefix.length;
-    } else if (prefix.length >= 2 && localPrefix.endsWith(prefix.slice(-Math.min(prefix.length, 12)))) {
-      prefixScore = 40;
-    } else if (prefix.length >= 4 && localPrefix.includes(prefix.slice(-8))) {
-      prefixScore = 15;
+    if (localPrefix.endsWith(prefix) || plainPrefix && localPrefix.endsWith(plainPrefix)) {
+      prefixScore = 100 + Math.max(prefix.length, plainPrefix.length);
+    } else {
+      const tail = prefix.slice(-Math.min(prefix.length, 12));
+      const plainTail = plainPrefix.slice(-Math.min(plainPrefix.length, 12));
+      if (prefix.length >= 2 && localPrefix.endsWith(tail) || plainTail.length >= 2 && localPrefix.endsWith(plainTail)) {
+        prefixScore = 40;
+      } else if (prefix.length >= 4 && localPrefix.includes(prefix.slice(-8)) || plainPrefix.length >= 4 && localPrefix.includes(plainPrefix.slice(-8))) {
+        prefixScore = 15;
+      }
     }
   }
   score += prefixScore;
+  const plainSuffix = mdEmphasisToPlain(suffix);
   let suffixScore = 0;
   if (suffix) {
-    if (localSuffix.startsWith(suffix)) {
-      suffixScore = 100 + suffix.length;
-    } else if (suffix.length >= 2 && localSuffix.startsWith(suffix.slice(0, Math.min(suffix.length, 12)))) {
-      suffixScore = 40;
-    } else if (suffix.length >= 4 && localSuffix.includes(suffix.slice(0, 8))) {
-      suffixScore = 15;
+    if (localSuffix.startsWith(suffix) || plainSuffix && localSuffix.startsWith(plainSuffix)) {
+      suffixScore = 100 + Math.max(suffix.length, plainSuffix.length);
+    } else {
+      const head = suffix.slice(0, Math.min(suffix.length, 12));
+      const plainHead = plainSuffix.slice(0, Math.min(plainSuffix.length, 12));
+      if (suffix.length >= 2 && localSuffix.startsWith(head) || plainHead.length >= 2 && localSuffix.startsWith(plainHead)) {
+        suffixScore = 40;
+      } else if (suffix.length >= 4 && localSuffix.includes(suffix.slice(0, 8)) || plainSuffix.length >= 4 && localSuffix.includes(plainSuffix.slice(0, 8))) {
+        suffixScore = 15;
+      }
     }
   }
   score += suffixScore;
@@ -56750,18 +56776,37 @@ function normalizeAnchorInput(anchor) {
 function buildCandidates(doc5, norm) {
   const text3 = norm.text || "";
   if (!text3 || !doc5) return [];
-  const offs = findOccurrences(doc5, text3);
-  return offs.map((from2) => {
-    const to = from2 + text3.length;
-    const ctx = localContext(doc5, from2, to);
-    return {
-      from: from2,
-      to,
-      exact: text3,
-      localPrefix: ctx.localPrefix,
-      localSuffix: ctx.localSuffix
-    };
-  });
+  const needles = [];
+  const seenNeedle = /* @__PURE__ */ new Set();
+  const pushNeedle = (needle, matchSource) => {
+    if (!needle || seenNeedle.has(needle)) return;
+    seenNeedle.add(needle);
+    needles.push({ needle, matchSource });
+  };
+  pushNeedle(text3, "exact");
+  const plain = mdEmphasisToPlain(text3);
+  if (plain && plain !== text3) pushNeedle(plain, "md-plain");
+  const out = [];
+  const seenRange = /* @__PURE__ */ new Set();
+  for (const { needle, matchSource } of needles) {
+    const offs = findOccurrences(doc5, needle);
+    for (const from2 of offs) {
+      const to = from2 + needle.length;
+      const key = from2 + ":" + to;
+      if (seenRange.has(key)) continue;
+      seenRange.add(key);
+      const ctx = localContext(doc5, from2, to);
+      out.push({
+        from: from2,
+        to,
+        exact: doc5.slice(from2, to),
+        matchSource,
+        localPrefix: ctx.localPrefix,
+        localSuffix: ctx.localSuffix
+      });
+    }
+  }
+  return out;
 }
 function resolveAnchor(doc5, anchor, options = {}) {
   const norm = normalizeAnchorInput(anchor);
