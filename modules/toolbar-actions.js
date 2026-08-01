@@ -38,6 +38,7 @@ export const PRIMARY_TOOLBAR_ACTIONS = Object.freeze([
  * @param {boolean} [input.autoSaveEnabled] - user preference for Office-like AutoSave
  * @param {boolean} [input.autoSaveDisk] - preference on AND write-back target available
  * @param {boolean} [input.versionPaneOpen]
+ * @param {boolean} [input.hasAnnotations]
  */
 export function getToolbarActionState(input = {}) {
   const hasDocument = !!input.hasDocument;
@@ -51,6 +52,7 @@ export function getToolbarActionState(input = {}) {
   const autoSaveDisk = !!input.autoSaveDisk;
   const versionPaneOpen = !!input.versionPaneOpen;
   const referencesOpen = !!input.referencesOpen;
+  const hasAnnotations = !!input.hasAnnotations;
   const autoSaveIntent = autoSaveDisk
     ? 'disk-autosave'
     : (autoSaveEnabled ? 'draft-only' : 'off');
@@ -111,7 +113,7 @@ export function getToolbarActionState(input = {}) {
     exportDocx: {
       label: 'DOCX',
       disabled: !hasDocument || busy,
-      detail: '仅正文，不含批注与引用库元数据',
+      detail: hasAnnotations ? '含批注' : '仅正文，不含批注与引用库元数据',
       busy: isBusy('exportDocx'),
     },
     references: {

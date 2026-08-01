@@ -50,6 +50,12 @@ const { pathToFileURL } = require('url');
   assert.strictEqual(openPane.versionHistory.pressed, true);
 
   assert.strictEqual(noHandle.exportDocx.detail, '仅正文，不含批注与引用库元数据');
+  const withAnns = getToolbarActionState({
+    hasDocument: true,
+    hasWriteHandle: false,
+    hasAnnotations: true,
+  });
+  assert.strictEqual(withAnns.exportDocx.detail, '含批注');
   assert.strictEqual(noHandle.references.label, '文献');
   assert.strictEqual(noHandle.references.pressed, false);
   assert.strictEqual(noHandle.source.label, '源码');

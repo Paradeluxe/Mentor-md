@@ -148,6 +148,7 @@ import {
   buildSaveDialogModel,
   buildSaveResultCopy
 } from './modules/save-dialog.js';
+import { buildCommentsParts } from './modules/docx-export-comments.js';
 import {
   classifySaveOutcome,
   shouldPromptForUnsavedChanges as shouldPromptForUnsavedChangesPure
@@ -7716,6 +7717,7 @@ function syncToolbarActionState() {
     autoSaveEnabled,
     autoSaveDisk,
     versionPaneOpen: !!_versionPaneOpen,
+    hasAnnotations: Array.isArray(State.annotations) && State.annotations.some((t) => t && t.pending !== true && Array.isArray(t.comments) && t.comments.some((c) => String((c && c.body) || "").trim())),
   });
   for (const [id, selector] of Object.entries(TOOLBAR_ACTION_SELECTORS)) {
     applyToolbarActionState(selector, actionState[id]);
@@ -11665,7 +11667,8 @@ function exportMd() {
   showToast(`${_mdCopy.status} · ${_mdCopy.detail}`, 2500);
 }
 async function exportDocx() {
-  // DOCX = body-only export copy (never clears dirty)
+  // DOCX export: body + Word comment threads when State.annotations has non-pending threads.
+  // Never clears dirty; references library is not embedded (use .mentor for full pack).
   if (!State.editor || !State.currentFile) {
     showToast("请先打开文档");
     return;
@@ -11674,16 +11677,21 @@ async function exportDocx() {
     showToast("JSZip 未加载, 无法导出 docx", 3e3);
     return;
   }
-  // Body-only export: annotations are not embedded as Word comments
-  showExportProgress("正在生成 .docx（仅正文）…");
-  showToast("正在生成 .docx（仅正文，不含批注）…", 1800);
+  const annotations = Array.isArray(State.annotations) ? State.annotations : [];
+  const hasAnns = annotations.some((t) => t && t.pending !== true && Array.isArray(t.comments) && t.comments.some((c) => String((c && c.body) || "").trim()));
+  showExportProgress(hasAnns ? "正在生成 .docx（含批注）…" : "正在生成 .docx…");
+  showToast(hasAnns ? "正在生成 .docx（含批注）…" : "正在生成 .docx…", 1800);
   try {
     const html = State.editor.getHTML();
-    const zip = await buildDocxBlob(html, State.mediaFiles || {});
+    const zip = await buildDocxBlob(html, State.mediaFiles || {}, annotations);
     const baseName = (State.currentFile.name || "untitled").replace(/\.(md|markdown|mentor)$/i, "");
     downloadBlob(`${baseName}.docx`, zip);
-    hideExportProgress("已导出（仅正文）");
-    const _docxCopy = buildSaveResultCopy({ kind: "export-docx", fileName: `${baseName}.docx` });
+    hideExportProgress(hasAnns ? "已导出（含批注）" : "已导出");
+    const _docxCopy = buildSaveResultCopy({
+      kind: "export-docx",
+      fileName: `${baseName}.docx`,
+      hasAnnotations: hasAnns
+    });
     setStatus(_docxCopy.status, _docxCopy.detail);
     showToast(`${_docxCopy.status} · ${_docxCopy.detail}`, 2800);
   } catch (e) {
@@ -11692,7 +11700,86 @@ async function exportDocx() {
     showToast("导出 docx 失败: " + (e.message || "未知错误"), 4e3);
   }
 }
-async function buildDocxBlob(html, mediaFiles) {
+/**
+ * Inject Word comment range markers into bodyXml for root comment entries.
+ * Paragraph-granular first-match: wrap the first <w:p> whose plain text contains
+ * the thread quote. Replies share the root range (no separate markers).
+ */
+
+function injectCommentRangeMarkers(bodyXml, commentsParts) {
+  if (!commentsParts || !Array.isArray(commentsParts.commentEntries)) return bodyXml;
+  const roots = commentsParts.commentEntries.filter((e) => e && e.isRoot);
+  if (!roots.length) return bodyXml;
+
+  function paraPlainText(pXml) {
+    let t = "";
+    const re = /<w:t(?:\s[^>]*)?>([^<]*)<\/w:t>/g;
+    let m;
+    while ((m = re.exec(pXml)) !== null) t += m[1];
+    return t;
+  }
+
+  function wrapPara(pXml, commentId) {
+    // Keep optional <w:pPr>...</w:pPr> at front; wrap the rest of the content.
+    const openEnd = pXml.indexOf(">");
+    if (openEnd < 0) return pXml;
+    const closeIdx = pXml.lastIndexOf("</w:p>");
+    if (closeIdx < 0) return pXml;
+    const openTag = pXml.slice(0, openEnd + 1);
+    const inner = pXml.slice(openEnd + 1, closeIdx);
+    const pPrMatch = inner.match(/^(\s*<w:pPr\b[\s\S]*?<\/w:pPr>)/);
+    const pPr = pPrMatch ? pPrMatch[1] : "";
+    const rest = pPrMatch ? inner.slice(pPrMatch[1].length) : inner;
+    const id = String(commentId);
+    return (
+      openTag +
+      pPr +
+      `<w:commentRangeStart w:id="${id}"/>` +
+      rest +
+      `<w:commentRangeEnd w:id="${id}"/>` +
+      `<w:r><w:commentReference w:id="${id}"/></w:r>` +
+      "</w:p>"
+    );
+  }
+
+  // Split body into paragraph chunks while preserving non-p content order.
+  // Match each top-level <w:p ...>...</w:p> (non-greedy, no nesting of p in this emitter).
+  const parts = [];
+  const reP = /<w:p\b[\s\S]*?<\/w:p>/g;
+  let last = 0;
+  let m;
+  const src = String(bodyXml || "");
+  while ((m = reP.exec(src)) !== null) {
+    if (m.index > last) parts.push({ type: "raw", xml: src.slice(last, m.index) });
+    parts.push({ type: "p", xml: m[0] });
+    last = m.index + m[0].length;
+  }
+  if (last < src.length) parts.push({ type: "raw", xml: src.slice(last) });
+
+  const usedQuoteKeys = new Set();
+  for (const entry of roots) {
+    const quote = String(entry.quoteText || "").trim();
+    // Empty quote: attach to first unused paragraph if any.
+    for (let i = 0; i < parts.length; i++) {
+      if (parts[i].type !== "p") continue;
+      if (parts[i]._used) continue;
+      const plain = paraPlainText(parts[i].xml);
+      const hit = quote ? plain.includes(quote) : plain.length > 0;
+      if (!hit) continue;
+      // Avoid double-wrapping same quote key across threads if identical quote
+      const key = quote || `__p${i}`;
+      if (quote && usedQuoteKeys.has(key) && plain.indexOf(quote) === plain.lastIndexOf(quote)) {
+        // same single occurrence already claimed — still allow if paragraph not used
+      }
+      parts[i] = { type: "p", xml: wrapPara(parts[i].xml, entry.commentId), _used: true };
+      if (quote) usedQuoteKeys.add(key);
+      break;
+    }
+  }
+
+  return parts.map((p) => p.xml).join("");
+}
+async function buildDocxBlob(html, mediaFiles, annotations = []) {
   if (typeof JSZip === "undefined") throw new Error("JSZip not loaded");
   const zip = new JSZip();
   const now = (/* @__PURE__ */ new Date()).toISOString();
@@ -11845,6 +11932,13 @@ async function buildDocxBlob(html, mediaFiles) {
   const blocks = Array.from(wrapper.children);
   let bodyXml = "";
   const blockEls = blocks.length > 0 ? blocks : Array.from(wrapper.querySelectorAll("p, h1, h2, h3, h4, h5, h6, ul, ol, blockquote, pre, hr"));
+  // v1.47+: build comment thread parts first so we can post-process bodyXml
+  // to inject <w:commentRangeStart>/<w:commentRangeEnd>/<w:commentReference>
+  // markers around the quoted anchor text. Empty annotations short-circuit
+  // the entire pipeline so legacy verify-export-buttons stays green.
+  const commentsParts = Array.isArray(annotations) && annotations.length
+    ? buildCommentsParts(annotations)
+    : null;
   function flattenBlocks(parent, list = []) {
     for (const child of parent.children) {
       const tag = child.tagName;
@@ -11944,6 +12038,13 @@ async function buildDocxBlob(html, mediaFiles) {
       }
     }
   }
+  // v1.47+: wrap each root thread's anchor text with commentRangeStart/End +
+  // commentReference markers. Replies don't get separate ranges — they share
+  // the root's range. First-match-per-thread keeps the mapping unambiguous
+  // even when the same word appears in multiple paragraphs.
+  if (commentsParts && commentsParts.commentEntries.length) {
+    bodyXml = injectCommentRangeMarkers(bodyXml, commentsParts);
+  }
   const rels = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
   <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
@@ -11957,9 +12058,27 @@ async function buildDocxBlob(html, mediaFiles) {
     imgRels += `  <Relationship Id="${info.rId}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/${info.fileName.replace(/^media\//, "")}"/>
 `;
   }
+  // Comment part relationships (after images). rId numbers continue after images.
+  let commentRels = "";
+  let nextRel = imageMap.size + 1;
+  const hasCommentParts = !!(commentsParts && commentsParts.commentEntries && commentsParts.commentEntries.length);
+  if (hasCommentParts) {
+    commentRels += `  <Relationship Id="rId${nextRel++}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments" Target="comments.xml"/>
+`;
+    commentRels += `  <Relationship Id="rId${nextRel++}" Type="http://schemas.microsoft.com/office/2011/relationships/commentsExtended" Target="commentsExtended.xml"/>
+`;
+    commentRels += `  <Relationship Id="rId${nextRel++}" Type="http://schemas.microsoft.com/office/2016/09/relationships/commentsIds" Target="commentsIds.xml"/>
+`;
+    commentRels += `  <Relationship Id="rId${nextRel++}" Type="http://schemas.microsoft.com/office/2018/08/relationships/commentsExtensible" Target="commentsExtensible.xml"/>
+`;
+    if (commentsParts.peopleXml) {
+      commentRels += `  <Relationship Id="rId${nextRel++}" Type="http://schemas.microsoft.com/office/2011/relationships/people" Target="people.xml"/>
+`;
+    }
+  }
   const docRels = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-${imgRels}</Relationships>`;
+${imgRels}${commentRels}</Relationships>`;
   zip.file("word/_rels/document.xml.rels", docRels);
   let types = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
@@ -11972,7 +12091,19 @@ ${imgRels}</Relationships>`;
   <Default Extension="svg" ContentType="image/svg+xml"/>
   <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
   <Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>
-  <Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>
+  <Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>`;
+  if (hasCommentParts) {
+    types += `
+  <Override PartName="/word/comments.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.comments+xml"/>
+  <Override PartName="/word/commentsExtended.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.commentsExtended+xml"/>
+  <Override PartName="/word/commentsIds.xml" ContentType="application/vnd.ms-word.commentsIds+xml"/>
+  <Override PartName="/word/commentsExtensible.xml" ContentType="application/vnd.ms-word.commentsExtensible+xml"/>`;
+    if (commentsParts.peopleXml) {
+      types += `
+  <Override PartName="/word/people.xml" ContentType="application/vnd.ms-word.people+xml"/>`;
+    }
+  }
+  types += `
 </Types>`;
   zip.file("[Content_Types].xml", types);
   const docXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -11992,9 +12123,17 @@ ${imgRels}</Relationships>`;
        xmlns:wpg="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingGroup"
        xmlns:wpi="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingInk"
        xmlns:wne="http://schemas.microsoft.com/office/word/2006/wordml"
-       xmlns:wps="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingShape">
+       xmlns:wps="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingShape"
+       mc:Ignorable="w14 w15 wp14">
 <w:body>${bodyXml}<w:sectPr><w:pgSz w:w="12240" w:h="15840"/><w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440" w:header="720" w:footer="720" w:gutter="0"/><w:cols w:space="720"/><w:docGrid w:linePitch="360"/></w:sectPr></w:body></w:document>`;
   zip.file("word/document.xml", docXml);
+  if (hasCommentParts) {
+    zip.file("word/comments.xml", commentsParts.commentsXml);
+    zip.file("word/commentsExtended.xml", commentsParts.commentsExtendedXml);
+    zip.file("word/commentsIds.xml", commentsParts.commentsIdsXml);
+    zip.file("word/commentsExtensible.xml", commentsParts.commentsExtensibleXml);
+    if (commentsParts.peopleXml) zip.file("word/people.xml", commentsParts.peopleXml);
+  }
   const coreXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties"
               xmlns:dc="http://purl.org/dc/elements/1.1/"
@@ -12018,6 +12157,7 @@ ${imgRels}</Relationships>`;
   zip.file("docProps/app.xml", appXml);
   return await zip.generateAsync({ type: "blob", mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", compression: "DEFLATE" });
 }
+
 function newDocument() {
   openNewTabBlank();
 }

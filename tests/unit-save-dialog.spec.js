@@ -51,6 +51,8 @@ const { pathToFileURL } = require('url');
 
   const docx = buildSaveResultCopy({ kind: 'export-docx' });
   assert.strictEqual(docx.detail, '仅正文；批注与文献库未导出');
+  const docxAnns = buildSaveResultCopy({ kind: 'export-docx', hasAnnotations: true });
+  assert.strictEqual(docxAnns.detail, '含批注；引用库请用 .mentor');
 
   console.log('PASS unit-save-dialog');
 })().catch((err) => {

@@ -57345,6 +57345,7 @@ function getToolbarActionState(input = {}) {
   const autoSaveDisk = !!input.autoSaveDisk;
   const versionPaneOpen = !!input.versionPaneOpen;
   const referencesOpen = !!input.referencesOpen;
+  const hasAnnotations = !!input.hasAnnotations;
   const autoSaveIntent = autoSaveDisk ? "disk-autosave" : autoSaveEnabled ? "draft-only" : "off";
   const autoSaveDetail = autoSaveDisk ? "\u5F00\u542F\uFF1A\u505C\u624B\u540E\u5199\u56DE\u5DF2\u6388\u6743\u6587\u4EF6" : autoSaveEnabled ? "\u5F00\u542F\uFF1A\u5C1A\u65E0\u5199\u56DE\u76EE\u6807\uFF0C\u4EC5\u81EA\u52A8\u4FDD\u5B58\u8349\u7A3F\uFF1B\u8BF7\u5148\u4FDD\u5B58\u5230\u672C\u5730\u6587\u4EF6" : "\u5173\u95ED\uFF1A\u4EC5\u624B\u52A8\u4FDD\u5B58\u5199\u56DE\u6587\u4EF6\uFF08\u4ECD\u4F1A\u4FDD\u5B58\u5D29\u6E83\u6062\u590D\u8349\u7A3F\uFF09";
   const isBusy = (id) => busyAction === id;
@@ -57398,7 +57399,7 @@ function getToolbarActionState(input = {}) {
     exportDocx: {
       label: "DOCX",
       disabled: !hasDocument || busy,
-      detail: "\u4EC5\u6B63\u6587\uFF0C\u4E0D\u542B\u6279\u6CE8\u4E0E\u5F15\u7528\u5E93\u5143\u6570\u636E",
+      detail: hasAnnotations ? "\u542B\u6279\u6CE8" : "\u4EC5\u6B63\u6587\uFF0C\u4E0D\u542B\u6279\u6CE8\u4E0E\u5F15\u7528\u5E93\u5143\u6570\u636E",
       busy: isBusy("exportDocx")
     },
     references: {
@@ -57511,7 +57512,7 @@ function mentorLikeName(name) {
   if (/\.mentor$/i.test(n)) return n;
   return n.replace(/\.(md|markdown)$/i, "") + ".mentor";
 }
-function buildSaveResultCopy({ kind, fileName } = {}) {
+function buildSaveResultCopy({ kind, fileName, hasAnnotations } = {}) {
   if (kind === "write-current") {
     return { status: "\u5DF2\u4FDD\u5B58", detail: `\u5DF2\u5199\u56DE ${fileName || ""}`.trim(), clearsDirty: true };
   }
@@ -57525,9 +57526,260 @@ function buildSaveResultCopy({ kind, fileName } = {}) {
     return { status: "Markdown \u5DF2\u5BFC\u51FA", detail: "\u539F\u6587\u4EF6\u672A\u6539\u53D8", clearsDirty: false };
   }
   if (kind === "export-docx") {
-    return { status: "DOCX \u5DF2\u5BFC\u51FA", detail: "\u4EC5\u6B63\u6587\uFF1B\u6279\u6CE8\u4E0E\u6587\u732E\u5E93\u672A\u5BFC\u51FA", clearsDirty: false };
+    const hasAnns = !!hasAnnotations;
+    return {
+      status: "DOCX \u5DF2\u5BFC\u51FA",
+      detail: hasAnns ? "\u542B\u6279\u6CE8\uFF1B\u5F15\u7528\u5E93\u8BF7\u7528 .mentor" : "\u4EC5\u6B63\u6587\uFF1B\u6279\u6CE8\u4E0E\u6587\u732E\u5E93\u672A\u5BFC\u51FA",
+      clearsDirty: false
+    };
   }
   return { status: "\u5DF2\u5B8C\u6210", detail: "", clearsDirty: false };
+}
+
+// modules/docx-export-comments.js
+var NS_W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+var NS_W14 = "http://schemas.microsoft.com/office/word/2010/wordml";
+var NS_W15 = "http://schemas.microsoft.com/office/word/2012/wordml";
+var NS_W16CID = "http://schemas.microsoft.com/office/word/2016/wordml/cid";
+var NS_W16CEX = "http://schemas.microsoft.com/office/word/2018/wordml/cex";
+function escXml(s) {
+  if (s == null) return "";
+  return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+function authorInitials(name) {
+  if (name == null) return "?";
+  const trimmed = String(name).trim();
+  if (!trimmed) return "?";
+  const parts = trimmed.split(/\s+/).filter(Boolean);
+  const first3 = parts[0] || trimmed;
+  const firstChar = (first3.charAt(0) || "?").toUpperCase();
+  if (parts.length >= 2) {
+    const secondChar = (parts[1].charAt(0) || "").toUpperCase();
+    return firstChar + secondChar;
+  }
+  return firstChar;
+}
+function getAuthorName(comment) {
+  const a = comment && comment.author;
+  if (!a) return "";
+  if (typeof a === "string") return a.trim();
+  if (typeof a === "object") return String(a.name || "").trim();
+  return "";
+}
+function getAuthorId(comment) {
+  const a = comment && comment.author;
+  if (!a || typeof a !== "object") return "";
+  return String(a.id || "").trim();
+}
+function getCommentBody(comment) {
+  return String(comment && comment.body || "").trim();
+}
+function isPending(thread) {
+  if (!thread) return true;
+  if (thread.pending === true) return true;
+  if (!Array.isArray(thread.comments) || thread.comments.length === 0) return true;
+  return !thread.comments.some((c) => getCommentBody(c));
+}
+function isValidThread(thread) {
+  if (!thread || typeof thread !== "object") return false;
+  if (typeof thread.threadId !== "string" || !thread.threadId) return false;
+  if (isPending(thread)) return false;
+  return true;
+}
+function makeParaId(counter) {
+  const hex = (counter * 2654435761 >>> 0).toString(16).toUpperCase();
+  return ("0000000" + hex).slice(-8);
+}
+function makeDurableId(counter) {
+  const hex = (counter * 2246822519 >>> 0).toString(16).toUpperCase();
+  return ("0000000" + hex).slice(-8);
+}
+function toIsoDate(s) {
+  if (!s) return "1970-01-01T00:00:00Z";
+  try {
+    const d = new Date(s);
+    if (isNaN(d.getTime())) return "1970-01-01T00:00:00Z";
+    return d.toISOString();
+  } catch {
+    return "1970-01-01T00:00:00Z";
+  }
+}
+function buildCommentsParts(annotations) {
+  const result = {
+    commentsXml: "",
+    commentsExtendedXml: "",
+    commentsIdsXml: "",
+    commentsExtensibleXml: "",
+    peopleXml: null,
+    threadMap: {},
+    commentEntries: []
+  };
+  if (!Array.isArray(annotations) || annotations.length === 0) {
+    return result;
+  }
+  const validThreads = annotations.filter(isValidThread);
+  if (validThreads.length === 0) return result;
+  const commentItems = [];
+  const extendedItems = [];
+  const idsItems = [];
+  const extensibleItems = [];
+  const peopleMap = /* @__PURE__ */ new Map();
+  let commentIdCounter = 0;
+  let paraIdCounter = 1;
+  for (const thread of validThreads) {
+    const rootEntry = {
+      commentId: commentIdCounter,
+      threadId: thread.threadId,
+      quoteText: String(thread.text || ""),
+      isRoot: true,
+      parentCommentId: null
+    };
+    result.commentEntries.push(rootEntry);
+    const comments = Array.isArray(thread.comments) ? thread.comments : [];
+    const rootComment = comments[0];
+    const replyComments = comments.slice(1).filter((c) => getCommentBody(c));
+    const rootParaId = makeParaId(paraIdCounter++);
+    const rootDurableId = makeDurableId(paraIdCounter);
+    const rootBody = getCommentBody(rootComment);
+    const rootAuthorName = getAuthorName(rootComment) || "\u533F\u540D";
+    const rootAuthorId = getAuthorId(rootComment);
+    const rootAuthorInitials = authorInitials(rootAuthorName);
+    const rootCreated = toIsoDate(rootComment && rootComment.createdAt || thread.createdAt);
+    commentItems.push({
+      id: rootEntry.commentId,
+      author: rootAuthorName,
+      initials: rootAuthorInitials,
+      date: rootCreated,
+      paraId: rootParaId,
+      durableId: rootDurableId,
+      body: rootBody
+    });
+    extendedItems.push({
+      paraId: rootParaId,
+      done: thread.resolved === true ? "1" : "0"
+    });
+    idsItems.push({
+      paraId: rootParaId,
+      durableId: rootDurableId
+    });
+    extensibleItems.push({
+      paraId: rootParaId,
+      dateUtc: rootCreated
+    });
+    if (rootAuthorId) {
+      const key = rootAuthorId;
+      if (!peopleMap.has(key)) {
+        peopleMap.set(key, { author: rootAuthorName || key, userId: key });
+      }
+    }
+    result.threadMap[thread.threadId] = {
+      commentId: rootEntry.commentId,
+      paraId: rootParaId,
+      durableId: rootDurableId,
+      parentCommentId: null
+    };
+    commentIdCounter++;
+    for (const reply of replyComments) {
+      commentIdCounter++;
+      const replyEntry = {
+        commentId: commentIdCounter - 1,
+        threadId: thread.threadId,
+        quoteText: "",
+        isRoot: false,
+        parentCommentId: rootEntry.commentId
+      };
+      result.commentEntries.push(replyEntry);
+      const replyParaId = makeParaId(paraIdCounter++);
+      const replyDurableId = makeDurableId(paraIdCounter);
+      const replyBody = getCommentBody(reply);
+      const replyAuthorName = getAuthorName(reply) || "\u533F\u540D";
+      const replyAuthorId = getAuthorId(reply);
+      const replyAuthorInitials = authorInitials(replyAuthorName);
+      const replyCreated = toIsoDate(reply.createdAt);
+      commentItems.push({
+        id: replyEntry.commentId,
+        author: replyAuthorName,
+        initials: replyAuthorInitials,
+        date: replyCreated,
+        paraId: replyParaId,
+        durableId: replyDurableId,
+        body: replyBody,
+        parentParaId: rootParaId
+      });
+      extendedItems.push({
+        paraId: replyParaId,
+        parentParaId: rootParaId,
+        done: thread.resolved === true ? "1" : "0"
+      });
+      idsItems.push({
+        paraId: replyParaId,
+        durableId: replyDurableId
+      });
+      extensibleItems.push({
+        paraId: replyParaId,
+        dateUtc: replyCreated
+      });
+      if (replyAuthorId) {
+        const key = replyAuthorId;
+        if (!peopleMap.has(key)) {
+          peopleMap.set(key, { author: replyAuthorName || key, userId: key });
+        }
+      }
+    }
+  }
+  result.commentsXml = renderCommentsXml(commentItems);
+  result.commentsExtendedXml = renderCommentsExtendedXml(extendedItems);
+  result.commentsIdsXml = renderCommentsIdsXml(idsItems);
+  result.commentsExtensibleXml = renderCommentsExtensibleXml(extensibleItems);
+  result.peopleXml = peopleMap.size > 0 ? renderPeopleXml(peopleMap) : null;
+  return result;
+}
+function renderCommentsXml(items) {
+  const inner2 = items.map((c) => {
+    const attrs = [
+      `w:id="${c.id}"`,
+      `w:author="${escXml(c.author)}"`,
+      `w:initials="${escXml(c.initials)}"`,
+      `w:date="${escXml(c.date)}"`
+    ].join(" ");
+    const paras = String(c.body || "").split(/\n{2,}/);
+    const bodyXml = paras.map((p) => {
+      const lines = p.split("\n");
+      const runs = lines.map((line, i) => {
+        const br = i < lines.length - 1 ? "<w:br/>" : "";
+        return `<w:r><w:t xml:space="preserve">${escXml(line)}</w:t>${br}</w:r>`;
+      }).join("");
+      const inner3 = runs || '<w:r><w:t xml:space="preserve"></w:t></w:r>';
+      return `<w:p w14:paraId="${escXml(c.paraId)}" w14:textId="00000000">${inner3}</w:p>`;
+    }).join("");
+    return `<w:comment ${attrs}>${bodyXml}</w:comment>`;
+  }).join("");
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:comments xmlns:w="${NS_W}" xmlns:w14="${NS_W14}">${inner2}</w:comments>`;
+}
+function renderCommentsExtendedXml(items) {
+  const inner2 = items.map((e) => {
+    const attrs = [
+      `w15:paraId="${escXml(e.paraId)}"`,
+      e.parentParaId ? `w15:paraIdParent="${escXml(e.parentParaId)}"` : "",
+      `w15:done="${e.done}"`
+    ].filter(Boolean).join(" ");
+    return `<w15:commentEx ${attrs}/>`;
+  }).join("");
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w15:commentsEx xmlns:w15="${NS_W15}" xmlns:w="${NS_W}">${inner2}</w15:commentsEx>`;
+}
+function renderCommentsIdsXml(items) {
+  const inner2 = items.map((i) => `<w16cid:commentId w16cid:paraId="${escXml(i.paraId)}" w16cid:durableId="${escXml(i.durableId)}"/>`).join("");
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w16cid:commentsIds xmlns:w16cid="${NS_W16CID}" xmlns:w="${NS_W}">${inner2}</w16cid:commentsIds>`;
+}
+function renderCommentsExtensibleXml(items) {
+  const inner2 = items.map((i) => `<w16cex:commentExtensible w16cex:paraId="${escXml(i.paraId)}" w16cex:dateUtc="${escXml(i.dateUtc)}"/>`).join("");
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w16cex:commentsExtensible xmlns:w16cex="${NS_W16CEX}" xmlns:w="${NS_W}">${inner2}</w16cex:commentsExtensible>`;
+}
+function renderPeopleXml(peopleMap) {
+  const inner2 = Array.from(peopleMap.values()).map(
+    (p) => `<w15:person w:author="${escXml(p.author)}"><w15:presenceInfo w15:providerId="None" w15:userId="${escXml(p.userId)}"/></w15:person>`
+  ).join("");
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w15:people xmlns:w15="${NS_W15}" xmlns:w="${NS_W}">${inner2}</w15:people>`;
 }
 
 // modules/save-lifecycle.js
@@ -65777,7 +66029,8 @@ function syncToolbarActionState() {
     commentPaneOpen,
     autoSaveEnabled,
     autoSaveDisk,
-    versionPaneOpen: !!_versionPaneOpen
+    versionPaneOpen: !!_versionPaneOpen,
+    hasAnnotations: Array.isArray(State2.annotations) && State2.annotations.some((t) => t && t.pending !== true && Array.isArray(t.comments) && t.comments.some((c) => String(c && c.body || "").trim()))
   });
   for (const [id, selector] of Object.entries(TOOLBAR_ACTION_SELECTORS)) {
     applyToolbarActionState(selector, actionState[id]);
@@ -69635,15 +69888,21 @@ async function exportDocx() {
     showToast("JSZip \u672A\u52A0\u8F7D, \u65E0\u6CD5\u5BFC\u51FA docx", 3e3);
     return;
   }
-  showExportProgress("\u6B63\u5728\u751F\u6210 .docx\uFF08\u4EC5\u6B63\u6587\uFF09\u2026");
-  showToast("\u6B63\u5728\u751F\u6210 .docx\uFF08\u4EC5\u6B63\u6587\uFF0C\u4E0D\u542B\u6279\u6CE8\uFF09\u2026", 1800);
+  const annotations = Array.isArray(State2.annotations) ? State2.annotations : [];
+  const hasAnns = annotations.some((t) => t && t.pending !== true && Array.isArray(t.comments) && t.comments.some((c) => String(c && c.body || "").trim()));
+  showExportProgress(hasAnns ? "\u6B63\u5728\u751F\u6210 .docx\uFF08\u542B\u6279\u6CE8\uFF09\u2026" : "\u6B63\u5728\u751F\u6210 .docx\u2026");
+  showToast(hasAnns ? "\u6B63\u5728\u751F\u6210 .docx\uFF08\u542B\u6279\u6CE8\uFF09\u2026" : "\u6B63\u5728\u751F\u6210 .docx\u2026", 1800);
   try {
     const html = State2.editor.getHTML();
-    const zip = await buildDocxBlob(html, State2.mediaFiles || {});
+    const zip = await buildDocxBlob(html, State2.mediaFiles || {}, annotations);
     const baseName = (State2.currentFile.name || "untitled").replace(/\.(md|markdown|mentor)$/i, "");
     downloadBlob(`${baseName}.docx`, zip);
-    hideExportProgress("\u5DF2\u5BFC\u51FA\uFF08\u4EC5\u6B63\u6587\uFF09");
-    const _docxCopy = buildSaveResultCopy({ kind: "export-docx", fileName: `${baseName}.docx` });
+    hideExportProgress(hasAnns ? "\u5DF2\u5BFC\u51FA\uFF08\u542B\u6279\u6CE8\uFF09" : "\u5DF2\u5BFC\u51FA");
+    const _docxCopy = buildSaveResultCopy({
+      kind: "export-docx",
+      fileName: `${baseName}.docx`,
+      hasAnnotations: hasAnns
+    });
     setStatus(_docxCopy.status, _docxCopy.detail);
     showToast(`${_docxCopy.status} \xB7 ${_docxCopy.detail}`, 2800);
   } catch (e) {
@@ -69652,7 +69911,61 @@ async function exportDocx() {
     showToast("\u5BFC\u51FA docx \u5931\u8D25: " + (e.message || "\u672A\u77E5\u9519\u8BEF"), 4e3);
   }
 }
-async function buildDocxBlob(html, mediaFiles) {
+function injectCommentRangeMarkers(bodyXml, commentsParts) {
+  if (!commentsParts || !Array.isArray(commentsParts.commentEntries)) return bodyXml;
+  const roots = commentsParts.commentEntries.filter((e) => e && e.isRoot);
+  if (!roots.length) return bodyXml;
+  function paraPlainText(pXml) {
+    let t = "";
+    const re = /<w:t(?:\s[^>]*)?>([^<]*)<\/w:t>/g;
+    let m2;
+    while ((m2 = re.exec(pXml)) !== null) t += m2[1];
+    return t;
+  }
+  function wrapPara(pXml, commentId) {
+    const openEnd = pXml.indexOf(">");
+    if (openEnd < 0) return pXml;
+    const closeIdx = pXml.lastIndexOf("</w:p>");
+    if (closeIdx < 0) return pXml;
+    const openTag = pXml.slice(0, openEnd + 1);
+    const inner2 = pXml.slice(openEnd + 1, closeIdx);
+    const pPrMatch = inner2.match(/^(\s*<w:pPr\b[\s\S]*?<\/w:pPr>)/);
+    const pPr = pPrMatch ? pPrMatch[1] : "";
+    const rest = pPrMatch ? inner2.slice(pPrMatch[1].length) : inner2;
+    const id = String(commentId);
+    return openTag + pPr + `<w:commentRangeStart w:id="${id}"/>` + rest + `<w:commentRangeEnd w:id="${id}"/><w:r><w:commentReference w:id="${id}"/></w:r></w:p>`;
+  }
+  const parts = [];
+  const reP = /<w:p\b[\s\S]*?<\/w:p>/g;
+  let last = 0;
+  let m;
+  const src = String(bodyXml || "");
+  while ((m = reP.exec(src)) !== null) {
+    if (m.index > last) parts.push({ type: "raw", xml: src.slice(last, m.index) });
+    parts.push({ type: "p", xml: m[0] });
+    last = m.index + m[0].length;
+  }
+  if (last < src.length) parts.push({ type: "raw", xml: src.slice(last) });
+  const usedQuoteKeys = /* @__PURE__ */ new Set();
+  for (const entry of roots) {
+    const quote = String(entry.quoteText || "").trim();
+    for (let i = 0; i < parts.length; i++) {
+      if (parts[i].type !== "p") continue;
+      if (parts[i]._used) continue;
+      const plain = paraPlainText(parts[i].xml);
+      const hit = quote ? plain.includes(quote) : plain.length > 0;
+      if (!hit) continue;
+      const key = quote || `__p${i}`;
+      if (quote && usedQuoteKeys.has(key) && plain.indexOf(quote) === plain.lastIndexOf(quote)) {
+      }
+      parts[i] = { type: "p", xml: wrapPara(parts[i].xml, entry.commentId), _used: true };
+      if (quote) usedQuoteKeys.add(key);
+      break;
+    }
+  }
+  return parts.map((p) => p.xml).join("");
+}
+async function buildDocxBlob(html, mediaFiles, annotations = []) {
   if (typeof import_jszip.default === "undefined") throw new Error("JSZip not loaded");
   const zip = new import_jszip.default();
   const now = (/* @__PURE__ */ new Date()).toISOString();
@@ -69806,6 +70119,7 @@ async function buildDocxBlob(html, mediaFiles) {
   const blocks = Array.from(wrapper.children);
   let bodyXml = "";
   const blockEls = blocks.length > 0 ? blocks : Array.from(wrapper.querySelectorAll("p, h1, h2, h3, h4, h5, h6, ul, ol, blockquote, pre, hr"));
+  const commentsParts = Array.isArray(annotations) && annotations.length ? buildCommentsParts(annotations) : null;
   function flattenBlocks(parent, list = []) {
     for (const child of parent.children) {
       const tag = child.tagName;
@@ -69899,6 +70213,9 @@ async function buildDocxBlob(html, mediaFiles) {
       }
     }
   }
+  if (commentsParts && commentsParts.commentEntries.length) {
+    bodyXml = injectCommentRangeMarkers(bodyXml, commentsParts);
+  }
   const rels = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
   <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
@@ -69912,9 +70229,26 @@ async function buildDocxBlob(html, mediaFiles) {
     imgRels += `  <Relationship Id="${info.rId}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/${info.fileName.replace(/^media\//, "")}"/>
 `;
   }
+  let commentRels = "";
+  let nextRel = imageMap.size + 1;
+  const hasCommentParts = !!(commentsParts && commentsParts.commentEntries && commentsParts.commentEntries.length);
+  if (hasCommentParts) {
+    commentRels += `  <Relationship Id="rId${nextRel++}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments" Target="comments.xml"/>
+`;
+    commentRels += `  <Relationship Id="rId${nextRel++}" Type="http://schemas.microsoft.com/office/2011/relationships/commentsExtended" Target="commentsExtended.xml"/>
+`;
+    commentRels += `  <Relationship Id="rId${nextRel++}" Type="http://schemas.microsoft.com/office/2016/09/relationships/commentsIds" Target="commentsIds.xml"/>
+`;
+    commentRels += `  <Relationship Id="rId${nextRel++}" Type="http://schemas.microsoft.com/office/2018/08/relationships/commentsExtensible" Target="commentsExtensible.xml"/>
+`;
+    if (commentsParts.peopleXml) {
+      commentRels += `  <Relationship Id="rId${nextRel++}" Type="http://schemas.microsoft.com/office/2011/relationships/people" Target="people.xml"/>
+`;
+    }
+  }
   const docRels = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-${imgRels}</Relationships>`;
+${imgRels}${commentRels}</Relationships>`;
   zip.file("word/_rels/document.xml.rels", docRels);
   let types = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
@@ -69927,7 +70261,19 @@ ${imgRels}</Relationships>`;
   <Default Extension="svg" ContentType="image/svg+xml"/>
   <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
   <Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>
-  <Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>
+  <Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>`;
+  if (hasCommentParts) {
+    types += `
+  <Override PartName="/word/comments.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.comments+xml"/>
+  <Override PartName="/word/commentsExtended.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.commentsExtended+xml"/>
+  <Override PartName="/word/commentsIds.xml" ContentType="application/vnd.ms-word.commentsIds+xml"/>
+  <Override PartName="/word/commentsExtensible.xml" ContentType="application/vnd.ms-word.commentsExtensible+xml"/>`;
+    if (commentsParts.peopleXml) {
+      types += `
+  <Override PartName="/word/people.xml" ContentType="application/vnd.ms-word.people+xml"/>`;
+    }
+  }
+  types += `
 </Types>`;
   zip.file("[Content_Types].xml", types);
   const docXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -69947,9 +70293,17 @@ ${imgRels}</Relationships>`;
        xmlns:wpg="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingGroup"
        xmlns:wpi="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingInk"
        xmlns:wne="http://schemas.microsoft.com/office/word/2006/wordml"
-       xmlns:wps="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingShape">
+       xmlns:wps="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingShape"
+       mc:Ignorable="w14 w15 wp14">
 <w:body>${bodyXml}<w:sectPr><w:pgSz w:w="12240" w:h="15840"/><w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440" w:header="720" w:footer="720" w:gutter="0"/><w:cols w:space="720"/><w:docGrid w:linePitch="360"/></w:sectPr></w:body></w:document>`;
   zip.file("word/document.xml", docXml);
+  if (hasCommentParts) {
+    zip.file("word/comments.xml", commentsParts.commentsXml);
+    zip.file("word/commentsExtended.xml", commentsParts.commentsExtendedXml);
+    zip.file("word/commentsIds.xml", commentsParts.commentsIdsXml);
+    zip.file("word/commentsExtensible.xml", commentsParts.commentsExtensibleXml);
+    if (commentsParts.peopleXml) zip.file("word/people.xml", commentsParts.peopleXml);
+  }
   const coreXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties"
               xmlns:dc="http://purl.org/dc/elements/1.1/"

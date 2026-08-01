@@ -71,7 +71,7 @@ function mentorLikeName(name) {
   return n.replace(/\.(md|markdown)$/i, '') + '.mentor';
 }
 
-export function buildSaveResultCopy({ kind, fileName } = {}) {
+export function buildSaveResultCopy({ kind, fileName, hasAnnotations } = {}) {
   if (kind === 'write-current') {
     return { status: '已保存', detail: `已写回 ${fileName || ''}`.trim(), clearsDirty: true };
   }
@@ -85,7 +85,12 @@ export function buildSaveResultCopy({ kind, fileName } = {}) {
     return { status: 'Markdown 已导出', detail: '原文件未改变', clearsDirty: false };
   }
   if (kind === 'export-docx') {
-    return { status: 'DOCX 已导出', detail: '仅正文；批注与文献库未导出', clearsDirty: false };
+    const hasAnns = !!hasAnnotations;
+    return {
+      status: 'DOCX 已导出',
+      detail: hasAnns ? '含批注；引用库请用 .mentor' : '仅正文；批注与文献库未导出',
+      clearsDirty: false,
+    };
   }
   return { status: '已完成', detail: '', clearsDirty: false };
 }
