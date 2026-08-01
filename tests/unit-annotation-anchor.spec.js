@@ -29,6 +29,7 @@ const t = async (name, fn) => {
   await t('module exports exist', async () => {
     const mod = await import(pathToFileURL(path.join(ROOT, 'modules/annotation-anchor.js')).href);
     assert.equal(typeof mod.findOccurrences, 'function');
+    assert.equal(typeof mod.mdEmphasisToPlain, 'function');
     assert.equal(typeof mod.scoreCandidate, 'function');
     assert.equal(typeof mod.resolveAnchor, 'function');
     assert.equal(typeof mod.mapAnchorRange, 'function');
@@ -107,6 +108,40 @@ const t = async (name, fn) => {
     assert.ok(r.range);
     assert.equal(doc.slice(r.range.from, r.range.to), 'TOKEN');
     assert.ok(doc.slice(Math.max(0, r.range.from - 7), r.range.from).includes('LEFT_B'));
+  });
+
+
+  await t('mdEmphasisToPlain italics and escapes', async () => {
+    assert.equal(mod.mdEmphasisToPlain('_p_ = .19'), 'p = .19');
+    assert.equal(mod.mdEmphasisToPlain('Bonferroni-corrected _p_ = .19'), 'Bonferroni-corrected p = .19');
+    assert.equal(mod.mdEmphasisToPlain('n\_init = 10'), 'n_init = 10');
+    assert.equal(mod.mdEmphasisToPlain('_F_(1, 65)'), 'F(1, 65)');
+    assert.equal(mod.mdEmphasisToPlain("Fisher's _r_-to-_z_"), "Fisher's r-to-z");
+    assert.equal(mod.mdEmphasisToPlain('n_init'), 'n_init'); // not italic mid-word
+  });
+
+  await t('resolveAnchor md quote against plain doc (post-/fm)', async () => {
+    const doc = 'did not survive correction for error rate (F(3, 195) = 2.68, p = .048; Bonferroni-corrected p = .19) or reaction time (F(3, 195) = 0.23, p = .873)';
+    const r = mod.resolveAnchor(doc, {
+      text: 'Bonferroni-corrected _p_ = .19',
+      prefix: 'r rate (_F_(3, 195) = 2.68, _p_ = .048; ',
+      suffix: ') or reaction time (_F_(3, 195) = 0.23, '
+    });
+    assert.equal(r.status, 'attached', 'status ' + r.status);
+    assert.ok(r.range, 'range');
+    assert.equal(doc.slice(r.range.from, r.range.to), 'Bonferroni-corrected p = .19');
+    assert.ok((r.confidence == null ? 1 : r.confidence) >= 0.5);
+  });
+
+  await t('resolveAnchor n\\_init md escape against plain', async () => {
+    const doc = 'K-means clustering (Euclidean distance, n_init = 10) was applied';
+    const r = mod.resolveAnchor(doc, {
+      text: 'n\_init = 10',
+      prefix: 'Euclidean distance, ',
+      suffix: ') was applied'
+    });
+    assert.equal(r.status, 'attached');
+    assert.equal(doc.slice(r.range.from, r.range.to), 'n_init = 10');
   });
 
   await t('mapAnchorRange insert before', async () => {

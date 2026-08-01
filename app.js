@@ -110,6 +110,7 @@ import {
 } from './modules/references.js';
 import {
   findOccurrences,
+  mdEmphasisToPlain,
   scoreCandidate,
   resolveAnchor,
   resolveAnchorSet,
@@ -6596,17 +6597,25 @@ function scrollToThread(threadId) {
       tr2.setMeta("__activeMarkSync", true);
       editor2.view.dispatch(tr2);
       try {
+        normalizeThreadQuoteToLive(thread, editor2.state.doc, recovered.from, recovered.to);
+      } catch (_) {}
+      try {
         syncThreadAnchorEvidence(thread, editor2.state.doc, recovered, {
           exact: thread.text || "",
-          status: recovered.fuzzy ? "edited" : "attached",
-          confidence: recovered.fuzzy ? 0.5 : 1
+          status: (recovered.fuzzy && thread.fuzzy !== false) ? "edited" : "attached",
+          confidence: (recovered.fuzzy && thread.fuzzy !== false) ? 0.5 : 1
         });
       } catch (_) {}
       thread.deleted = false;
-      thread.fuzzy = !!recovered.fuzzy;
-      thread.invalid = !!recovered.fuzzy;
-      thread.invalidReason = recovered.fuzzy ? (thread.invalidReason || "mark-reattached-fuzzy") : void 0;
       thread.range = { from: recovered.from, to: recovered.to };
+      if (thread.fuzzy === false) {
+        thread.invalid = false;
+        thread.invalidReason = void 0;
+      } else {
+        thread.fuzzy = !!recovered.fuzzy;
+        thread.invalid = !!recovered.fuzzy;
+        thread.invalidReason = recovered.fuzzy ? (thread.invalidReason || "mark-reattached-fuzzy") : void 0;
+      }
       try { markDirty(); } catch (_) {}
       try { renderCommentList(); } catch (_) {}
       const docSize = editor2.state.doc.content.size;
@@ -7014,15 +7023,25 @@ function flushSourceView() {
           authorColor: snap.authorColor,
           active: false
         })));
+        try {
+          normalizeThreadQuoteToLive(ann, editor2.state.doc, found2.from, found2.to);
+        } catch (_) {}
         syncThreadAnchorEvidence(ann, editor2.state.doc, found2, {
           exact: ann.text,
-          status: found2.fuzzy ? "edited" : "attached",
-          confidence: found2.fuzzy ? 0.5 : 1
+          status: (found2.fuzzy && ann.fuzzy !== false) ? "edited" : "attached",
+          confidence: (found2.fuzzy && ann.fuzzy !== false) ? 0.5 : 1
         });
-        ann.fuzzy = !!found2.fuzzy;
-        ann.invalid = !!found2.fuzzy;
-        ann.deleted = false;
-        ann.invalidReason = found2.fuzzy ? "text-changed" : void 0;
+        // md-emphasis normalize may have cleared fuzzy
+        if (ann.fuzzy === false) {
+          ann.invalid = false;
+          ann.deleted = false;
+          ann.invalidReason = void 0;
+        } else {
+          ann.fuzzy = !!found2.fuzzy;
+          ann.invalid = !!found2.fuzzy;
+          ann.deleted = false;
+          ann.invalidReason = found2.fuzzy ? "text-changed" : void 0;
+        }
       } else {
         failedThreadIds.add(snap.threadId);
         console.warn(`[P-mark] mark restore 失败: threadId=${String(snap.threadId).slice(0, 8)} reason=${found2 && found2.ambiguous ? "ambiguous" : "not-found"}`);
@@ -8838,6 +8857,9 @@ function loadMarkdownIntoEditor(name, content, annotationsData = null, options =
                 fuzzy: !!positions.fuzzy
                 // P1-A: 降级匹配时标 fuzzy
               };
+              try {
+                normalizeThreadQuoteToLive(thread, doc5, positions.from, positions.to);
+              } catch (_) {}
               if (thread.anchor && typeof thread.anchor === "object") {
                 thread.anchor = {
                   ...thread.anchor,
@@ -8982,6 +9004,65 @@ function loadMarkdownIntoEditor(name, content, annotationsData = null, options =
     } catch (e) {
       console.warn("[external-watch] start after load failed", e);
     }
+}
+
+/**
+ * After quote reattach (esp. post-/fm md-path open), rewrite thread quote to the
+ * live PM plain slice when md emphasis markers were the only mismatch
+ * (`_p_` vs `p`). Clears false fuzzy banners.
+ * Returns true when quote was normalized.
+ */
+function normalizeThreadQuoteToLive(thread, doc5, from2, to) {
+  if (!thread || !doc5 || typeof from2 !== 'number' || typeof to !== 'number' || from2 >= to) {
+    return false;
+  }
+  let live = '';
+  try {
+    live = doc5.textBetween(from2, to, ' ');
+  } catch (_) {
+    return false;
+  }
+  if (!live) return false;
+  const stored = thread.text || '';
+  const plainStored = mdEmphasisToPlain(stored);
+  const mdOnlyMismatch = !!(stored && live !== stored && (live === plainStored || plainStored === mdEmphasisToPlain(live)));
+  if (!(live === stored || mdOnlyMismatch || (!stored && live))) {
+    return false;
+  }
+  const ctx = computeContextAt(doc5, from2, to, 40);
+  thread.text = live;
+  thread.prefix = ctx.prefix;
+  thread.suffix = ctx.suffix;
+  if (thread.anchor && typeof thread.anchor === 'object') {
+    const q = thread.anchor.quote && typeof thread.anchor.quote === 'object' ? { ...thread.anchor.quote } : {};
+    q.exact = live;
+    q.prefix = ctx.prefix;
+    q.suffix = ctx.suffix;
+    thread.anchor = {
+      ...thread.anchor,
+      quote: q,
+      status: thread.fuzzy ? (thread.anchor.status || 'edited') : 'attached',
+      confidence: thread.fuzzy ? (thread.anchor.confidence != null ? thread.anchor.confidence : 0.5) : 1,
+      position: {
+        from: from2,
+        to,
+        startAssoc: 1,
+        endAssoc: -1
+      },
+      updatedAt: nowISO()
+    };
+  }
+  if (mdOnlyMismatch) {
+    thread.fuzzy = false;
+    thread.invalid = false;
+    if (thread.invalidReason === 'text-changed' || thread.invalidReason === 'mark-reattached-fuzzy' || thread.invalidReason === 'text-edited') {
+      thread.invalidReason = void 0;
+    }
+    if (thread.anchor && typeof thread.anchor === 'object') {
+      thread.anchor = { ...thread.anchor, status: 'attached', confidence: 1 };
+    }
+  }
+  return true;
 }
 
 function findAnnotationRange(doc5, annotation) {
@@ -15040,7 +15121,7 @@ window.__mdAnnotator = {
       activeHighlightKey
     },
     tabs: { genTabId: genTabIdPure, findTabByDocument: findTabByDocumentPure, snapshotTabState, tabLabel },
-    annotationAnchor: { findOccurrences, scoreCandidate, resolveAnchor, resolveAnchorSet, mapAnchorRange, captureAnchorEvidence, projectLegacyFlags, auditAnnotationInvariants },
+    annotationAnchor: { findOccurrences, mdEmphasisToPlain, scoreCandidate, resolveAnchor, resolveAnchorSet, mapAnchorRange, captureAnchorEvidence, projectLegacyFlags, auditAnnotationInvariants },
     mentorArchive: { createArchiveManifest, verifyStructuralArchive, STRUCTURAL_HTML_NAME, ARCHIVE_MANIFEST_NAME }
   },
   loadMarkdownIntoEditor,

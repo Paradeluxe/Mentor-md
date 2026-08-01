@@ -23,6 +23,12 @@
 
 ## Unreleased
 
+### Post-/fm md-path anchors (no false fuzzy on `_p_`)
+- Root cause: after external `/fm` drops `document.html`, open uses content.md; quote triples still store md literals (`_p_`, `n\_init`) while PM `textBetween` is plain (`p`, `n_init`) → soft reattach + `⚠ 位置可能偏移`.
+- Fix: `mdEmphasisToPlain` + plain needles in `modules/annotation-anchor.js` `resolveAnchor`; `normalizeThreadQuoteToLive` on load/mark-restore/locate rewrites quote to live plain and clears md-only fuzzy.
+- Gates: `tests/unit-annotation-anchor.spec.js` (md quote vs plain doc; n\\_init escape); live DFC open (no HTML) fuzzyN=0, Bonferroni live `Bonferroni-corrected p = .19`.
+- Bundle cache bump required (`npm run build:bundle` + `sync-build-meta --bump`).
+
 ### Version history (Word-like auto versions)
 - Toolbar **版本** drawer: every successful disk save (manual + disk-AutoSave) and every「保存此版本」named pin leaves a recoverable IndexedDB snapshot (`Mentor-versions`).
 - Dedup by content fingerprint; retention: rolling autosave cap (default 40) + named pins (default 50); settings 版本历史 enable toggle + retention.
