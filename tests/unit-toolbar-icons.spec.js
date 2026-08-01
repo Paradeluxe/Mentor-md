@@ -29,6 +29,7 @@ const required = {
   '#btn-export-md .tb-icon::before': 'm9%2015%203%203%203-3',
   '#btn-export-docx .tb-icon::before': 'file',
   '#btn-refs .tb-icon::before': 'm16%206%204%2014', // library
+  '#btn-version-history .tb-icon::before': 'M3%2012a9%209%200%201%200%209-9',
   '[data-cmd="blockquote"]::before': 'quote',
   '.rc-insert-btn::before': 'quote',
   '.rc-edit-btn::before': 'pencil',
@@ -59,9 +60,11 @@ assert.ok(!gen.includes('↶') && !gen.includes('↷'), 'no unicode arrows');
 assert.ok(buildPy.includes("'#btn-refs .tb-icon::before': 'library'"), 'build maps refs->library');
 assert.ok(buildPy.includes("'#btn-new .tb-icon::before': 'filePlus2'"), 'build maps new->filePlus2');
 assert.ok(buildPy.includes("'#btn-save-as .tb-icon::before': 'fileArchive'"), 'build maps save-as->fileArchive');
+assert.ok(buildPy.includes("'#btn-version-history .tb-icon::before': 'history'"), 'build maps version->history');
 
 // icons.js has library alias
 assert.ok(iconsJs.includes('library:'), 'icons.js exports library');
+assert.ok(iconsJs.includes('history:'), 'icons.js exports history');
 assert.ok(iconsJs.includes("stroke-width='2'"), 'icons.js stroke 2');
 
 console.log('PASS unit-toolbar-icons');
