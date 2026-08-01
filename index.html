@@ -26,8 +26,8 @@
         role="toolbar"
         aria-label="文档与全局操作">
         <div class="tb-group" data-toolbar-group="chrome">
-                  <button id="help-btn" class="help-btn" data-act="toggle-help" title="使用帮助 (按 ? 键)" aria-label="使用帮助" onclick="window.__mdAnnotator && window.__mdAnnotator.toggleHelp && window.__mdAnnotator.toggleHelp(); event.stopPropagation();">?</button>
-                  <button id="settings-btn" class="settings-btn" data-act="toggle-settings" title="设置" aria-label="设置"></button>
+                  <button id="help-btn" class="help-btn" data-act="toggle-help" title="使用帮助 (按 ? 键)" aria-label="使用帮助" aria-controls="help-popover" aria-expanded="false" onclick="window.__mdAnnotator && window.__mdAnnotator.toggleHelp && window.__mdAnnotator.toggleHelp(); event.stopPropagation();">?</button>
+                  <button id="settings-btn" class="settings-btn" data-act="toggle-settings" title="设置" aria-label="设置" aria-controls="settings-popover" aria-expanded="false"></button>
                 </div>
                 <div class="tb-group" data-toolbar-group="document">
                   <button id="btn-new" title="新建空白文档" class="tb-icon-text"><span class="tb-icon"></span><span class="tb-label">新建</span></button>
@@ -361,9 +361,9 @@
 <script src="icons.js?v=184"></script>
 <script type="module" src="app.bundle.js?v=228"></script>
 <!-- 帮助 popover (浮在 body 顶层, 位置由 JS 动态计算) -->
-<div id="help-popover" class="help-popover hidden" role="tooltip">
+<div id="help-popover" class="help-popover hidden" role="dialog" aria-modal="false" aria-labelledby="help-popover-title">
   <div class="help-popover-arrow"></div>
-  <h3>Mentor 使用提示</h3>
+  <h3 id="help-popover-title">Mentor 使用提示</h3>
   <ul>
     <li><strong>选区批注:</strong> 拖选任意文字 → 点 <kbd>批注</kbd> / <kbd>AI</kbd> → 侧栏建线程</li>
     <li><strong>嵌套回复:</strong> 在批注线程里继续回复, 像 docx 一样对话</li>

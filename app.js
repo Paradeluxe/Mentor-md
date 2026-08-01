@@ -13055,12 +13055,22 @@ function isHelpOpen() {
   const popover = document.querySelector("#help-popover");
   return popover && !popover.classList.contains("hidden");
 }
+function setToolbarPopoverState(button, popover, open, { restoreFocus = false } = {}) {
+  if (!button || !popover) return;
+  popover.classList.toggle("hidden", !open);
+  button.classList.toggle("is-active", !!open);
+  button.setAttribute("aria-expanded", open ? "true" : "false");
+  if (!open && restoreFocus) {
+    try { button.focus(); } catch (_) {}
+  }
+}
+
 function openHelp() {
   const btn = document.querySelector("#help-btn");
   const popover = document.querySelector("#help-popover");
   if (!btn || !popover) return;
-  popover.classList.remove("hidden");
-  btn.classList.add("is-active");
+  if (typeof isSettingsOpen === "function" && isSettingsOpen()) closeSettings({ restoreFocus: false });
+  setToolbarPopoverState(btn, popover, true);
   const popWidth = 340;
   const margin = 16;
   const btnRect = btn.getBoundingClientRect();
@@ -13080,13 +13090,11 @@ function openHelp() {
     if (closeBtn) closeBtn.focus();
   }, 50);
 }
-function closeHelp() {
+function closeHelp({ restoreFocus = true } = {}) {
   const btn = document.querySelector("#help-btn");
   const popover = document.querySelector("#help-popover");
   if (!btn || !popover) return;
-  popover.classList.add("hidden");
-  btn.classList.remove("is-active");
-  btn.focus();
+  setToolbarPopoverState(btn, popover, false, { restoreFocus });
 }
 function toggleHelp() {
   if (isHelpOpen()) closeHelp();
@@ -13100,8 +13108,8 @@ function openSettings() {
   const btn = document.querySelector("#settings-btn");
   const popover = document.querySelector("#settings-popover");
   if (!btn || !popover) return;
-  if (typeof isHelpOpen === "function" && isHelpOpen()) closeHelp();
-  popover.classList.remove("hidden");
+  if (typeof isHelpOpen === "function" && isHelpOpen()) closeHelp({ restoreFocus: false });
+  setToolbarPopoverState(btn, popover, true);
   const btnRect = btn.getBoundingClientRect();
   const popWidth = 320;
   const popLeft = Math.max(8, Math.min(window.innerWidth - popWidth - 8, btnRect.left));
@@ -13118,12 +13126,11 @@ function openSettings() {
     if (closeBtn) closeBtn.focus();
   }, 50);
 }
-function closeSettings() {
+function closeSettings({ restoreFocus = true } = {}) {
   const btn = document.querySelector("#settings-btn");
   const popover = document.querySelector("#settings-popover");
   if (!btn || !popover) return;
-  popover.classList.add("hidden");
-  btn.focus();
+  setToolbarPopoverState(btn, popover, false, { restoreFocus });
 }
 function toggleSettings() {
   if (isSettingsOpen()) closeSettings();
