@@ -105,16 +105,16 @@ async function test(name, fn) {
     const commentsXml = assertions.readPart(zip, 'word/comments.xml');
     const extXml = assertions.readPart(zip, 'word/commentsExtended.xml');
     const idsXml = assertions.readPart(zip, 'word/commentsIds.xml');
-    const peopleXml = assertions.readPart(zip, 'word/people.xml');
     assert.ok(docXml && docXml.includes('Hello world'), 'document.xml missing "Hello world"');
     assert.ok(docXml && docXml.includes('Second para'), 'document.xml missing second paragraph');
     assert.ok(commentsXml && commentsXml.includes('Alice'), 'comments.xml missing author');
     assert.ok(commentsXml && commentsXml.includes('root note'), 'comments.xml missing body');
+    assert.ok(commentsXml && commentsXml.includes('annotationRef'), 'comments.xml needs annotationRef');
     // Threading: reply (id=1) should reference root (id=0) via w15:paraIdParent
     assert.ok(extXml && extXml.includes('paraIdParent'), 'commentsExtended should reference paraIdParent for threading');
     assert.ok(extXml && /w15:paraIdParent="0A000001"/.test(extXml), 'reply parent should point to root paraId 0A000001');
     assert.ok(idsXml && idsXml.includes('commentsIds'), 'commentsIds.xml should be present');
-    assert.ok(peopleXml && peopleXml.includes('Alice'), 'people.xml should mention Alice');
+    assert.ok(!zip.files['word/people.xml'], 'people.xml omitted for Word compatibility');
   });
 
   // ---- assertion helpers ----

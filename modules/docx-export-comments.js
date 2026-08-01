@@ -104,18 +104,22 @@ function isValidThread(thread) {
   return true;
 }
 
-// Eight-character uppercase hex (paraId / durableId). Format matches
-// the in-tree fixture (see tests/helpers/docx-fixture.js makeCommentDocxFixture).
+// Eight-character uppercase hex (paraId / durableId).
+// Word OOXML constraint (MS-DOCX / ECMA-376 extended):
+//   w14:paraId  must be in [0x00000000, 0x7FFFFFFF]
+//   w16cid:durableId must be in [0x00000000, 0x7FFFFFFE]
+// High-bit ids make Word report "file may be corrupted".
 function makeParaId(counter) {
-  // Deterministic per counter so re-runs produce stable ids.
-  const hex = ((counter * 0x9E3779B1) >>> 0).toString(16).toUpperCase();
-  return ('0000000' + hex).slice(-8);
+  const n = ((counter * 0x9e3779b1) >>> 0) & 0x7fffffff;
+  const v = n === 0 ? 1 : n;
+  return ('0000000' + v.toString(16).toUpperCase()).slice(-8);
 }
 
 function makeDurableId(counter) {
-  // Stable 8-hex distinct from paraId
-  const hex = ((counter * 0x85EBCA77) >>> 0).toString(16).toUpperCase();
-  return ('0000000' + hex).slice(-8);
+  // Keep strictly below 0x7FFFFFFF and distinct from paraId stream.
+  let n = ((counter * 0x85ebca77) >>> 0) & 0x7ffffffe;
+  if (n === 0) n = 2;
+  return ('0000000' + n.toString(16).toUpperCase()).slice(-8);
 }
 
 // ISO date — Word accepts the same ISO-8601 strings we already store on
@@ -211,6 +215,7 @@ export function buildCommentsParts(annotations) {
 
     extensibleItems.push({
       paraId: rootParaId,
+      durableId: rootDurableId,
       dateUtc: rootCreated,
     });
 
@@ -279,6 +284,7 @@ export function buildCommentsParts(annotations) {
 
       extensibleItems.push({
         paraId: replyParaId,
+        durableId: replyDurableId,
         dateUtc: replyCreated,
       });
 
@@ -296,7 +302,10 @@ export function buildCommentsParts(annotations) {
   result.commentsExtendedXml = renderCommentsExtendedXml(extendedItems);
   result.commentsIdsXml = renderCommentsIdsXml(idsItems);
   result.commentsExtensibleXml = renderCommentsExtensibleXml(extensibleItems);
-  result.peopleXml = peopleMap.size > 0 ? renderPeopleXml(peopleMap) : null;
+  // people.xml is intentionally omitted: Word Desktop rejects several
+  // presenceInfo shapes as "file may be corrupted". Comments open fine
+  // without it (verified via COM). Re-enable only with a Word-proven part.
+  result.peopleXml = null;
 
   return result;
 }
@@ -314,19 +323,28 @@ function renderCommentsXml(items) {
         `w:date="${escXml(c.date)}"`,
       ].join(' ');
       // Multi-paragraph body support: split on \n\n, otherwise keep one para.
+      // First para carries the Word-required annotationRef + unique paraId
+      // used by commentsEx / commentsIds. Extra paras get fresh paraIds.
       const paras = String(c.body || '').split(/\n{2,}/);
       const bodyXml = paras
-        .map((p) => {
-          // Multi-line single paragraph: line breaks via <w:br/>.
+        .map((p, pi) => {
           const lines = p.split('\n');
           const runs = lines
             .map((line, i) => {
               const br = i < lines.length - 1 ? '<w:br/>' : '';
-              return `<w:r><w:t xml:space="preserve">${escXml(line)}</w:t>${br}</w:r>`;
+              return (
+                `<w:r><w:rPr><w:color w:val="000000"/><w:sz w:val="20"/><w:szCs w:val="20"/></w:rPr>` +
+                `<w:t xml:space="preserve">${escXml(line)}</w:t>${br}</w:r>`
+              );
             })
             .join('');
-          const inner = runs || '<w:r><w:t xml:space="preserve"></w:t></w:r>';
-          return `<w:p w14:paraId="${escXml(c.paraId)}" w14:textId="00000000">${inner}</w:p>`;
+          const textRuns = runs || '<w:r><w:t xml:space="preserve"></w:t></w:r>';
+          const paraId = pi === 0 ? c.paraId : makeParaId(c.id * 1000 + pi + 17);
+          const annRef =
+            pi === 0
+              ? '<w:r><w:rPr><w:rStyle w:val="CommentReference"/></w:rPr><w:annotationRef/></w:r>'
+              : '';
+          return `<w:p w14:paraId="${escXml(paraId)}" w14:textId="77777777">${annRef}${textRuns}</w:p>`;
         })
         .join('');
       return `<w:comment ${attrs}>${bodyXml}</w:comment>`;
@@ -335,7 +353,10 @@ function renderCommentsXml(items) {
 
   return (
     '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
-    `<w:comments xmlns:w="${NS_W}" xmlns:w14="${NS_W14}">${inner}</w:comments>`
+    `<w:comments xmlns:w="${NS_W}" xmlns:w14="${NS_W14}" xmlns:w15="${NS_W15}" ` +
+    `xmlns:w16cid="${NS_W16CID}" xmlns:w16cex="${NS_W16CEX}" ` +
+    `xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" ` +
+    `mc:Ignorable="w14 w15 w16cid w16cex">${inner}</w:comments>`
   );
 }
 
@@ -352,7 +373,9 @@ function renderCommentsExtendedXml(items) {
     .join('');
   return (
     '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
-    `<w15:commentsEx xmlns:w15="${NS_W15}" xmlns:w="${NS_W}">${inner}</w15:commentsEx>`
+    `<w15:commentsEx xmlns:w15="${NS_W15}" xmlns:w="${NS_W}" ` +
+    `xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" ` +
+    `mc:Ignorable="w15">${inner}</w15:commentsEx>`
   );
 }
 
@@ -362,17 +385,22 @@ function renderCommentsIdsXml(items) {
     .join('');
   return (
     '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
-    `<w16cid:commentsIds xmlns:w16cid="${NS_W16CID}" xmlns:w="${NS_W}">${inner}</w16cid:commentsIds>`
+    `<w16cid:commentsIds xmlns:w16cid="${NS_W16CID}" xmlns:w="${NS_W}" ` +
+    `xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" ` +
+    `mc:Ignorable="w16cid">${inner}</w16cid:commentsIds>`
   );
 }
 
 function renderCommentsExtensibleXml(items) {
+  // Word/skill format uses durableId (NOT paraId) on commentExtensible.
   const inner = items
-    .map((i) => `<w16cex:commentExtensible w16cex:paraId="${escXml(i.paraId)}" w16cex:dateUtc="${escXml(i.dateUtc)}"/>`)
+    .map((i) => `<w16cex:commentExtensible w16cex:durableId="${escXml(i.durableId)}" w16cex:dateUtc="${escXml(i.dateUtc)}"/>`)
     .join('');
   return (
     '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
-    `<w16cex:commentsExtensible xmlns:w16cex="${NS_W16CEX}" xmlns:w="${NS_W}">${inner}</w16cex:commentsExtensible>`
+    `<w16cex:commentsExtensible xmlns:w16cex="${NS_W16CEX}" xmlns:w="${NS_W}" ` +
+    `xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" ` +
+    `mc:Ignorable="w16cex">${inner}</w16cex:commentsExtensible>`
   );
 }
 

@@ -57587,12 +57587,14 @@ function isValidThread(thread) {
   return true;
 }
 function makeParaId(counter) {
-  const hex = (counter * 2654435761 >>> 0).toString(16).toUpperCase();
-  return ("0000000" + hex).slice(-8);
+  const n = counter * 2654435761 >>> 0 & 2147483647;
+  const v = n === 0 ? 1 : n;
+  return ("0000000" + v.toString(16).toUpperCase()).slice(-8);
 }
 function makeDurableId(counter) {
-  const hex = (counter * 2246822519 >>> 0).toString(16).toUpperCase();
-  return ("0000000" + hex).slice(-8);
+  let n = counter * 2246822519 >>> 0 & 2147483646;
+  if (n === 0) n = 2;
+  return ("0000000" + n.toString(16).toUpperCase()).slice(-8);
 }
 function toIsoDate(s) {
   if (!s) return "1970-01-01T00:00:00Z";
@@ -57666,6 +57668,7 @@ function buildCommentsParts(annotations) {
     });
     extensibleItems.push({
       paraId: rootParaId,
+      durableId: rootDurableId,
       dateUtc: rootCreated
     });
     if (rootAuthorId) {
@@ -57722,6 +57725,7 @@ function buildCommentsParts(annotations) {
       });
       extensibleItems.push({
         paraId: replyParaId,
+        durableId: replyDurableId,
         dateUtc: replyCreated
       });
       if (replyAuthorId) {
@@ -57736,7 +57740,7 @@ function buildCommentsParts(annotations) {
   result.commentsExtendedXml = renderCommentsExtendedXml(extendedItems);
   result.commentsIdsXml = renderCommentsIdsXml(idsItems);
   result.commentsExtensibleXml = renderCommentsExtensibleXml(extensibleItems);
-  result.peopleXml = peopleMap.size > 0 ? renderPeopleXml(peopleMap) : null;
+  result.peopleXml = null;
   return result;
 }
 function renderCommentsXml(items) {
@@ -57748,18 +57752,20 @@ function renderCommentsXml(items) {
       `w:date="${escXml(c.date)}"`
     ].join(" ");
     const paras = String(c.body || "").split(/\n{2,}/);
-    const bodyXml = paras.map((p) => {
+    const bodyXml = paras.map((p, pi) => {
       const lines = p.split("\n");
       const runs = lines.map((line, i) => {
         const br = i < lines.length - 1 ? "<w:br/>" : "";
-        return `<w:r><w:t xml:space="preserve">${escXml(line)}</w:t>${br}</w:r>`;
+        return `<w:r><w:rPr><w:color w:val="000000"/><w:sz w:val="20"/><w:szCs w:val="20"/></w:rPr><w:t xml:space="preserve">${escXml(line)}</w:t>${br}</w:r>`;
       }).join("");
-      const inner3 = runs || '<w:r><w:t xml:space="preserve"></w:t></w:r>';
-      return `<w:p w14:paraId="${escXml(c.paraId)}" w14:textId="00000000">${inner3}</w:p>`;
+      const textRuns = runs || '<w:r><w:t xml:space="preserve"></w:t></w:r>';
+      const paraId = pi === 0 ? c.paraId : makeParaId(c.id * 1e3 + pi + 17);
+      const annRef = pi === 0 ? '<w:r><w:rPr><w:rStyle w:val="CommentReference"/></w:rPr><w:annotationRef/></w:r>' : "";
+      return `<w:p w14:paraId="${escXml(paraId)}" w14:textId="77777777">${annRef}${textRuns}</w:p>`;
     }).join("");
     return `<w:comment ${attrs}>${bodyXml}</w:comment>`;
   }).join("");
-  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:comments xmlns:w="${NS_W}" xmlns:w14="${NS_W14}">${inner2}</w:comments>`;
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:comments xmlns:w="${NS_W}" xmlns:w14="${NS_W14}" xmlns:w15="${NS_W15}" xmlns:w16cid="${NS_W16CID}" xmlns:w16cex="${NS_W16CEX}" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" mc:Ignorable="w14 w15 w16cid w16cex">${inner2}</w:comments>`;
 }
 function renderCommentsExtendedXml(items) {
   const inner2 = items.map((e) => {
@@ -57770,21 +57776,15 @@ function renderCommentsExtendedXml(items) {
     ].filter(Boolean).join(" ");
     return `<w15:commentEx ${attrs}/>`;
   }).join("");
-  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w15:commentsEx xmlns:w15="${NS_W15}" xmlns:w="${NS_W}">${inner2}</w15:commentsEx>`;
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w15:commentsEx xmlns:w15="${NS_W15}" xmlns:w="${NS_W}" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" mc:Ignorable="w15">${inner2}</w15:commentsEx>`;
 }
 function renderCommentsIdsXml(items) {
   const inner2 = items.map((i) => `<w16cid:commentId w16cid:paraId="${escXml(i.paraId)}" w16cid:durableId="${escXml(i.durableId)}"/>`).join("");
-  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w16cid:commentsIds xmlns:w16cid="${NS_W16CID}" xmlns:w="${NS_W}">${inner2}</w16cid:commentsIds>`;
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w16cid:commentsIds xmlns:w16cid="${NS_W16CID}" xmlns:w="${NS_W}" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" mc:Ignorable="w16cid">${inner2}</w16cid:commentsIds>`;
 }
 function renderCommentsExtensibleXml(items) {
-  const inner2 = items.map((i) => `<w16cex:commentExtensible w16cex:paraId="${escXml(i.paraId)}" w16cex:dateUtc="${escXml(i.dateUtc)}"/>`).join("");
-  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w16cex:commentsExtensible xmlns:w16cex="${NS_W16CEX}" xmlns:w="${NS_W}">${inner2}</w16cex:commentsExtensible>`;
-}
-function renderPeopleXml(peopleMap) {
-  const inner2 = Array.from(peopleMap.values()).map(
-    (p) => `<w15:person w:author="${escXml(p.author)}"><w15:presenceInfo w15:providerId="None" w15:userId="${escXml(p.userId)}"/></w15:person>`
-  ).join("");
-  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w15:people xmlns:w15="${NS_W15}" xmlns:w="${NS_W}">${inner2}</w15:people>`;
+  const inner2 = items.map((i) => `<w16cex:commentExtensible w16cex:durableId="${escXml(i.durableId)}" w16cex:dateUtc="${escXml(i.dateUtc)}"/>`).join("");
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w16cex:commentsExtensible xmlns:w16cex="${NS_W16CEX}" xmlns:w="${NS_W}" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" mc:Ignorable="w16cex">${inner2}</w16cex:commentsExtensible>`;
 }
 
 // modules/docx-import.js
@@ -59794,9 +59794,9 @@ var State2 = {
   tabs: [],
   // [{ id, name, html, annotations, dirty, handle, saveMode, mediaUrls, mediaFiles, ... }]
   activeTabId: null,
-  // 磁盘路径提示 (来自 ?open= 或 handle 名)。v1.45.6: 取消「受保护文档」写盘拦截。
+  // 磁盘路径提示 (来自 pending-open / handle 名)。v1.45.6: 取消「受保护文档」写盘拦截。
   diskPathHint: "",
-  // Runtime-only deep-link watch capability (never persisted / never left in URL).
+  // Runtime-only external path watch (pending-open / server path; never left in URL).
   externalWatchPath: "",
   externalWatchToken: "",
   externalWatch: {
@@ -70579,7 +70579,7 @@ function injectCommentRangeMarkers(bodyXml, commentsParts) {
     const pPr = pPrMatch ? pPrMatch[1] : "";
     const rest = pPrMatch ? inner2.slice(pPrMatch[1].length) : inner2;
     const id = String(commentId);
-    return openTag + pPr + `<w:commentRangeStart w:id="${id}"/>` + rest + `<w:commentRangeEnd w:id="${id}"/><w:r><w:commentReference w:id="${id}"/></w:r></w:p>`;
+    return openTag + pPr + `<w:commentRangeStart w:id="${id}"/>` + rest + `<w:commentRangeEnd w:id="${id}"/><w:r><w:rPr><w:rStyle w:val="CommentReference"/></w:rPr><w:commentReference w:id="${id}"/></w:r></w:p>`;
   }
   const parts = [];
   const reP = /<w:p\b[\s\S]*?<\/w:p>/g;
@@ -70833,7 +70833,7 @@ async function buildDocxBlob(html, mediaFiles, annotations = []) {
       }
       pCount++;
       const imgId = pCount;
-      const runXml = `<w:r><w:rPr/><w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0"><wp:extent cx="${cx}" cy="${cy}"/><wp:docPr id="${imgId}" name="Picture ${imgId}"/><a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:nvPicPr><pic:cNvPr id="${imgId}" name="Picture ${imgId}"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="${rIdForImg}" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>`;
+      const runXml = `<w:r><w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><wp:extent cx="${cx}" cy="${cy}"/><wp:docPr id="${imgId}" name="Picture ${imgId}"/><wp:cNvGraphicFramePr><a:graphicFrameLocks noChangeAspect="1"/></wp:cNvGraphicFramePr><a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic><pic:nvPicPr><pic:cNvPr id="${imgId}" name="Picture ${imgId}"/><pic:cNvPicPr><a:picLocks noChangeAspect="1"/></pic:cNvPicPr></pic:nvPicPr><pic:blipFill><a:blip r:embed="${rIdForImg}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>`;
       bodyXml += `<w:p>${runXml}</w:p>`;
       continue;
     }
@@ -70877,50 +70877,57 @@ async function buildDocxBlob(html, mediaFiles, annotations = []) {
   }
   let commentRels = "";
   let nextRel = imageMap.size + 1;
+  const corePartRels = `  <Relationship Id="rId${nextRel++}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+    <Relationship Id="rId${nextRel++}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings" Target="settings.xml"/>
+    <Relationship Id="rId${nextRel++}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/fontTable" Target="fontTable.xml"/>
+  `;
   const hasCommentParts = !!(commentsParts && commentsParts.commentEntries && commentsParts.commentEntries.length);
   if (hasCommentParts) {
     commentRels += `  <Relationship Id="rId${nextRel++}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments" Target="comments.xml"/>
-`;
+  `;
     commentRels += `  <Relationship Id="rId${nextRel++}" Type="http://schemas.microsoft.com/office/2011/relationships/commentsExtended" Target="commentsExtended.xml"/>
-`;
+  `;
     commentRels += `  <Relationship Id="rId${nextRel++}" Type="http://schemas.microsoft.com/office/2016/09/relationships/commentsIds" Target="commentsIds.xml"/>
-`;
+  `;
     commentRels += `  <Relationship Id="rId${nextRel++}" Type="http://schemas.microsoft.com/office/2018/08/relationships/commentsExtensible" Target="commentsExtensible.xml"/>
-`;
+  `;
     if (commentsParts.peopleXml) {
       commentRels += `  <Relationship Id="rId${nextRel++}" Type="http://schemas.microsoft.com/office/2011/relationships/people" Target="people.xml"/>
-`;
+  `;
     }
   }
   const docRels = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-${imgRels}${commentRels}</Relationships>`;
+  <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  ${imgRels}${corePartRels}${commentRels}</Relationships>`;
   zip.file("word/_rels/document.xml.rels", docRels);
   let types = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
-  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
-  <Default Extension="xml" ContentType="application/xml"/>
-  <Default Extension="png" ContentType="image/png"/>
-  <Default Extension="jpg" ContentType="image/jpeg"/>
-  <Default Extension="jpeg" ContentType="image/jpeg"/>
-  <Default Extension="gif" ContentType="image/gif"/>
-  <Default Extension="svg" ContentType="image/svg+xml"/>
-  <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
-  <Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>
-  <Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>`;
+  <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+    <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+    <Default Extension="xml" ContentType="application/xml"/>
+    <Default Extension="png" ContentType="image/png"/>
+    <Default Extension="jpg" ContentType="image/jpeg"/>
+    <Default Extension="jpeg" ContentType="image/jpeg"/>
+    <Default Extension="gif" ContentType="image/gif"/>
+    <Default Extension="svg" ContentType="image/svg+xml"/>
+    <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+    <Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>
+    <Override PartName="/word/settings.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.settings+xml"/>
+    <Override PartName="/word/fontTable.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.fontTable+xml"/>
+    <Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>
+    <Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>`;
   if (hasCommentParts) {
     types += `
-  <Override PartName="/word/comments.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.comments+xml"/>
-  <Override PartName="/word/commentsExtended.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.commentsExtended+xml"/>
-  <Override PartName="/word/commentsIds.xml" ContentType="application/vnd.ms-word.commentsIds+xml"/>
-  <Override PartName="/word/commentsExtensible.xml" ContentType="application/vnd.ms-word.commentsExtensible+xml"/>`;
+    <Override PartName="/word/comments.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.comments+xml"/>
+    <Override PartName="/word/commentsExtended.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.commentsExtended+xml"/>
+    <Override PartName="/word/commentsIds.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.commentsIds+xml"/>
+        <Override PartName="/word/commentsExtensible.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.commentsExtensible+xml"/>`;
     if (commentsParts.peopleXml) {
       types += `
-  <Override PartName="/word/people.xml" ContentType="application/vnd.ms-word.people+xml"/>`;
+        <Override PartName="/word/people.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.people+xml"/>`;
     }
   }
   types += `
-</Types>`;
+  </Types>`;
   zip.file("[Content_Types].xml", types);
   const docXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:document xmlns:wpc="http://schemas.microsoft.com/office/word/2010/wordprocessingCanvas"
@@ -70943,6 +70950,29 @@ ${imgRels}${commentRels}</Relationships>`;
        mc:Ignorable="w14 w15 wp14">
 <w:body>${bodyXml}<w:sectPr><w:pgSz w:w="12240" w:h="15840"/><w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440" w:header="720" w:footer="720" w:gutter="0"/><w:cols w:space="720"/><w:docGrid w:linePitch="360"/></w:sectPr></w:body></w:document>`;
   zip.file("word/document.xml", docXml);
+  zip.file(
+    "word/styles.xml",
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+  <w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+    <w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri" w:eastAsia="Calibri" w:cs="Calibri"/><w:sz w:val="22"/><w:szCs w:val="22"/></w:rPr></w:rPrDefault><w:pPrDefault><w:pPr><w:spacing w:after="160" w:line="276" w:lineRule="auto"/></w:pPr></w:pPrDefault></w:docDefaults>
+    <w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:qFormat/></w:style>
+    <w:style w:type="paragraph" w:styleId="Heading1"><w:name w:val="heading 1"/><w:basedOn w:val="Normal"/><w:uiPriority w:val="9"/><w:qFormat/><w:pPr><w:outlineLvl w:val="0"/></w:pPr><w:rPr><w:b/><w:sz w:val="32"/></w:rPr></w:style>
+    <w:style w:type="paragraph" w:styleId="Heading2"><w:name w:val="heading 2"/><w:basedOn w:val="Normal"/><w:uiPriority w:val="9"/><w:qFormat/><w:pPr><w:outlineLvl w:val="1"/></w:pPr><w:rPr><w:b/><w:sz w:val="28"/></w:rPr></w:style>
+    <w:style w:type="paragraph" w:styleId="Heading3"><w:name w:val="heading 3"/><w:basedOn w:val="Normal"/><w:uiPriority w:val="9"/><w:qFormat/><w:pPr><w:outlineLvl w:val="2"/></w:pPr><w:rPr><w:b/><w:sz w:val="24"/></w:rPr></w:style>
+    <w:style w:type="character" w:styleId="CommentReference"><w:name w:val="annotation reference"/><w:uiPriority w:val="99"/><w:semiHidden/><w:unhideWhenUsed/><w:rPr><w:sz w:val="16"/><w:szCs w:val="16"/></w:rPr></w:style>
+      <w:style w:type="paragraph" w:styleId="CommentText"><w:name w:val="annotation text"/><w:basedOn w:val="Normal"/><w:uiPriority w:val="99"/><w:semiHidden/><w:unhideWhenUsed/><w:rPr><w:sz w:val="20"/><w:szCs w:val="20"/></w:rPr></w:style>
+  </w:styles>`
+  );
+  zip.file(
+    "word/settings.xml",
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+  <w:settings xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:zoom w:percent="100"/><w:defaultTabStop w:val="720"/><w:characterSpacingControl w:val="doNotCompress"/></w:settings>`
+  );
+  zip.file(
+    "word/fontTable.xml",
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+  <w:fonts xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:font w:name="Calibri"><w:panose1 w:val="020F0502020204030204"/></w:font><w:font w:name="Times New Roman"/><w:font w:name="Consolas"/></w:fonts>`
+  );
   if (hasCommentParts) {
     zip.file("word/comments.xml", commentsParts.commentsXml);
     zip.file("word/commentsExtended.xml", commentsParts.commentsExtendedXml);
@@ -73368,10 +73398,13 @@ async function boot() {
   if (isFirstTime) {
     setTimeout(() => promptAuthor({ firstTime: true }), 400);
   }
-  const _urlParams = new URLSearchParams(location.search);
-  if (_urlParams.has("open")) {
-    console.log("[boot] ?open= present, skipping tryReconnect (handled by _handleUrlOpen)");
-  } else {
+  let launchOpened = false;
+  try {
+    launchOpened = await consumeLaunchOpen();
+  } catch (e) {
+    console.warn("[boot] consumeLaunchOpen failed:", e);
+  }
+  if (!launchOpened) {
     await tryReconnect();
   }
   try {
@@ -73538,61 +73571,140 @@ async function _fetchSessionToken() {
     return "";
   }
 }
-async function _handleUrlOpen() {
-  const params = new URLSearchParams(location.search);
-  const openPath = params.get("open");
-  if (!openPath) return;
+async function _openMentorAbsolutePath(openPath, token) {
   const baseName = openPath.split("\\").pop().split("/").pop() || "open.mentor";
   if (State2.currentFile && State2.currentFile.name === baseName && hasWriteHandle()) {
-    console.log("[?open] already loaded with write handle via reconnect; stripping url");
-    _stripOpenQueryFromUrl();
-    return;
+    console.log("[launch-open] already loaded with write handle");
+    return true;
   }
   let opened = false;
   try {
-    let token = await _fetchSessionToken();
-    if (!token) token = params.get("token") || "";
-    const url = location.origin + "/open?path=" + encodeURIComponent(openPath) + (token ? "&token=" + encodeURIComponent(token) : "");
-    const r = await fetch(url, { cache: "no-store" });
-    if (!r.ok) {
-      console.warn("[?open] fetch failed:", r.status, r.statusText);
-      showToast("\u65E0\u6CD5\u4ECE\u94FE\u63A5\u6253\u5F00\u6587\u4EF6 (HTTP " + r.status + ")\uFF0C\u5C1D\u8BD5\u91CD\u8FDE\u2026", 2800);
-    } else {
-      const blob = await r.blob();
-      const file = new File([blob], baseName, { type: "application/zip" });
-      for (let i = 0; i < 100 && !(State2.editor && typeof openFromMentorFile === "function"); i++) {
-        await new Promise((r2) => setTimeout(r2, 50));
+    try {
+      let stored = null;
+      try {
+        stored = await HandleStore.getFile(baseName);
+      } catch (_) {
       }
-      if (typeof openFromMentorFile === "function" && State2.editor) {
-        State2.diskPathHint = openPath;
-        State2.externalWatchPath = openPath;
-        State2.externalWatchToken = token || "";
-        await openFromMentorFile(file);
+      if (stored) {
+        let perm = "prompt";
         try {
-          startSupervisionPolling();
+          perm = await stored.queryPermission({ mode: "readwrite" });
         } catch (_) {
         }
-        opened = true;
-        showToast("\u5DF2\u6253\u5F00 " + baseName, 2500);
+        if (perm === "granted") {
+          State2.diskPathHint = openPath;
+          State2.externalWatchPath = openPath;
+          State2.externalWatchToken = token || "";
+          await openFromMentorHandle(stored, { preserveExternalWatch: true });
+          try {
+            startSupervisionPolling();
+          } catch (_) {
+          }
+          try {
+            if (typeof startExternalWatchForCurrentDocument === "function") {
+              await startExternalWatchForCurrentDocument();
+            }
+          } catch (_) {
+          }
+          opened = true;
+          showToast("\u5DF2\u6253\u5F00\u5E76\u53EF\u5199\u56DE " + baseName, 2500);
+        }
+      }
+    } catch (e) {
+      console.warn("[launch-open] stored-handle open failed:", e);
+    }
+    if (!opened) {
+      const url = location.origin + "/open?path=" + encodeURIComponent(openPath) + (token ? "&token=" + encodeURIComponent(token) : "");
+      const r = await fetch(url, { cache: "no-store" });
+      if (!r.ok) {
+        console.warn("[launch-open] fetch failed:", r.status, r.statusText);
+        showToast("\u65E0\u6CD5\u6253\u5F00\u6587\u4EF6 (HTTP " + r.status + ")", 2800);
       } else {
-        console.warn("[?open] openFromMentorFile \u4E0D\u53EF\u7528\u6216 editor \u672A\u5C31\u7EEA");
-        showToast("\u5E94\u7528\u672A\u5C31\u7EEA, \u8BF7\u7A0D\u540E\u624B\u52A8\u6253\u5F00\u6587\u4EF6", 4e3);
+        const blob = await r.blob();
+        const file = new File([blob], baseName, { type: "application/zip" });
+        for (let i = 0; i < 100 && !(State2.editor && typeof openFromMentorFile === "function"); i++) {
+          await new Promise((r2) => setTimeout(r2, 50));
+        }
+        if (typeof openFromMentorFile === "function" && State2.editor) {
+          State2.diskPathHint = openPath;
+          State2.externalWatchPath = openPath;
+          State2.externalWatchToken = token || "";
+          await openFromMentorFile(file);
+          try {
+            startSupervisionPolling();
+          } catch (_) {
+          }
+          opened = true;
+          let upgraded = false;
+          try {
+            const up = await tryAttachStoredWriteHandle(baseName);
+            upgraded = !!(up && up.ok);
+          } catch (_) {
+          }
+          if (upgraded) {
+            showToast("\u5DF2\u6253\u5F00\u5E76\u53EF\u5199\u56DE " + baseName, 2500);
+          } else {
+            showToast("\u5DF2\u6253\u5F00 " + baseName + " \xB7 \u4FDD\u5B58\u65F6\u6388\u6743\u4E00\u6B21\u5373\u53EF\u5199\u56DE", 3200);
+            try {
+              setStatus("\u5DF2\u6253\u5F00", baseName + " \xB7 \u4FDD\u5B58\u65F6\u70B9\u300C\u6388\u6743\u5199\u56DE\u300D");
+            } catch (_) {
+            }
+          }
+        } else {
+          console.warn("[launch-open] openFromMentorFile \u4E0D\u53EF\u7528\u6216 editor \u672A\u5C31\u7EEA");
+          showToast("\u5E94\u7528\u672A\u5C31\u7EEA, \u8BF7\u7A0D\u540E\u624B\u52A8\u6253\u5F00\u6587\u4EF6", 4e3);
+        }
       }
     }
   } catch (e) {
-    console.warn("[?open] error:", e);
-  } finally {
-    _stripOpenQueryFromUrl();
+    console.warn("[launch-open] error:", e);
   }
-  if (!opened) {
-    try {
-      await tryReconnect();
-    } catch (e) {
-      console.warn("[?open] fallback tryReconnect failed:", e);
-    }
+  return opened;
+}
+async function _consumePendingOpen(token) {
+  try {
+    const url = location.origin + "/pending-open?token=" + encodeURIComponent(token || "");
+    const r = await fetch(url, { cache: "no-store" });
+    if (!r.ok) return null;
+    const j = await r.json();
+    if (!j || !j.ok || !j.path) return null;
+    return String(j.path);
+  } catch (e) {
+    console.warn("[pending-open] fetch failed:", e);
+    return null;
   }
 }
-document.addEventListener("DOMContentLoaded", () => setTimeout(_handleUrlOpen, 100));
+async function consumeLaunchOpen() {
+  for (let i = 0; i < 100 && !State2.editor; i++) {
+    await new Promise((r2) => setTimeout(r2, 50));
+  }
+  const params = new URLSearchParams(location.search);
+  if (params.has("open")) {
+    console.error("[launch] deep-link ?open= is removed; use pending-open / double-click / Open");
+    try {
+      showToast("\u6DF1\u94FE\u5DF2\u62C6\u9664 \xB7 \u8BF7\u7528\u684C\u9762 Mentor / \u53CC\u51FB .mentor / \u5DE5\u5177\u680F\u6253\u5F00", 4500);
+    } catch (_) {
+    }
+    try {
+      setStatus("\u6DF1\u94FE\u5DF2\u62C6\u9664", "\u8BF7\u91CD\u65B0\u7528 Word \u5F0F\u6253\u5F00");
+    } catch (_) {
+    }
+    _stripOpenQueryFromUrl();
+    return false;
+  }
+  let token = await _fetchSessionToken();
+  const openPath = await _consumePendingOpen(token) || "";
+  if (!openPath) return false;
+  const opened = await _openMentorAbsolutePath(openPath, token);
+  if (!opened) {
+    console.error("[launch] pending-open path failed to load:", openPath);
+    try {
+      showToast("pending \u6253\u5F00\u5931\u8D25 \xB7 \u770B\u63A7\u5236\u53F0 \u2014 \u4E0D\u518D\u56DE\u843D\u6DF1\u94FE", 4e3);
+    } catch (_) {
+    }
+  }
+  return opened;
+}
 window.__mdAnnotator = {
   State: State2,
   FS_API,
@@ -73742,6 +73854,7 @@ window.__mdAnnotator = {
   openFiles,
   openFilesLegacy,
   openFromMentorFile,
+  consumeLaunchOpen,
   openFromDocxFile,
   parseDocxToMentor,
   buildCommentsParts,

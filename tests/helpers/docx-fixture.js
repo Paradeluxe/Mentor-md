@@ -38,9 +38,9 @@ const CONTENT_TYPE = {
   document: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml',
   comments: 'application/vnd.openxmlformats-officedocument.wordprocessingml.comments+xml',
   commentsExtended: 'application/vnd.openxmlformats-officedocument.wordprocessingml.commentsExtended+xml',
-  commentsIds:     'application/vnd.ms-word.commentsIds+xml',
-  commentsExtensible: 'application/vnd.ms-word.commentsExtensible+xml',
-  people: 'application/vnd.ms-word.people+xml',
+  commentsIds:     'application/vnd.openxmlformats-officedocument.wordprocessingml.commentsIds+xml',
+  commentsExtensible: 'application/vnd.openxmlformats-officedocument.wordprocessingml.commentsExtensible+xml',
+  people: 'application/vnd.openxmlformats-officedocument.wordprocessingml.people+xml',
   rels:   'application/vnd.openxmlformats-package.relationships+xml',
 };
 
@@ -91,6 +91,9 @@ function renderRels(rels) {
 function buildContentTypes(parts) {
   const overrides = [];
   overrides.push(`<Override PartName="/word/document.xml" ContentType="${CONTENT_TYPE.document}"/>`);
+  overrides.push(`<Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>`);
+  overrides.push(`<Override PartName="/word/settings.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.settings+xml"/>`);
+  overrides.push(`<Override PartName="/word/fontTable.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.fontTable+xml"/>`);
   if (parts.commentsXml)              overrides.push(`<Override PartName="/word/comments.xml" ContentType="${CONTENT_TYPE.comments}"/>`);
   if (parts.commentsExtendedXml)      overrides.push(`<Override PartName="/word/commentsExtended.xml" ContentType="${CONTENT_TYPE.commentsExtended}"/>`);
   if (parts.commentsIdsXml)           overrides.push(`<Override PartName="/word/commentsIds.xml" ContentType="${CONTENT_TYPE.commentsIds}"/>`);
@@ -151,7 +154,13 @@ async function makeMinimalDocx(opts) {
 
   const wordFolder = zip.folder('word');
   wordFolder.folder('_rels').file('document.xml.rels', renderRels(defaultDocumentRels(o)));
-  wordFolder.file('document.xml', o.documentXml || `<w:document xmlns:w="${NS.w}"><w:body/></w:document>`);
+  wordFolder.file('document.xml', o.documentXml || (
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+    `<w:document xmlns:w="${NS.w}"><w:body>` +
+    '<w:p><w:r><w:t>Hello</w:t></w:r></w:p>' +
+    '<w:sectPr><w:pgSz w:w="12240" w:h="15840"/><w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440"/></w:sectPr>' +
+    '</w:body></w:document>'
+  ));
 
   // Stub parts that some parsers expect
   wordFolder.file('styles.xml', stubStyles());
@@ -179,31 +188,36 @@ async function makeCommentDocxFixture() {
     '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
     `<w:document xmlns:w="${NS.w}" xmlns:w14="${NS.w14}" xmlns:w15="${NS.w15}" xmlns:w16cid="${NS.w16cid}" xmlns:w16cex="${NS.w16cex}" xmlns:mc="${NS.mc}" mc:Ignorable="w14 w15 w16cid w16cex">` +
     '<w:body>' +
-    `<w:p w14:paraId="${ROOT_PARA_ID}" w14:textId="11111111">` +
+    `<w:p>` +
       `<w:commentRangeStart w:id="0"/>` +
       '<w:r><w:t xml:space="preserve">Hello world</w:t></w:r>' +
       `<w:commentRangeEnd w:id="0"/>` +
       `<w:r><w:rPr><w:rStyle w:val="CommentReference"/></w:rPr><w:commentReference w:id="0"/></w:r>` +
     '</w:p>' +
-    `<w:p w14:paraId="0A000003" w14:textId="22222222">` +
+    `<w:p>` +
       '<w:r><w:t>Second para</w:t></w:r>' +
     '</w:p>' +
-    `<w:p w14:paraId="${REPLY_PARA_ID}" w14:textId="33333333">` +
+    `<w:p>` +
       `<w:commentRangeStart w:id="1"/>` +
       '<w:r><w:t xml:space="preserve">reply anchor</w:t></w:r>' +
       `<w:commentRangeEnd w:id="1"/>` +
       `<w:r><w:rPr><w:rStyle w:val="CommentReference"/></w:rPr><w:commentReference w:id="1"/></w:r>` +
     '</w:p>' +
+    '<w:sectPr><w:pgSz w:w="12240" w:h="15840"/><w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440"/></w:sectPr>' +
     '</w:body></w:document>';
 
   const commentsXml =
     '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
     `<w:comments xmlns:w="${NS.w}" xmlns:w14="${NS.w14}">` +
       `<w:comment w:id="0" w:author="Alice" w:initials="A" w:date="2026-01-01T00:00:00Z">` +
-        `<w:p w14:paraId="${ROOT_PARA_ID}" w14:textId="aaaaaaaa"><w:r><w:t>root note</w:t></w:r></w:p>` +
+        `<w:p w14:paraId="${ROOT_PARA_ID}" w14:textId="77777777">` +
+          '<w:r><w:rPr><w:rStyle w:val="CommentReference"/></w:rPr><w:annotationRef/></w:r>' +
+          '<w:r><w:t>root note</w:t></w:r></w:p>' +
       '</w:comment>' +
       `<w:comment w:id="1" w:author="Bob" w:initials="B" w:date="2026-01-02T00:00:00Z">` +
-        `<w:p w14:paraId="${REPLY_PARA_ID}" w14:textId="bbbbbbbb"><w:r><w:t>reply note</w:t></w:r></w:p>` +
+        `<w:p w14:paraId="${REPLY_PARA_ID}" w14:textId="77777777">` +
+          '<w:r><w:rPr><w:rStyle w:val="CommentReference"/></w:rPr><w:annotationRef/></w:r>' +
+          '<w:r><w:t>reply note</w:t></w:r></w:p>' +
       '</w:comment>' +
     '</w:comments>';
 
@@ -224,16 +238,11 @@ async function makeCommentDocxFixture() {
   const commentsExtensibleXml =
     '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
     `<w16cex:commentsExtensible xmlns:w16cex="${NS.w16cex}" xmlns:w="${NS.w}">` +
-      `<w16cex:commentExtensible w16cex:paraId="${ROOT_PARA_ID}" w16cex:dateUtc="2026-01-01T00:00:00Z"/>` +
-      `<w16cex:commentExtensible w16cex:paraId="${REPLY_PARA_ID}" w16cex:dateUtc="2026-01-02T00:00:00Z"/>` +
+      `<w16cex:commentExtensible w16cex:durableId="11111111" w16cex:dateUtc="2026-01-01T00:00:00Z"/>` +
+      `<w16cex:commentExtensible w16cex:durableId="22222222" w16cex:dateUtc="2026-01-02T00:00:00Z"/>` +
     '</w16cex:commentsExtensible>';
 
-  const peopleXml =
-    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
-    `<w15:people xmlns:w15="${NS.w15}" xmlns:w="${NS.w}">` +
-      '<w15:person w:author="Alice"><w15:presenceInfo w15:providerId="None" w15:userId="Alice"/></w15:person>' +
-      '<w15:person w:author="Bob"><w15:presenceInfo w15:providerId="None" w15:userId="Bob"/></w15:person>' +
-    '</w15:people>';
+  const peopleXml = null; // people part currently omitted — Word-desktop compatibility
 
   return await makeMinimalDocx({
     documentXml,

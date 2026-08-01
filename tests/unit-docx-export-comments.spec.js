@@ -11,7 +11,7 @@
  *  - Pending (empty comments) threads are skipped.
  *  - Resolved threads emit w15:done="1".
  *  - Replies emit a w:comment with w15:paraIdParent linking root paraId.
- *  - people.xml is built only when at least one comment carries an author.id.
+ *  - people.xml is currently always null (Word Desktop rejects our presenceInfo shape).
  *  - comment ids are 0-based, deterministic across threads.
  *  - commentEntries expose commentId, threadId, isRoot, parentCommentId.
  */
@@ -82,8 +82,9 @@ const assert = require('assert');
   assert.ok(one.commentsExtendedXml.includes('w15:done="0"'), 'unresolved done=0');
   assert.ok(one.commentsIdsXml.includes('w16cid:commentId'), 'commentsIds has commentId');
   assert.ok(one.commentsExtensibleXml.includes('w16cex:commentExtensible'), 'commentsExtensible present');
-  assert.ok(one.peopleXml && one.peopleXml.includes('Alice'), 'people.xml mentions Alice');
-  assert.ok(one.peopleXml && one.peopleXml.includes('uid-a'), 'people.xml carries author id');
+  assert.strictEqual(one.peopleXml, null, 'people.xml omitted for Word compatibility');
+  assert.ok(one.commentsXml.includes('w:annotationRef'), 'comment body has annotationRef');
+  assert.ok(one.commentsExtensibleXml.includes('w16cex:durableId='), 'commentsExtensible uses durableId');
   assert.strictEqual(one.commentEntries.length, 1, 'one entry');
   assert.strictEqual(one.commentEntries[0].commentId, 0, 'entry commentId 0');
   assert.strictEqual(one.commentEntries[0].threadId, 't1', 'entry threadId t1');
@@ -190,10 +191,8 @@ const assert = require('assert');
     assert.ok(multiParts.commentsXml.includes('w:author="' + name + '"'),
       'multi author ' + name);
   }
-  // people.xml contains all three authors
-  for (const name of ['Alice', 'Bob', 'Carol']) {
-    assert.ok(multiParts.peopleXml.includes(name), 'people.xml has ' + name);
-  }
+  // people.xml intentionally omitted
+  assert.strictEqual(multiParts.peopleXml, null, 'people.xml omitted');
   assert.strictEqual(multiParts.commentEntries.length, 3, 'multi 3 entries');
   console.log('PASS multiple threads');
 
