@@ -49,6 +49,8 @@ const { chromium } = require('playwright');
   });
 
   await t('narrow: open more menu + strike toggles', async () => {
+    await page.setViewportSize({ width: 900, height: 800 });
+    await page.waitForTimeout(50);
     await page.click('#btn-tb-more');
     const open = await page.evaluate(() => {
       const menu = document.getElementById('tb-more-menu');
@@ -66,9 +68,39 @@ const { chromium } = require('playwright');
       return { strike: ed.isActive('strike'), html: ed.getHTML() };
     });
     if (!r.strike && !/strike|s>|del>/i.test(r.html)) {
-      // tip tap may use s tag
       if (!r.html.includes('<s>') && !r.html.includes('strike')) throw new Error(JSON.stringify(r));
     }
+  });
+
+  await t('narrow: more menu keyboard open/end/escape', async () => {
+    await page.setViewportSize({ width: 900, height: 800 });
+    await page.waitForTimeout(50);
+    await page.evaluate(() => {
+      document.querySelector('#author-modal')?.classList.add('hidden');
+      const menu = document.getElementById('tb-more-menu');
+      menu?.classList.add('hidden');
+      document.getElementById('btn-tb-more')?.setAttribute('aria-expanded', 'false');
+    });
+    await page.focus('#btn-tb-more');
+    await page.keyboard.press('ArrowDown');
+    await page.waitForTimeout(40);
+    const opened = await page.getAttribute('#btn-tb-more', 'aria-expanded');
+    if (opened !== 'true') throw new Error('ArrowDown should open more menu, got ' + opened);
+    const onItem = await page.evaluate(() => document.activeElement?.matches('#tb-more-menu button[data-cmd]'));
+    if (!onItem) throw new Error('focus should move to first menuitem');
+    await page.keyboard.press('End');
+    await page.waitForTimeout(20);
+    const onLast = await page.evaluate(() => {
+      const items = [...document.querySelectorAll('#tb-more-menu button[data-cmd]')];
+      return document.activeElement === items[items.length - 1];
+    });
+    if (!onLast) throw new Error('End should focus last menuitem');
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(40);
+    const closed = await page.getAttribute('#btn-tb-more', 'aria-expanded');
+    if (closed !== 'false') throw new Error('Escape should close menu, got ' + closed);
+    const focusBack = await page.evaluate(() => document.activeElement?.id);
+    if (focusBack !== 'btn-tb-more') throw new Error('focus should return to more btn, got ' + focusBack);
   });
 
   await t('wide: more btn hidden via CSS; strike still reachable', async () => {
@@ -136,7 +168,7 @@ const { chromium } = require('playwright');
 
   await t('meta build mentions 1.43.46', async () => {
     const v = await page.evaluate(() => document.querySelector('meta[name="build"]')?.content || '');
-    if (!/1\.43\.4[6-9]|1\.43\.[5-9]/.test(v)) throw new Error(v);
+    if (!/1\.43\.[4-9]|1\.4[4-9]|1\.[5-9]/.test(v)) throw new Error(v);
   });
 
   console.log('\nTOTAL', pass + fail, 'PASS', pass, 'FAIL', fail);

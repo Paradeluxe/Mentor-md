@@ -71270,27 +71270,71 @@ function setupFormatMoreMenu() {
   const btn = document.getElementById("btn-tb-more");
   const menu = document.getElementById("tb-more-menu");
   if (!btn || !menu) return;
-  const close3 = () => {
+  const items = () => [...menu.querySelectorAll("button[data-cmd]")];
+  const isWide = () => window.matchMedia("(min-width: 1180px)").matches;
+  const open2 = ({ focus: focus3 = false } = {}) => {
+    if (isWide()) return;
+    menu.classList.remove("hidden");
+    btn.setAttribute("aria-expanded", "true");
+    if (focus3) items()[0]?.focus();
+  };
+  const close3 = ({ restoreFocus = false } = {}) => {
     menu.classList.add("hidden");
     btn.setAttribute("aria-expanded", "false");
+    if (restoreFocus) {
+      try {
+        btn.focus();
+      } catch (_) {
+      }
+    }
   };
   const toggle = (e) => {
     e.preventDefault();
     e.stopPropagation();
-    if (window.matchMedia("(min-width: 1180px)").matches) {
+    if (isWide()) {
       close3();
       return;
     }
-    const open2 = menu.classList.contains("hidden");
-    if (open2) {
-      menu.classList.remove("hidden");
-      btn.setAttribute("aria-expanded", "true");
-    } else close3();
+    if (menu.classList.contains("hidden")) open2();
+    else close3();
   };
   btn.addEventListener("click", toggle);
+  btn.addEventListener("keydown", (e) => {
+    if (isWide()) return;
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      open2({ focus: true });
+      if (e.key === "ArrowUp") {
+        const list = items();
+        list[list.length - 1]?.focus();
+      }
+    }
+  });
+  menu.addEventListener("keydown", (e) => {
+    if (isWide() || menu.classList.contains("hidden")) return;
+    const list = items();
+    if (!list.length) return;
+    const idx = list.indexOf(document.activeElement);
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      list[(idx + 1 + list.length) % list.length]?.focus();
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      list[(idx - 1 + list.length) % list.length]?.focus();
+    } else if (e.key === "Home") {
+      e.preventDefault();
+      list[0]?.focus();
+    } else if (e.key === "End") {
+      e.preventDefault();
+      list[list.length - 1]?.focus();
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      close3({ restoreFocus: true });
+    }
+  });
   menu.addEventListener("click", (e) => {
     if (e.target.closest("button[data-cmd]") && window.matchMedia("(max-width: 1179px)").matches) {
-      setTimeout(close3, 0);
+      setTimeout(() => close3(), 0);
     }
   });
   document.addEventListener("mousedown", (e) => {
@@ -71299,7 +71343,7 @@ function setupFormatMoreMenu() {
     close3();
   });
   window.addEventListener("resize", () => {
-    if (window.matchMedia("(min-width: 1180px)").matches) close3();
+    if (isWide()) close3();
   });
 }
 var _toolbarActionInflight = /* @__PURE__ */ Object.create(null);
