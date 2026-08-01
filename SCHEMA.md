@@ -85,6 +85,7 @@ ZIP 内 `content.md` + `annotations.json` 同名约定, media/* 子目录按需
 | `createdAt`  | string   | 必   | -        | ISO-8601 UTC, thread 创建时刻               |
 | `comments`   | array    | 必   | `[]`     | 评论数组, 见下                              |
 | `range`      | object   | 否   | -        | `{ from, to }` PM 位置缓存 (保存可选)       |
+| `mdRange`    | object   | 否   | -        | `{ from, to }` content.md 字符偏移（Word 式外部改稿主锚；/fix-mentor word_rebind 写入） |
 | `ranges`     | array    | 否   | -        | 多 cell / 跨块范围 `[{from,to}, ...]`       |
 | `imageAnchors` | array  | 否   | -        | 图片锚点 `[{from,to,src,alt,title}]`        |
 | `deleted`    | boolean  | 否   | `false`  | 正文锚点丢失                               |
@@ -197,3 +198,29 @@ v1 读盘器必须 **拒绝** (报损坏):
   ]
 }
 ```
+
+---
+
+## DOCX 互操作（v1.48+）
+
+Mentor ↔ DOCX 以**映射契约**为准，不是 ZIP 字节一致。
+
+### 导出（to-docx）
+
+- 入口：`buildDocxBlob(html, mediaFiles, annotations)` / 工具栏 `#btn-export-docx`
+- 有批注时写入 `word/comments.xml` + extended/ids/extensible/people，并在 `document.xml` 注入 `commentRangeStart/End` + `commentReference`
+- 无批注时与旧版「仅正文」路径一致
+- **不**导出引用库（`references.json`）；请用 `.mentor`
+
+### 导入（from-docx）
+
+- 入口：`parseDocxToMentor(arrayBuffer)` / `openFromDocxFile`（打开选择器接受 `.docx`）
+- 返回 `{ contentMd, annotations, mediaFiles, warnings }`
+- 图片：`word/media/*` → `mediaFiles['media/imageN.ext']`，正文 `![](media/imageN.ext)`
+- **threadId 每次导入重建**（Word 无稳定可移植线程 UUID）；锚点靠 `text` + `prefix`/`suffix` + `mdRange`
+- 无 range 的批注 → `invalid: true, invalidReason: 'orphaned'`
+- 引用库：导入为空清单
+
+### 明确不在范围内
+
+- track changes 完整往返、纯图片锚点批注、脚注/页眉页脚、宏文档 `.docm` 特殊行为

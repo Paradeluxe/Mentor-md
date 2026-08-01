@@ -1,5 +1,24 @@
 # Mentor Changelog
 
+## v1.48.0 — DOCX 双向转换（含批注）
+
+- **导出 DOCX**：有批注时写入 Word 批注线程（根+回复、作者、已解决）；无批注时仍为仅正文
+- **导入 DOCX**：打开 `.docx` 解析正文 + comments* 部件 → Mentor 批注；`threadId` 每次重建
+- **图片**：导入提取 `word/media` → `mediaFiles`；导出沿用既有 `inlineImage` 路径
+- **契约**：往返成功 = 引文文本 + 范围 + 线程结构 + 作者，非 ZIP 字节一致
+- 模块：`modules/docx-export-comments.js`、`modules/docx-import.js`
+- 测试：`tests/unit-docx-*.spec.js`、`tests/e2e-docx-*.spec.js`
+
+## v1.47.3 — 深链/无句柄也能写回原文件
+
+- **问题**：`?open=` 深链或下载方式打开没有 FileSystemFileHandle → Ctrl+S 只提示「不能写回原文件」。
+- **改动**：
+  1. 深链打开时若 IDB 已有同名授权 handle → 直接按可写打开（保留 path+token 监管/外部刷新）。
+  2. 否则打开后提示「保存时授权一次」；Ctrl+S 主按钮改为 **授权写回并保存**（选同一 `.mentor`），之后与普通打开相同。
+  3. 次按钮「仅下载副本」；无 FS Access 的浏览器仍走旧下载文案。
+- API：`attachWriteHandle` / `tryAttachStoredWriteHandle` / `enableWriteBackForCurrent`（`window.__mdAnnotator`）。
+
+
 按时间倒序记录已发布的变化。最新条目在上方。
 
 ## Unreleased

@@ -57789,6 +57789,7 @@ function renderPeopleXml(peopleMap) {
 
 // modules/docx-import.js
 var import_jszip = __toESM(require_jszip_min());
+var DOCX_MAX_BYTES = 25 * 1024 * 1024;
 function decodeEntities(s) {
   return String(s || "").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n))).replace(/&#x([0-9a-fA-F]+);/g, (_, h) => String.fromCharCode(parseInt(h, 16))).replace(/&amp;/g, "&");
 }
@@ -57970,8 +57971,14 @@ function parseDocumentXml(docXml) {
         mdAcc.push(runToMd(node));
         continue;
       }
-      if (n === "hyperlink" || n === "sdt" || n === "sdtContent" || n === "smartTag") {
+      if (n === "del") {
+        continue;
+      }
+      if (n === "ins" || n === "hyperlink" || n === "sdt" || n === "sdtContent" || n === "smartTag") {
         walkInline(node.children, mdAcc);
+        continue;
+      }
+      if (n === "proofErr" || n === "bookmarkStart" || n === "bookmarkEnd" || n === "sectPr") {
         continue;
       }
       if (node.children && node.children.length) walkInline(node.children, mdAcc);
@@ -58186,7 +58193,8 @@ function assembleMentorAnnotations({ comments, extended, people, rangesByComment
       warnings.push(`comment id=${root2.id} has no range in document.xml`);
     }
     const threadId = uuid();
-    annotations.push({
+    const orphan = mdFrom < 0;
+    const thread = {
       threadId,
       text: text3,
       prefix,
@@ -58201,25 +58209,91 @@ function assembleMentorAnnotations({ comments, extended, people, rangesByComment
         version: "1",
         quote: { exact: text3, prefix, suffix },
         position: null,
-        status: mdFrom >= 0 ? "attached" : "orphan",
-        confidence: mdFrom >= 0 ? 1 : 0,
+        status: orphan ? "orphan" : "attached",
+        confidence: orphan ? 0 : 1,
         updatedAt: (/* @__PURE__ */ new Date()).toISOString()
       }
-    });
+    };
+    if (orphan) {
+      thread.invalid = true;
+      thread.invalidReason = range ? "quote-not-in-md" : "orphaned";
+    }
+    annotations.push(thread);
   }
   return { annotations, warnings };
 }
-async function parseDocxToMentor(input) {
+async function parseDocxToMentor(input, options = {}) {
   const warnings = [];
-  const zip = await import_jszip.default.loadAsync(input);
+  const maxBytes = options.maxBytes != null ? options.maxBytes : DOCX_MAX_BYTES;
+  let byteLength = 0;
+  if (input && typeof input.byteLength === "number") byteLength = input.byteLength;
+  else if (input && typeof input.length === "number") byteLength = input.length;
+  if (byteLength > maxBytes) {
+    const err = new Error(
+      "DOCX \u8FC7\u5927\uFF08>" + Math.round(maxBytes / (1024 * 1024)) + "MB\uFF09\uFF0C\u8BF7\u62C6\u5206\u540E\u518D\u5BFC\u5165"
+    );
+    err.code = "DOCX_TOO_LARGE";
+    throw err;
+  }
+  let zip;
+  try {
+    zip = await import_jszip.default.loadAsync(input);
+  } catch (e) {
+    const err = new Error("\u65E0\u6CD5\u8BFB\u53D6 DOCX\uFF08\u4E0D\u662F\u6709\u6548\u7684 ZIP/OOXML \u6587\u4EF6\uFF09");
+    err.code = "DOCX_NOT_ZIP";
+    err.cause = e;
+    throw err;
+  }
   const read = async (path2) => {
     const f = zip.file(path2);
     if (!f) return null;
     return f.async("string");
   };
-  const docXml = await read("word/document.xml");
+  let docXml = await read("word/document.xml");
   if (!docXml) {
     throw new Error("DOCX missing word/document.xml");
+  }
+  const mediaFiles = {};
+  const rIdToMediaPath = {};
+  const relsXml = await read("word/_rels/document.xml.rels");
+  if (relsXml) {
+    const relTree = parseXml(relsXml);
+    const rels = findDescendants(relTree, "Relationship");
+    let imgN = 0;
+    for (const rel2 of rels) {
+      const type = attr(rel2, "Type", "type") || "";
+      if (!/\/image$/i.test(type)) continue;
+      const rId = attr(rel2, "Id", "Id", "id");
+      let target = attr(rel2, "Target", "target") || "";
+      if (!rId || !target) continue;
+      target = target.replace(/\\/g, "/");
+      let zipPath = target.startsWith("/") ? target.slice(1) : "word/" + target.replace(/^\.\//, "");
+      zipPath = zipPath.replace(/word\/word\//, "word/");
+      const file = zip.file(zipPath) || zip.file(target);
+      if (!file) {
+        warnings.push("missing media target: " + target);
+        continue;
+      }
+      const nameLower = zipPath.toLowerCase();
+      if (/\.(emf|wmf)$/i.test(nameLower)) {
+        warnings.push("skipped unsupported vector image: " + zipPath);
+        continue;
+      }
+      const extMatch = /\.([a-z0-9]+)$/i.exec(zipPath);
+      const ext = (extMatch ? extMatch[1] : "png").toLowerCase();
+      imgN += 1;
+      const mentorKey = "media/image" + imgN + "." + ext;
+      try {
+        const u8 = await file.async("uint8array");
+        mediaFiles[mentorKey] = u8;
+        rIdToMediaPath[rId] = mentorKey;
+      } catch (e) {
+        warnings.push("failed to read media " + zipPath + ": " + (e && e.message));
+      }
+    }
+  }
+  if (Object.keys(rIdToMediaPath).length) {
+    docXml = injectImageMarkdownPlaceholders(docXml, rIdToMediaPath, warnings);
   }
   const { contentMd, rangesByCommentId, plainText } = parseDocumentXml(docXml);
   const commentsXml = await read("word/comments.xml");
@@ -58242,15 +58316,32 @@ async function parseDocxToMentor(input) {
     contentMd
   });
   warnings.push(...w2);
-  const mediaFiles = {};
   return {
     contentMd,
     annotations,
     mediaFiles,
     warnings,
     plainText,
-    _debug: { rangesByCommentId, commentCount: parts.comments.length }
+    _debug: { rangesByCommentId, commentCount: parts.comments.length, mediaCount: Object.keys(mediaFiles).length }
   };
+}
+function injectImageMarkdownPlaceholders(docXml, rIdToMediaPath, warnings = []) {
+  return String(docXml || "").replace(/<w:drawing\b[\s\S]*?<\/w:drawing>/gi, (block) => {
+    const m = /r:embed\s*=\s*"([^"]+)"/i.exec(block) || /r:embed\s*=\s*'([^']+)'/i.exec(block);
+    if (!m) {
+      warnings.push("drawing without r:embed skipped");
+      return "";
+    }
+    const rId = m[1];
+    const path2 = rIdToMediaPath[rId];
+    if (!path2) {
+      warnings.push("drawing rId not mapped: " + rId);
+      return "";
+    }
+    const md2 = "![](" + path2 + ")";
+    const esc = md2.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    return '<w:r><w:t xml:space="preserve">' + esc + "</w:t></w:r>";
+  });
 }
 
 // modules/save-lifecycle.js

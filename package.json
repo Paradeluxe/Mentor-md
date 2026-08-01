@@ -1,6 +1,6 @@
 {
   "name": "mentor",
-  "version": "1.47.2",
+  "version": "1.48.0",
   "private": true,
   "description": "Mentor - WYSIWYG Markdown editor with docx-style annotations (.mentor package primary path)",
   "scripts": {

@@ -28,7 +28,7 @@
 - ✅ **KaTeX 数学公式** — `$inline$` + `$$block$$`
 - ✅ **File System Access API** — Chrome/Edge 写回原位置
 - ✅ **IndexedDB** — handle（UUID 主键）+ 正文/批注原子草稿崩溃恢复
-- ✅ **DOCX 导出** — **仅正文**（不含 Word 批注）；批注请用 `.mentor`
+- ✅ **DOCX 双向转换（含批注）** — 导出 Word 批注线程；打开 `.docx` 导入正文+批注（threadId 每次重建）；引用库仍请用 `.mentor`
 - ✅ **离线 bundle** — `npm run build:bundle`；`npm test` 带 pretest bundle 门禁
 - ✅ **模块划分** — `modules/document-session.js` / `io.js` / `annotations.js` / `tabs.js`
 - ✅ **正文引文联动** — 导入 BibTeX / RIS / EndNote / CSL-JSON，只读文献卡片插入不可直接编辑的作者—年份引文字段
@@ -159,7 +159,7 @@ python3 -m http.server 8787
 - **`Ctrl+S`** 保存：有写权限则写回当前文档；否则弹出说明并推荐 `.mentor`
 - **自动保存** 顶栏开关（默认开）：开 + 已授权文件句柄 → 停手后写回磁盘并清脏标；关或无句柄 → 仅草稿崩溃恢复
 - **另存**：下载 `.mentor` 副本，原文件不变
-- **导出 MD / DOCX**：导出副本，不清除 dirty；DOCX 仅正文
+- **导出 MD / DOCX**：导出副本，不清除 dirty；DOCX 在有批注时写入 Word 批注线程，无批注时仍为仅正文
 
 ---
 

@@ -4,10 +4,10 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Mentor — 像 docx 一样批注 Markdown</title>
-<meta name="build" content="v1.47.2 cache-bust v=224" />
+<meta name="build" content="v1.47.3 cache-bust v=232" />
 <!-- v1.43.37 offline: local fonts + KaTeX (no CDN) -->
 <link rel="stylesheet" href="vendor/fonts/local-fonts.css?v=1" />
-<link rel="stylesheet" href="styles.css?v=225" />
+<link rel="stylesheet" href="styles.css?v=232" />
 <link rel="stylesheet" href="vendor/katex/katex.min.css?v=1" />
 <!-- 字体：系统无衬线 + 等宽（侧栏时间戳、文件名） -->
 <style>
@@ -41,7 +41,7 @@
                 </div>
                 <div class="tb-group" data-toolbar-group="export">
                   <button id="btn-export-md" title="导出 Markdown 副本" class="tb-icon-text"><span class="tb-icon"></span><span class="tb-label">MD</span></button>
-                  <button id="btn-export-docx" title="导出 DOCX 副本（仅正文）" data-export-mode="body-only" class="tb-icon-text"><span class="tb-icon"></span><span class="tb-label">DOCX</span></button>
+                  <button id="btn-export-docx" title="导出 DOCX（含批注；无批注时仅正文）" data-export-mode="comments-aware" class="tb-icon-text"><span class="tb-icon"></span><span class="tb-label">DOCX</span></button>
                 </div>
                 <div class="tb-group" data-toolbar-group="references">
                   <button id="btn-refs" title="打开文献库" class="tb-icon-text" aria-controls="refs-pane" aria-expanded="false" aria-pressed="false"><span class="tb-icon"></span><span class="tb-label">文献</span></button>
@@ -359,7 +359,7 @@
 
 <!-- v1.43.37 offline: bundled app (esbuild) + local icons; no esm.sh -->
 <script src="icons.js?v=184"></script>
-<script type="module" src="app.bundle.js?v=229"></script>
+<script type="module" src="app.bundle.js?v=232"></script>
 <!-- 帮助 popover (浮在 body 顶层, 位置由 JS 动态计算) -->
 <div id="help-popover" class="help-popover hidden" role="dialog" aria-modal="false" aria-labelledby="help-popover-title">
   <div class="help-popover-arrow"></div>
@@ -374,7 +374,8 @@
     <li><strong>离线运行:</strong> v1.43.37+ 依赖已本地打包, 无网也可打开编辑</li>
     <li><strong>保存:</strong> 写回当前文档；无原位写权限时会先说明并推荐 <code>.mentor</code></li>
     <li><strong>另存:</strong> 下载 <code>.mentor</code> 副本，不改变原文件</li>
-    <li><strong>导出 DOCX:</strong> 仅正文，不含批注与引用库元数据</li>
+    <li><strong>导出 DOCX:</strong> 含批注线程（作者/回复/已解决）；引用库请用 .mentor。无批注时行为与旧版一致（仅正文）</li>
+    <li><strong>导入 DOCX:</strong> 打开 .docx 时解析正文 + Word 批注 → Mentor 批注线程（threadId 每次导入重建）；可另存为 .mentor</li>
     <li><strong>跨刷新重连:</strong> 授权过的 .md handle 留在 IndexedDB; 重开应用自动恢复并继续保存</li>
     <li><strong>正文引文:</strong> 从文献库插入；点击正文引文可定位对应文献；反复点击文献卡片可按正文顺序逐处定位，最后循环；缺失 key 会明确标红</li>
     <li><strong>文献库:</strong> 管理元数据；正文引文使用 Pandoc <code>[@citekey]</code>；改 citekey 会同步正文；导出 BibTeX 给 Pandoc/Zotero</li>
