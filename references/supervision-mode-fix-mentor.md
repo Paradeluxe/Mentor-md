@@ -125,3 +125,15 @@ Writer sidecar JSON (`*.mentor.supervision.json`):
 
 ### Server `GET /supervision?path=&token=`
 Same path/token rules as `/revision`. Missing file → `active:false, health:missing`. Read/JSON errors → typed inactive payloads (not silent empty active).
+
+
+## Normal open (basename poll) — v1.47.3+
+
+Deep-link `path+token` is no longer the only path. When the user opens a `.mentor` via the Open button / file picker:
+
+1. Client `GET /session` (localhost only) for the session token.
+2. Polls `GET /supervision?name=<basename>&token=...`.
+3. Server resolves basename via in-memory `SUPERVISION_BY_NAME` or `HTML_DIR/.supervision-index.json`.
+4. fix-mentor `write_supervision` / `register_supervision_with_server` POSTs `/supervision/register` so the index is warm before the first poll.
+
+Still requires mentor-server on 127.0.0.1. Same basename, two different folders: last register wins.

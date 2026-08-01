@@ -105,9 +105,10 @@ export function createSupervisionPoller({
     }
   }
 
-  async function start({ path, token, documentId } = {}) {
+  async function start({ path, name, token, documentId } = {}) {
     const nextDoc = String(documentId || '');
-    if (!path || !token || !nextDoc) {
+    const hasTarget = Boolean(path || name);
+    if (!hasTarget || !token || !nextDoc) {
       // Invalid input: just stop and do nothing.
       stop();
       return;
@@ -115,7 +116,12 @@ export function createSupervisionPoller({
     // Bump generation so any in-flight probe from the previous start is dropped.
     generation += 1;
     sessionId = `${nextDoc}#${generation}`;
-    currentCtx = { path: String(path), token: String(token), documentId: nextDoc };
+    currentCtx = {
+      path: path ? String(path) : '',
+      name: name ? String(name) : '',
+      token: String(token),
+      documentId: nextDoc,
+    };
     stopped = false;
     lastGood = null;
     clearTimer();

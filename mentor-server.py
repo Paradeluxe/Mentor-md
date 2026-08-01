@@ -4,6 +4,11 @@ mentor-server.py - Mentor static server + locked /open for local .mentor files
 
 Default port: 8787 (see PORT file; avoids clash with tools on 8765)
 
+Word-style launch only:
+  - Browser opens clean http://127.0.0.1:PORT/index.html (shell first)
+  - Double-click / --open queues path via pending-open
+  - Deep-link ?open= REMOVED. No --deep-link. Failures must surface.
+
 Usage:
   python mentor-server.py
   python mentor-server.py --port 9000
@@ -26,6 +31,10 @@ HTML_DIR = os.path.dirname(os.path.abspath(__file__))
 SESSION_TOKEN = secrets.token_urlsafe(24)
 ALLOWED_OPEN_PATHS = set()
 TOKEN_FILE = os.path.join(HTML_DIR, '.mentor-session')
+PENDING_OPEN_FILE = os.path.join(HTML_DIR, '.mentor-pending-open.json')
+# basename(lower) -> absolute .mentor path for name-based supervision poll
+SUPERVISION_BY_NAME = {}
+SUPERVISION_INDEX_FILE = os.path.join(HTML_DIR, '.supervision-index.json')
 
 
 def default_port():
@@ -76,6 +85,106 @@ def allow_open_path(path):
     return abspath
 
 
+def load_supervision_index():
+    try:
+        if not os.path.isfile(SUPERVISION_INDEX_FILE):
+            return
+        with open(SUPERVISION_INDEX_FILE, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        by = data.get('byName') or {}
+        if isinstance(by, dict):
+            for k, v in by.items():
+                if isinstance(k, str) and isinstance(v, str):
+                    SUPERVISION_BY_NAME[k.lower()] = v
+    except Exception:
+        pass
+
+
+load_supervision_index()
+
+
+def register_supervision_path(path):
+    """Index a .mentor path so GET /supervision?name= can resolve it."""
+    abspath = allow_open_path(path) if path else None
+    if not abspath:
+        abspath = os.path.abspath(path) if path else None
+        if not abspath or not abspath.lower().endswith('.mentor'):
+            return None
+    base = os.path.basename(abspath).lower()
+    SUPERVISION_BY_NAME[base] = abspath
+    try:
+        data = {
+            'byName': dict(SUPERVISION_BY_NAME),
+            'updatedAt': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
+        }
+        with open(SUPERVISION_INDEX_FILE, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+    return abspath
+
+
+def resolve_supervision_by_name(name):
+    if not name:
+        return None
+    base = os.path.basename(str(name)).lower()
+    path = SUPERVISION_BY_NAME.get(base)
+    if path and os.path.isfile(path):
+        return path
+    load_supervision_index()
+    path = SUPERVISION_BY_NAME.get(base)
+    if path and os.path.isfile(path):
+        return path
+    return None
+
+
+def set_pending_open(path):
+    """Queue a Word-style open: client shell loads bare index, then consumes this."""
+    abspath = allow_open_path(path)
+    if not abspath:
+        return None
+    register_supervision_path(abspath)
+    payload = {
+        'path': abspath,
+        'name': os.path.basename(abspath),
+        'setAt': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
+    }
+    try:
+        with open(PENDING_OPEN_FILE, 'w', encoding='utf-8') as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print('warn: cannot write pending-open:', e)
+        return None
+    return abspath
+
+
+def take_pending_open():
+    """Consume one pending open (or None)."""
+    if not os.path.isfile(PENDING_OPEN_FILE):
+        return None
+    try:
+        with open(PENDING_OPEN_FILE, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+    except Exception:
+        data = None
+    try:
+        os.remove(PENDING_OPEN_FILE)
+    except Exception:
+        pass
+    if not isinstance(data, dict):
+        return None
+    path = data.get('path') or ''
+    abspath = allow_open_path(path)
+    if not abspath:
+        return None
+    register_supervision_path(abspath)
+    return {
+        'path': abspath,
+        'name': os.path.basename(abspath),
+        'setAt': data.get('setAt') or '',
+    }
+
+
 def request_is_local(handler):
     host = handler.client_address[0] if handler.client_address else ''
     return host in ('127.0.0.1', '::1', 'localhost')
@@ -92,23 +201,30 @@ def token_ok(handler, params=None):
 
 
 def resolve_local_mentor_path(handler, params, require_exists=True):
-    """Shared validation for /open and /revision.
+    """Shared validation for /open, /revision, /supervision.
 
     Returns (path, None) on success or (None, (code, message, as_json)) on failure.
-    as_json True means caller should emit JSON error body (revision path).
     """
     if not request_is_local(handler):
         return None, (403, 'Local only', False)
     if not token_ok(handler, params):
-        return None, (403, 'Missing or invalid token', False)
+        return None, (403, 'Missing or invalid token', True)
     raw_path = (params.get('path') or [''])[0]
-    if not raw_path:
-        return None, (400, 'Missing path', False)
-    mentor_path = os.path.abspath(raw_path)
+    raw_name = (params.get('name') or [''])[0]
+    if raw_path:
+        mentor_path = os.path.abspath(raw_path)
+    elif raw_name:
+        mentor_path = resolve_supervision_by_name(raw_name)
+        if not mentor_path:
+            return None, (404, 'not-found', True)
+    else:
+        return None, (400, 'Missing path', True)
     if not mentor_path.lower().endswith('.mentor'):
-        return None, (400, 'Not a mentor file', False)
+        return None, (400, 'Not a mentor file', True)
     if require_exists and not os.path.isfile(mentor_path):
         return None, (404, 'not-found', True)
+    if mentor_path:
+        ALLOWED_OPEN_PATHS.add(mentor_path)
     return mentor_path, None
 
 
@@ -195,14 +311,12 @@ def read_supervision_snapshot(sidecar_path):
         'updatedAt': str(raw.get('updatedAt') or raw.get('startedAt') or ''),
     }
     if not active:
-        # Inactive snapshot keeps a compact stable shape for clients.
         compact = inactive_supervision_payload('ok' if raw.get('active') is False else 'ok')
         compact['message'] = payload['message']
         compact['tool'] = payload['tool']
         return compact
     err = str(raw.get('error') or '')
     if err:
-        # Fixed codes only — never echo free-form exception text from disk.
         if err in ('invalid-json', 'invalid-shape', 'unreadable', 'poll-failed', 'unsupported-version'):
             payload['error'] = err
     try:
@@ -226,7 +340,9 @@ class MentorHandler(http.server.SimpleHTTPRequestHandler):
         self.wfile.write(data)
 
     def do_POST(self):
-        if not self.path.startswith('/allow-open'):
+        parsed = urllib.parse.urlparse(self.path)
+        route = parsed.path or ''
+        if route not in ('/allow-open', '/supervision/register', '/pending-open'):
             self.send_error(404, 'Not found')
             return
         if not request_is_local(self):
@@ -243,6 +359,28 @@ class MentorHandler(http.server.SimpleHTTPRequestHandler):
         path = str(body.get('path') or '')
         if not token or not secrets.compare_digest(token, SESSION_TOKEN):
             self._send_json(403, {'ok': False, 'error': 'bad token'})
+            return
+        if route == '/supervision/register':
+            registered = register_supervision_path(path)
+            if not registered:
+                self._send_json(400, {'ok': False, 'error': 'invalid mentor path'})
+                return
+            self._send_json(200, {
+                'ok': True,
+                'path': registered,
+                'name': os.path.basename(registered),
+            })
+            return
+        if route == '/pending-open':
+            queued = set_pending_open(path)
+            if not queued:
+                self._send_json(400, {'ok': False, 'error': 'invalid mentor path'})
+                return
+            self._send_json(200, {
+                'ok': True,
+                'path': queued,
+                'name': os.path.basename(queued),
+            })
             return
         allowed = allow_open_path(path)
         if not allowed:
@@ -262,17 +400,34 @@ class MentorHandler(http.server.SimpleHTTPRequestHandler):
                 else:
                     self.send_error(code, message)
                 return
-            # Token already proved local session. Accept any existing local .mentor
-            # (refresh with ?open= must not die just because in-memory allowlist reset).
             ALLOWED_OPEN_PATHS.add(mentor_path)
             with open(mentor_path, 'rb') as f:
                 data = f.read()
             self.send_response(200)
             self.send_header('Content-Type', 'application/zip')
             self.send_header('Content-Length', str(len(data)))
-            # Same-origin only: do not emit Access-Control-Allow-Origin
             self.end_headers()
             self.wfile.write(data)
+            return
+        if self.path.startswith('/pending-open'):
+            if not request_is_local(self):
+                self.send_error(403, 'Local only')
+                return
+            parsed = urllib.parse.urlparse(self.path)
+            params = urllib.parse.parse_qs(parsed.query)
+            if not token_ok(self, params):
+                self._send_json(403, {'ok': False, 'error': 'bad-token'})
+                return
+            item = take_pending_open()
+            if not item:
+                self._send_json(200, {'ok': False, 'empty': True})
+                return
+            self._send_json(200, {
+                'ok': True,
+                'path': item['path'],
+                'name': item['name'],
+                'setAt': item.get('setAt') or '',
+            })
             return
         if self.path.startswith('/revision'):
             parsed = urllib.parse.urlparse(self.path)
@@ -281,7 +436,10 @@ class MentorHandler(http.server.SimpleHTTPRequestHandler):
             if err:
                 code, message, as_json = err
                 if as_json or code == 404:
-                    self._send_json(code, {'ok': False, 'error': 'not-found' if message == 'not-found' else message})
+                    self._send_json(code, {
+                        'ok': False,
+                        'error': 'not-found' if message == 'not-found' else message,
+                    })
                 else:
                     self.send_error(code, message)
                 return
@@ -297,16 +455,13 @@ class MentorHandler(http.server.SimpleHTTPRequestHandler):
                 'revision': f'{st.st_mtime_ns}:{st.st_size}',
             })
             return
-        # fix-mentor supervision sidecar: <path.mentor>.supervision.json
         if self.path.startswith('/supervision'):
             parsed = urllib.parse.urlparse(self.path)
             params = urllib.parse.parse_qs(parsed.query)
-            # Sidecar may be absent while mentor exists — do not require mentor file.
             mentor_path, err = resolve_local_mentor_path(self, params, require_exists=False)
             if err:
                 code, message, as_json = err
                 if as_json or code in (400, 403, 404):
-                    # Fixed error codes only — never echo absolute paths.
                     err_code = 'not-found' if message == 'not-found' else (
                         'bad-token' if code == 403 else 'bad-request'
                     )
@@ -324,7 +479,6 @@ class MentorHandler(http.server.SimpleHTTPRequestHandler):
             self._send_json(200, {'ok': True, 'token': SESSION_TOKEN})
             return
         super().do_GET()
-
 
 
 def start_server(port, open_url=None):
@@ -345,7 +499,7 @@ def start_server(port, open_url=None):
 
 
 def register_open_on_running(port, path):
-    """When server already runs, register path with its session token."""
+    """When server already runs, queue pending-open only (no deep-link / allow-open mask)."""
     token = ''
     try:
         with open(TOKEN_FILE, 'r', encoding='utf-8') as f:
@@ -353,12 +507,13 @@ def register_open_on_running(port, path):
     except Exception:
         pass
     if not token:
+        print('ERROR: no session token file for pending-open')
         return False
     try:
         import urllib.request
         payload = json.dumps({'token': token, 'path': os.path.abspath(path)}).encode('utf-8')
         req = urllib.request.Request(
-            f'http://127.0.0.1:{port}/allow-open',
+            f'http://127.0.0.1:{port}/pending-open',
             data=payload,
             headers={'Content-Type': 'application/json'},
             method='POST',
@@ -367,39 +522,38 @@ def register_open_on_running(port, path):
             body = json.loads(r.read().decode('utf-8', errors='ignore') or '{}')
             return bool(body.get('ok'))
     except Exception as e:
-        print('allow-open failed:', e)
+        print('ERROR: pending-open failed:', e)
         return False
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--port', type=int, default=None)
-    parser.add_argument('--open', type=str, help='Open a .mentor file')
+    parser.add_argument('--open', type=str, help='Open a .mentor file (Word-style pending queue)')
     parser.add_argument('--no-browser', action='store_true')
     args = parser.parse_args()
     port = args.port if args.port is not None else default_port()
 
     open_path = allow_open_path(args.open) if args.open else None
+    # Word-style only: clean shell URL. File arrives via pending-open.
     open_url = f'http://127.0.0.1:{port}/index.html'
     if open_path:
-        open_url += f'?open={urllib.parse.quote(open_path)}&token={urllib.parse.quote(SESSION_TOKEN)}'
+        queued = set_pending_open(open_path)
+        if not queued:
+            print('ERROR: --open failed to queue pending-open:', args.open)
+            sys.exit(3)
 
     if is_port_in_use(port):
         if is_mentor_on_port(port):
             print(f'Port {port} already running Mentor. Opening browser...')
             if open_path:
-                register_open_on_running(port, open_path)
-                # Prefer existing server token for client fetch
-                try:
-                    with open(TOKEN_FILE, 'r', encoding='utf-8') as f:
-                        existing = f.read().strip()
-                    if existing:
-                        open_url = (
-                            f'http://127.0.0.1:{port}/index.html'
-                            f'?open={urllib.parse.quote(open_path)}&token={urllib.parse.quote(existing)}'
-                        )
-                except Exception:
-                    pass
+                ok = register_open_on_running(port, open_path)
+                if not ok:
+                    print('ERROR: pending-open failed on running server:', open_path)
+                    print('No deep-link fallback. Fix server /pending-open.')
+                    sys.exit(3)
+                print('queued pending-open', open_path)
+                open_url = f'http://127.0.0.1:{port}/index.html'
             if not args.no_browser:
                 webbrowser.open(open_url)
             return
@@ -410,6 +564,8 @@ def main():
     if args.no_browser:
         os.chdir(HTML_DIR)
         write_session_token()
+        if open_path:
+            set_pending_open(open_path)
         socketserver.TCPServer.allow_reuse_address = True
         with socketserver.TCPServer(('127.0.0.1', port), MentorHandler) as httpd:
             print(f'Mentor server (no-browser): http://127.0.0.1:{port}/index.html')

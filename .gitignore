@@ -37,6 +37,8 @@ dist/
 
 # Local session / runtime junk (never commit)
 .mentor-session
+.mentor-pending-open.json
+.supervision-index.json
 server.log
 *.log
 example.mentor

@@ -28,7 +28,7 @@
 | 导入 DOCX | 「打开」选 `.docx` → 正文 + 批注进入编辑器，请另存为 `.mentor` |
 | AI 批注宠物 | 保持 Mentor 开着；终端跑 `/fm` 时普通打开即可（不必深链） |
 
-双击 `.mentor` 时地址栏是干净的 `index.html`（没有 `?open=`）。文件由本机 server 的 pending 队列交给编辑器，和 Word「先开软件再进文件」同一心智。
+双击 `.mentor` 时地址栏必须是干净的 `index.html`。文件只经本机 server 的 **pending-open** 队列交给编辑器（深链 `?open=` 已拆除，旧书签会明确失败以便暴露问题）。
 
 ## 端口
 

@@ -1,6 +1,6 @@
 @echo off
-REM Mentor launcher (Windows)
-REM v1.43.20: port 8787 (avoid 8765 clashes) + robust Python discovery + Mentor title check
+REM Mentor launcher (Windows) — Word-style shell first
+REM v1.49: Word-style only — pending-open queue; deep-link REMOVED (fail loud)
 
 setlocal EnableExtensions DisableDelayedExpansion
 cd /d "%~dp0"
@@ -34,30 +34,21 @@ if not defined PYEXE (
 )
 
 set "OPEN_FILE=%~f1"
+REM Word-style only: clean shell URL; no deep-link, no allow-open mask
 set "OPEN_URL=http://127.0.0.1:%MENTOR_PORT%/index.html"
-
-if not "%~1"=="" (
-  set "OPEN_TOKEN="
-  if exist "%~dp0.mentor-session" (
-    set /p OPEN_TOKEN=<"%~dp0.mentor-session"
-  )
-  for /f "usebackq delims=" %%A in (`powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\encode-open-path.ps1" -Path "%~f1"`) do (
-    if defined OPEN_TOKEN (
-      set "OPEN_URL=http://127.0.0.1:%MENTOR_PORT%/index.html?open=%%A&token=%OPEN_TOKEN%"
-    ) else (
-      set "OPEN_URL=http://127.0.0.1:%MENTOR_PORT%/index.html?open=%%A"
-    )
-  )
-)
 
 REM --- is port listening? ---
 netstat -an | findstr ":%MENTOR_PORT%.*LISTENING" >nul 2>&1
 if %errorlevel% equ 0 (
   REM verify it is Mentor (not psyclaw / other)
-  set "IS_MENTOR=0"
   for /f "usebackq delims=" %%T in (`powershell -NoProfile -Command "try { $r=Invoke-WebRequest -UseBasicParsing -TimeoutSec 2 -Uri 'http://127.0.0.1:%MENTOR_PORT%/index.html'; if ($r.Content -match 'Mentor') { 'yes' } else { 'no' } } catch { 'no' }"`) do set "TITLE_CHK=%%T"
   setlocal EnableDelayedExpansion
   if /i "!TITLE_CHK!"=="yes" (
+    REM If a file was passed, queue Word-style pending-open then open shell
+    if not "%OPEN_FILE%"=="" (
+      powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+        "$port='%MENTOR_PORT%'; $path='%OPEN_FILE%'; $tok=''; if (Test-Path '.mentor-session') { $tok = (Get-Content -Raw '.mentor-session').Trim() }; if (-not $tok) { $s=Invoke-RestMethod -Uri (\"http://127.0.0.1:$port/session\") -TimeoutSec 2; $tok=$s.token }; if (-not $tok) { throw 'no session token' }; $r=Invoke-RestMethod -Method Post -Uri (\"http://127.0.0.1:$port/pending-open\") -ContentType 'application/json' -Body (@{token=$tok; path=$path} | ConvertTo-Json) -TimeoutSec 3; if (-not $r.ok) { throw 'pending-open failed' }"
+    )
     start "" "!OPEN_URL!"
     endlocal
     goto :end
@@ -69,7 +60,7 @@ if %errorlevel% equ 0 (
   exit /b 2
 )
 
-REM start server
+REM start server (server queues pending-open when --open is set; browser gets clean URL)
 if "%OPEN_FILE%"=="" (
   start "Mentor Server :%MENTOR_PORT%" /MIN %PYEXE% mentor-server.py --port %MENTOR_PORT%
 ) else (
