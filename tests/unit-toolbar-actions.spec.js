@@ -25,15 +25,20 @@ const { pathToFileURL } = require('url');
     referencesOpen: false,
   });
   assert.strictEqual(noHandle.autoSave.label, '自动保存');
-  assert.strictEqual(noHandle.autoSave.pressed, true); // default ON
-  assert.strictEqual(noHandle.autoSave.intent, 'draft-only');
-  assert.strictEqual(noHandle.save.label, '保存');
-  assert.strictEqual(noHandle.save.intent, 'choose-save-target');
-  assert.strictEqual(noHandle.save.disabled, false);
-  assert.strictEqual(noHandle.saveAs.label, '另存');
-  assert.strictEqual(noHandle.versionHistory.label, '版本');
-  assert.strictEqual(noHandle.versionHistory.disabled, false);
-  assert.strictEqual(noHandle.versionHistory.pressed, false);
+    assert.strictEqual(noHandle.autoSave.pressed, true); // default ON
+    assert.strictEqual(noHandle.autoSave.intent, 'draft-only');
+    assert.strictEqual(noHandle.autoSave.disk, false);
+    assert.strictEqual(noHandle.autoSave.ariaLabel, '自动保存：开');
+    assert.ok(noHandle.autoSave.title.includes('尚无写回目标'));
+    assert.strictEqual(noHandle.save.label, '保存');
+    assert.strictEqual(noHandle.save.intent, 'choose-save-target');
+    assert.strictEqual(noHandle.save.disabled, false);
+    assert.strictEqual(noHandle.saveAs.label, '另存');
+    assert.strictEqual(noHandle.versionHistory.label, '版本');
+    assert.strictEqual(noHandle.versionHistory.disabled, false);
+    assert.strictEqual(noHandle.versionHistory.pressed, false);
+    assert.strictEqual(noHandle.versionHistory.expanded, false);
+    assert.strictEqual(noHandle.references.expanded, false);
 
   const openPane = getToolbarActionState({
     hasDocument: true,
@@ -68,14 +73,19 @@ const { pathToFileURL } = require('url');
     autoSaveDisk: true,
   });
   assert.strictEqual(withHandle.save.intent, 'write-current');
-  assert.strictEqual(withHandle.autoSave.pressed, true);
-  assert.strictEqual(withHandle.autoSave.intent, 'disk-autosave');
-  assert.strictEqual(withHandle.source.label, '预览');
-  assert.strictEqual(withHandle.source.pressed, true);
-  assert.strictEqual(withHandle.references.pressed, true);
-  assert.strictEqual(withHandle.filePane.pressed, false);
-  assert.strictEqual(withHandle.filePane.expanded, false);
-  assert.strictEqual(withHandle.commentPane.pressed, true);
+    assert.strictEqual(withHandle.autoSave.pressed, true);
+    assert.strictEqual(withHandle.autoSave.intent, 'disk-autosave');
+    assert.strictEqual(withHandle.autoSave.disk, true);
+    assert.strictEqual(withHandle.autoSave.ariaLabel, '自动保存：开');
+    assert.strictEqual(withHandle.source.label, '预览');
+    assert.strictEqual(withHandle.source.pressed, true);
+    assert.strictEqual(withHandle.source.mode, 'source');
+    assert.strictEqual(withHandle.source.title, '切换为渲染视图');
+    assert.strictEqual(withHandle.references.pressed, true);
+    assert.strictEqual(withHandle.references.expanded, true);
+    assert.strictEqual(withHandle.filePane.pressed, false);
+    assert.strictEqual(withHandle.filePane.expanded, false);
+    assert.strictEqual(withHandle.commentPane.pressed, true);
 
   const autoOff = getToolbarActionState({
     hasDocument: true,
@@ -122,9 +132,27 @@ const { pathToFileURL } = require('url');
     referencesOpen: false,
   });
   assert.strictEqual(busy.save.disabled, true);
-  assert.strictEqual(busy.references.disabled, false);
+    assert.strictEqual(busy.references.disabled, false);
 
-  console.log('PASS unit-toolbar-actions');
+    const busySave = getToolbarActionState({
+      hasDocument: true,
+      hasWriteHandle: true,
+      busyAction: 'save',
+    });
+    assert.strictEqual(busySave.save.busy, true);
+    assert.strictEqual(busySave.save.disabled, true);
+    assert.strictEqual(busySave.versionHistory.busy, false);
+    assert.strictEqual(busySave.versionHistory.disabled, true);
+
+    const sourceRendered = getToolbarActionState({
+      hasDocument: true,
+      renderMode: 'rendered',
+    });
+    assert.strictEqual(sourceRendered.source.mode, 'rendered');
+    assert.strictEqual(sourceRendered.source.title, '切换为源码视图');
+    assert.strictEqual(sourceRendered.source.ariaLabel, undefined);
+
+    console.log('PASS unit-toolbar-actions');
 })().catch((err) => {
   console.error(err.stack || err);
   process.exit(1);

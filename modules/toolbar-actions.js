@@ -32,97 +32,128 @@ export const PRIMARY_TOOLBAR_ACTIONS = Object.freeze([
  * @param {boolean} [input.canUndo]
  * @param {boolean} [input.canRedo]
  * @param {boolean} [input.busy]
+ * @param {string} [input.busyAction] - action id currently in-flight
  * @param {boolean} [input.filePaneOpen] - true when outline/file drawer is open
  * @param {boolean} [input.commentPaneOpen] - true when comment drawer is open
  * @param {boolean} [input.autoSaveEnabled] - user preference for Office-like AutoSave
  * @param {boolean} [input.autoSaveDisk] - preference on AND write-back target available
+ * @param {boolean} [input.versionPaneOpen]
  */
 export function getToolbarActionState(input = {}) {
   const hasDocument = !!input.hasDocument;
   const readOnly = !!input.readOnly;
-  const busy = !!input.busy;
+  const busyAction = typeof input.busyAction === 'string' ? input.busyAction : '';
+  const busy = !!input.busy || !!busyAction;
   const renderMode = input.renderMode === 'source' ? 'source' : 'rendered';
   const filePaneOpen = input.filePaneOpen !== false;
   const commentPaneOpen = input.commentPaneOpen !== false;
   const autoSaveEnabled = input.autoSaveEnabled !== false; // default ON
   const autoSaveDisk = !!input.autoSaveDisk;
+  const versionPaneOpen = !!input.versionPaneOpen;
+  const referencesOpen = !!input.referencesOpen;
+  const autoSaveIntent = autoSaveDisk
+    ? 'disk-autosave'
+    : (autoSaveEnabled ? 'draft-only' : 'off');
+  const autoSaveDetail = autoSaveDisk
+    ? '开启：停手后写回已授权文件'
+    : (autoSaveEnabled
+      ? '开启：尚无写回目标，仅自动保存草稿；请先保存到本地文件'
+      : '关闭：仅手动保存写回文件（仍会保存崩溃恢复草稿）');
+  const isBusy = (id) => busyAction === id;
 
   return {
     new: {
       label: '新建',
       disabled: busy,
+      busy: isBusy('new'),
     },
     open: {
       label: '打开',
       disabled: busy,
+      busy: isBusy('open'),
     },
     autoSave: {
       label: '自动保存',
       disabled: busy || readOnly,
       pressed: autoSaveEnabled,
-      intent: autoSaveDisk ? 'disk-autosave' : (autoSaveEnabled ? 'draft-only' : 'off'),
-      detail: autoSaveDisk
-        ? '开启：停手后写回已授权文件'
-        : (autoSaveEnabled
-          ? '开启：尚无写回目标，仅自动保存草稿；请先保存到本地文件'
-          : '关闭：仅手动保存写回文件（仍会保存崩溃恢复草稿）'),
+      disk: autoSaveDisk,
+      intent: autoSaveIntent,
+      detail: autoSaveDetail,
+      ariaLabel: autoSaveEnabled ? '自动保存：开' : '自动保存：关',
+      title: autoSaveDetail,
+      busy: isBusy('autoSave'),
     },
     save: {
       label: '保存',
       disabled: !hasDocument || readOnly || busy,
       intent: input.hasWriteHandle ? 'write-current' : 'choose-save-target',
       dirty: !!input.dirty,
+      busy: isBusy('save'),
     },
     saveAs: {
       label: '另存',
       disabled: !hasDocument || busy,
+      busy: isBusy('saveAs'),
     },
     versionHistory: {
       label: '版本',
       disabled: !hasDocument || busy,
-      pressed: !!input.versionPaneOpen,
+      pressed: versionPaneOpen,
+      expanded: versionPaneOpen,
       detail: '自动版本快照 · 可恢复',
+      busy: isBusy('versionHistory'),
     },
     exportMd: {
       label: 'MD',
       disabled: !hasDocument || busy,
+      busy: isBusy('exportMd'),
     },
     exportDocx: {
       label: 'DOCX',
       disabled: !hasDocument || busy,
       detail: '仅正文，不含批注与引用库元数据',
+      busy: isBusy('exportDocx'),
     },
     references: {
       label: '文献',
       // Always allow opening the library (import / manage) even with no doc
       // or while a save/export is busy — blocking this felt like a dead button.
       disabled: false,
-      pressed: !!input.referencesOpen,
+      pressed: referencesOpen,
+      expanded: referencesOpen,
+      busy: false,
     },
     undo: {
       label: '撤销',
       disabled: !hasDocument || !input.canUndo || busy,
+      busy: isBusy('undo'),
     },
     redo: {
       label: '重做',
       disabled: !hasDocument || !input.canRedo || busy,
+      busy: isBusy('redo'),
     },
     source: {
       label: renderMode === 'source' ? '预览' : '源码',
+      title: renderMode === 'source' ? '切换为渲染视图' : '切换为源码视图',
+      mode: renderMode,
       disabled: !hasDocument || busy,
       pressed: renderMode === 'source',
+      busy: isBusy('source'),
     },
     filePane: {
       label: '大纲栏',
       disabled: false,
       pressed: filePaneOpen,
       expanded: filePaneOpen,
+      busy: false,
     },
     commentPane: {
       label: '批注栏',
       disabled: false,
       pressed: commentPaneOpen,
       expanded: commentPaneOpen,
+      busy: false,
     },
   };
 }
