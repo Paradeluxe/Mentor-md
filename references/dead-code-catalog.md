@@ -11,7 +11,7 @@
 | `d131a0b` | `scripts/scan-dead-code.mjs` |
 | `3dfae12` | app dead helpers + live-sync shims + staged client path |
 | `fa0197d` | server staged writer + fuzzy UI CSS/card chrome |
-| *(bundle)* | `app.bundle.js` + `?v=250` after gates |
+| `f8921bd` | `app.bundle.js` + `?v=250` + catalog + unit align |
 
 ## Deleted / simplified (Round 5)
 
