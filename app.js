@@ -749,7 +749,6 @@ var State = {
     startedAt: 0,
     pollTimer: null,
     lastToastAt: 0,
-    staged: false,
   },
   externalWatch: {
     mode: "off",
@@ -1589,7 +1588,6 @@ function uuid() {
 function escapeHtml(s) {
   return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 }
-function escapeAttr(s) { return escapeHtml(s); }
 
 /** Short stable label from UUID (matches author chip when display name unset). */
 function authorIdToShortName(id) {
@@ -3937,7 +3935,7 @@ function shouldPromptUnload() {
   return false;
 }
 function onBeforeUnload(e) {
-  try { _closeDocChannelFull(); } catch (_) {}
+  try { closeLiveSync(); } catch (_) {}
   if (!shouldPromptUnload()) return;
   e.preventDefault();
   e.returnValue = "";
@@ -4701,11 +4699,6 @@ function markerPlaceholder(type, isReply) {
   if (type && MENTION_TYPES[type]) return MENTION_TYPES[type].placeholder;
   return "\u5199\u8C03\u6574\u8BF4\u660E\u2026";
 }
-function typeLabel(type) {
-  if (type === "ai") return "AI\u8C03\u6574";
-  if (type === "review") return "\u5BA1\u9605"; // legacy display
-  return "\u4EBA\u7C7B\u8C03\u6574";
-}
 /**
  * Seed an empty draft for new threads. Markers are manual input only.
  * @AI / @REVIEW must never be prefilled.
@@ -4745,11 +4738,9 @@ function applyThreadType(threadId, type) {
   renderCommentList();
   focusThreadInput(threadId);
 }
-// backward-compat aliases
-var AI_MENTION_PREFIX = MENTION_TYPES.ai.prefix;
+// Test/API aliases
 function bodyHasAiMarker(body) { return getMarkerType(body) === "ai"; }
 function ensureAiMarker(body) { return ensureMarker(body, "ai"); }
-function seedAiDraft(threadId) { return seedDraft(threadId, "ai"); }
 function focusThreadInput(threadId, { type = undefined } = {}) {
   setTimeout(() => {
     const ta2 = document.querySelector(`[data-thread-input="${threadId}"]`);
@@ -6226,50 +6217,7 @@ async function resolveMentorPathByName(name) {
   return "";
 }
 
-async function buildCurrentMentorZipBlobForFixMentor() {
-  // Prefer live save snapshot path used by writeCurrentToHandle.
-  if (typeof createSaveSnapshot === "function" && typeof buildMentorZipBlob === "function") {
-    try {
-      const snap = createSaveSnapshot({ skipHardAudit: true });
-      if (snap) {
-        const blob = await buildMentorZipBlob(
-          snap.mdText || "",
-          snap.sidecar,
-          snap.mediaFiles || State.mediaFiles || {},
-          snap.references || State.references,
-          { documentHtml: snap.documentHtml || null }
-        );
-        if (blob) return blob;
-      }
-    } catch (e) {
-      console.warn("[fix-mentor] createSaveSnapshot zip failed", e);
-    }
-  }
-  // Fallback: rebuild from editor state
-  let mdText = "";
-  try {
-    const flushed = flushSourceView();
-    mdText = flushed !== null ? flushed : (State.editor ? htmlToMarkdownMedia(State.editor.getHTML()) : (State.currentFile && State.currentFile.content) || "");
-  } catch (_) {
-    mdText = (State.currentFile && State.currentFile.content) || "";
-  }
-  const ann = {
-    version: "1",
-    document: (State.currentFile && State.currentFile.name) || "document.mentor",
-    updatedAt: new Date().toISOString(),
-    author: { id: State.authorId, name: State.author },
-    annotations: typeof buildAnnotationsSidecar === "function" ? buildAnnotationsSidecar() : (State.annotations || []),
-  };
-  return buildMentorZipBlob(
-    mdText,
-    ann,
-    State.mediaFiles || {},
-    State.references,
-    { documentHtml: State.editor ? htmlWithMediaPaths(State.editor.getHTML(), State.mediaUrls) : null }
-  );
-}
-
-async function applyFixMentorResultFromPath(absPath, { staged = false } = {}) {
+async function applyFixMentorResultFromPath(absPath) {
   if (!absPath) return { ok: false, error: "no-path" };
   const token = (State.externalWatchToken || "") || (await ensureLocalSessionToken());
   if (!token) return { ok: false, error: "no-token" };
@@ -6296,28 +6244,22 @@ async function applyFixMentorResultFromPath(absPath, { staged = false } = {}) {
       structuralHtml: archive && archive.documentHtml || null,
       archiveVerification: archive && archive.verification || null,
     });
-    if (!staged && isAbsMentorPath(absPath)) {
+    if (isAbsMentorPath(absPath)) {
       State.externalWatchPath = absPath;
       State.diskPathHint = absPath;
       if (State.currentFile) State.currentFile.path = absPath;
     }
     // Write back to real disk: handle OR server path (Word-style)
-    let wrote = false;
     try {
       if (typeof writeCurrentToDisk === "function" && hasDiskWriteTarget()) {
         const wr = await writeCurrentToDisk({ reason: "manual", showProgress: false, forceOverwriteExternal: true });
-        wrote = !!(wr && wr.ok);
-        if (wrote) showToast("AI 结果已写回磁盘", 2600);
+        if (wr && wr.ok) showToast("AI 结果已写回磁盘", 2600);
       } else if (keepHandle && typeof writeCurrentToHandle === "function") {
         const wr = await writeCurrentToHandle({ reason: "manual", showProgress: false, forceOverwriteExternal: true });
-        wrote = !!(wr && wr.ok);
-        if (wrote) showToast("AI 结果已写回原文件", 2600);
+        if (wr && wr.ok) showToast("AI 结果已写回原文件", 2600);
       }
     } catch (e) {
       console.warn("[fix-mentor] write-back failed", e);
-    }
-    if (!wrote && staged) {
-      showToast("AI 已处理。若未写盘，请 Ctrl+S 保存", 3600);
     }
     try { renderCommentList(); } catch (_) {}
     try { startSupervisionPolling(); } catch (_) {}
@@ -6639,7 +6581,6 @@ async function pollFixMentorJobOnce() {
       message: data.message || "",
       error: data.error || "",
       exitCode: data.exitCode,
-      staged: data.staged != null ? !!data.staged : !!job.staged,
       phase: data.phase || job.phase || "",
       phaseLabel: data.phaseLabel || job.phaseLabel || "",
       step: data.step != null ? data.step : job.step,
@@ -6654,36 +6595,29 @@ async function pollFixMentorJobOnce() {
     if (st === "done" || st === "error" || st === "cancelled") {
       stopFixMentorJobPolling();
       if (st === "done") {
-        const staged = !!(data.staged || job.staged);
         const resultPath = data.path || job.path || "";
-        showToast(staged ? "AI 处理完成 · 正在写回…" : "AI 处理完成", 2800);
+        showToast("AI 处理完成", 2800);
         try { startSupervisionPolling(); } catch (_) {}
         try {
-          if (staged && resultPath) {
-            void applyFixMentorResultFromPath(resultPath, { staged: true }).then((r) => {
+          if (resultPath) {
+            void applyFixMentorResultFromPath(resultPath).then((r) => {
               if (!r || !r.ok) {
+                // Disk path apply failed — fall back to external refresh.
+                if (typeof scheduleExternalRefresh === "function") {
+                  scheduleExternalRefresh({
+                    generation: State.externalWatch && State.externalWatch.generation,
+                    hint: { cause: "fix-mentor-done" },
+                  });
+                }
                 showToast("结果写回失败，请手动重开磁盘文件", 4000);
               }
               try { syncFixMentorJobUi(); } catch (_) {}
             });
-          } else {
-            if (typeof scheduleExternalRefresh === "function") {
-              scheduleExternalRefresh({
-                generation: State.externalWatch && State.externalWatch.generation,
-                hint: { cause: "fix-mentor-done" },
-              });
-            }
-            if (typeof refreshFromExternalDisk === "function") {
-              const gen = State.externalWatch && State.externalWatch.generation;
-              setTimeout(() => {
-                void refreshFromExternalDisk({ generation: gen }).catch(() => {});
-              }, 400);
-            }
-            // Soft re-render after a beat
-            setTimeout(() => {
-              try { renderCommentList(); } catch (_) {}
-              try { syncFixMentorJobUi(); } catch (_) {}
-            }, 1200);
+          } else if (typeof scheduleExternalRefresh === "function") {
+            scheduleExternalRefresh({
+              generation: State.externalWatch && State.externalWatch.generation,
+              hint: { cause: "fix-mentor-done" },
+            });
           }
         } catch (_) {}
       } else {
@@ -6844,7 +6778,6 @@ async function runFixMentorFromUi(opts = {}) {
     error: "",
     exitCode: null,
     startedAt: Date.now(),
-    staged: false,
     writeBackPath: saved.writeBackPath || saved.path,
   });
   showToast("提交 AI 任务…", 1600);
@@ -6890,7 +6823,6 @@ async function runFixMentorFromUi(opts = {}) {
       threadId: data.threadId || threadId,
       message: data.message || "已有任务在运行",
       error: "",
-      staged: false,
     });
     State.fixMentorJob.startedAtClient = Date.now();
     startFixMentorJobPolling();
@@ -6915,10 +6847,9 @@ async function runFixMentorFromUi(opts = {}) {
     message: data.message || "Hermes 已启动",
     error: "",
     startedAt: Date.now(),
-    staged: false,
   });
   State.fixMentorJob.startedAtClient = Date.now();
-    startFixMentorJobPolling();
+  startFixMentorJobPolling();
   showToast("AI 任务已提交 · warm Hermes", 2400);
   return { ok: true, job: data };
 }
@@ -12049,21 +11980,12 @@ function __injectLiveMessageForTest(msg) {
   onLiveMessage({ data: msg });
 }
 
-// Legacy names → live sync
+// Legacy names → live sync (kept for diag hooks / activateOpenedDocument)
 function _getDocPath() {
   return liveDocumentKey();
 }
-function _closeDocChannel() {
-  closeLiveSync();
-}
 function _openDocChannel() {
   openLiveSyncForCurrentDocument();
-}
-function _reevaluateReadOnly() {
-  // no-op: role driven by lease now
-}
-function _closeDocChannelFull() {
-  closeLiveSync();
 }
 window.addEventListener("beforeunload", onBeforeUnload);
 window.addEventListener("pagehide", () => {
@@ -17015,5 +16937,5 @@ window.__mdAnnotator__diagTab = () => ({
   live: getLiveSyncState()
 });
 window.__mdAnnotator__openDocChannel = _openDocChannel;
-window.__mdAnnotator__closeDocChannel = _closeDocChannelFull;
+window.__mdAnnotator__closeDocChannel = closeLiveSync;
 window.__mdAnnotator__getDocPath = _getDocPath;
