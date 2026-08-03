@@ -7,20 +7,35 @@ const { pathToFileURL } = require('url');
   const modUrl = pathToFileURL(path.join(__dirname, '..', 'modules', 'save-dialog.js')).href;
   const { buildSaveDialogModel, buildSaveResultCopy } = await import(modUrl);
 
-  const noHandle = buildSaveDialogModel({
+  const noHandleLegacy = buildSaveDialogModel({
     kind: 'no-handle',
     fileName: 'paper.md',
     annotations: 3,
     references: 12,
     media: 2,
+    canAuthorize: false,
   });
-  assert.strictEqual(noHandle.title, '保存文档');
-  assert.ok(noHandle.message.includes('.mentor'));
-  assert.strictEqual(noHandle.primaryLabel, '保存 .mentor');
-  assert.strictEqual(noHandle.secondaryLabel, '仅导出 Markdown');
-  assert.strictEqual(noHandle.cancelLabel, '取消');
-  assert.strictEqual(noHandle.severity, 'normal');
-  assert.ok(noHandle.details.some((d) => d.label === '包含' && d.value.includes('批注 3')));
+  assert.strictEqual(noHandleLegacy.title, '保存文档');
+  assert.ok(noHandleLegacy.message.includes('.mentor'));
+  assert.strictEqual(noHandleLegacy.primaryLabel, '保存 .mentor');
+  assert.strictEqual(noHandleLegacy.secondaryLabel, '仅导出 Markdown');
+
+  const noHandleAuth = buildSaveDialogModel({
+    kind: 'no-handle',
+    fileName: 'paper.md',
+    annotations: 3,
+    references: 12,
+    media: 2,
+    canAuthorize: true,
+  });
+  assert.strictEqual(noHandleAuth.title, '启用写回磁盘');
+  assert.strictEqual(noHandleAuth.primaryLabel, '授权写回并保存');
+  assert.strictEqual(noHandleAuth.secondaryLabel, '仅下载副本');
+  assert.ok(noHandleAuth.details.some((d) => d.label === '包含' && d.value.includes('批注 3')));
+
+  const permAuth = buildSaveDialogModel({ kind: 'permission-denied', fileName: 'a.mentor', canAuthorize: true });
+  assert.strictEqual(permAuth.primaryLabel, '重新授权写回');
+  assert.strictEqual(permAuth.secondaryLabel, '仅下载副本');
 
   assert.strictEqual(
     buildSaveDialogModel({ kind: 'external-modified', fileName: 'paper.mentor' }).title,

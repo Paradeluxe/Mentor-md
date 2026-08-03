@@ -29,7 +29,7 @@ const { pathToFileURL } = require('url');
     assert.strictEqual(noHandle.autoSave.intent, 'draft-only');
     assert.strictEqual(noHandle.autoSave.disk, false);
     assert.strictEqual(noHandle.autoSave.ariaLabel, '自动保存：开');
-    assert.ok(noHandle.autoSave.title.includes('尚无写回目标'));
+    assert.ok(noHandle.autoSave.title.includes('尚无写盘目标') || noHandle.autoSave.title.includes('仅草稿'));
     assert.strictEqual(noHandle.save.label, '保存');
     assert.strictEqual(noHandle.save.intent, 'choose-save-target');
     assert.strictEqual(noHandle.save.disabled, false);

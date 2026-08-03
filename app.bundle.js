@@ -56685,7 +56685,7 @@ function findOccurrences(text3, exact) {
 function mdEmphasisToPlain(s) {
   if (s == null || s === "") return "";
   let out = String(s);
-  out = out.replace(/\\([\\`*_{}\\[\\]()#+\\-.!|])/g, "$1");
+  out = out.replace(new RegExp("\\\\([!-/:-@[-`{-~])", "g"), "$1");
   out = out.replace(/\*\*([^*]+)\*\*/g, "$1");
   out = out.replace(/__([^_]+)__/g, "$1");
   out = out.replace(/\*([^*]+)\*/g, "$1");
@@ -57017,13 +57017,13 @@ function projectLegacyFlags(status) {
     case "moved":
       return { fuzzy: false, invalid: false, deleted: false, invalidReason: void 0 };
     case "edited":
-      return { fuzzy: true, invalid: false, deleted: false, invalidReason: "text-edited" };
+      return { fuzzy: false, invalid: false, deleted: false, invalidReason: void 0 };
     case "orphaned":
       return { fuzzy: false, invalid: true, deleted: true, invalidReason: "orphaned" };
     case "ambiguous":
-      return { fuzzy: true, invalid: true, deleted: false, invalidReason: "ambiguous" };
+      return { fuzzy: false, invalid: true, deleted: false, invalidReason: "ambiguous" };
     case "collision":
-      return { fuzzy: true, invalid: true, deleted: false, invalidReason: "mark-collision" };
+      return { fuzzy: false, invalid: true, deleted: false, invalidReason: "mark-collision" };
     case "image-missing":
       return { fuzzy: false, invalid: true, deleted: true, invalidReason: "image-deleted" };
     default:
@@ -57122,6 +57122,180 @@ function auditAnnotationInvariants({ threads, marks, doc: doc5 }) {
     errors,
     checkedAt: (/* @__PURE__ */ new Date()).toISOString()
   };
+}
+
+// modules/md-range.js
+var ANCHOR_MODE_RANGE = "range";
+function isMdRange(r) {
+  return !!(r && typeof r.from === "number" && typeof r.to === "number" && Number.isFinite(r.from) && Number.isFinite(r.to) && r.from >= 0 && r.to > r.from);
+}
+function validateThreadMdRange(thread, md2) {
+  if (!thread || typeof md2 !== "string") {
+    return { ok: false, reason: "missing" };
+  }
+  if (isImageOnlyThread(thread)) {
+    return { ok: true, reason: "image" };
+  }
+  const r = thread.mdRange;
+  if (!isMdRange(r)) return { ok: false, reason: "missing-mdRange" };
+  if (r.to > md2.length) return { ok: false, reason: "mdRange-oob" };
+  const slice2 = md2.slice(r.from, r.to);
+  const text3 = thread.text != null ? String(thread.text) : "";
+  if (slice2 === text3) {
+    return { ok: true, reason: "ok", slice: slice2 };
+  }
+  const plainSlice = mdEmphasisToPlain(slice2);
+  const plainText = mdEmphasisToPlain(text3);
+  if (plainSlice === text3 || plainSlice === plainText || slice2 === plainText) {
+    return { ok: true, reason: "ok-plain", slice: slice2, text: text3 };
+  }
+  return { ok: false, reason: "mdRange-text-mismatch", slice: slice2, text: text3 };
+}
+function isImageOnlyThread(th) {
+  if (!th) return false;
+  const t = String(th.text || "").trim();
+  if (/^\[图片\]$/i.test(t) || /^\[image\]$/i.test(t)) return true;
+  return Array.isArray(th.imageAnchors) && th.imageAnchors.length > 0 && (!th.ranges || !th.ranges.length);
+}
+function stampThreadMdRange(thread, md2, contextChars = 40) {
+  if (!thread || typeof md2 !== "string") return false;
+  if (isImageOnlyThread(thread)) return true;
+  const text3 = thread.text != null ? String(thread.text) : "";
+  if (!text3) {
+    delete thread.mdRange;
+    return false;
+  }
+  const cur = validateThreadMdRange(thread, md2);
+  if (cur.ok && (cur.reason === "ok" || cur.reason === "ok-plain")) {
+    projectQuoteFromMdRange(thread, md2, contextChars);
+    return true;
+  }
+  const hits = findOccurrences(md2, text3);
+  if (hits.length !== 1) {
+    delete thread.mdRange;
+    return false;
+  }
+  const from2 = hits[0];
+  const to = from2 + text3.length;
+  thread.mdRange = { from: from2, to };
+  projectQuoteFromMdRange(thread, md2, contextChars);
+  return true;
+}
+function projectQuoteFromMdRange(thread, md2, contextChars = 40) {
+  if (!thread || !isMdRange(thread.mdRange) || typeof md2 !== "string") return;
+  const { from: from2, to } = thread.mdRange;
+  if (to > md2.length) return;
+  const exact = md2.slice(from2, to);
+  thread.text = exact;
+  const p0 = Math.max(0, from2 - contextChars);
+  const s1 = Math.min(md2.length, to + contextChars);
+  thread.prefix = md2.slice(p0, from2);
+  thread.suffix = md2.slice(to, s1);
+  if (!thread.anchor || typeof thread.anchor !== "object") {
+    thread.anchor = { version: "1" };
+  }
+  thread.anchor.quote = {
+    exact,
+    prefix: thread.prefix,
+    suffix: thread.suffix
+  };
+  thread.anchor.status = thread.anchor.status === "orphaned" ? "orphaned" : "attached";
+  if (thread.anchor.status === "attached") {
+    thread.invalid = false;
+    thread.deleted = false;
+    thread.fuzzy = false;
+    delete thread.invalidReason;
+  }
+}
+function stampSidecarMdRanges(sidecar, md2, opts = {}) {
+  const contextChars = opts.contextChars != null ? opts.contextChars : 40;
+  const anns = sidecar && Array.isArray(sidecar.annotations) ? sidecar.annotations : [];
+  let stamped = 0;
+  let failed = 0;
+  const failedIds = [];
+  for (const th of anns) {
+    if (!th || typeof th !== "object") continue;
+    if (isImageOnlyThread(th)) {
+      stamped += 1;
+      continue;
+    }
+    if (stampThreadMdRange(th, md2, contextChars)) stamped += 1;
+    else {
+      failed += 1;
+      if (th.threadId) failedIds.push(String(th.threadId));
+      th.invalid = true;
+      th.deleted = false;
+      th.fuzzy = false;
+      th.invalidReason = th.invalidReason || "missing-mdRange";
+      if (th.anchor && typeof th.anchor === "object") {
+        th.anchor = { ...th.anchor, status: "orphaned", confidence: 0 };
+      }
+    }
+  }
+  if (sidecar && typeof sidecar === "object") {
+    sidecar.anchorMode = ANCHOR_MODE_RANGE;
+    if (opts.contentMdSha256) sidecar.contentMdSha256 = opts.contentMdSha256;
+    sidecar.updatedAt = sidecar.updatedAt || (/* @__PURE__ */ new Date()).toISOString();
+  }
+  return { stamped, failed, failedIds };
+}
+function pmRangeFromMdRange(doc5, md2, mdRange, sep = " ") {
+  if (!doc5 || typeof md2 !== "string" || !isMdRange(mdRange)) return null;
+  if (mdRange.to > md2.length) return null;
+  const exact = md2.slice(mdRange.from, mdRange.to);
+  if (!exact) return null;
+  const needle = mdEmphasisToPlain(exact) || exact;
+  const plain = doc5.textBetween(0, doc5.content.size, sep, sep);
+  let hits = findOccurrences(plain, needle);
+  if (!hits.length && needle !== exact) {
+    hits = findOccurrences(plain, exact);
+  }
+  if (!hits.length) return null;
+  let chosen = null;
+  if (hits.length === 1) {
+    chosen = hits[0];
+  } else {
+    const mdPfx = mdEmphasisToPlain(md2.slice(Math.max(0, mdRange.from - 40), mdRange.from));
+    const mdSfx = mdEmphasisToPlain(md2.slice(mdRange.to, Math.min(md2.length, mdRange.to + 40)));
+    const pTail = mdPfx.slice(-Math.min(24, mdPfx.length));
+    const sHead = mdSfx.slice(0, Math.min(24, mdSfx.length));
+    const ok = [];
+    for (const h of hits) {
+      const lp = plain.slice(Math.max(0, h - 40), h);
+      const ls = plain.slice(h + needle.length, h + needle.length + 40);
+      const prefOk = !pTail || lp.endsWith(pTail);
+      const sufOk = !sHead || ls.startsWith(sHead);
+      if (prefOk && sufOk) ok.push(h);
+    }
+    if (ok.length !== 1) return null;
+    chosen = ok[0];
+  }
+  const posAtOffset = (offset) => {
+    if (offset <= 0) return 0;
+    let lo = 0;
+    let hi = doc5.content.size;
+    while (lo < hi) {
+      const mid = lo + hi >> 1;
+      const len = doc5.textBetween(0, mid, sep).length;
+      if (len < offset) lo = mid + 1;
+      else hi = mid;
+    }
+    return lo;
+  };
+  const from2 = posAtOffset(chosen);
+  const to = posAtOffset(chosen + needle.length);
+  if (!(from2 < to)) return null;
+  return { from: from2, to, exact, plain: needle };
+}
+function contentMdRevision(md2) {
+  const s = String(md2 || "");
+  let h = 0xcbf29ce484222325n;
+  const prime = 0x100000001b3n;
+  for (let i = 0; i < s.length; i++) {
+    h ^= BigInt(s.charCodeAt(i));
+    h = h * prime & 0xffffffffffffffffn;
+  }
+  return h.toString(16).padStart(16, "0");
 }
 
 // modules/annotation-anchor-plugin.js
@@ -57392,7 +57566,7 @@ function getToolbarActionState(input = {}) {
   const referencesOpen = !!input.referencesOpen;
   const hasAnnotations = !!input.hasAnnotations;
   const autoSaveIntent = autoSaveDisk ? "disk-autosave" : autoSaveEnabled ? "draft-only" : "off";
-  const autoSaveDetail = autoSaveDisk ? "\u5F00\u542F\uFF1A\u505C\u624B\u540E\u5199\u56DE\u5DF2\u6388\u6743\u6587\u4EF6" : autoSaveEnabled ? "\u5F00\u542F\uFF1A\u5C1A\u65E0\u5199\u56DE\u76EE\u6807\uFF0C\u4EC5\u81EA\u52A8\u4FDD\u5B58\u8349\u7A3F\uFF1B\u8BF7\u5148\u4FDD\u5B58\u5230\u672C\u5730\u6587\u4EF6" : "\u5173\u95ED\uFF1A\u4EC5\u624B\u52A8\u4FDD\u5B58\u5199\u56DE\u6587\u4EF6\uFF08\u4ECD\u4F1A\u4FDD\u5B58\u5D29\u6E83\u6062\u590D\u8349\u7A3F\uFF09";
+  const autoSaveDetail = autoSaveDisk ? "\u5F00\u542F\uFF1A\u505C\u624B\u540E\u81EA\u52A8\u5199\u76D8\uFF0C\u65E0\u9700\u6309\u4FDD\u5B58" : autoSaveEnabled ? "\u5F00\u542F\uFF1A\u5C1A\u65E0\u5199\u76D8\u76EE\u6807\u65F6\u4EC5\u8349\u7A3F\uFF1B\u684C\u9762/\u53CC\u51FB\u6253\u5F00 .mentor \u540E\u81EA\u52A8\u5199\u76D8" : "\u5173\u95ED\uFF1A\u4EC5\u624B\u52A8\u4FDD\u5B58\u5199\u76D8\uFF08\u4ECD\u4F1A\u4FDD\u5B58\u5D29\u6E83\u6062\u590D\u8349\u7A3F\uFF09";
   const isBusy = (id) => busyAction === id;
   return {
     new: {
@@ -57497,6 +57671,7 @@ function buildSaveDialogModel(input = {}) {
   const ann = Number(input.annotations) || 0;
   const refs = Number(input.references) || 0;
   const media = Number(input.media) || 0;
+  const canAuthorize = !!input.canAuthorize;
   switch (input.kind) {
     case "external-modified":
       return {
@@ -57527,15 +57702,31 @@ function buildSaveDialogModel(input = {}) {
     case "permission-denied":
       return {
         title: "\u6CA1\u6709\u5199\u6743\u9650",
-        message: "\u6D4F\u89C8\u5668\u62D2\u7EDD\u5199\u56DE\u539F\u6587\u4EF6\u3002\u53EF\u53E6\u5B58 .mentor \u526F\u672C\uFF0C\u6216\u91CD\u65B0\u6253\u5F00\u6587\u4EF6\u5E76\u6388\u6743\u3002",
-        primaryLabel: "\u53E6\u5B58 .mentor",
-        secondaryLabel: "",
+        message: canAuthorize ? "\u6D4F\u89C8\u5668\u62D2\u7EDD\u5199\u56DE\u3002\u53EF\u91CD\u65B0\u6388\u6743\u5199\u56DE\u539F\u6587\u4EF6\uFF0C\u6216\u4E0B\u8F7D .mentor \u526F\u672C\u3002" : "\u6D4F\u89C8\u5668\u62D2\u7EDD\u5199\u56DE\u539F\u6587\u4EF6\u3002\u53EF\u53E6\u5B58 .mentor \u526F\u672C\uFF0C\u6216\u91CD\u65B0\u6253\u5F00\u6587\u4EF6\u5E76\u6388\u6743\u3002",
+        primaryLabel: canAuthorize ? "\u91CD\u65B0\u6388\u6743\u5199\u56DE" : "\u53E6\u5B58 .mentor",
+        secondaryLabel: canAuthorize ? "\u4EC5\u4E0B\u8F7D\u526F\u672C" : "",
         cancelLabel: "\u53D6\u6D88",
         severity: "warning",
         details: [{ label: "\u6587\u4EF6", value: fileName }]
       };
     case "no-handle":
     default:
+      if (canAuthorize) {
+        return {
+          title: "\u542F\u7528\u5199\u56DE\u78C1\u76D8",
+          message: "\u9009\u4E00\u6B21\u4FDD\u5B58\u4F4D\u7F6E\uFF08\u6216\u9009\u4E2D\u539F .mentor\uFF09\u5373\u53EF\u5199\u76D8\uFF1B\u4E4B\u540E\u81EA\u52A8\u4FDD\u5B58\u4F1A\u76F4\u63A5\u5199\u56DE\uFF0C\u65E0\u9700\u518D\u6309\u4FDD\u5B58\u3002",
+          primaryLabel: "\u6388\u6743\u5199\u56DE\u5E76\u4FDD\u5B58",
+          secondaryLabel: "\u4EC5\u4E0B\u8F7D\u526F\u672C",
+          cancelLabel: "\u53D6\u6D88",
+          severity: "normal",
+          details: [
+            { label: "\u6587\u4EF6", value: mentorLikeName(fileName) },
+            { label: "\u53BB\u5411", value: "\u672C\u673A\u78C1\u76D8\uFF08\u4E00\u6B21\u6388\u6743\uFF09" },
+            { label: "\u5305\u542B", value: `\u6B63\u6587 \xB7 \u6279\u6CE8 ${ann} \xB7 \u6587\u732E ${refs} \xB7 \u56FE\u7247 ${media}` },
+            { label: "\u4E4B\u540E", value: "\u81EA\u52A8\u4FDD\u5B58\u5F00\u7740\u5C31\u4F1A\u5199\u76D8" }
+          ]
+        };
+      }
       return {
         title: "\u4FDD\u5B58\u6587\u6863",
         message: "\u5F53\u524D\u6D4F\u89C8\u5668\u4E0D\u80FD\u76F4\u63A5\u5199\u56DE\u539F\u6587\u4EF6\u3002\u5EFA\u8BAE\u4FDD\u5B58\u4E3A .mentor\uFF0C\u4EE5\u4FDD\u7559\u6B63\u6587\u3001\u6279\u6CE8\u3001\u56FE\u7247\u548C\u6587\u732E\u5E93\u3002",
@@ -59844,6 +60035,23 @@ var State2 = {
   // Runtime-only external path watch (pending-open / server path; never left in URL).
   externalWatchPath: "",
   externalWatchToken: "",
+  // In-app Hermes /fix-mentor trigger (mentor-server spawn)
+  hermesConnection: { state: "unknown", reachable: false, agentReady: false },
+  fixMentorJob: {
+    id: "",
+    status: "idle",
+    // idle|saving|starting|running|done|error
+    path: "",
+    threadId: "",
+    scope: "all",
+    message: "",
+    error: "",
+    exitCode: null,
+    startedAt: 0,
+    pollTimer: null,
+    lastToastAt: 0,
+    staged: false
+  },
   externalWatch: {
     mode: "off",
     generation: 0,
@@ -61190,7 +61398,7 @@ function _validateMarksAfterEdit(editor2, opts) {
         }
         return pieces.length ? pieces.join(" ") : literal;
       })();
-      const textMatches = currentText === ann.text;
+      const textMatches = currentText === ann.text || !!currentText && !!ann.text && (mdEmphasisToPlain(ann.text) === currentText || mdEmphasisToPlain(ann.text) === mdEmphasisToPlain(currentText) || ann.text === mdEmphasisToPlain(currentText));
       if (live) {
         const status = textMatches && ann.invalidReason !== "text-edited" ? (ann.anchor && ann.anchor.status) === "moved" ? "moved" : "attached" : "edited";
         const oldPrefix = ann.prefix || "";
@@ -61214,6 +61422,10 @@ function _validateMarksAfterEdit(editor2, opts) {
           ann.deleted = false;
           changed = true;
           touchUi(ann);
+        }
+        if (currentText && ann.text !== currentText) {
+          ann.text = currentText;
+          changed = true;
         }
         const stickyEdited = ann.invalidReason === "text-edited";
         if ((ann.fuzzy || ann.invalid) && !stickyEdited) {
@@ -61239,13 +61451,13 @@ function _validateMarksAfterEdit(editor2, opts) {
             confidence: 0.75
           });
         }
-        if (!ann.fuzzy || ann.invalidReason !== "text-edited") {
-          ann.fuzzy = true;
-          ann.deleted = false;
-          ann.invalidReason = "text-edited";
-          changed = true;
-          touchUi(ann);
+        ann.fuzzy = false;
+        ann.deleted = false;
+        if (ann.invalidReason === "text-edited" || ann.invalidReason === "mark-reattached-fuzzy") {
+          ann.invalidReason = void 0;
         }
+        changed = true;
+        touchUi(ann);
         if (ann.invalid) {
           ann.invalid = false;
           changed = true;
@@ -61285,8 +61497,9 @@ function _validateMarksAfterEdit(editor2, opts) {
           changed = true;
           touchUi(ann);
         }
-        if (!ann.fuzzy) {
-          ann.fuzzy = true;
+        const mdSrc = State2.currentFile && typeof State2.currentFile.content === "string" ? State2.currentFile.content : "";
+        if (ann.fuzzy) {
+          ann.fuzzy = false;
           changed = true;
         }
         continue;
@@ -61304,34 +61517,32 @@ function _validateMarksAfterEdit(editor2, opts) {
           to: rePos.to,
           resolved: !!ann.resolved,
           authorColor: annotationAuthorColor(ann),
-          fuzzy: !!rePos.fuzzy
+          fuzzy: false
         });
         occupiedRanges.push({ from: rePos.from, to: rePos.to, tid: ann.threadId });
         syncThreadAnchorEvidence(ann, doc5, rePos, {
           exact: ann.text || "",
-          status: rePos.fuzzy ? "edited" : "attached",
-          confidence: rePos.fuzzy ? 0.5 : 1
+          status: "attached",
+          confidence: 1
         });
-        const wantFuzzy = !!rePos.fuzzy;
         if (ann.deleted) {
           ann.deleted = false;
           changed = true;
         }
-        if (ann.invalid !== wantFuzzy) {
-          ann.invalid = wantFuzzy;
+        if (ann.invalid) {
+          ann.invalid = false;
           changed = true;
         }
-        if (ann.fuzzy !== wantFuzzy) {
-          ann.fuzzy = wantFuzzy;
+        if (ann.fuzzy) {
+          ann.fuzzy = false;
           changed = true;
         }
-        if (wantFuzzy) ann.invalidReason = ann.invalidReason || "mark-reattached-fuzzy";
-        else ann.invalidReason = void 0;
+        ann.invalidReason = void 0;
         changed = true;
         touchUi(ann);
-      } else if (!ann.fuzzy || !ann.invalid) {
+      } else if (!ann.invalid) {
         ann.deleted = false;
-        ann.fuzzy = true;
+        ann.fuzzy = false;
         ann.invalid = true;
         ann.invalidReason = ann.invalidReason || (rePos ? "mark-collision" : "mark-missing");
         changed = true;
@@ -61480,8 +61691,12 @@ function patchCommentCard(ann) {
   if (!list) return false;
   const el = list.querySelector(`.comment-thread[data-thread="${ann.threadId}"]`);
   if (!el) return false;
-  el.classList.toggle("is-fuzzy", !!ann.fuzzy && !ann.deleted);
-  el.classList.toggle("is-deleted", !!ann.deleted);
+  const warn2 = annotationWarningState(ann);
+  const warnKind = warn2 && warn2.kind;
+  el.classList.toggle("is-fuzzy", false);
+  el.classList.toggle("is-deleted", warnKind === "orphaned" || !!ann.deleted);
+  el.classList.toggle("is-ambiguous", warnKind === "ambiguous");
+  el.classList.toggle("is-anchor-bad", warnKind === "collision" || warnKind === "image-missing");
   el.classList.toggle("is-resolved", !!ann.resolved);
   el.classList.toggle("is-pending", !!ann.pending);
   el.classList.toggle("is-active", State2.activeThreadId === ann.threadId);
@@ -61495,25 +61710,30 @@ function patchCommentCard(ann) {
     const tx = String(ann.text || "");
     qt.textContent = tx.slice(0, 200) + (tx.length > 200 ? "\u2026" : "");
   }
-  let banner = el.querySelector(".deleted-banner, .fuzzy-banner");
-  const wantDeleted = !!ann.deleted;
-  const wantFuzzy = !wantDeleted && !!ann.fuzzy;
-  if (wantDeleted) {
-    if (!banner || !banner.classList.contains("deleted-banner")) {
+  let banner = el.querySelector(".deleted-banner, .fuzzy-banner, .invalid-banner, .ambiguous-banner");
+  const safeThreadId = escapeHtml(ann.threadId);
+  const actions = ' <button class="link-btn" data-act="reattach" data-thread="' + safeThreadId + '">\u91CD\u65B0\u9009\u62E9\u6B63\u6587</button> \xB7 <button class="link-btn link-danger" data-act="delete-orphan" data-thread="' + safeThreadId + '">\u5220\u9664</button>';
+  let wantClass = "";
+  let wantHtml = "";
+  if (warnKind === "orphaned" || ann.deleted) {
+    wantClass = "deleted-banner";
+    wantHtml = "\u{1F4CD} \u539F\u6587\u5DF2\u88AB\u5220\u9664 -" + actions;
+  } else if (warnKind === "ambiguous") {
+    wantClass = "ambiguous-banner";
+    wantHtml = "\u26A0 \u65E0\u6CD5\u552F\u4E00\u786E\u5B9A\u539F\u6587\u4F4D\u7F6E\uFF08\u91CD\u590D\u951A\u70B9\uFF09\u2014" + actions;
+  } else if (warnKind === "collision" || warnKind === "image-missing" || ann.invalid && !ann.deleted) {
+    wantClass = "invalid-banner";
+    wantHtml = "\u26A0 \u6279\u6CE8\u951A\u70B9\u5931\u6548 \u2014" + actions;
+  }
+  if (wantClass) {
+    if (!banner || !banner.classList.contains(wantClass)) {
       if (banner) banner.remove();
       const div = document.createElement("div");
-      div.className = "deleted-banner";
-      const safeThreadId = escapeHtml(ann.threadId);
-      div.innerHTML = '\u{1F4CD} \u539F\u6587\u5DF2\u88AB\u5220\u9664 - <button class="link-btn" data-act="reattach" data-thread="' + safeThreadId + '">\u91CD\u65B0\u9009\u62E9\u6B63\u6587</button> \xB7 <button class="link-btn link-danger" data-act="delete-orphan" data-thread="' + safeThreadId + '">\u5220\u9664</button>';
+      div.className = wantClass;
+      div.innerHTML = wantHtml;
       el.insertBefore(div, el.firstChild);
-    }
-  } else if (wantFuzzy) {
-    if (!banner || !banner.classList.contains("fuzzy-banner")) {
-      if (banner) banner.remove();
-      const div = document.createElement("div");
-      div.className = "fuzzy-banner";
-      div.textContent = "\u26A0 \u4F4D\u7F6E\u53EF\u80FD\u504F\u79FB - \u8BF7\u68C0\u67E5\u6587\u6863";
-      el.insertBefore(div, el.firstChild);
+    } else {
+      banner.innerHTML = wantHtml;
     }
   } else if (banner) {
     banner.remove();
@@ -61759,6 +61979,9 @@ function serializeAnnotationThread(t) {
   if (t.range && typeof t.range.from === "number" && typeof t.range.to === "number") {
     o.range = { from: t.range.from, to: t.range.to };
   }
+  if (t.mdRange && typeof t.mdRange.from === "number" && typeof t.mdRange.to === "number" && t.mdRange.to > t.mdRange.from) {
+    o.mdRange = { from: t.mdRange.from, to: t.mdRange.to };
+  }
   if (Array.isArray(t.ranges) && t.ranges.length) {
     const doc5 = State2.editor && State2.editor.state && State2.editor.state.doc;
     o.ranges = t.ranges.map((r) => {
@@ -61783,7 +62006,6 @@ function serializeAnnotationThread(t) {
   if (t.deleted) o.deleted = true;
   if (t.invalid) o.invalid = true;
   if (t.invalidReason) o.invalidReason = t.invalidReason;
-  if (t.fuzzy) o.fuzzy = true;
   if (t.anchor && typeof t.anchor === "object") {
     const a = t.anchor;
     o.anchor = {
@@ -61816,7 +62038,6 @@ function serializeAnnotationThread(t) {
     const proj = projectLegacyFlags(o.anchor.status);
     if (proj.invalid && !o.invalid) o.invalid = true;
     if (proj.deleted && !o.deleted) o.deleted = true;
-    if (proj.fuzzy && !o.fuzzy) o.fuzzy = true;
     if (proj.invalidReason && !o.invalidReason) o.invalidReason = proj.invalidReason;
   }
   return o;
@@ -61915,8 +62136,19 @@ function createSaveSnapshot(options = {}) {
     document: currentFile.name,
     updatedAt: nowISO(),
     author: { id: State2.authorId, name: State2.author },
+    anchorMode: ANCHOR_MODE_RANGE,
     annotations: buildAnnotationsSidecar()
   };
+  try {
+    const stamp = stampSidecarMdRanges(sidecar, mdText, {
+      contentMdSha256: contentMdRevision(mdText)
+    });
+    if (stamp.failed) {
+      console.warn("[md-range] stamp failed for", stamp.failed, "threads", stamp.failedIds);
+    }
+  } catch (eStamp) {
+    console.warn("[md-range] stamp", eStamp);
+  }
   const mediaFiles = filterMediaFilesForArchive(State2.mediaFiles || {}, {
     mdText,
     html: documentHtml,
@@ -62060,12 +62292,12 @@ function setAutoSaveEnabled(on, { silent = false } = {}) {
     if (next2) {
       const disk = isAutoSaveDiskActive();
       setStatus(
-        disk ? "\u81EA\u52A8\u4FDD\u5B58\u5DF2\u5F00\u542F" : "\u81EA\u52A8\u4FDD\u5B58\u5DF2\u5F00\u542F\uFF08\u8349\u7A3F\uFF09",
-        disk ? "\u505C\u624B\u540E\u5199\u56DE\u5DF2\u6388\u6743\u6587\u4EF6" : "\u5C1A\u65E0\u5199\u56DE\u76EE\u6807 \xB7 \u5148\u4FDD\u5B58\u5230\u672C\u5730\u540E\u624D\u4F1A\u5199\u76D8"
+        disk ? "\u81EA\u52A8\u4FDD\u5B58\u5DF2\u5F00\u542F" : "\u81EA\u52A8\u4FDD\u5B58\u5DF2\u5F00\u542F \xB7 \u5F85\u6388\u6743\u5199\u76D8",
+        disk ? "\u505C\u624B\u540E\u81EA\u52A8\u5199\u56DE\u78C1\u76D8\uFF0C\u65E0\u9700\u6309\u4FDD\u5B58" : "\u70B9\u4E00\u6B21\u6388\u6743\u9009\u6587\u4EF6\u540E\u5373\u53EF\u81EA\u52A8\u5199\u76D8"
       );
-      if (!disk) {
+      if (disk) {
         try {
-          showToast("\u81EA\u52A8\u4FDD\u5B58\u5DF2\u5F00\uFF1A\u8BF7\u5148\u4FDD\u5B58\u5230\u672C\u5730\u6587\u4EF6\uFF0C\u4E4B\u540E\u624D\u4F1A\u5199\u56DE\u78C1\u76D8", 2800);
+          showToast("\u81EA\u52A8\u4FDD\u5B58\u5DF2\u5F00\uFF1A\u4FEE\u6539\u540E\u81EA\u52A8\u5199\u76D8", 2e3);
         } catch (_) {
         }
       }
@@ -62073,10 +62305,74 @@ function setAutoSaveEnabled(on, { silent = false } = {}) {
       setStatus("\u81EA\u52A8\u4FDD\u5B58\u5DF2\u5173\u95ED", "\u4EC5\u624B\u52A8\u4FDD\u5B58\u5199\u56DE\u6587\u4EF6 \xB7 \u8349\u7A3F\u4ECD\u4F1A\u81EA\u52A8\u4FDD\u5B58");
     }
   }
+  if (next2 && hasDiskWriteTarget()) {
+    try {
+      if (State2.currentFile && State2.currentFile.dirty && canWriteLiveDocument()) {
+        Promise.resolve().then(() => autosaveNow()).catch(() => {
+        });
+      }
+    } catch (_) {
+    }
+  }
   return next2;
 }
+async function ensureAutoSaveDiskTargetFromGesture() {
+  setAutoSaveEnabled(true, { silent: true });
+  if (hasDiskWriteTarget()) {
+    try {
+      syncToolbarActionState();
+    } catch (_) {
+    }
+    if (State2.currentFile && State2.currentFile.dirty) {
+      try {
+        await autosaveNow();
+      } catch (_) {
+      }
+    }
+    try {
+      showToast("\u81EA\u52A8\u4FDD\u5B58\u5DF2\u5F00\uFF1A\u4FEE\u6539\u540E\u81EA\u52A8\u5199\u76D8", 2e3);
+    } catch (_) {
+    }
+    return { ok: true, already: true };
+  }
+  const up = await enableWriteBackForCurrent({
+    thenSave: !!(State2.currentFile && State2.currentFile.dirty),
+    preferSavePicker: true
+  });
+  try {
+    syncToolbarActionState();
+  } catch (_) {
+  }
+  if (up && up.ok) {
+    setAutoSaveEnabled(true, { silent: true });
+    try {
+      setStatus("\u81EA\u52A8\u4FDD\u5B58\u5DF2\u5F00\u542F", "\u5DF2\u6388\u6743 \xB7 \u505C\u624B\u540E\u81EA\u52A8\u5199\u76D8");
+      showToast("\u5DF2\u6388\u6743\u5199\u76D8 \xB7 \u81EA\u52A8\u4FDD\u5B58\u5DF2\u5F00", 2600);
+    } catch (_) {
+    }
+    if (!(up.saveResult && up.saveResult.ok) && State2.currentFile && State2.currentFile.dirty) {
+      try {
+        await autosaveNow();
+      } catch (_) {
+      }
+    }
+    return up;
+  }
+  if (up && up.cancelled) {
+    try {
+      showToast("\u672A\u6388\u6743\u5199\u76D8 \xB7 \u81EA\u52A8\u4FDD\u5B58\u6682\u4EC5\u8349\u7A3F", 2800);
+    } catch (_) {
+    }
+    return up;
+  }
+  try {
+    showToast("\u65E0\u6CD5\u6388\u6743\u5199\u76D8: " + (up && (up.error || up.message) || "unknown"), 3200);
+  } catch (_) {
+  }
+  return up || { ok: false };
+}
 function isAutoSaveDiskActive() {
-  return getAutoSaveEnabled() && hasWriteHandle() && !State2.readOnlyMode && canWriteLiveDocument();
+  return getAutoSaveEnabled() && hasDiskWriteTarget() && !State2.readOnlyMode && canWriteLiveDocument();
 }
 function syncAutosaveToggleUi() {
   try {
@@ -62090,6 +62386,14 @@ var _saveQueued = false;
 var _autosaveFailToastAt = 0;
 function hasWriteHandle() {
   return !!(State2.currentFile && State2.currentFile.handle && (State2.saveMode === "mentor-handle" || State2.saveMode === "handle"));
+}
+function hasDiskWriteTarget() {
+  if (hasWriteHandle()) return true;
+  try {
+    if (typeof resolveActiveMentorAbsPath === "function" && resolveActiveMentorAbsPath()) return true;
+  } catch (_) {
+  }
+  return !!(State2.externalWatchPath && isAbsMentorPath && isAbsMentorPath(State2.externalWatchPath));
 }
 function isMentorPackMode() {
   const name = State2.currentFile && State2.currentFile.name || "";
@@ -62605,6 +62909,150 @@ async function runNamedVersionPin() {
     showToast("\u4FDD\u5B58\u7248\u672C\u5931\u8D25", 3e3);
   }
 }
+async function writeCurrentViaServer(absPath, { reason = "manual", showProgress = false } = {}) {
+  const path2 = String(absPath || "").trim();
+  if (!path2 || !(typeof isAbsMentorPath === "function" ? isAbsMentorPath(path2) : true)) {
+    return { ok: false, error: "no-path" };
+  }
+  if (!State2.currentFile) return { ok: false, error: "no-document" };
+  if (State2.readOnlyMode || typeof canWriteLiveDocument === "function" && !canWriteLiveDocument()) {
+    return { ok: false, skipped: true, error: "live-follower" };
+  }
+  const token = State2.externalWatchToken || "" || await ensureLocalSessionToken();
+  if (!token) return { ok: false, error: "no-token", message: "\u65E0 mentor-server token" };
+  let snapshot;
+  try {
+    snapshot = createSaveSnapshot({ skipHardAudit: reason === "autosave" });
+  } catch (e) {
+    return {
+      ok: false,
+      error: e && e.message ? e.message : String(e),
+      code: e && e.code || void 0
+    };
+  }
+  let payload;
+  try {
+    if (showProgress) showExportProgress("\u6B63\u5728\u4FDD\u5B58\u5230\u78C1\u76D8\u2026");
+    payload = await buildMentorZipBlob(
+      snapshot.mdText,
+      snapshot.sidecar,
+      snapshot.mediaFiles,
+      snapshot.references,
+      { documentHtml: snapshot.documentHtml }
+    );
+  } catch (e) {
+    if (showProgress) hideExportProgress("\u4FDD\u5B58\u5931\u8D25");
+    return { ok: false, error: e && e.message ? e.message : String(e) };
+  }
+  try {
+    await fetch(location.origin + "/allow-open", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token, path: path2 })
+    });
+  } catch (_) {
+  }
+  const q = new URLSearchParams({ token, path: path2 });
+  let res;
+  try {
+    res = await fetch(location.origin + "/write-mentor?" + q.toString(), {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/zip",
+        "X-Mentor-Token": token,
+        "X-Mentor-Path": path2
+      },
+      body: payload
+    });
+  } catch (e) {
+    if (showProgress) hideExportProgress("\u4FDD\u5B58\u5931\u8D25");
+    return { ok: false, error: "network", message: e && e.message ? e.message : String(e) };
+  }
+  let data = null;
+  try {
+    data = await res.json();
+  } catch (_) {
+  }
+  if (!res.ok || !data || data.ok === false) {
+    if (showProgress) hideExportProgress("\u4FDD\u5B58\u5931\u8D25");
+    return {
+      ok: false,
+      error: data && data.error || "http-" + res.status,
+      message: data && data.message || ""
+    };
+  }
+  const diskMtime = data.mtimeNs ? Math.floor(Number(data.mtimeNs) / 1e6) : Date.now();
+  try {
+    State2.externalWatchPath = path2;
+    State2.diskPathHint = path2;
+    if (State2.currentFile) {
+      State2.currentFile.path = path2;
+      State2.fileMtime = diskMtime;
+    }
+  } catch (_) {
+  }
+  let warnings = [];
+  try {
+    if (typeof finalizeOfficialCommit === "function") {
+      const fin = await finalizeOfficialCommit(snapshot, {
+        reason,
+        diskMtime
+      });
+      if (fin && Array.isArray(fin.warnings)) warnings = fin.warnings;
+    } else {
+      if (typeof markClean === "function") markClean();
+      try {
+        await putAtomicDraftForCurrent();
+      } catch (_) {
+      }
+    }
+  } catch (e) {
+    warnings.push("finalize");
+    console.warn("[write-server] finalize", e);
+  }
+  if (showProgress) hideExportProgress("\u5DF2\u4FDD\u5B58");
+  try {
+    snapshotActiveTab();
+  } catch (_) {
+  }
+  try {
+    startExternalWatchForCurrentDocument && startExternalWatchForCurrentDocument();
+  } catch (_) {
+  }
+  return { ok: true, path: path2, disk: true, via: "server", warnings, mtime: diskMtime };
+}
+async function writeCurrentToDisk(opts = {}) {
+  const reason = opts.reason || "manual";
+  const showProgress = !!opts.showProgress;
+  if (hasWriteHandle()) {
+    return writeCurrentToHandle({
+      reason,
+      showProgress,
+      forceOverwriteExternal: !!opts.forceOverwriteExternal
+    });
+  }
+  let path2 = "";
+  try {
+    path2 = resolveActiveMentorAbsPath();
+  } catch (_) {
+    path2 = "";
+  }
+  if (!path2 && State2.externalWatchPath) path2 = String(State2.externalWatchPath || "");
+  if (!path2) {
+    try {
+      path2 = await resolveMentorPathByName(mentorBasenameHint());
+    } catch (_) {
+    }
+  }
+  if (path2) {
+    return writeCurrentViaServer(path2, { reason, showProgress });
+  }
+  return {
+    ok: false,
+    error: "no-disk-target",
+    message: "\u6CA1\u6709\u53EF\u5199\u56DE\u7684\u78C1\u76D8\u76EE\u6807\uFF08\u65E0\u6587\u4EF6\u53E5\u67C4\u4E14\u65E0\u7EDD\u5BF9\u8DEF\u5F84\uFF09"
+  };
+}
 function startAutosaveTimer() {
   stopAutosaveTimer();
   if (!canWriteLiveDocument()) return;
@@ -62641,13 +63089,13 @@ async function autosaveNow() {
     return { ok: false, skipped: true, error: "external-paused" };
   }
   const time = (/* @__PURE__ */ new Date()).toLocaleTimeString();
-  const wantDisk = getAutoSaveEnabled() && hasWriteHandle();
+  const wantDisk = getAutoSaveEnabled();
   if (wantDisk) {
     try {
-      const wr = await writeCurrentToHandle({ reason: "autosave", showProgress: false });
+      const wr = await writeCurrentToDisk({ reason: "autosave", showProgress: false });
       if (wr && wr.ok) {
-        setStatus("\u5DF2\u81EA\u52A8\u4FDD\u5B58", time);
-        console.log(`[autosave] disk at ${time}`);
+        setStatus("\u5DF2\u81EA\u52A8\u4FDD\u5B58", time + (wr.via === "server" ? " \xB7 \u78C1\u76D8" : ""));
+        console.log(`[autosave] disk at ${time}`, wr.via || "handle");
         try {
           syncAutosaveToggleUi();
         } catch (_) {
@@ -62656,14 +63104,23 @@ async function autosaveNow() {
           syncToolbarActionState();
         } catch (_) {
         }
-        return { ok: true, disk: true, draft: true };
+        return { ok: true, disk: true, draft: true, via: wr.via || "handle" };
       }
       if (wr && wr.skipped) {
         console.log("[autosave] disk skipped:", wr.error || "skipped");
       } else if (wr && wr.error === "need-permission") {
         console.log("[autosave] disk needs permission; draft only");
+      } else if (wr && wr.error === "no-disk-target") {
+        console.log("[autosave] no disk target yet; draft only");
+        try {
+          if (!autosaveNow._needAuthNoted) {
+            autosaveNow._needAuthNoted = true;
+            setStatus("\u81EA\u52A8\u4FDD\u5B58 \xB7 \u5F85\u6388\u6743", "\u70B9\u300C\u81EA\u52A8\u4FDD\u5B58\u300D\u6216 Ctrl+S \u9009\u6587\u4EF6\u540E\u5373\u53EF\u5199\u76D8");
+          }
+        } catch (_) {
+        }
       } else if (wr && wr.error) {
-        console.warn("[autosave] disk failed:", wr.error);
+        console.warn("[autosave] disk failed:", wr.error, wr.message || "");
       }
     } catch (eDisk) {
       console.warn("[autosave] disk threw:", eDisk);
@@ -64702,26 +65159,57 @@ function annotationHasLiveMark(threadId) {
   });
   return found2;
 }
+function threadAnchorOk(thread) {
+  if (!thread || typeof thread !== "object" || !thread.threadId) return false;
+  if (thread.deleted || thread.invalid) return false;
+  const status = thread.anchor && thread.anchor.status;
+  if (status === "orphaned" || status === "ambiguous" || status === "collision" || status === "image-missing") {
+    return false;
+  }
+  const hasImg = Array.isArray(thread.imageAnchors) && thread.imageAnchors.length > 0;
+  if (hasImg) {
+    return thread.imageAnchors.some((a) => a && a.src);
+  }
+  if (annotationHasLiveMark(thread.threadId)) return true;
+  if (thread.range && typeof thread.range.from === "number" && typeof thread.range.to === "number" && thread.range.from < thread.range.to) {
+    return true;
+  }
+  const md2 = State2.currentFile && typeof State2.currentFile.content === "string" ? State2.currentFile.content : "";
+  if (md2 && typeof isMdRange === "function" && isMdRange(thread.mdRange)) {
+    try {
+      if (validateThreadMdRange(thread, md2).ok) return true;
+    } catch (_) {
+    }
+  }
+  return false;
+}
 function annotationWarningState(thread) {
   if (!thread || typeof thread !== "object") return null;
+  if (thread.threadId && annotationHasLiveMark(thread.threadId)) {
+    if (thread.deleted || thread.invalid || thread.fuzzy || thread.anchor && thread.anchor.status === "orphaned") {
+      thread.deleted = false;
+      thread.invalid = false;
+      thread.fuzzy = false;
+      thread.invalidReason = void 0;
+      if (thread.anchor && typeof thread.anchor === "object") {
+        thread.anchor = { ...thread.anchor, status: "attached", confidence: 1 };
+      }
+    }
+    return null;
+  }
+  if (threadAnchorOk(thread)) return null;
   const status = thread.anchor && thread.anchor.status;
   const reason = thread.invalidReason || "";
   if (status === "ambiguous" || reason === "ambiguous") return { kind: "ambiguous" };
-  if (status === "collision" || reason === "mark-collision" || reason === "collision") return { kind: "collision" };
   if (status === "image-missing" || reason === "image-deleted") return { kind: "image-missing" };
-  if (thread.threadId && annotationHasLiveMark(thread.threadId)) {
-    if (reason === "mark-missing" || reason === "mark-reattached-fuzzy") {
-      thread.deleted = false;
-      thread.invalid = false;
-      thread.invalidReason = void 0;
-      if (thread.anchor && thread.anchor.status === "orphaned") {
-        thread.anchor = { ...thread.anchor, status: "attached" };
-      }
-      return null;
-    }
+  if (status === "collision" || reason === "mark-collision" || reason === "collision") return { kind: "collision" };
+  if (status === "orphaned" || thread.deleted || reason === "text-deleted" || reason === "orphaned") {
+    return { kind: "orphaned" };
   }
-  if (status === "orphaned" || thread.deleted || thread.invalid) return { kind: "orphaned" };
-  return null;
+  if (thread.invalid || reason === "mark-missing" || reason === "mdRange-missing" || reason === "mdRange-map-fail") {
+    return { kind: "collision" };
+  }
+  return { kind: "collision" };
 }
 function activateAnnotationThread(threadId, options = {}) {
   if (!threadId) {
@@ -64804,6 +65292,700 @@ function revealSupervisionThread(threadId) {
     }
   }
   return { found: true, filtered: Boolean(filtered) };
+}
+function isAbsMentorPath(p) {
+  const s = String(p || "").trim();
+  if (!s || !/\.mentor$/i.test(s)) return false;
+  return /^[A-Za-z]:[\\/]/.test(s) || s.startsWith("\\\\") || s.startsWith("/") || /[\\/]/.test(s);
+}
+function mentorBasenameHint() {
+  const raw = State2.currentFile && State2.currentFile.name || State2.diskPathHint || State2.externalWatchPath || "";
+  const s = String(raw || "").trim();
+  if (!s) return "";
+  const ia = s.lastIndexOf("/");
+  const ib = s.lastIndexOf("\\");
+  const i = ia > ib ? ia : ib;
+  const base2 = i >= 0 ? s.slice(i + 1) : s;
+  return /\.mentor$/i.test(base2) ? base2 : "";
+}
+function resolveActiveMentorAbsPath() {
+  const candidates = [
+    State2.externalWatchPath,
+    State2.currentFile && State2.currentFile.path,
+    State2.diskPathHint,
+    // Chromium/Electron non-standard: File.path on some open paths
+    State2.currentFile && State2.currentFile._filePath
+  ];
+  for (const raw of candidates) {
+    const p = String(raw || "").trim();
+    if (isAbsMentorPath(p)) return p;
+  }
+  return "";
+}
+async function resolveMentorPathByName(name) {
+  const base2 = String(name || mentorBasenameHint() || "").trim();
+  if (!base2) return "";
+  const token = State2.externalWatchToken || "" || await ensureLocalSessionToken();
+  if (!token) return "";
+  try {
+    const q = new URLSearchParams({ token, name: base2 });
+    const res = await fetch(location.origin + "/resolve-mentor-path?" + q.toString(), { cache: "no-store" });
+    if (!res.ok) return "";
+    const data = await res.json();
+    if (data && data.ok && isAbsMentorPath(data.path)) {
+      State2.externalWatchPath = data.path;
+      State2.diskPathHint = data.path;
+      if (State2.currentFile && !State2.currentFile.path) State2.currentFile.path = data.path;
+      return data.path;
+    }
+  } catch (_) {
+  }
+  return "";
+}
+async function applyFixMentorResultFromPath(absPath, { staged = false } = {}) {
+  if (!absPath) return { ok: false, error: "no-path" };
+  const token = State2.externalWatchToken || "" || await ensureLocalSessionToken();
+  if (!token) return { ok: false, error: "no-token" };
+  try {
+    const file = await fetchExternalMentorFile(absPath, token);
+    if (!file) return { ok: false, error: "fetch-failed" };
+    const keepHandle = State2.currentFile && State2.currentFile.handle ? State2.currentFile.handle : null;
+    const keepDocId = State2.currentFile && State2.currentFile.documentId;
+    const name = State2.currentFile && State2.currentFile.name || file.name;
+    const { mdText, annotations, references, mediaFiles, archive } = await readMentorZip(file);
+    await activateOpenedDocument({
+      name,
+      content: mdText,
+      annotations,
+      references,
+      mediaFiles,
+      handle: keepHandle,
+      documentId: keepDocId,
+      saveMode: keepHandle ? State2.saveMode || "mentor-handle" : "mentor-download",
+      quiet: true,
+      forceDisk: true,
+      diskMtime: file.lastModified,
+      structuralHtml: archive && archive.documentHtml || null,
+      archiveVerification: archive && archive.verification || null
+    });
+    if (!staged && isAbsMentorPath(absPath)) {
+      State2.externalWatchPath = absPath;
+      State2.diskPathHint = absPath;
+      if (State2.currentFile) State2.currentFile.path = absPath;
+    }
+    let wrote = false;
+    try {
+      if (typeof writeCurrentToDisk === "function" && hasDiskWriteTarget()) {
+        const wr = await writeCurrentToDisk({ reason: "manual", showProgress: false, forceOverwriteExternal: true });
+        wrote = !!(wr && wr.ok);
+        if (wrote) showToast("AI \u7ED3\u679C\u5DF2\u5199\u56DE\u78C1\u76D8", 2600);
+      } else if (keepHandle && typeof writeCurrentToHandle === "function") {
+        const wr = await writeCurrentToHandle({ reason: "manual", showProgress: false, forceOverwriteExternal: true });
+        wrote = !!(wr && wr.ok);
+        if (wrote) showToast("AI \u7ED3\u679C\u5DF2\u5199\u56DE\u539F\u6587\u4EF6", 2600);
+      }
+    } catch (e) {
+      console.warn("[fix-mentor] write-back failed", e);
+    }
+    if (!wrote && staged) {
+      showToast("AI \u5DF2\u5904\u7406\u3002\u82E5\u672A\u5199\u76D8\uFF0C\u8BF7 Ctrl+S \u4FDD\u5B58", 3600);
+    }
+    try {
+      renderCommentList();
+    } catch (_) {
+    }
+    try {
+      startSupervisionPolling();
+    } catch (_) {
+    }
+    return { ok: true };
+  } catch (e) {
+    console.warn("[fix-mentor] apply result failed", e);
+    return { ok: false, error: e && e.message ? e.message : String(e) };
+  }
+}
+function hermesConnLabel(state, health) {
+  const s = String(state || health && health.state || "unknown");
+  if (!health || health.reachable === false || s === "down" || s === "unavailable") return "Hermes \u672A\u8FDE\u63A5";
+  if (s === "loading" || s === "starting") return "Hermes \u9884\u70ED\u4E2D\u2026";
+  if (s === "ready") return "Hermes \u5DF2\u5C31\u7EEA";
+  if (s === "busy") return "Hermes \u5FD9\u788C";
+  if (s === "error") return "Hermes \u9519\u8BEF";
+  if (health.agentReady) return "Hermes \u5DF2\u5C31\u7EEA";
+  return "Hermes " + s;
+}
+function syncHermesConnectionUi() {
+  const h = State2.hermesConnection || {};
+  const chip = document.getElementById("hermes-conn-status");
+  const text3 = document.getElementById("hermes-conn-status-text");
+  if (!chip) return;
+  const state = h.state || (h.reachable ? "unknown" : "down");
+  chip.classList.remove("hidden");
+  chip.dataset.state = state;
+  chip.dataset.ready = h.agentReady ? "1" : "0";
+  chip.title = [
+    hermesConnLabel(state, h),
+    h.skills && h.skills.length ? "skills: " + h.skills.join(",") : "",
+    h.error || "",
+    h.mode ? "mode=" + h.mode : ""
+  ].filter(Boolean).join(" \xB7 ");
+  if (text3) text3.textContent = hermesConnLabel(state, h);
+}
+async function fetchHermesConnection(opts) {
+  opts = opts || {};
+  const warm = !!opts.warm;
+  const wait = opts.wait || 0;
+  try {
+    let token = State2.externalWatchToken || "";
+    if (!token && typeof ensureLocalSessionToken === "function") {
+      try {
+        token = await ensureLocalSessionToken();
+      } catch (_) {
+      }
+    }
+    const q = new URLSearchParams();
+    if (token) q.set("token", token);
+    if (warm) q.set("warm", "1");
+    if (wait) q.set("wait", String(wait));
+    const res = await fetch(location.origin + "/hermes-connection?" + q.toString(), { cache: "no-store" });
+    if (!res.ok) return null;
+    const data = await res.json();
+    State2.hermesConnection = {
+      state: data.state || (data.reachable ? "ready" : "down"),
+      reachable: !!data.reachable,
+      agentReady: !!data.agentReady,
+      error: data.error || "",
+      skills: data.skills || [],
+      mode: data.mode || "warm",
+      uptimeSec: data.uptimeSec,
+      busy: !!data.busy,
+      checkedAt: Date.now()
+    };
+    try {
+      syncHermesConnectionUi();
+    } catch (_) {
+    }
+    return State2.hermesConnection;
+  } catch (e) {
+    State2.hermesConnection = {
+      state: "down",
+      reachable: false,
+      agentReady: false,
+      error: String(e && e.message || e),
+      checkedAt: Date.now()
+    };
+    try {
+      syncHermesConnectionUi();
+    } catch (_) {
+    }
+    return State2.hermesConnection;
+  }
+}
+function startHermesConnectionPolling() {
+  if (State2._hermesConnTimer) return;
+  void fetchHermesConnection({ warm: true });
+  State2._hermesConnTimer = setInterval(function() {
+    void fetchHermesConnection({ warm: false });
+  }, 4e3);
+}
+function isFixMentorJobActive(status) {
+  return status === "saving" || status === "starting" || status === "running";
+}
+function fixMentorStatusLabel(st) {
+  switch (st) {
+    case "saving":
+      return "\u4FDD\u5B58\u4E2D\u2026";
+    case "starting":
+      return "\u542F\u52A8 Hermes\u2026";
+    case "running":
+      return "AI \u5904\u7406\u4E2D\u2026";
+    case "done":
+      return "AI \u5904\u7406\u5B8C\u6210";
+    case "error":
+      return "AI \u5904\u7406\u5931\u8D25";
+    default:
+      return "";
+  }
+}
+function setFixMentorJobState(partial = {}) {
+  const prev = State2.fixMentorJob || {};
+  State2.fixMentorJob = { ...prev, ...partial };
+  try {
+    syncFixMentorJobUi();
+  } catch (_) {
+  }
+}
+function formatFixMentorElapsed(sec) {
+  const n = Math.max(0, Math.floor(Number(sec) || 0));
+  const m = Math.floor(n / 60);
+  const s = n % 60;
+  return m + ":" + String(s).padStart(2, "0");
+}
+function pickFixMentorLogPreview(logTail, lastLog) {
+  const lines = Array.isArray(logTail) ? logTail.filter((x) => String(x || "").trim()) : [];
+  if (!lines.length) return lastLog ? String(lastLog) : "";
+  return lines.slice(-3).map((l) => String(l).slice(0, 160)).join("\n");
+}
+function syncFixMentorJobUi() {
+  const job = State2.fixMentorJob || {};
+  const active = isFixMentorJobActive(job.status);
+  const label = fixMentorStatusLabel(job.status);
+  const phaseLabel = job.phaseLabel || "";
+  const detail = job.message || job.error || "";
+  const elapsedSec = job.elapsedSec != null ? Number(job.elapsedSec) : job.startedAtClient ? Math.floor((Date.now() - job.startedAtClient) / 1e3) : 0;
+  const elapsedLabel = job.elapsedLabel || formatFixMentorElapsed(elapsedSec);
+  const pct = Math.max(0, Math.min(100, Number(job.progress) || (active ? 12 : job.status === "done" ? 100 : 0)));
+  const logPreview = pickFixMentorLogPreview(job.logTail, job.lastLog);
+  document.querySelectorAll('[data-act="run-fix-mentor"]').forEach((btn) => {
+    const tid = btn.dataset.thread || "";
+    btn.disabled = active;
+    btn.classList.toggle("is-running", active);
+    btn.classList.toggle("is-done", job.status === "done");
+    btn.classList.toggle("is-error", job.status === "error");
+    if (active) {
+      btn.setAttribute("aria-busy", "true");
+      btn.textContent = job.threadId && tid === job.threadId ? "\u5904\u7406\u4E2D " + elapsedLabel : "\u6392\u961F " + elapsedLabel;
+      btn.title = [label, phaseLabel, detail].filter(Boolean).join(" \xB7 ");
+    } else if (job.status === "done") {
+      btn.removeAttribute("aria-busy");
+      btn.textContent = "AI \u5904\u7406";
+      btn.title = "\u4FDD\u5B58\u5E76\u8BA9 Hermes \u5904\u7406\u5F85\u529E (@AI / AI \u5361)";
+    } else if (job.status === "error") {
+      btn.removeAttribute("aria-busy");
+      btn.textContent = "\u91CD\u8BD5 AI";
+      btn.title = detail || "\u4E0A\u6B21\u5931\u8D25\uFF0C\u70B9\u51FB\u91CD\u8BD5";
+    } else {
+      btn.removeAttribute("aria-busy");
+      btn.textContent = "AI \u5904\u7406";
+      btn.title = "\u4FDD\u5B58\u5E76\u8BA9 Hermes \u5904\u7406\u5F85\u529E (@AI / AI \u5361)";
+    }
+  });
+  const name = (job.path || "").split(/[\\/]/).pop() || (job.sourceName || "") || "";
+  const chipLine = [
+    phaseLabel || label || "AI",
+    name,
+    detail && detail !== phaseLabel ? detail : ""
+  ].filter(Boolean).join(" \xB7 ");
+  const chip = document.getElementById("fix-mentor-status");
+  const chipText = document.getElementById("fix-mentor-status-text");
+  const chipElapsed = document.getElementById("fix-mentor-status-elapsed");
+  if (chip) {
+    if (active || job.status === "error" || job.status === "done") {
+      chip.classList.remove("hidden");
+      chip.dataset.status = job.status || "idle";
+      chip.title = chipLine || "AI \u6279\u6CE8\u5904\u7406";
+      if (chipText) {
+        chipText.textContent = active ? (phaseLabel || label || "AI \u5904\u7406\u4E2D") + (detail && detail !== phaseLabel ? " \xB7 " + String(detail).slice(0, 48) : "") : chipLine || label || "AI";
+      }
+      if (chipElapsed) {
+        chipElapsed.textContent = active || job.status === "done" || job.status === "error" ? elapsedLabel : "";
+      }
+      if (job.status === "done") {
+        const doneId = job.id;
+        setTimeout(() => {
+          const cur = State2.fixMentorJob || {};
+          if (cur.id === doneId && cur.status === "done") {
+            chip.classList.add("hidden");
+            chip.dataset.status = "idle";
+            if (chipText) chipText.textContent = "";
+            if (chipElapsed) chipElapsed.textContent = "";
+          }
+        }, 1e4);
+      }
+    } else {
+      chip.classList.add("hidden");
+      chip.dataset.status = "idle";
+      if (chipText) chipText.textContent = "";
+      if (chipElapsed) chipElapsed.textContent = "";
+    }
+  }
+  const banner = document.getElementById("fix-mentor-job-banner");
+  if (banner) {
+    const titleEl = document.getElementById("fm-prog-title");
+    const elEl = document.getElementById("fm-prog-elapsed");
+    const pctEl = document.getElementById("fm-prog-pct");
+    const fillEl = document.getElementById("fm-prog-fill");
+    const phaseEl = document.getElementById("fm-prog-phase");
+    const logEl = document.getElementById("fm-prog-log");
+    if (active || job.status === "error" || job.status === "done") {
+      banner.hidden = false;
+      banner.dataset.status = job.status || "idle";
+      banner.dataset.stale = job.stale ? "1" : "0";
+      if (titleEl) {
+        titleEl.textContent = job.status === "done" ? "AI \u5904\u7406\u5B8C\u6210" : job.status === "error" ? "AI \u5904\u7406\u5931\u8D25" : "AI \u5904\u7406\u8FDB\u884C\u4E2D";
+      }
+      if (elEl) elEl.textContent = elapsedLabel;
+      if (pctEl) pctEl.textContent = job.status === "error" ? "\u2014" : Math.round(pct) + "%";
+      if (fillEl) {
+        fillEl.style.width = (job.status === "error" ? Math.max(pct, 20) : pct) + "%";
+      }
+      if (phaseEl) {
+        const bits = [phaseLabel || label, name].filter(Boolean);
+        if (job.stale && active) bits.push("\u8F93\u51FA\u5C11\u4ECD\u5728\u8DD1");
+        phaseEl.textContent = bits.join(" \xB7 ");
+      }
+      if (logEl) {
+        if (job.status === "error") {
+          logEl.textContent = detail || job.error || logPreview || "";
+        } else {
+          logEl.textContent = logPreview || detail || "\u7B49\u5F85 Hermes \u8F93\u51FA\u2026";
+        }
+      }
+      if (job.status === "done") {
+        const doneId = job.id;
+        setTimeout(() => {
+          const cur = State2.fixMentorJob || {};
+          if (cur.id === doneId && cur.status === "done") {
+            banner.hidden = true;
+            banner.dataset.status = "idle";
+          }
+        }, 1e4);
+      }
+    } else {
+      banner.hidden = true;
+      banner.dataset.status = "idle";
+      banner.dataset.stale = "0";
+    }
+  }
+}
+function stopFixMentorJobPolling() {
+  const job = State2.fixMentorJob || {};
+  if (job.pollTimer) {
+    try {
+      clearInterval(job.pollTimer);
+    } catch (_) {
+    }
+    State2.fixMentorJob.pollTimer = null;
+  }
+  if (job.tickTimer) {
+    try {
+      clearInterval(job.tickTimer);
+    } catch (_) {
+    }
+    State2.fixMentorJob.tickTimer = null;
+  }
+}
+async function fetchFixMentorJob(jobId, path2) {
+  const token = State2.externalWatchToken || "" || await ensureLocalSessionToken();
+  if (!token) return null;
+  const q = new URLSearchParams();
+  q.set("token", token);
+  if (jobId) q.set("id", jobId);
+  if (path2) q.set("path", path2);
+  const res = await fetch(location.origin + "/fix-mentor-job?" + q.toString(), { cache: "no-store" });
+  if (!res.ok) {
+    let err = "http-" + res.status;
+    try {
+      const body = await res.json();
+      err = body && (body.error || body.message) || err;
+    } catch (_) {
+    }
+    return { ok: false, error: err, status: "error" };
+  }
+  return await res.json();
+}
+async function pollFixMentorJobOnce() {
+  const job = State2.fixMentorJob || {};
+  if (!job.id && !job.path) return;
+  try {
+    const data = await fetchFixMentorJob(job.id, job.path);
+    if (!data) return;
+    const st = String(data.status || "");
+    if (st === "idle" && !job.id) {
+      setFixMentorJobState({ status: "idle", message: "", error: "" });
+      stopFixMentorJobPolling();
+      return;
+    }
+    setFixMentorJobState({
+      id: data.id || job.id,
+      status: st === "queued" || st === "starting" || st === "running" ? st === "running" ? "running" : "starting" : st === "done" ? "done" : st === "error" || st === "cancelled" ? "error" : job.status,
+      path: data.path || job.path,
+      threadId: data.threadId || job.threadId,
+      message: data.message || "",
+      error: data.error || "",
+      exitCode: data.exitCode,
+      staged: data.staged != null ? !!data.staged : !!job.staged,
+      phase: data.phase || job.phase || "",
+      phaseLabel: data.phaseLabel || job.phaseLabel || "",
+      step: data.step != null ? data.step : job.step,
+      progress: data.progress != null ? data.progress : job.progress,
+      elapsedSec: data.elapsedSec != null ? data.elapsedSec : job.elapsedSec,
+      elapsedLabel: data.elapsedLabel || job.elapsedLabel || "",
+      lastLog: data.lastLog || job.lastLog || "",
+      logTail: Array.isArray(data.logTail) ? data.logTail : job.logTail || [],
+      stale: !!data.stale,
+      sourceName: data.sourceName || job.sourceName || ""
+    });
+    if (st === "done" || st === "error" || st === "cancelled") {
+      stopFixMentorJobPolling();
+      if (st === "done") {
+        const staged = !!(data.staged || job.staged);
+        const resultPath = data.path || job.path || "";
+        showToast(staged ? "AI \u5904\u7406\u5B8C\u6210 \xB7 \u6B63\u5728\u5199\u56DE\u2026" : "AI \u5904\u7406\u5B8C\u6210", 2800);
+        try {
+          startSupervisionPolling();
+        } catch (_) {
+        }
+        try {
+          if (staged && resultPath) {
+            void applyFixMentorResultFromPath(resultPath, { staged: true }).then((r) => {
+              if (!r || !r.ok) {
+                showToast("\u7ED3\u679C\u5199\u56DE\u5931\u8D25\uFF0C\u8BF7\u624B\u52A8\u91CD\u5F00\u78C1\u76D8\u6587\u4EF6", 4e3);
+              }
+              try {
+                syncFixMentorJobUi();
+              } catch (_) {
+              }
+            });
+          } else {
+            if (typeof scheduleExternalRefresh === "function") {
+              scheduleExternalRefresh({
+                generation: State2.externalWatch && State2.externalWatch.generation,
+                hint: { cause: "fix-mentor-done" }
+              });
+            }
+            if (typeof refreshFromExternalDisk === "function") {
+              const gen = State2.externalWatch && State2.externalWatch.generation;
+              setTimeout(() => {
+                void refreshFromExternalDisk({ generation: gen }).catch(() => {
+                });
+              }, 400);
+            }
+            setTimeout(() => {
+              try {
+                renderCommentList();
+              } catch (_) {
+              }
+              try {
+                syncFixMentorJobUi();
+              } catch (_) {
+              }
+            }, 1200);
+          }
+        } catch (_) {
+        }
+      } else {
+        showToast("AI \u5904\u7406\u5931\u8D25: " + (data.message || data.error || "unknown"), 4500);
+      }
+    }
+  } catch (e) {
+    console.warn("[fix-mentor-job] poll failed", e);
+  }
+}
+function startFixMentorJobPolling() {
+  stopFixMentorJobPolling();
+  if (!State2.fixMentorJob.startedAtClient) {
+    State2.fixMentorJob.startedAtClient = Date.now();
+  }
+  State2.fixMentorJob.pollTimer = setInterval(() => {
+    void pollFixMentorJobOnce();
+  }, 800);
+  State2.fixMentorJob.tickTimer = setInterval(() => {
+    const j = State2.fixMentorJob || {};
+    if (!isFixMentorJobActive(j.status)) return;
+    const base2 = j.startedAtClient || Date.now();
+    const sec = Math.floor((Date.now() - base2) / 1e3);
+    const elapsedSec = Math.max(sec, Number(j.elapsedSec) || 0);
+    let progress = Number(j.progress) || 10;
+    if (progress < 92) progress = Math.min(92, progress + 0.15);
+    setFixMentorJobState({
+      elapsedSec,
+      elapsedLabel: formatFixMentorElapsed(elapsedSec),
+      progress
+    });
+  }, 1e3);
+  void pollFixMentorJobOnce();
+}
+async function ensureDiskSavedForFixMentor() {
+  if (!State2.currentFile) {
+    return { ok: false, error: "no-document", message: "\u8BF7\u5148\u6253\u5F00 .mentor \u6587\u4EF6" };
+  }
+  if (!/\.mentor$/i.test(String(State2.currentFile.name || State2.diskPathHint || ""))) {
+    return { ok: false, error: "not-mentor", message: "AI \u5904\u7406\u4EC5\u652F\u6301 .mentor \u5305" };
+  }
+  if (State2.readOnlyMode || typeof canWriteLiveDocument === "function" && !canWriteLiveDocument()) {
+    return { ok: false, error: "read-only", message: "\u5F53\u524D\u4E3A\u53EA\u8BFB\u67E5\u770B\uFF0C\u8BF7\u5148\u63A5\u7BA1\u7F16\u8F91" };
+  }
+  let path2 = "";
+  try {
+    path2 = resolveActiveMentorAbsPath();
+  } catch (_) {
+    path2 = "";
+  }
+  if (!path2) {
+    setFixMentorJobState({ status: "saving", message: "\u6B63\u5728\u89E3\u6790\u6587\u4EF6\u8DEF\u5F84\u2026", error: "" });
+    try {
+      path2 = await resolveMentorPathByName(mentorBasenameHint());
+    } catch (_) {
+      path2 = "";
+    }
+  }
+  if (!path2 || !isAbsMentorPath(path2)) {
+    return {
+      ok: false,
+      error: "no-disk-path",
+      message: "\u6CA1\u6709\u78C1\u76D8\u8DEF\u5F84\u3002\u8BF7\u7528 mentor.cmd / \u684C\u9762\u56FE\u6807\u6253\u5F00 .mentor\uFF08\u7ECF mentor-server\uFF09\uFF0C\u4E0D\u8981\u53EA\u62D6\u8FDB\u6D4F\u89C8\u5668\u3002"
+    };
+  }
+  const dirty = !!State2.currentFile.dirty;
+  if (dirty) {
+    setFixMentorJobState({ status: "saving", message: "\u6B63\u5728\u4FDD\u5B58\u5230\u78C1\u76D8\u2026", path: path2, error: "" });
+    const result = await writeCurrentToDisk({ reason: "manual", showProgress: true });
+    if (!result || !result.ok) {
+      return {
+        ok: false,
+        error: result && result.error || "save-failed",
+        message: "\u4FDD\u5B58\u5931\u8D25: " + (result && (result.message || result.error) || "unknown")
+      };
+    }
+  }
+  return { ok: true, path: path2, stage: false, writeBackPath: path2 };
+}
+async function runFixMentorFromUi(opts = {}) {
+  const threadId = String(opts.threadId || "").trim();
+  const scope = opts.scope === "thread" ? "thread" : "all";
+  const cur = State2.fixMentorJob || {};
+  if (isFixMentorJobActive(cur.status)) {
+    showToast("\u5DF2\u6709 AI \u4EFB\u52A1\u5728\u8FD0\u884C", 2200);
+    return { ok: false, error: "busy" };
+  }
+  if (threadId) {
+    try {
+      const ta2 = document.querySelector(`[data-thread-input="${threadId}"]`);
+      const draft = ta2 && ta2.value || State2.replyDrafts[threadId] || "";
+      if (String(draft).trim()) {
+        if (typeof addReply === "function") {
+          addReply(threadId, draft);
+        }
+      }
+    } catch (_) {
+    }
+  }
+  try {
+    const conn = await fetchHermesConnection({ warm: true, wait: 12 });
+    if (!conn || !conn.agentReady) {
+      const msg = "Hermes \u672A\u5C31\u7EEA\uFF08\u5E95\u680F\u8FDE\u63A5\u82AF\u7247\uFF09\u3002\u7B49\u300CHermes \u5DF2\u5C31\u7EEA\u300D\u518D\u70B9 AI\uFF0C\u6216\u91CD\u542F mentor-server\u3002";
+      setFixMentorJobState({
+        status: "error",
+        error: "hermes-not-ready",
+        message: msg
+      });
+      showToast(msg, 4500);
+      return { ok: false, error: "hermes-not-ready", message: msg };
+    }
+  } catch (_) {
+    const msg = "\u65E0\u6CD5\u68C0\u67E5 Hermes \u8FDE\u63A5";
+    setFixMentorJobState({ status: "error", error: "hermes-conn-check", message: msg });
+    showToast(msg, 4200);
+    return { ok: false, error: "hermes-conn-check", message: msg };
+  }
+  const saved = await ensureDiskSavedForFixMentor();
+  if (!saved.ok) {
+    setFixMentorJobState({ status: "error", error: saved.error || "precheck", message: saved.message || "" });
+    showToast(saved.message || "\u65E0\u6CD5\u542F\u52A8 AI", 4200);
+    return saved;
+  }
+  if (!saved.path) {
+    const msg = "\u6CA1\u6709\u78C1\u76D8\u8DEF\u5F84\uFF0C\u5DF2\u7981\u6B62\u6682\u5B58\u56DE\u843D\u3002\u8BF7\u7ECF mentor-server \u6253\u5F00\u771F\u5B9E .mentor\u3002";
+    setFixMentorJobState({ status: "error", error: "no-disk-path", message: msg });
+    showToast(msg, 4500);
+    return { ok: false, error: "no-disk-path", message: msg };
+  }
+  const token = State2.externalWatchToken || "" || await ensureLocalSessionToken();
+  if (!token) {
+    const msg = "\u65E0\u6CD5\u83B7\u53D6 mentor-server session token\uFF08\u8BF7\u786E\u8BA4\u901A\u8FC7 http://127.0.0.1:8787 \u6253\u5F00\uFF09";
+    setFixMentorJobState({ status: "error", error: "no-token", message: msg, path: saved.path || "" });
+    showToast(msg, 4200);
+    return { ok: false, error: "no-token", message: msg };
+  }
+  setFixMentorJobState({
+    status: "starting",
+    id: "",
+    path: saved.path,
+    threadId,
+    scope,
+    message: "\u63D0\u4EA4\u5230 warm Hermes\u2026",
+    error: "",
+    exitCode: null,
+    startedAt: Date.now(),
+    staged: false,
+    writeBackPath: saved.writeBackPath || saved.path
+  });
+  showToast("\u63D0\u4EA4 AI \u4EFB\u52A1\u2026", 1600);
+  try {
+    await fetch(location.origin + "/supervision/register", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token, path: saved.path })
+    });
+  } catch (_) {
+  }
+  try {
+    startSupervisionPolling();
+  } catch (_) {
+  }
+  let res;
+  try {
+    res = await fetch(location.origin + "/run-fix-mentor", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        token,
+        path: saved.path,
+        name: mentorBasenameHint() || void 0,
+        threadId: threadId || void 0,
+        scope
+      })
+    });
+  } catch (e) {
+    const msg = "\u65E0\u6CD5\u8FDE\u63A5 mentor-server: " + (e && e.message ? e.message : e);
+    setFixMentorJobState({ status: "error", error: "network", message: msg });
+    showToast(msg, 4200);
+    return { ok: false, error: "network", message: msg };
+  }
+  let data = null;
+  try {
+    data = await res.json();
+  } catch (_) {
+    data = null;
+  }
+  if (res.status === 409 && data) {
+    setFixMentorJobState({
+      id: data.id || "",
+      status: data.status === "running" ? "running" : "starting",
+      path: data.path || saved.path || "",
+      threadId: data.threadId || threadId,
+      message: data.message || "\u5DF2\u6709\u4EFB\u52A1\u5728\u8FD0\u884C",
+      error: "",
+      staged: false
+    });
+    State2.fixMentorJob.startedAtClient = Date.now();
+    startFixMentorJobPolling();
+    showToast(data.message || "\u5DF2\u6709 AI \u4EFB\u52A1\u5728\u8FD0\u884C", 2500);
+    return { ok: true, attached: true, job: data };
+  }
+  if (!res.ok || !data || data.ok === false && !data.id) {
+    const err = data && (data.error || data.message) || "http-" + res.status;
+    const msg = data && data.message || err;
+    setFixMentorJobState({ status: "error", error: err, message: msg, path: saved.path });
+    showToast(msg, 4500);
+    return { ok: false, error: err, message: msg };
+  }
+  setFixMentorJobState({
+    id: data.id || "",
+    status: data.status === "running" ? "running" : "starting",
+    path: data.path || saved.path,
+    threadId: data.threadId || threadId,
+    scope: data.scope || scope,
+    message: data.message || "Hermes \u5DF2\u542F\u52A8",
+    error: "",
+    startedAt: Date.now(),
+    staged: false
+  });
+  State2.fixMentorJob.startedAtClient = Date.now();
+  startFixMentorJobPolling();
+  showToast("AI \u4EFB\u52A1\u5DF2\u63D0\u4EA4 \xB7 warm Hermes", 2400);
+  return { ok: true, job: data };
 }
 function invokeAiForThread(threadId) {
   if (!threadId) return false;
@@ -64959,8 +66141,8 @@ function renderCommentList() {
     const threadType = threadTypeOf(thread);
     const safeThreadId = escapeHtml(thread.threadId);
     return `
-      <div class="comment-thread ${isActive2 ? "is-active" : ""} ${thread.resolved ? "is-resolved" : ""} ${thread.fuzzy ? "is-fuzzy" : ""} ${thread.deleted ? "is-deleted" : ""} ${warnKind === "ambiguous" || thread.invalidReason === "ambiguous" ? "is-ambiguous" : ""} ${isCollapsed ? "is-collapsed" : ""} ${thread.pending ? "is-pending" : ""}${threadTypeClass(thread)}" data-thread="${safeThreadId}" data-thread-type="${threadType || ""}">
-        ${warnKind === "orphaned" || thread.deleted ? '<div class="deleted-banner">\u{1F4CD} \u539F\u6587\u5DF2\u88AB\u5220\u9664 - <button class="link-btn" data-act="reattach" data-thread="' + safeThreadId + '">\u91CD\u65B0\u9009\u62E9\u6B63\u6587</button> \xB7 <button class="link-btn link-danger" data-act="delete-orphan" data-thread="' + safeThreadId + '">\u5220\u9664</button></div>' : warnKind === "ambiguous" ? '<div class="ambiguous-banner">\u26A0 \u65E0\u6CD5\u552F\u4E00\u786E\u5B9A\u539F\u6587\u4F4D\u7F6E\uFF08\u91CD\u590D\u951A\u70B9\uFF09\u2014 <button class="link-btn" data-act="reattach" data-thread="' + safeThreadId + '">\u91CD\u65B0\u9009\u62E9\u6B63\u6587</button> \xB7 <button class="link-btn link-danger" data-act="delete-orphan" data-thread="' + safeThreadId + '">\u5220\u9664</button></div>' : warnKind === "collision" || warnKind === "image-missing" || thread.invalid && !thread.deleted ? '<div class="invalid-banner">\u26A0 \u6279\u6CE8\u951A\u70B9\u5931\u6548 \u2014 <button class="link-btn" data-act="reattach" data-thread="' + safeThreadId + '">\u91CD\u65B0\u9009\u62E9\u6B63\u6587</button> \xB7 <button class="link-btn link-danger" data-act="delete-orphan" data-thread="' + safeThreadId + '">\u5220\u9664</button></div>' : thread.fuzzy ? '<div class="fuzzy-banner">\u26A0 \u4F4D\u7F6E\u53EF\u80FD\u504F\u79FB - \u8BF7\u68C0\u67E5\u6587\u6863</div>' : ""}
+      <div class="comment-thread ${isActive2 ? "is-active" : ""} ${thread.resolved ? "is-resolved" : ""} ${warnKind === "orphaned" || thread.deleted ? "is-deleted" : ""} ${warnKind === "ambiguous" ? "is-ambiguous" : ""} ${warnKind === "collision" || warnKind === "image-missing" || thread.invalid && !thread.deleted && warnKind ? "is-anchor-bad" : ""} ${isCollapsed ? "is-collapsed" : ""} ${thread.pending ? "is-pending" : ""}${threadTypeClass(thread)}" data-thread="${safeThreadId}" data-thread-type="${threadType || ""}">
+        ${warnKind === "orphaned" || thread.deleted ? '<div class="deleted-banner">\u{1F4CD} \u539F\u6587\u5DF2\u88AB\u5220\u9664 - <button class="link-btn" data-act="reattach" data-thread="' + safeThreadId + '">\u91CD\u65B0\u9009\u62E9\u6B63\u6587</button> \xB7 <button class="link-btn link-danger" data-act="delete-orphan" data-thread="' + safeThreadId + '">\u5220\u9664</button></div>' : warnKind === "ambiguous" ? '<div class="ambiguous-banner">\u26A0 \u65E0\u6CD5\u552F\u4E00\u786E\u5B9A\u539F\u6587\u4F4D\u7F6E\uFF08\u91CD\u590D\u951A\u70B9\uFF09\u2014 <button class="link-btn" data-act="reattach" data-thread="' + safeThreadId + '">\u91CD\u65B0\u9009\u62E9\u6B63\u6587</button> \xB7 <button class="link-btn link-danger" data-act="delete-orphan" data-thread="' + safeThreadId + '">\u5220\u9664</button></div>' : warnKind === "collision" || warnKind === "image-missing" || thread.invalid && !thread.deleted ? '<div class="invalid-banner">\u26A0 \u6279\u6CE8\u951A\u70B9\u5931\u6548 \u2014 <button class="link-btn" data-act="reattach" data-thread="' + safeThreadId + '">\u91CD\u65B0\u9009\u62E9\u6B63\u6587</button> \xB7 <button class="link-btn link-danger" data-act="delete-orphan" data-thread="' + safeThreadId + '">\u5220\u9664</button></div>' : ""}
         <!-- card header: number + quote + menu -->
         <div class="comment-quote" data-thread="${safeThreadId}" title="\u70B9\u51FB\u6536\u8D77/\u5C55\u5F00\u6279\u6CE8">
           <span class="comment-number-badge" data-number="${number}" title="\u6279\u6CE8 #${number}">${number}</span>
@@ -65020,6 +66202,7 @@ function renderCommentList() {
               <textarea data-thread-input="${safeThreadId}" rows="1" placeholder="${escapeHtml(markerPlaceholder(threadType, !!first3.body))}" autocomplete="off"></textarea>
               <div class="form-actions">
                 <button type="button" class="comment-invoke-ai-btn" data-act="invoke-ai" data-thread="${safeThreadId}" title="\u5728\u56DE\u590D\u4E2D\u63D2\u5165 @AI\uFF08\u663E\u5F0F\u5524\u8D77 AI\uFF09" aria-label="\u63D2\u5165 @AI">@AI</button>
+                <button type="button" class="comment-run-ai-btn" data-act="run-fix-mentor" data-thread="${safeThreadId}" title="\u4FDD\u5B58\u5E76\u8BA9 Hermes \u5904\u7406\u5F85\u529E (@AI / AI \u5361)" aria-label="AI \u5904\u7406">AI \u5904\u7406</button>
                 <button class="comment-resolve-btn ${thread.resolved ? "is-resolved" : ""}" data-act="resolve" data-thread="${safeThreadId}" title="${thread.resolved ? "\u91CD\u65B0\u6253\u5F00\u6B64\u6279\u6CE8" : "\u6807\u8BB0\u4E3A\u5DF2\u89E3\u51B3"}" aria-label="${thread.resolved ? "\u91CD\u65B0\u6253\u5F00" : "\u6807\u8BB0\u4E3A\u5DF2\u89E3\u51B3"}">${thread.resolved ? "\u91CD\u5F00" : "\u89E3\u51B3"}</button>
                 <button data-act="submit-reply" data-thread="${safeThreadId}" class="primary" disabled title="\u8F93\u5165\u540E\u53EF\u56DE\u590D (Ctrl+Enter)">\u56DE\u590D</button>
               </div>
@@ -65148,6 +66331,17 @@ function renderCommentList() {
       invokeAiForThread(btn.dataset.thread);
     });
   });
+  list.querySelectorAll('[data-act="run-fix-mentor"]').forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      void runFixMentorFromUi({ threadId: btn.dataset.thread || "", scope: "all" });
+    });
+  });
+  try {
+    syncFixMentorJobUi();
+  } catch (_) {
+  }
   list.querySelectorAll('[data-act="edit-comment"]').forEach((btn) => {
     btn.addEventListener("click", (e) => {
       e.stopPropagation();
@@ -65527,8 +66721,8 @@ function scrollToThread(threadId) {
       try {
         syncThreadAnchorEvidence(thread, editor2.state.doc, recovered, {
           exact: thread.text || "",
-          status: recovered.fuzzy && thread.fuzzy !== false ? "edited" : "attached",
-          confidence: recovered.fuzzy && thread.fuzzy !== false ? 0.5 : 1
+          status: "attached",
+          confidence: 1
         });
       } catch (_) {
       }
@@ -65538,9 +66732,9 @@ function scrollToThread(threadId) {
         thread.invalid = false;
         thread.invalidReason = void 0;
       } else {
-        thread.fuzzy = !!recovered.fuzzy;
-        thread.invalid = !!recovered.fuzzy;
-        thread.invalidReason = recovered.fuzzy ? thread.invalidReason || "mark-reattached-fuzzy" : void 0;
+        thread.fuzzy = false;
+        thread.invalid = false;
+        thread.invalidReason = void 0;
       }
       try {
         markDirty();
@@ -65956,18 +67150,18 @@ function flushSourceView() {
         }
         syncThreadAnchorEvidence(ann, editor2.state.doc, found2, {
           exact: ann.text,
-          status: found2.fuzzy && ann.fuzzy !== false ? "edited" : "attached",
-          confidence: found2.fuzzy && ann.fuzzy !== false ? 0.5 : 1
+          status: "attached",
+          confidence: 1
         });
         if (ann.fuzzy === false) {
           ann.invalid = false;
           ann.deleted = false;
           ann.invalidReason = void 0;
         } else {
-          ann.fuzzy = !!found2.fuzzy;
-          ann.invalid = !!found2.fuzzy;
+          ann.fuzzy = false;
+          ann.invalid = false;
           ann.deleted = false;
-          ann.invalidReason = found2.fuzzy ? "text-changed" : void 0;
+          ann.invalidReason = void 0;
         }
       } else {
         failedThreadIds.add(snap.threadId);
@@ -65979,7 +67173,7 @@ function flushSourceView() {
     editor2.view.dispatch(tr2);
     for (const ann of State2.annotations) {
       if (failedThreadIds.has(ann.threadId)) {
-        ann.fuzzy = true;
+        ann.fuzzy = false;
         ann.invalid = true;
         ann.invalidReason = ann.invalidReason || "text-changed";
         if (ann.anchor && typeof ann.anchor === "object") {
@@ -66540,7 +67734,11 @@ function rebuildAnnotationMarks(markSnapshot) {
           const thr = State2.annotations.find((x) => x && x.threadId === snap.threadId);
           if (thr) {
             thr.invalid = true;
-            thr.fuzzy = !!(found2 && found2.ambiguous);
+            thr.fuzzy = false;
+            if (found2 && found2.ambiguous) {
+              thr.invalid = true;
+              thr.invalidReason = "ambiguous";
+            }
             thr.invalidReason = found2 && found2.ambiguous ? "ambiguous" : "text-not-found";
             thr.range = null;
             if (thr.anchor && typeof thr.anchor === "object") {
@@ -66652,7 +67850,7 @@ function syncToolbarActionState() {
   const busyAction = typeof State2._toolbarBusyAction === "string" ? State2._toolbarBusyAction : "";
   const actionState = getToolbarActionState({
     hasDocument: !!State2.currentFile,
-    hasWriteHandle: hasWriteHandle(),
+    hasWriteHandle: hasDiskWriteTarget(),
     dirty: !!(State2.currentFile && State2.currentFile.dirty),
     readOnly: !!State2.readOnlyMode || !canWriteLiveDocument(),
     saveMode: State2.saveMode,
@@ -67524,72 +68722,31 @@ function loadMarkdownIntoEditor(name, content, annotationsData = null, options =
     } else if (cap > 0 && validAnns.length > cap * 0.8) {
       showToast(`\u26A0 \u6587\u6863\u542B ${validAnns.length}/${cap} \u6761\u6279\u6CE8, \u63A5\u8FD1\u4E0A\u9650. \u2699 \u53EF\u8C03\u6574`, 4e3);
     }
-    const annsToProcess = validAnns;
+    const mdSource = typeof content === "string" ? content : "";
+    const doc5 = State2.editor.state.doc;
     const seenThreadIds = /* @__PURE__ */ new Set();
-    const plainForAnchorSet = State2.editor.state.doc.textBetween(0, State2.editor.state.doc.content.size, " ");
-    const anchorSetJobs = validAnns.filter((ann) => {
-      if (!ann || !ann.threadId || !ann.text) return false;
-      if (Array.isArray(ann.imageAnchors) && ann.imageAnchors.length) return false;
-      if (Array.isArray(ann.ranges) && ann.ranges.length > 1) return false;
-      const saved = ann.anchor && ann.anchor.position || ann.range;
-      if (saved && typeof saved.from === "number" && typeof saved.to === "number" && saved.to - saved.from !== String(ann.text).length) return false;
-      return true;
-    });
-    const anchorSet = resolveAnchorSet(plainForAnchorSet, anchorSetJobs);
-    const anchorSetById = new Map(anchorSetJobs.map((ann) => [ann.threadId, ann]));
-    const anchorSetCollisionIds = /* @__PURE__ */ new Set();
-    for (const collision of anchorSet.collisions || []) {
-      const ann = anchorSetById.get(collision.threadId);
-      const saved = ann && (ann.anchor && ann.anchor.position || ann.range);
-      const savedFrom = saved && typeof saved.from === "number" ? State2.editor.state.doc.textBetween(0, Math.max(0, Math.min(State2.editor.state.doc.content.size, saved.from)), " ").length : null;
-      if (savedFrom == null || savedFrom !== collision.range.from || ann.invalid || ann.deleted || ann.fuzzy) {
-        anchorSetCollisionIds.add(collision.threadId);
-      }
-    }
-    for (const ann of annsToProcess) {
+    let rangeAttached = 0;
+    let rangeOrphaned = 0;
+    for (const ann of validAnns) {
       const isDuplicate = ann.threadId && seenThreadIds.has(ann.threadId);
       if (ann.threadId) seenThreadIds.add(ann.threadId);
-      const isAnchorCollision = !!(ann.threadId && anchorSetCollisionIds.has(ann.threadId));
-      const isIncomplete = !ann.threadId || !ann.text;
-      const doc5 = State2.editor.state.doc;
       const hasImgAnchors = Array.isArray(ann.imageAnchors) && ann.imageAnchors.length > 0;
-      const hasTextRanges = Array.isArray(ann.ranges) && ann.ranges.length > 1;
-      const resolveSavedRanges = () => {
-        if (!hasTextRanges) return null;
-        const live = [];
-        const used = /* @__PURE__ */ new Set();
-        for (const saved of ann.ranges) {
-          if (!saved || typeof saved.from !== "number" || typeof saved.to !== "number" || saved.from >= saved.to) return null;
-          const expected = (() => {
-            if (saved.text != null && String(saved.text)) return String(saved.text);
-            try {
-              const atSaved = doc5.textBetween(saved.from, saved.to, " ");
-              if (atSaved && String(ann.text || "").includes(atSaved)) return atSaved;
-            } catch (_) {
-            }
-            const parts = String(ann.text || "").split(/\s+/).filter(Boolean);
-            const idx = ann.ranges.indexOf(saved);
-            return parts[idx] || "";
-          })();
-          if (!expected) return null;
-          const candidate = findAnnotationRange(doc5, {
-            text: expected,
-            prefix: saved.prefix || "",
-            suffix: saved.suffix || "",
-            range: saved,
-            anchor: { position: saved }
-          });
-          if (!candidate || candidate.ambiguous || typeof candidate.from !== "number" || candidate.from >= candidate.to) return null;
-          const key = `${candidate.from}:${candidate.to}`;
-          if (used.has(key)) return null;
-          used.add(key);
-          live.push({ from: candidate.from, to: candidate.to });
-        }
-        return live.length === ann.ranges.length ? live : null;
-      };
       const pureImageLabel = !!(ann.text && (/^\[图片\]$/i.test(String(ann.text).trim()) || /^\[image\]$/i.test(String(ann.text).trim())));
-      if (!isDuplicate && !isIncomplete && hasImgAnchors) {
-        const thread = {
+      const savedStatus = ann.anchor && ann.anchor.status;
+      const intentionallyOrphan = savedStatus === "orphaned" || savedStatus === "collision" || !!ann.deleted;
+      if (isDuplicate) {
+        State2.annotations.push({
+          ...ann,
+          authorColor: annotationAuthorColor(ann),
+          range: null,
+          invalid: true,
+          invalidReason: "duplicate-threadId"
+        });
+        rangeOrphaned++;
+        continue;
+      }
+      if (hasImgAnchors) {
+        const thread2 = {
           ...ann,
           authorColor: annotationAuthorColor(ann),
           imageAnchors: ann.imageAnchors.map((a) => ({ ...a })),
@@ -67598,180 +68755,47 @@ function loadMarkdownIntoEditor(name, content, annotationsData = null, options =
           fuzzy: false,
           invalidReason: void 0
         };
-        const sync = resyncImageAnchors(thread, doc5);
-        if (sync.resolved > 0 && thread.imageAnchors && thread.imageAnchors.length) {
-          State2.annotations.push(thread);
-          const pure = !thread.ranges || !thread.ranges.length;
-          if (!pure && thread.range && typeof thread.range.from === "number") {
-            const tr2 = State2.editor.state.tr;
-            tr2.addMark(
-              thread.range.from,
-              thread.range.to,
-              State2.editor.schema.marks.annotation.create(annotationMarkAttrs(thread))
-            );
-            tr2.setMeta("addToHistory", false);
-            tr2.setMeta("__activeMarkSync", true);
-            State2.editor.view.dispatch(tr2);
-          }
+        const sync = resyncImageAnchors(thread2, doc5);
+        if (sync.resolved > 0 && thread2.imageAnchors && thread2.imageAnchors.length) {
+          State2.annotations.push(thread2);
+          rangeAttached++;
           continue;
         }
         State2.annotations.push({
-          ...thread,
+          ...thread2,
           range: null,
           invalid: true,
-          invalidReason: "image-deleted"
+          invalidReason: "image-anchor-missing",
+          anchor: ann.anchor && typeof ann.anchor === "object" ? { ...ann.anchor, status: "orphaned", confidence: 0 } : { version: "1", status: "orphaned", confidence: 0, updatedAt: nowISO() }
         });
+        rangeOrphaned++;
         continue;
       }
-      if (isAnchorCollision) {
-        const thr = {
-          ...ann,
-          authorColor: annotationAuthorColor(ann),
-          range: null,
-          invalid: true,
-          fuzzy: true,
-          deleted: false,
-          invalidReason: "collision"
-        };
-        thr.anchor = ann.anchor && typeof ann.anchor === "object" ? { ...ann.anchor, status: "collision", confidence: 0 } : {
-          version: "1",
-          quote: { exact: ann.text || "", prefix: ann.prefix || "", suffix: ann.suffix || "" },
-          status: "collision",
-          confidence: 0,
-          updatedAt: nowISO()
-        };
-        State2.annotations.push(thr);
-        continue;
-      }
-      const resolvedTextRanges = !isDuplicate && !isIncomplete ? resolveSavedRanges() : null;
-      if (resolvedTextRanges) {
-        const first3 = resolvedTextRanges[0];
-        const last = resolvedTextRanges[resolvedTextRanges.length - 1];
-        const thread = {
-          ...ann,
-          authorColor: annotationAuthorColor(ann),
-          ranges: resolvedTextRanges,
-          range: { from: first3.from, to: last.to },
-          invalid: false,
-          deleted: false,
-          fuzzy: false,
-          invalidReason: void 0
-        };
-        const parts = resolvedTextRanges.map((r) => {
-          try {
-            return doc5.textBetween(r.from, r.to, " ");
-          } catch (_) {
-            return "";
-          }
-        }).filter(Boolean);
-        if (parts.length) thread.text = parts.join(" ");
-        syncThreadAnchorEvidence(thread, doc5, thread.range, {
-          exact: thread.text,
-          status: "attached",
-          confidence: 1
-        });
-        State2.annotations.push(thread);
-        const tr2 = State2.editor.state.tr;
-        const mark = State2.editor.schema.marks.annotation.create(annotationMarkAttrs(thread));
-        for (const r of resolvedTextRanges) tr2.addMark(r.from, r.to, mark);
-        tr2.setMeta("addToHistory", false);
-        tr2.setMeta("__activeMarkSync", true);
-        State2.editor.view.dispatch(tr2);
-        continue;
-      }
-      const positions = isDuplicate || isAnchorCollision || isIncomplete || hasTextRanges ? null : findAnnotationRange(doc5, ann);
-      if (positions && positions.ambiguous) {
-        const thr = {
-          ...ann,
-          authorColor: annotationAuthorColor(ann),
-          range: null,
-          invalid: true,
-          fuzzy: true,
-          deleted: false,
-          invalidReason: "ambiguous"
-        };
-        if (thr.anchor && typeof thr.anchor === "object") {
-          thr.anchor = { ...thr.anchor, status: "ambiguous" };
-        } else {
-          thr.anchor = {
-            version: "1",
-            quote: { exact: ann.text || "", prefix: ann.prefix || "", suffix: ann.suffix || "" },
-            status: "ambiguous",
-            confidence: 0,
-            updatedAt: nowISO()
-          };
-        }
-        State2.annotations.push(thr);
-      } else if (positions && typeof positions.from === "number" && typeof positions.to === "number") {
-        const thread = {
-          ...ann,
-          authorColor: annotationAuthorColor(ann),
-          range: { from: positions.from, to: positions.to },
-          fuzzy: !!positions.fuzzy
-          // P1-A: 降级匹配时标 fuzzy
-        };
-        try {
-          normalizeThreadQuoteToLive(thread, doc5, positions.from, positions.to);
-        } catch (_) {
-        }
-        if (thread.anchor && typeof thread.anchor === "object") {
-          thread.anchor = {
-            ...thread.anchor,
-            status: positions.fuzzy ? "edited" : "attached",
-            position: {
-              from: positions.from,
-              to: positions.to,
-              startAssoc: 1,
-              endAssoc: -1
-            }
-          };
-        } else {
-          try {
-            const plain = doc5.textBetween(0, doc5.content.size, String.fromCharCode(10), String.fromCharCode(10));
-            const pf = plain.indexOf(ann.text || "");
-            const ev = captureAnchorEvidence(plain, pf >= 0 ? pf : 0, pf >= 0 ? pf + String(ann.text || "").length : 0, { now: nowISO() });
-            ev.position = { from: positions.from, to: positions.to, startAssoc: 1, endAssoc: -1 };
-            ev.quote = { exact: ann.text || "", prefix: ann.prefix || "", suffix: ann.suffix || "" };
-            ev.status = positions.fuzzy ? "edited" : "attached";
-            thread.anchor = ev;
-          } catch (_) {
-          }
-        }
-        if (hasImgAnchors) {
-          thread.imageAnchors = ann.imageAnchors.map((a) => ({ ...a }));
-          resyncImageAnchors(thread, doc5);
-        }
-        State2.annotations.push(thread);
-        const skipMark = pureImageLabel || thread.imageAnchors && thread.imageAnchors.length === 1 && thread.range && thread.imageAnchors[0].from === thread.range.from && thread.imageAnchors[0].to === thread.range.to;
-        if (!skipMark) {
-          const tr2 = State2.editor.state.tr;
-          tr2.addMark(
-            positions.from,
-            positions.to,
-            State2.editor.schema.marks.annotation.create(annotationMarkAttrs(thread))
-          );
-          tr2.setMeta("addToHistory", false);
-          tr2.setMeta("__activeMarkSync", true);
-          State2.editor.view.dispatch(tr2);
-        }
-      } else {
-        let reason = isDuplicate ? "duplicate-threadId" : isIncomplete ? "incomplete-data" : "text-not-found";
-        if (reason === "text-not-found" && hasTextRanges) {
-          reason = "multi-range-not-found";
-        }
-        if (reason === "text-not-found" && ann.text && ann.text.includes("\n")) {
-          reason = "cross-block";
-        }
-        if (reason === "text-not-found" && pureImageLabel) {
-          reason = "image-anchor-missing";
-        }
+      if (intentionallyOrphan) {
         State2.annotations.push({
           ...ann,
           authorColor: annotationAuthorColor(ann),
           range: null,
           invalid: true,
-          invalidReason: reason,
-          anchor: ann.anchor && typeof ann.anchor === "object" ? { ...ann.anchor, status: "orphaned" } : {
+          deleted: !!ann.deleted,
+          fuzzy: false,
+          invalidReason: ann.invalidReason || savedStatus || "orphaned"
+        });
+        rangeOrphaned++;
+        continue;
+      }
+      const mr = ann.mdRange;
+      const v = validateThreadMdRange(ann, mdSource);
+      if (!v.ok) {
+        State2.annotations.push({
+          ...ann,
+          authorColor: annotationAuthorColor(ann),
+          range: null,
+          invalid: true,
+          deleted: false,
+          fuzzy: false,
+          invalidReason: v.reason || "missing-mdRange",
+          anchor: ann.anchor && typeof ann.anchor === "object" ? { ...ann.anchor, status: "orphaned", confidence: 0 } : {
             version: "1",
             quote: { exact: ann.text || "", prefix: ann.prefix || "", suffix: ann.suffix || "" },
             status: "orphaned",
@@ -67779,6 +68803,88 @@ function loadMarkdownIntoEditor(name, content, annotationsData = null, options =
             updatedAt: nowISO()
           }
         });
+        rangeOrphaned++;
+        continue;
+      }
+      const pm = pmRangeFromMdRange(doc5, mdSource, mr, " ");
+      if (!pm || typeof pm.from !== "number" || pm.from >= pm.to) {
+        State2.annotations.push({
+          ...ann,
+          authorColor: annotationAuthorColor(ann),
+          range: null,
+          invalid: true,
+          deleted: false,
+          fuzzy: false,
+          invalidReason: "mdRange-pm-unmapped",
+          anchor: ann.anchor && typeof ann.anchor === "object" ? { ...ann.anchor, status: "orphaned", confidence: 0 } : {
+            version: "1",
+            quote: { exact: ann.text || "", prefix: ann.prefix || "", suffix: ann.suffix || "" },
+            status: "orphaned",
+            confidence: 0,
+            updatedAt: nowISO()
+          }
+        });
+        rangeOrphaned++;
+        continue;
+      }
+      const thread = {
+        ...ann,
+        authorColor: annotationAuthorColor(ann),
+        range: { from: pm.from, to: pm.to },
+        mdRange: { from: mr.from, to: mr.to },
+        invalid: false,
+        deleted: false,
+        fuzzy: false,
+        invalidReason: void 0
+      };
+      try {
+        normalizeThreadQuoteToLive(thread, doc5, pm.from, pm.to);
+      } catch (_) {
+      }
+      if (thread.anchor && typeof thread.anchor === "object") {
+        thread.anchor = {
+          ...thread.anchor,
+          status: "attached",
+          confidence: 1,
+          position: { from: pm.from, to: pm.to, startAssoc: 1, endAssoc: -1 },
+          quote: {
+            exact: thread.text || ann.text || "",
+            prefix: thread.prefix || ann.prefix || "",
+            suffix: thread.suffix || ann.suffix || ""
+          }
+        };
+      } else {
+        try {
+          const plain = doc5.textBetween(0, doc5.content.size, String.fromCharCode(10), String.fromCharCode(10));
+          const ev = captureAnchorEvidence(plain, 0, 0, { now: nowISO() });
+          ev.position = { from: pm.from, to: pm.to, startAssoc: 1, endAssoc: -1 };
+          ev.quote = {
+            exact: thread.text || ann.text || "",
+            prefix: thread.prefix || "",
+            suffix: thread.suffix || ""
+          };
+          ev.status = "attached";
+          thread.anchor = ev;
+        } catch (_) {
+        }
+      }
+      State2.annotations.push(thread);
+      const tr2 = State2.editor.state.tr;
+      tr2.addMark(
+        pm.from,
+        pm.to,
+        State2.editor.schema.marks.annotation.create(annotationMarkAttrs(thread))
+      );
+      tr2.setMeta("addToHistory", false);
+      tr2.setMeta("__activeMarkSync", true);
+      State2.editor.view.dispatch(tr2);
+      rangeAttached++;
+    }
+    console.log(`[md-range] restore attached=${rangeAttached} orphaned=${rangeOrphaned}`);
+    if (rangeOrphaned > 0) {
+      try {
+        showToast(`\u26A0 ${rangeOrphaned} \u6761\u6279\u6CE8\u65E0\u6548 mdRange\uFF08\u5DF2 orphan\uFF0C\u4E0D\u518D quote \u641C\u7D22\uFF09`, 4500);
+      } catch (_) {
       }
     }
   }
@@ -67788,7 +68894,7 @@ function loadMarkdownIntoEditor(name, content, annotationsData = null, options =
       if (!t || !t.threadId) continue;
       if (seenThreadIds.has(t.threadId)) {
         t.invalid = true;
-        t.fuzzy = true;
+        t.fuzzy = false;
         t.invalidReason = "duplicate-threadId";
         if (t.anchor && typeof t.anchor === "object") t.anchor = { ...t.anchor, status: "ambiguous", confidence: 0 };
       }
@@ -67804,6 +68910,17 @@ function loadMarkdownIntoEditor(name, content, annotationsData = null, options =
       State2.editor.view.dispatch(trSeed);
     }
   } catch (_) {
+  }
+  try {
+    if (typeof content === "string" && content && Array.isArray(State2.annotations)) {
+      for (const th of State2.annotations) {
+        if (!th || th.invalid || th.deleted) continue;
+        if (Array.isArray(th.imageAnchors) && th.imageAnchors.length && !th.range) continue;
+        stampThreadMdRange(th, content);
+      }
+    }
+  } catch (eStampLive) {
+    console.warn("[md-range] live stamp after load", eStampLive);
   }
   if (preservedTabThreadId && State2.annotations.some((a) => a && a.threadId === preservedTabThreadId)) {
     State2.activeThreadId = preservedTabThreadId;
@@ -67963,7 +69080,7 @@ function findAnnotationRange(doc5, annotation) {
   };
   const makeRange = (from2, to, fuzzy) => {
     const r = { from: posAtOffset(from2), to: posAtOffset(to) };
-    if (fuzzy) r.fuzzy = true;
+    if (fuzzy) r.fuzzy = false;
     return r;
   };
   if (text22) {
@@ -68497,6 +69614,207 @@ async function ensureWritePermission(fileHandle) {
     return "unknown";
   }
 }
+async function attachWriteHandle(handle, { source = "picker", allowRename = false } = {}) {
+  if (!handle || !State2.currentFile) return { ok: false, error: "no-doc" };
+  const want = String(State2.currentFile.name || "").toLowerCase();
+  const got = String(handle.name || "").toLowerCase();
+  const mayRename = allowRename || source === "save-picker" || source === "save";
+  if (want && got && want !== got && !mayRename) {
+    return { ok: false, error: "name-mismatch", expected: State2.currentFile.name, got: handle.name };
+  }
+  if (mayRename && handle.name) {
+    try {
+      State2.currentFile.name = handle.name;
+    } catch (_) {
+    }
+  }
+  try {
+    const perm = await ensureWritePermission(handle);
+    if (perm !== "granted") {
+      let q = "unknown";
+      try {
+        q = await handle.queryPermission({ mode: "readwrite" });
+      } catch (_) {
+      }
+      if (q !== "granted") return { ok: false, error: "permission-denied" };
+    }
+  } catch (e) {
+    return { ok: false, error: e && e.message ? e.message : "permission-denied" };
+  }
+  State2.currentFile.handle = handle;
+  const nm = handle.name || State2.currentFile.name || "";
+  State2.saveMode = /\.mentor$/i.test(nm) ? "mentor-handle" : "handle";
+  try {
+    await rememberOpenedFile(State2.currentFile.name || nm, handle);
+  } catch (_) {
+  }
+  try {
+    snapshotActiveTab();
+  } catch (_) {
+  }
+  try {
+    renderFilePaneCurrent();
+  } catch (_) {
+  }
+  try {
+    syncToolbarActionState();
+  } catch (_) {
+  }
+  try {
+    if (typeof startExternalWatchForCurrentDocument === "function") {
+      await startExternalWatchForCurrentDocument();
+    }
+  } catch (_) {
+  }
+  try {
+    setStatus("\u5DF2\u542F\u7528\u5199\u56DE", `${State2.currentFile.name} \xB7 \u81EA\u52A8\u4FDD\u5B58\u5C06\u5199\u76D8`);
+  } catch (_) {
+  }
+  try {
+    if (getAutoSaveEnabled() && State2.currentFile.dirty) {
+      Promise.resolve().then(() => autosaveNow()).catch(() => {
+      });
+    }
+  } catch (_) {
+  }
+  return { ok: true, source };
+}
+async function tryAttachStoredWriteHandle(fileName = null) {
+  if (hasWriteHandle()) return { ok: true, already: true, source: "existing" };
+  if (!State2.currentFile && !fileName) return { ok: false, error: "no-doc" };
+  const name = fileName || State2.currentFile && State2.currentFile.name || "";
+  if (!name) return { ok: false, error: "no-name" };
+  let handle = null;
+  try {
+    const docId = State2.currentFile && State2.currentFile.documentId;
+    if (docId) handle = await HandleStore.getFile(docId);
+    if (!handle) handle = await HandleStore.getFile(name);
+  } catch (e) {
+    console.warn("[tryAttachStoredWriteHandle]", e);
+  }
+  if (!handle) return { ok: false, error: "no-stored-handle" };
+  let perm = "prompt";
+  try {
+    perm = await handle.queryPermission({ mode: "readwrite" });
+  } catch (_) {
+    perm = "prompt";
+  }
+  if (perm !== "granted") return { ok: false, error: "need-permission", handle };
+  return attachWriteHandle(handle, { source: "idb" });
+}
+async function enableWriteBackForCurrent(opts = {}) {
+  const thenSave = !!opts.thenSave;
+  const preferSavePicker = opts.preferSavePicker !== false;
+  if (hasDiskWriteTarget() && !hasWriteHandle()) {
+    if (thenSave) {
+      const result = await writeCurrentToDisk({ reason: "manual", showProgress: isMentorPackMode() });
+      return { ok: true, already: true, via: "server", saveResult: result };
+    }
+    return { ok: true, already: true, via: "server" };
+  }
+  if (hasWriteHandle()) {
+    if (thenSave) {
+      const result = await writeCurrentToDisk({ reason: "manual", showProgress: isMentorPackMode() });
+      return { ok: true, already: true, saveResult: result };
+    }
+    return { ok: true, already: true };
+  }
+  if (!State2.currentFile) return { ok: false, error: "no-doc" };
+  let stored = null;
+  try {
+    const docId = State2.currentFile.documentId;
+    if (docId) stored = await HandleStore.getFile(docId);
+    if (!stored) stored = await HandleStore.getFile(State2.currentFile.name);
+  } catch (_) {
+  }
+  if (stored) {
+    const att = await attachWriteHandle(stored, { source: "idb-prompt", allowRename: true });
+    if (att.ok) {
+      if (thenSave) {
+        const result = await writeCurrentToDisk({ reason: "manual", showProgress: isMentorPackMode() });
+        return { ...att, saveResult: result };
+      }
+      return att;
+    }
+  }
+  const canOpen = typeof window.showOpenFilePicker === "function";
+  const canSave = typeof window.showSaveFilePicker === "function";
+  if (!(FS_API && FS_API.supported) || !canOpen && !canSave) {
+    return { ok: false, error: "unsupported" };
+  }
+  const suggested = (() => {
+    const n = String(State2.currentFile.name || "document.mentor");
+    if (/\.mentor$/i.test(n)) return n;
+    if (/^(untitled|未命名)/i.test(n) || !n.trim()) return "document.mentor";
+    return n.replace(/\.(md|markdown)$/i, "") + ".mentor";
+  })();
+  const isPlaceholder = /^(untitled|未命名)/i.test(String(State2.currentFile.name || "")) || !State2.currentFile.name;
+  try {
+    let handle = null;
+    let source = "picker";
+    if (preferSavePicker && canSave) {
+      handle = await window.showSaveFilePicker({
+        suggestedName: suggested,
+        types: [{
+          description: "Mentor \u5355\u6587\u4EF6\u5305 (.mentor)",
+          accept: { "application/zip": [".mentor"] }
+        }]
+      });
+      source = "save-picker";
+    } else if (canOpen) {
+      const handles = await window.showOpenFilePicker({
+        multiple: false,
+        types: [{
+          description: "Mentor \u5355\u6587\u4EF6\u5305 (.mentor)",
+          accept: { "application/zip": [".mentor"] }
+        }],
+        excludeAcceptAllOption: false
+      });
+      handle = handles && handles[0] || null;
+      source = "open-picker";
+    } else if (canSave) {
+      handle = await window.showSaveFilePicker({
+        suggestedName: suggested,
+        types: [{
+          description: "Mentor \u5355\u6587\u4EF6\u5305 (.mentor)",
+          accept: { "application/zip": [".mentor"] }
+        }]
+      });
+      source = "save-picker";
+    }
+    if (!handle) return { ok: false, cancelled: true };
+    if (source === "open-picker" && !isPlaceholder) {
+      const want = String(State2.currentFile.name || "").toLowerCase();
+      const got = String(handle.name || "").toLowerCase();
+      if (want && got && want !== got) {
+        try {
+          showToast(`\u5DF2\u6388\u6743 ${handle.name}\uFF08\u539F\u540D ${State2.currentFile.name}\uFF09\xB7 \u4E4B\u540E\u81EA\u52A8\u5199\u6B64\u6587\u4EF6`, 3600);
+        } catch (_) {
+        }
+      }
+    }
+    const att = await attachWriteHandle(handle, { source, allowRename: true });
+    if (!att.ok) return att;
+    if (thenSave) {
+      const result = await writeCurrentToDisk({ reason: "manual", showProgress: isMentorPackMode() });
+      if (result && result.ok) {
+        try {
+          showToast("\u5DF2\u5199\u56DE\u78C1\u76D8 \xB7 \u81EA\u52A8\u4FDD\u5B58\u5C06\u7EE7\u7EED\u5199\u76D8", 2600);
+        } catch (_) {
+        }
+      }
+      return { ...att, saveResult: result };
+    }
+    try {
+      showToast("\u5DF2\u6388\u6743\u5199\u76D8 \xB7 \u81EA\u52A8\u4FDD\u5B58\u5F00\u542F\u540E\u4F1A\u5199\u56DE", 2400);
+    } catch (_) {
+    }
+    return att;
+  } catch (e) {
+    if (e && e.name === "AbortError") return { ok: false, cancelled: true };
+    return { ok: false, error: e && e.message ? e.message : String(e) };
+  }
+}
 async function openFromHandle(fileHandle, sidecarHandle = null, options = {}) {
   const quiet = !!(options && options.quiet);
   await ensureWritePermission(fileHandle);
@@ -68536,7 +69854,9 @@ async function openFromHandle(fileHandle, sidecarHandle = null, options = {}) {
   }
 }
 async function openFromMentorHandle(fileHandle, options = {}) {
-  clearExternalWatchSource();
+  if (!(options && options.preserveExternalWatch)) {
+    clearExternalWatchSource();
+  }
   const quiet = !!(options && options.quiet);
   const preferDraft = !!(options && options.preferDraft);
   const forceDisk = !!(options && options.forceDisk);
@@ -68562,6 +69882,17 @@ async function openFromMentorHandle(fileHandle, options = {}) {
     archiveVerification: archive && archive.verification || null
   });
   if (!State2.diskPathHint) State2.diskPathHint = file.name;
+  try {
+    void resolveMentorPathByName(file.name).then((p) => {
+      if (p) {
+        try {
+          startSupervisionPolling();
+        } catch (_) {
+        }
+      }
+    });
+  } catch (_) {
+  }
   try {
     startSupervisionPolling();
   } catch (_) {
@@ -70021,6 +71352,14 @@ async function openFromMentorFile(file, options = {}) {
     archiveVerification: archive && archive.verification || null
   });
   try {
+    const p = State2.externalWatchPath || State2.diskPathHint || "";
+    if (p && isAbsMentorPath(p) && State2.currentFile) {
+      State2.currentFile.path = p;
+      State2.diskPathHint = p;
+    }
+  } catch (_) {
+  }
+  try {
     startSupervisionPolling();
   } catch (_) {
   }
@@ -70408,8 +71747,23 @@ async function runManualSave() {
         return result;
       }
       if (result.error === "\u6743\u9650\u88AB\u62D2" || result.error === "need-permission") {
-        const choice2 = await openSaveDialog(buildSaveDialogModel({ kind: "permission-denied", fileName: State2.currentFile.name }));
+        const canAuthorize2 = !!(FS_API && FS_API.supported && (typeof window.showSaveFilePicker === "function" || typeof window.showOpenFilePicker === "function"));
+        const choice2 = await openSaveDialog(buildSaveDialogModel({ kind: "permission-denied", fileName: State2.currentFile.name, canAuthorize: canAuthorize2 }));
         if (choice2 === "primary") {
+          if (canAuthorize2) {
+            const up = await enableWriteBackForCurrent({ thenSave: true, preferSavePicker: true });
+            if (up.ok && up.saveResult) return up.saveResult;
+            if (up.ok) {
+              return await writeCurrentToDisk({ reason: "manual", showProgress: isMentorPackMode() });
+            }
+            if (up.cancelled) return { ok: false, cancelled: true };
+            showToast("\u6388\u6743\u672A\u5B8C\u6210\uFF0C\u53EF\u53E6\u5B58\u526F\u672C", 2800);
+            return { ok: false, error: up.error || "permission-denied" };
+          }
+          const snap = createSaveSnapshot();
+          return await downloadMentorSnapshot(snap, { markCleanOnSuccess: false });
+        }
+        if (choice2 === "secondary" && canAuthorize2) {
           const snap = createSaveSnapshot();
           return await downloadMentorSnapshot(snap, { markCleanOnSuccess: false });
         }
@@ -70434,6 +71788,32 @@ async function runManualSave() {
       }
       return result;
     }
+    {
+      const pathOnly = resolveActiveMentorAbsPath() || State2.externalWatchPath || "";
+      if (pathOnly && isAbsMentorPath(pathOnly)) {
+        let result = await writeCurrentViaServer(pathOnly, { reason: "manual", showProgress: isMentorPackMode() });
+        if (result && result.ok) {
+          const copy2 = buildSaveResultCopy({ kind: "write-current", fileName: State2.currentFile.name });
+          const warnings = result.warnings || [];
+          if (warnings.length) {
+            setStatus("\u5DF2\u4FDD\u5B58", "\u6587\u4EF6\u5DF2\u4FDD\u5B58\uFF0C\u4F46\u672C\u5730\u6062\u590D\u8BB0\u5F55\u4E0D\u5B8C\u6574");
+            showToast("\u5DF2\u4FDD\u5B58\u5230\u78C1\u76D8 \u2713 \xB7 \u6062\u590D\u70B9\u672A\u5B8C\u6574\u5199\u5165", 3200);
+          } else {
+            setStatus(copy2.status || "\u5DF2\u4FDD\u5B58", (copy2.detail || "") + " \xB7 \u8DEF\u5F84\u5199\u56DE");
+            showToast("\u5DF2\u4FDD\u5B58\u5230\u78C1\u76D8 \u2713 (.mentor)", 2400);
+          }
+          try {
+            snapshotActiveTab();
+          } catch {
+          }
+          return result;
+        }
+        if (result && result.error && /ANNOTATION_ANCHOR_AUDIT_FAILED|批注锚点/.test(String(result.error))) {
+        } else if (result && result.error && result.error !== "no-token") {
+          showToast("\u8DEF\u5F84\u5199\u56DE\u5931\u8D25: " + (result.message || result.error) + " \u2014 \u5C06\u5C1D\u8BD5\u5176\u5B83\u65B9\u5F0F", 3600);
+        }
+      }
+    }
     let snapshot;
     try {
       snapshot = createSaveSnapshot();
@@ -70456,15 +71836,38 @@ async function runManualSave() {
       showToast("\u4FDD\u5B58\u5931\u8D25: " + msg, 4e3);
       return { ok: false, error: msg };
     }
+    const canAuthorize = !!(FS_API && FS_API.supported && (typeof window.showSaveFilePicker === "function" || typeof window.showOpenFilePicker === "function"));
     const model = buildSaveDialogModel({
       kind: "no-handle",
       fileName: snapshot.name,
       annotations: (snapshot.sidecar && snapshot.sidecar.annotations || []).length,
       references: (snapshot.references && snapshot.references.entries || []).length,
-      media: Object.keys(snapshot.mediaFiles || {}).length
+      media: Object.keys(snapshot.mediaFiles || {}).length,
+      canAuthorize
     });
     const choice = await openSaveDialog(model);
     if (choice === "primary") {
+      if (canAuthorize) {
+        const up = await enableWriteBackForCurrent({ thenSave: true, preferSavePicker: true });
+        if (up.ok && up.saveResult) {
+          if (up.saveResult.ok) {
+            const copy2 = buildSaveResultCopy({ kind: "write-current", fileName: State2.currentFile.name });
+            setStatus(copy2.status, copy2.detail);
+            showToast("\u5DF2\u5199\u56DE\u78C1\u76D8 \u2713 \xB7 \u81EA\u52A8\u4FDD\u5B58\u53EF\u7EE7\u7EED\u5199\u76D8", 2800);
+            try {
+              snapshotActiveTab();
+            } catch {
+            }
+            try {
+              setAutoSaveEnabled(true, { silent: true });
+            } catch (_) {
+            }
+          }
+          return up.saveResult;
+        }
+        if (up.cancelled) return { ok: false, cancelled: true };
+        showToast("\u672A\u5B8C\u6210\u6388\u6743\uFF0C\u5DF2\u6539\u4E3A\u4E0B\u8F7D\u526F\u672C", 2800);
+      }
       try {
         await AnnotationStore.put(snapshot.name, snapshot.sidecar);
       } catch {
@@ -70472,6 +71875,13 @@ async function runManualSave() {
       return await downloadMentorSnapshot(snapshot, { markCleanOnSuccess: true });
     }
     if (choice === "secondary") {
+      if (canAuthorize) {
+        try {
+          await AnnotationStore.put(snapshot.name, snapshot.sidecar);
+        } catch {
+        }
+        return await downloadMentorSnapshot(snapshot, { markCleanOnSuccess: false });
+      }
       return await exportMarkdownSnapshot(snapshot, { markCleanOnSuccess: false });
     }
     return { ok: false, cancelled: true };
@@ -72526,8 +73936,17 @@ function setupToolbar() {
     const autoBtn = document.querySelector("#btn-autosave");
     if (autoBtn && !autoBtn.dataset.boundAutosave) {
       autoBtn.dataset.boundAutosave = "1";
-      autoBtn.addEventListener("click", () => {
-        setAutoSaveEnabled(!getAutoSaveEnabled());
+      autoBtn.addEventListener("click", async () => {
+        const turningOn = !getAutoSaveEnabled();
+        if (turningOn) {
+          if (!hasDiskWriteTarget()) {
+            await ensureAutoSaveDiskTargetFromGesture();
+            return;
+          }
+          setAutoSaveEnabled(true);
+          return;
+        }
+        setAutoSaveEnabled(false);
       });
     }
     syncAutosaveToggleUi();
@@ -73528,6 +74947,10 @@ async function boot() {
     await tryReconnect();
   }
   try {
+    startHermesConnectionPolling();
+  } catch (_) {
+  }
+  try {
     initUpdateUi();
   } catch (e) {
     console.warn("[update] init failed", e);
@@ -73552,12 +74975,57 @@ async function restoreWorkspaceEntry(entry) {
     } catch (_) {
     }
     if (permission === "granted") {
+      const p = entry.path || "";
+      if (p && typeof isAbsMentorPath === "function" && isAbsMentorPath(p)) {
+        State2.diskPathHint = p;
+        State2.externalWatchPath = p;
+      }
       await openFromMentorHandle(handle, {
         quiet: true,
         preferDraft: true,
         documentId: entry.documentId
       });
+      if (p && isAbsMentorPath(p)) {
+        State2.externalWatchPath = p;
+        State2.diskPathHint = p;
+        if (State2.currentFile) State2.currentFile.path = p;
+        try {
+          const token = await ensureLocalSessionToken();
+          if (token) State2.externalWatchToken = token;
+        } catch (_) {
+        }
+        try {
+          startExternalWatchForCurrentDocument && startExternalWatchForCurrentDocument();
+        } catch (_) {
+        }
+      }
       return true;
+    }
+  }
+  const entryPath = entry.path || "";
+  if (entryPath && typeof isAbsMentorPath === "function" && isAbsMentorPath(entryPath)) {
+    try {
+      const token = await ensureLocalSessionToken();
+      if (token) {
+        const opened = await _openMentorAbsolutePath(entryPath, token);
+        if (opened) {
+          try {
+            const draft2 = await restoreDraftIfAny(entry.documentId, entry.name);
+            if (draft2 && State2.currentFile && draft2.updatedAt && State2.currentFile.dirty) {
+            }
+          } catch (_) {
+          }
+          if (State2.currentFile) {
+            State2.currentFile.documentId = entry.documentId || State2.currentFile.documentId;
+            State2.currentFile.path = entryPath;
+          }
+          State2.externalWatchPath = entryPath;
+          State2.diskPathHint = entryPath;
+          return true;
+        }
+      }
+    } catch (e) {
+      console.warn("[workspace] path restore failed", entryPath, e);
     }
   }
   const draft = await restoreDraftIfAny(entry.documentId, entry.name);
@@ -73573,6 +75041,16 @@ async function restoreWorkspaceEntry(entry) {
     preferDraft: false,
     forceDisk: true
   });
+  if (entryPath && isAbsMentorPath(entryPath)) {
+    State2.externalWatchPath = entryPath;
+    State2.diskPathHint = entryPath;
+    if (State2.currentFile) State2.currentFile.path = entryPath;
+    try {
+      const token = await ensureLocalSessionToken();
+      if (token) State2.externalWatchToken = token;
+    } catch (_) {
+    }
+  }
   return true;
 }
 async function restoreWorkspaceSession() {
@@ -73727,7 +75205,14 @@ async function _openMentorAbsolutePath(openPath, token) {
           } catch (_) {
           }
           opened = true;
-          showToast("\u5DF2\u6253\u5F00\u5E76\u53EF\u5199\u56DE " + baseName, 2500);
+          showToast("\u5DF2\u6253\u5F00\u5E76\u53EF\u81EA\u52A8\u5199\u76D8 " + baseName, 2500);
+          try {
+            if (getAutoSaveEnabled() && State2.currentFile && State2.currentFile.dirty) {
+              Promise.resolve().then(() => autosaveNow()).catch(() => {
+              });
+            }
+          } catch (_) {
+          }
         }
       }
     } catch (e) {
@@ -73761,12 +75246,19 @@ async function _openMentorAbsolutePath(openPath, token) {
             upgraded = !!(up && up.ok);
           } catch (_) {
           }
-          if (upgraded) {
-            showToast("\u5DF2\u6253\u5F00\u5E76\u53EF\u5199\u56DE " + baseName, 2500);
-          } else {
-            showToast("\u5DF2\u6253\u5F00 " + baseName + " \xB7 \u4FDD\u5B58\u65F6\u6388\u6743\u4E00\u6B21\u5373\u53EF\u5199\u56DE", 3200);
+          if (upgraded || hasDiskWriteTarget()) {
+            showToast("\u5DF2\u6253\u5F00\u5E76\u53EF\u81EA\u52A8\u5199\u76D8 " + baseName, 2500);
             try {
-              setStatus("\u5DF2\u6253\u5F00", baseName + " \xB7 \u4FDD\u5B58\u65F6\u70B9\u300C\u6388\u6743\u5199\u56DE\u300D");
+              if (getAutoSaveEnabled() && State2.currentFile && State2.currentFile.dirty) {
+                Promise.resolve().then(() => autosaveNow()).catch(() => {
+                });
+              }
+            } catch (_) {
+            }
+          } else {
+            showToast("\u5DF2\u6253\u5F00 " + baseName + " \xB7 \u70B9\u300C\u81EA\u52A8\u4FDD\u5B58\u300D\u6216 Ctrl+S \u6388\u6743\u4E00\u6B21\u5373\u53EF\u5199\u76D8", 3600);
+            try {
+              setStatus("\u5DF2\u6253\u5F00", baseName + " \xB7 \u70B9\u81EA\u52A8\u4FDD\u5B58/\u4FDD\u5B58\u6388\u6743\u5199\u76D8");
             } catch (_) {
             }
           }
@@ -74108,7 +75600,16 @@ window.__mdAnnotator = {
   shouldPromptUnload,
   scheduleAutosaveDebounce,
   hasWriteHandle,
+  attachWriteHandle,
+  tryAttachStoredWriteHandle,
+  enableWriteBackForCurrent,
+  ensureAutoSaveDiskTargetFromGesture,
   writeCurrentToHandle,
+  writeCurrentToDisk,
+  writeCurrentViaServer,
+  hasDiskWriteTarget,
+  fetchHermesConnection,
+  startHermesConnectionPolling,
   writeToHandle,
   finalizeOfficialCommit,
   classifySaveOutcome,
@@ -74384,6 +75885,10 @@ window.__mdAnnotator = {
   activateAndRevealThread: (tid, opts) => activateAndRevealThread(tid, opts),
   revealSupervisionThread: (tid) => revealSupervisionThread(tid),
   invokeAiForThread: (tid) => invokeAiForThread(tid),
+  runFixMentorFromUi: (opts) => runFixMentorFromUi(opts || {}),
+  resolveActiveMentorAbsPath,
+  getFixMentorJob: () => ({ ...State2.fixMentorJob || {} }),
+  threadAnchorOk: (thread) => threadAnchorOk(thread),
   annotationWarningState: (thread) => annotationWarningState(thread),
   ensureCommentCardVisible: (tid) => ensureCommentCardVisible(tid),
   ensureFilterIncludesThread: (th) => ensureFilterIncludesThread(th),

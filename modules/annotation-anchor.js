@@ -44,7 +44,7 @@ export function mdEmphasisToPlain(s) {
   if (s == null || s === '') return '';
   let out = String(s);
   // CommonMark escapes: \_ \* etc.
-  out = out.replace(/\\([\\`*_{}\\[\\]()#+\\-.!|])/g, '$1');
+  out = out.replace(new RegExp('\\\\([\x21-\x2f\x3a-\x40\x5b-\x60\x7b-\x7e])', 'g'), '$1');
   // Bold before italic
   out = out.replace(/\*\*([^*]+)\*\*/g, '$1');
   out = out.replace(/__([^_]+)__/g, '$1');
@@ -453,13 +453,13 @@ export function projectLegacyFlags(status) {
     case 'moved':
       return { fuzzy: false, invalid: false, deleted: false, invalidReason: undefined };
     case 'edited':
-      return { fuzzy: true, invalid: false, deleted: false, invalidReason: 'text-edited' };
+      return { fuzzy: false, invalid: false, deleted: false, invalidReason: undefined };
     case 'orphaned':
       return { fuzzy: false, invalid: true, deleted: true, invalidReason: 'orphaned' };
     case 'ambiguous':
-      return { fuzzy: true, invalid: true, deleted: false, invalidReason: 'ambiguous' };
+      return { fuzzy: false, invalid: true, deleted: false, invalidReason: 'ambiguous' };
     case 'collision':
-      return { fuzzy: true, invalid: true, deleted: false, invalidReason: 'mark-collision' };
+      return { fuzzy: false, invalid: true, deleted: false, invalidReason: 'mark-collision' };
     case 'image-missing':
       return { fuzzy: false, invalid: true, deleted: true, invalidReason: 'image-deleted' };
     default:

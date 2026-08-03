@@ -294,7 +294,72 @@ const { chromium } = require('playwright');
       if (!r.dirty) throw new Error('should stay dirty');
     });
 
-    await t('shouldPromptUnload true when dirty, false when clean', async () => {
+      await t('AutoSave ON + server path (no handle) → writeCurrentViaServer', async () => {
+    const r = await page.evaluate(async () => {
+      const M = window.__mdAnnotator;
+      M.setAutoSaveEnabled(true, { silent: true });
+      let serverCalls = 0;
+      const origFetch = window.fetch;
+      window.fetch = async (url, opts) => {
+        const u = String(url);
+        if (u.includes('/write-mentor')) {
+          serverCalls++;
+          return new Response(JSON.stringify({ ok: true, mtimeNs: Date.now() * 1e6 }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+        if (u.includes('/allow-open')) {
+          return new Response(JSON.stringify({ ok: true }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+        if (u.includes('/session')) {
+          return new Response(JSON.stringify({ ok: true, token: 'test-token' }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+        return origFetch(url, opts);
+      };
+      try {
+        M.State.saveMode = 'mentor-download';
+        M.State.mediaFiles = {};
+        M.State.externalWatchToken = 'test-token';
+        M.State.externalWatchPath = 'E:\\tmp\\autosave-path.mentor';
+        M.State.diskPathHint = 'E:\\tmp\\autosave-path.mentor';
+        M.State.currentFile = {
+          name: 'autosave-path.mentor',
+          dirty: true,
+          dirtyGen: 1,
+          path: 'E:\\tmp\\autosave-path.mentor',
+          handle: null,
+        };
+        M.State.editor.commands.setContent('<p>server path autosave</p>', false);
+        const disk = M.isAutoSaveDiskActive();
+        const hasTarget = M.hasDiskWriteTarget();
+        const wr = await M.autosaveNow();
+        return {
+          disk,
+          hasTarget,
+          wrOk: !!(wr && wr.ok),
+          wrDisk: !!(wr && wr.disk),
+          serverCalls,
+          dirty: M.State.currentFile.dirty,
+        };
+      } finally {
+        window.fetch = origFetch;
+      }
+    });
+    if (!r.hasTarget) throw new Error('hasDiskWriteTarget false ' + JSON.stringify(r));
+    if (!r.disk) throw new Error('isAutoSaveDiskActive false ' + JSON.stringify(r));
+    if (!r.wrOk || !r.wrDisk) throw new Error('autosave disk fail ' + JSON.stringify(r));
+    if (r.serverCalls < 1) throw new Error('no server write ' + JSON.stringify(r));
+    if (r.dirty !== false) throw new Error('should markClean ' + JSON.stringify(r));
+  });
+
+  await t('shouldPromptUnload true when dirty, false when clean', async () => {
       const r = await page.evaluate(() => {
         const M = window.__mdAnnotator;
         if (typeof M.shouldPromptUnload !== 'function') return { missing: true };

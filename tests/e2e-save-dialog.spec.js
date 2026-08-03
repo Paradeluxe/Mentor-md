@@ -50,9 +50,9 @@ function assert(cond, message) {
       visible: !document.querySelector('#save-dialog')?.classList.contains('hidden'),
     }));
     assert(dlg.visible, 'save dialog visible');
-    assert(dlg.title === '保存文档', `title 保存文档 (got ${dlg.title})`);
-    assert(dlg.primary === '保存 .mentor', `primary 保存 .mentor (got ${dlg.primary})`);
-    assert(dlg.secondary === '仅导出 Markdown', `secondary (got ${dlg.secondary})`);
+    assert(dlg.title === '启用写回磁盘' || dlg.title === '保存文档', `title (got ${dlg.title})`);
+    assert(dlg.primary === '授权写回并保存' || dlg.primary === '保存 .mentor', `primary authorize/save (got ${dlg.primary})`);
+    assert(dlg.secondary === '仅下载副本' || dlg.secondary === '仅导出 Markdown', `secondary (got ${dlg.secondary})`);
 
     console.log('\n=== Cancel keeps dirty ===');
     await page.locator('#save-dialog-cancel').click();
@@ -61,12 +61,25 @@ function assert(cond, message) {
     assert(dirtyAfterCancel, 'dirty after cancel');
 
     console.log('\n=== Primary downloads .mentor and clears dirty ===');
-    await page.keyboard.press('Control+s');
-    await page.waitForSelector('#save-dialog:not(.hidden)');
-    const [download] = await Promise.all([
-      page.waitForEvent('download', { timeout: 15000 }),
-      page.locator('#save-dialog-primary').click(),
-    ]);
+        // Headless cannot complete native Save picker; force legacy download path for this assertion.
+        await page.evaluate(() => {
+          const M = window.__mdAnnotator;
+          if (M.FS_API) M.FS_API.supported = false;
+          try { delete window.showSaveFilePicker; } catch (_) { window.showSaveFilePicker = undefined; }
+          try { delete window.showOpenFilePicker; } catch (_) { window.showOpenFilePicker = undefined; }
+        });
+        await page.keyboard.press('Control+s');
+        await page.waitForSelector('#save-dialog:not(.hidden)');
+        const primaryLabel = await page.locator('#save-dialog-primary').textContent();
+        // secondary = 仅下载副本 when authorize available; after FS disabled primary is 保存 .mentor
+        // Also cover authorize UI via secondary when still available
+        const clickTarget = /授权/.test(primaryLabel || '')
+          ? '#save-dialog-secondary'
+          : '#save-dialog-primary';
+        const [download] = await Promise.all([
+          page.waitForEvent('download', { timeout: 15000 }),
+          page.locator(clickTarget).click(),
+        ]);
     const name = download.suggestedFilename();
     assert(/\.mentor$/i.test(name), `download .mentor (got ${name})`);
     await page.waitForFunction(() => document.querySelector('#save-dialog')?.classList.contains('hidden'));

@@ -64,6 +64,12 @@ function assert(cond, msg) {
     }));
     assert(before.dirty === true, `dirty before save (gen=${before.gen})`);
 
+    await page.evaluate(() => {
+      const M = window.__mdAnnotator;
+      if (M.FS_API) M.FS_API.supported = false;
+      try { delete window.showSaveFilePicker; } catch (_) { window.showSaveFilePicker = undefined; }
+      try { delete window.showOpenFilePicker; } catch (_) { window.showOpenFilePicker = undefined; }
+    });
     const [download] = await Promise.all([
       page.waitForEvent('download', { timeout: 20000 }),
       (async () => {
@@ -133,6 +139,12 @@ function assert(cond, msg) {
     await page.waitForTimeout(500);
     const before = await page.evaluate(() => !!window.__mdAnnotator.State.currentFile.dirty);
     assert(before === true, 'dirty before media-pack save');
+    await page.evaluate(() => {
+      const M = window.__mdAnnotator;
+      if (M.FS_API) M.FS_API.supported = false;
+      try { delete window.showSaveFilePicker; } catch (_) { window.showSaveFilePicker = undefined; }
+      try { delete window.showOpenFilePicker; } catch (_) { window.showOpenFilePicker = undefined; }
+    });
     const [dl] = await Promise.all([
       page.waitForEvent('download', { timeout: 30000 }),
       (async () => {

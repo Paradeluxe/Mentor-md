@@ -2993,6 +2993,10 @@ body.refs-pane-collapsed #expand-refs-pane-btn {
 
 /* Banners */
 
+.comment-thread.is-anchor-bad {
+  border-left: 3px solid var(--danger, #c44);
+}
+
 .comment-thread.is-ambiguous {
   border-color: rgba(180, 83, 9, 0.4);
   box-shadow:
@@ -3568,6 +3572,80 @@ body.refs-pane-collapsed #expand-refs-pane-btn {
   color: var(--thread-solid);
 }
 
+/* Card: run Hermes fix-mentor */
+.comment-run-ai-btn {
+  font-size: 12px;
+  font-weight: 650;
+  padding: 5px 10px;
+  border-radius: 6px;
+  border: 1px solid color-mix(in srgb, var(--ai, #0aa) 55%, var(--border-warm));
+  background: color-mix(in srgb, var(--ai, #0aa) 18%, transparent);
+  color: var(--ai-solid, var(--ai, #0891b2));
+  cursor: pointer;
+  line-height: 1.3;
+  letter-spacing: 0.01em;
+  transition: background 0.12s, border-color 0.12s, color 0.12s, opacity 0.12s;
+}
+.comment-run-ai-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--ai, #0aa) 28%, transparent);
+  border-color: var(--ai, #0aa);
+}
+.comment-run-ai-btn:disabled,
+.comment-run-ai-btn.is-running {
+  opacity: 0.85;
+  cursor: progress;
+}
+.comment-run-ai-btn.is-running {
+  background: color-mix(in srgb, var(--ai, #0aa) 32%, transparent);
+  border-style: dashed;
+}
+.comment-run-ai-btn.is-error {
+  border-color: color-mix(in srgb, var(--danger, #c44) 55%, var(--border-warm));
+  color: var(--danger, #b91c1c);
+  background: color-mix(in srgb, var(--danger, #c44) 10%, transparent);
+}
+.comment-run-ai-btn.is-done {
+  border-color: color-mix(in srgb, var(--success, #16a34a) 45%, var(--border-warm));
+}
+.comment-reply-form .form-actions .comment-run-ai-btn {
+  margin-right: 0;
+}
+.comment-thread.is-collapsed .comment-reply-form .comment-run-ai-btn {
+  display: none;
+}
+
+/* Pane-level job banner */
+.fix-mentor-job-banner {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  margin: 0 10px 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 550;
+  line-height: 1.35;
+  border: 1px solid color-mix(in srgb, var(--ai, #0aa) 35%, var(--border-warm));
+  background: color-mix(in srgb, var(--ai, #0aa) 14%, var(--panel, #fff));
+  color: var(--text);
+  box-shadow: 0 1px 0 color-mix(in srgb, var(--border-warm) 50%, transparent);
+}
+.fix-mentor-job-banner[data-status="running"],
+.fix-mentor-job-banner[data-status="starting"],
+.fix-mentor-job-banner[data-status="saving"] {
+  border-style: solid;
+  border-color: color-mix(in srgb, var(--ai, #0aa) 50%, var(--border-warm));
+}
+.fix-mentor-job-banner[data-status="done"] {
+  border-color: color-mix(in srgb, var(--success, #16a34a) 45%, var(--border-warm));
+  background: color-mix(in srgb, var(--success, #16a34a) 10%, var(--panel, #fff));
+}
+.fix-mentor-job-banner[data-status="error"] {
+  border-color: color-mix(in srgb, var(--danger, #c44) 50%, var(--border-warm));
+  background: color-mix(in srgb, var(--danger, #c44) 10%, var(--panel, #fff));
+  color: var(--danger, #b91c1c);
+}
+
 /* Reply-toggle details — "↳ 回复" expander */
 .comment-thread .reply-toggle {
   margin: 2px 12px 6px 12px;
@@ -3675,12 +3753,16 @@ body.refs-pane-collapsed #expand-refs-pane-btn {
   gap: 6px;
   margin-top: 8px;
 }
-/* resolve 与提交靠右；@AI 靠左 */
+/* resolve 与提交靠右；@AI + AI处理 靠左 */
 .comment-reply-form .form-actions .comment-resolve-btn {
+  margin-left: auto;
   margin-right: 0;
 }
 .comment-reply-form .form-actions .comment-invoke-ai-btn {
-  margin-right: auto;
+  margin-right: 0;
+}
+.comment-reply-form .form-actions .comment-run-ai-btn {
+  margin-right: 0;
 }
 .comment-reply-form .form-actions button {
   font-size: 12px;
@@ -5122,6 +5204,68 @@ body.refs-pane-collapsed #expand-refs-pane-btn {
 }
 
 
+
+/* ===== AI fix-mentor status chip (statusbar primary indicator) ===== */
+#statusbar .fix-mentor-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: min(420px, 42vw);
+  padding: 2px 10px 2px 8px;
+  margin-right: 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  line-height: 1.3;
+  font-weight: 550;
+  border: 1px solid color-mix(in srgb, var(--ai, #0aa) 45%, transparent);
+  background: color-mix(in srgb, var(--ai, #0aa) 14%, var(--panel, var(--bg-elevated, #1e1e1e)));
+  color: color-mix(in srgb, var(--ai, #5eead4) 80%, #fff);
+}
+#statusbar .fix-mentor-status.hidden { display: none !important; }
+#statusbar .fix-mentor-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+  background: color-mix(in srgb, var(--ai, #2dd4bf) 90%, #fff);
+  box-shadow: 0 0 0 0 color-mix(in srgb, var(--ai, #2dd4bf) 55%, transparent);
+}
+#statusbar .fix-mentor-status[data-status="saving"] .fix-mentor-status-dot,
+#statusbar .fix-mentor-status[data-status="starting"] .fix-mentor-status-dot,
+#statusbar .fix-mentor-status[data-status="running"] .fix-mentor-status-dot {
+  animation: fix-mentor-status-pulse 1.1s ease-out infinite;
+}
+#statusbar .fix-mentor-status[data-status="done"] {
+  border-color: color-mix(in srgb, var(--success, #16a34a) 50%, transparent);
+  background: color-mix(in srgb, var(--success, #16a34a) 14%, var(--panel, #1e1e1e));
+  color: color-mix(in srgb, var(--success, #4ade80) 85%, #fff);
+}
+#statusbar .fix-mentor-status[data-status="done"] .fix-mentor-status-dot {
+  background: var(--success, #22c55e);
+  animation: none;
+}
+#statusbar .fix-mentor-status[data-status="error"] {
+  border-color: color-mix(in srgb, var(--danger, #c44) 55%, transparent);
+  background: color-mix(in srgb, var(--danger, #c44) 14%, var(--panel, #1e1e1e));
+  color: color-mix(in srgb, var(--danger, #f87171) 85%, #fff);
+}
+#statusbar .fix-mentor-status[data-status="error"] .fix-mentor-status-dot {
+  background: var(--danger, #ef4444);
+  animation: none;
+}
+#statusbar .fix-mentor-status-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@keyframes fix-mentor-status-pulse {
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--ai, #2dd4bf) 55%, transparent); }
+  70% { box-shadow: 0 0 0 6px transparent; }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+
 /* ===== fix-mentor supervision mode ===== */
 #statusbar {
   justify-content: flex-start;
@@ -5456,3 +5600,159 @@ body.supervision-active[data-supervision-lock="document"] .editor-scroll::after 
 .version-act-restore { background: var(--accent-soft); border-color: var(--action-primary); color: var(--accent); }
 .version-act-restore:hover { background: var(--action-primary); color: var(--text-on-strong); }
 .version-act-delete:hover { background: var(--danger-soft, rgba(220, 60, 60, 0.12)); border-color: var(--danger); color: var(--danger); }
+
+
+/* fix-mentor live progress panel */
+.fix-mentor-job-banner {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  margin: 0 0 8px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--accent, #0d9488) 35%, transparent);
+  background: color-mix(in srgb, var(--accent, #0d9488) 10%, var(--panel, #fff));
+  font-size: 12.5px;
+  line-height: 1.35;
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  box-shadow: 0 1px 0 rgba(0,0,0,.04);
+}
+.fix-mentor-job-banner[hidden] { display: none !important; }
+.fm-prog-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  color: var(--text, #1a1a1a);
+}
+.fm-prog-title { flex: 1 1 auto; min-width: 0; }
+.fm-prog-elapsed {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: var(--accent, #0d9488);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+.fm-prog-pct {
+  font-variant-numeric: tabular-nums;
+  color: var(--muted, #667);
+  min-width: 2.5em;
+  text-align: right;
+}
+.fm-prog-bar {
+  height: 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent, #0d9488) 18%, #e8e8e8);
+  overflow: hidden;
+  position: relative;
+}
+.fm-prog-fill {
+  height: 100%;
+  width: 8%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #0d9488, #14b8a6 55%, #2dd4bf);
+  transition: width .45s ease;
+}
+.fix-mentor-job-banner[data-status="running"] .fm-prog-fill,
+.fix-mentor-job-banner[data-status="starting"] .fm-prog-fill,
+.fix-mentor-job-banner[data-status="saving"] .fm-prog-fill {
+  background-size: 200% 100%;
+  animation: fm-prog-shimmer 1.4s linear infinite;
+}
+.fix-mentor-job-banner[data-status="done"] .fm-prog-fill {
+  width: 100% !important;
+  background: #16a34a;
+  animation: none;
+}
+.fix-mentor-job-banner[data-status="error"] .fm-prog-fill {
+  background: #dc2626;
+  animation: none;
+}
+.fm-prog-phase {
+  color: var(--text, #222);
+  font-weight: 500;
+}
+.fm-prog-log {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  color: var(--muted, #556);
+  max-height: 4.8em;
+  overflow: hidden;
+  white-space: pre-wrap;
+  word-break: break-word;
+  opacity: .92;
+}
+.fix-mentor-job-banner[data-stale="1"] .fm-prog-phase::after {
+  content: " · 输出少仍在跑";
+  color: #b45309;
+  font-weight: 600;
+}
+@keyframes fm-prog-shimmer {
+  0% { filter: brightness(1); }
+  50% { filter: brightness(1.15); }
+  100% { filter: brightness(1); }
+}
+#statusbar .fix-mentor-status-elapsed {
+  font-variant-numeric: tabular-nums;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  opacity: .9;
+  margin-left: 2px;
+}
+#statusbar .fix-mentor-status[data-status="running"] .fix-mentor-status-text,
+#statusbar .fix-mentor-status[data-status="starting"] .fix-mentor-status-text,
+#statusbar .fix-mentor-status[data-status="saving"] .fix-mentor-status-text {
+  max-width: min(42vw, 360px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Hermes connection chip (separate from AI job progress) */
+#statusbar .hermes-conn-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 10px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, #64748b 35%, transparent);
+  background: color-mix(in srgb, #64748b 10%, var(--panel, #fff));
+  font-size: 12px;
+  max-width: min(28vw, 220px);
+  margin-right: 6px;
+}
+#statusbar .hermes-conn-status.hidden { display: none !important; }
+#statusbar .hermes-conn-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: #94a3b8; flex: 0 0 auto;
+}
+#statusbar .hermes-conn-status[data-state="ready"][data-ready="1"] {
+  border-color: color-mix(in srgb, #16a34a 40%, transparent);
+  background: color-mix(in srgb, #16a34a 12%, var(--panel, #fff));
+}
+#statusbar .hermes-conn-status[data-state="ready"] .hermes-conn-dot,
+#statusbar .hermes-conn-status[data-ready="1"] .hermes-conn-dot { background: #16a34a; }
+#statusbar .hermes-conn-status[data-state="loading"],
+#statusbar .hermes-conn-status[data-state="starting"] {
+  border-color: color-mix(in srgb, #0d9488 40%, transparent);
+}
+#statusbar .hermes-conn-status[data-state="loading"] .hermes-conn-dot,
+#statusbar .hermes-conn-status[data-state="starting"] .hermes-conn-dot {
+  background: #0d9488;
+  animation: fix-mentor-status-pulse 1.1s ease-out infinite;
+}
+#statusbar .hermes-conn-status[data-state="busy"] .hermes-conn-dot {
+  background: #2563eb;
+  animation: fix-mentor-status-pulse 1.1s ease-out infinite;
+}
+#statusbar .hermes-conn-status[data-state="error"],
+#statusbar .hermes-conn-status[data-state="down"],
+#statusbar .hermes-conn-status[data-state="unavailable"] {
+  border-color: color-mix(in srgb, #dc2626 40%, transparent);
+}
+#statusbar .hermes-conn-status[data-state="error"] .hermes-conn-dot,
+#statusbar .hermes-conn-status[data-state="down"] .hermes-conn-dot,
+#statusbar .hermes-conn-status[data-state="unavailable"] .hermes-conn-dot { background: #dc2626; }
+#statusbar .hermes-conn-status-text {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}

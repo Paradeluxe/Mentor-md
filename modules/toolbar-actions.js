@@ -57,10 +57,10 @@ export function getToolbarActionState(input = {}) {
     ? 'disk-autosave'
     : (autoSaveEnabled ? 'draft-only' : 'off');
   const autoSaveDetail = autoSaveDisk
-    ? '开启：停手后写回已授权文件'
+    ? '开启：停手后自动写盘，无需按保存'
     : (autoSaveEnabled
-      ? '开启：尚无写回目标，仅自动保存草稿；请先保存到本地文件'
-      : '关闭：仅手动保存写回文件（仍会保存崩溃恢复草稿）');
+      ? '开启：尚无写盘目标时仅草稿；桌面/双击打开 .mentor 后自动写盘'
+      : '关闭：仅手动保存写盘（仍会保存崩溃恢复草稿）');
   const isBusy = (id) => busyAction === id;
 
   return {

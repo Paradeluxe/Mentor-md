@@ -7,8 +7,8 @@ Version history (v1.48, Word-like auto versions) layers on top — see `version-
 
 | Mode | Target | Clears dirty? |
 |------|--------|----------------|
-| AutoSave **ON** + write handle | Official `.mentor`/`.md` handle (debounced) + DraftStore + **VersionStore** | **Yes** (`markClean`) |
-| AutoSave **ON** without handle | DraftStore only (AutoRecover) | **No** |
+| AutoSave **ON** + disk target (FSA handle **or** mentor-server abs path) | Official via `writeCurrentToDisk` (debounced) + DraftStore + VersionStore | **Yes** — no Save button needed |
+| AutoSave **ON** without disk target | DraftStore only (AutoRecover); `data-disk=false` | **No** |
 | AutoSave **OFF** | DraftStore only (AutoRecover) | **No** |
 | Ctrl+S / Save (`runManualSave` / `reason:'manual'`) | Official handle or download + DraftStore + **VersionStore** | **Yes** |
 | Tab close / `beforeunload` | Prompt if `shouldPromptUnload()` | N/A |

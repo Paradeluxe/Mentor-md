@@ -121,6 +121,16 @@ import {
   applyStatusToThread
 } from './modules/annotation-anchor.js';
 import {
+  ANCHOR_MODE_RANGE,
+  stampSidecarMdRanges,
+  stampThreadMdRange,
+  validateThreadMdRange,
+  pmRangeFromMdRange,
+  contentMdRevision,
+  isMdRange,
+  projectQuoteFromMdRange
+} from './modules/md-range.js';
+import {
   annotationAnchorKey,
   createAnnotationAnchorPlugin,
   setAnnotationAnchorResetMeta,
@@ -725,6 +735,22 @@ var State = {
   // Runtime-only external path watch (pending-open / server path; never left in URL).
   externalWatchPath: "",
   externalWatchToken: "",
+  // In-app Hermes /fix-mentor trigger (mentor-server spawn)
+  hermesConnection: { state: "unknown", reachable: false, agentReady: false },
+  fixMentorJob: {
+    id: "",
+    status: "idle", // idle|saving|starting|running|done|error
+    path: "",
+    threadId: "",
+    scope: "all",
+    message: "",
+    error: "",
+    exitCode: null,
+    startedAt: 0,
+    pollTimer: null,
+    lastToastAt: 0,
+    staged: false,
+  },
   externalWatch: {
     mode: "off",
     generation: 0,
@@ -2124,7 +2150,13 @@ function _validateMarksAfterEdit(editor2, opts) {
         }
         return pieces.length ? pieces.join(" ") : literal;
       })();
-      const textMatches = currentText === ann.text;
+      // Range mode: md escapes/emphasis vs PM plain must not yellow-banner
+      const textMatches = currentText === ann.text
+        || (!!currentText && !!ann.text && (
+          mdEmphasisToPlain(ann.text) === currentText
+          || mdEmphasisToPlain(ann.text) === mdEmphasisToPlain(currentText)
+          || ann.text === mdEmphasisToPlain(currentText)
+        ));
       if (live) {
         const status = textMatches && ann.invalidReason !== "text-edited"
           ? ((ann.anchor && ann.anchor.status) === "moved" ? "moved" : "attached")
@@ -2158,6 +2190,11 @@ function _validateMarksAfterEdit(editor2, opts) {
           changed = true;
           touchUi(ann);
         }
+        // Quiet sync: keep ann.text as live PM plain when only md-escape differed
+        if (currentText && ann.text !== currentText) {
+          ann.text = currentText;
+          changed = true;
+        }
         // Sticky: partial mark edits auto-sync ann.text to the new mark
         // content, so a later light→full validate would see textMatches and
         // wrongly clear fuzzy. Keep text-edited until reattach / resolve UX.
@@ -2185,13 +2222,14 @@ function _validateMarksAfterEdit(editor2, opts) {
             confidence: 0.75
           });
         }
-        if (!ann.fuzzy || ann.invalidReason !== "text-edited") {
-          ann.fuzzy = true;
-          ann.deleted = false;
-          ann.invalidReason = "text-edited";
-          changed = true;
-          touchUi(ann);
+        // fuzzy removed: mark body edit updates quote only
+        ann.fuzzy = false;
+        ann.deleted = false;
+        if (ann.invalidReason === "text-edited" || ann.invalidReason === "mark-reattached-fuzzy") {
+          ann.invalidReason = void 0;
         }
+        changed = true;
+        touchUi(ann);
         if (ann.invalid) {
           ann.invalid = false;
           changed = true;
@@ -2233,10 +2271,11 @@ function _validateMarksAfterEdit(editor2, opts) {
           changed = true;
           touchUi(ann);
         }
-        if (!ann.fuzzy) {
-          ann.fuzzy = true;
-          changed = true;
-        }
+        // Range mode: soft yellow only if we truly lack mdRange confidence
+        const mdSrc = State.currentFile && typeof State.currentFile.content === "string"
+          ? State.currentFile.content
+          : "";
+        if (ann.fuzzy) { ann.fuzzy = false; changed = true; }
         continue;
       }
       let rePos = null;
@@ -2255,34 +2294,23 @@ function _validateMarksAfterEdit(editor2, opts) {
           to: rePos.to,
           resolved: !!ann.resolved,
           authorColor: annotationAuthorColor(ann),
-          fuzzy: !!rePos.fuzzy
+          fuzzy: false
         });
         occupiedRanges.push({ from: rePos.from, to: rePos.to, tid: ann.threadId });
         syncThreadAnchorEvidence(ann, doc5, rePos, {
           exact: ann.text || "",
-          status: rePos.fuzzy ? "edited" : "attached",
-          confidence: rePos.fuzzy ? 0.5 : 1
+          status: "attached",
+          confidence: 1
         });
-        const wantFuzzy = !!rePos.fuzzy;
-        if (ann.deleted) {
-          ann.deleted = false;
-          changed = true;
-        }
-        if (ann.invalid !== wantFuzzy) {
-          ann.invalid = wantFuzzy;
-          changed = true;
-        }
-        if (ann.fuzzy !== wantFuzzy) {
-          ann.fuzzy = wantFuzzy;
-          changed = true;
-        }
-        if (wantFuzzy) ann.invalidReason = ann.invalidReason || "mark-reattached-fuzzy";
-        else ann.invalidReason = void 0;
+        if (ann.deleted) { ann.deleted = false; changed = true; }
+        if (ann.invalid) { ann.invalid = false; changed = true; }
+        if (ann.fuzzy) { ann.fuzzy = false; changed = true; }
+        ann.invalidReason = void 0;
         changed = true;
         touchUi(ann);
-      } else if (!ann.fuzzy || !ann.invalid) {
+      } else if (!ann.invalid) {
         ann.deleted = false;
-        ann.fuzzy = true;
+        ann.fuzzy = false;
         ann.invalid = true;
         ann.invalidReason = ann.invalidReason || (rePos ? "mark-collision" : "mark-missing");
         changed = true;
@@ -2432,8 +2460,12 @@ function patchCommentCard(ann) {
   if (!list) return false;
   const el = list.querySelector(`.comment-thread[data-thread="${ann.threadId}"]`);
   if (!el) return false;
-  el.classList.toggle("is-fuzzy", !!ann.fuzzy && !ann.deleted);
-  el.classList.toggle("is-deleted", !!ann.deleted);
+  const warn = annotationWarningState(ann);
+  const warnKind = warn && warn.kind;
+  el.classList.toggle("is-fuzzy", false);
+  el.classList.toggle("is-deleted", warnKind === "orphaned" || !!ann.deleted);
+  el.classList.toggle("is-ambiguous", warnKind === "ambiguous");
+  el.classList.toggle("is-anchor-bad", warnKind === "collision" || warnKind === "image-missing");
   el.classList.toggle("is-resolved", !!ann.resolved);
   el.classList.toggle("is-pending", !!ann.pending);
   el.classList.toggle("is-active", State.activeThreadId === ann.threadId);
@@ -2447,25 +2479,30 @@ function patchCommentCard(ann) {
     const tx = String(ann.text || "");
     qt.textContent = tx.slice(0, 200) + (tx.length > 200 ? "\u2026" : "");
   }
-  let banner = el.querySelector(".deleted-banner, .fuzzy-banner");
-  const wantDeleted = !!ann.deleted;
-  const wantFuzzy = !wantDeleted && !!ann.fuzzy;
-  if (wantDeleted) {
-    if (!banner || !banner.classList.contains("deleted-banner")) {
+  let banner = el.querySelector(".deleted-banner, .fuzzy-banner, .invalid-banner, .ambiguous-banner");
+  const safeThreadId = escapeHtml(ann.threadId);
+  const actions = ' <button class="link-btn" data-act="reattach" data-thread="' + safeThreadId + '">\u91CD\u65B0\u9009\u62E9\u6B63\u6587</button> \xB7 <button class="link-btn link-danger" data-act="delete-orphan" data-thread="' + safeThreadId + '">\u5220\u9664</button>';
+  let wantClass = "";
+  let wantHtml = "";
+  if (warnKind === "orphaned" || ann.deleted) {
+    wantClass = "deleted-banner";
+    wantHtml = "\u{1F4CD} \u539F\u6587\u5DF2\u88AB\u5220\u9664 -" + actions;
+  } else if (warnKind === "ambiguous") {
+    wantClass = "ambiguous-banner";
+    wantHtml = "\u26A0 \u65E0\u6CD5\u552F\u4E00\u786E\u5B9A\u539F\u6587\u4F4D\u7F6E\uFF08\u91CD\u590D\u951A\u70B9\uFF09\u2014" + actions;
+  } else if (warnKind === "collision" || warnKind === "image-missing" || (ann.invalid && !ann.deleted)) {
+    wantClass = "invalid-banner";
+    wantHtml = "\u26A0 \u6279\u6CE8\u951A\u70B9\u5931\u6548 \u2014" + actions;
+  }
+  if (wantClass) {
+    if (!banner || !banner.classList.contains(wantClass)) {
       if (banner) banner.remove();
       const div = document.createElement("div");
-      div.className = "deleted-banner";
-      const safeThreadId = escapeHtml(ann.threadId);
-      div.innerHTML = '\u{1F4CD} \u539F\u6587\u5DF2\u88AB\u5220\u9664 - <button class="link-btn" data-act="reattach" data-thread="' + safeThreadId + '">\u91CD\u65B0\u9009\u62E9\u6B63\u6587</button> \xB7 <button class="link-btn link-danger" data-act="delete-orphan" data-thread="' + safeThreadId + '">\u5220\u9664</button>';
+      div.className = wantClass;
+      div.innerHTML = wantHtml;
       el.insertBefore(div, el.firstChild);
-    }
-  } else if (wantFuzzy) {
-    if (!banner || !banner.classList.contains("fuzzy-banner")) {
-      if (banner) banner.remove();
-      const div = document.createElement("div");
-      div.className = "fuzzy-banner";
-      div.textContent = "\u26A0 \u4F4D\u7F6E\u53EF\u80FD\u504F\u79FB - \u8BF7\u68C0\u67E5\u6587\u6863";
-      el.insertBefore(div, el.firstChild);
+    } else {
+      banner.innerHTML = wantHtml;
     }
   } else if (banner) {
     banner.remove();
@@ -2727,6 +2764,10 @@ function serializeAnnotationThread(t) {
   if (t.range && typeof t.range.from === "number" && typeof t.range.to === "number") {
     o.range = { from: t.range.from, to: t.range.to };
   }
+  // Range mode: durable content.md coordinates (canonical)
+  if (t.mdRange && typeof t.mdRange.from === "number" && typeof t.mdRange.to === "number" && t.mdRange.to > t.mdRange.from) {
+    o.mdRange = { from: t.mdRange.from, to: t.mdRange.to };
+  }
   if (Array.isArray(t.ranges) && t.ranges.length) {
     const doc = State.editor && State.editor.state && State.editor.state.doc;
     o.ranges = t.ranges.map((r) => {
@@ -2748,7 +2789,7 @@ function serializeAnnotationThread(t) {
   if (t.deleted) o.deleted = true;
   if (t.invalid) o.invalid = true;
   if (t.invalidReason) o.invalidReason = t.invalidReason;
-  if (t.fuzzy) o.fuzzy = true;
+  // fuzzy never persisted
   // Multi-evidence anchor (v1 optional); legacy flags remain authoritative for old readers
   if (t.anchor && typeof t.anchor === "object") {
     const a = t.anchor;
@@ -2782,7 +2823,7 @@ function serializeAnnotationThread(t) {
     const proj = projectLegacyFlags(o.anchor.status);
     if (proj.invalid && !o.invalid) o.invalid = true;
     if (proj.deleted && !o.deleted) o.deleted = true;
-    if (proj.fuzzy && !o.fuzzy) o.fuzzy = true;
+    // fuzzy stripped on serialize
     if (proj.invalidReason && !o.invalidReason) o.invalidReason = proj.invalidReason;
   }
   return o;
@@ -2886,8 +2927,20 @@ function createSaveSnapshot(options = {}) {
     document: currentFile.name,
     updatedAt: nowISO(),
     author: { id: State.authorId, name: State.author },
+    anchorMode: ANCHOR_MODE_RANGE,
     annotations: buildAnnotationsSidecar()
   };
+  // Range mode: stamp mdRange from content.md BEFORE archive (no quote-only sidecar)
+  try {
+    const stamp = stampSidecarMdRanges(sidecar, mdText, {
+      contentMdSha256: contentMdRevision(mdText)
+    });
+    if (stamp.failed) {
+      console.warn("[md-range] stamp failed for", stamp.failed, "threads", stamp.failedIds);
+    }
+  } catch (eStamp) {
+    console.warn("[md-range] stamp", eStamp);
+  }
   const mediaFiles = filterMediaFilesForArchive(State.mediaFiles || {}, {
     mdText,
     html: documentHtml,
@@ -3026,21 +3079,64 @@ function setAutoSaveEnabled(on, { silent = false } = {}) {
     if (next) {
       const disk = isAutoSaveDiskActive();
       setStatus(
-        disk ? "自动保存已开启" : "自动保存已开启（草稿）",
-        disk ? "停手后写回已授权文件" : "尚无写回目标 · 先保存到本地后才会写盘"
+        disk ? "自动保存已开启" : "自动保存已开启 · 待授权写盘",
+        disk ? "停手后自动写回磁盘，无需按保存" : "点一次授权选文件后即可自动写盘"
       );
-      if (!disk) {
-        try { showToast("自动保存已开：请先保存到本地文件，之后才会写回磁盘", 2800); } catch (_) {}
+      if (disk) {
+        try { showToast("自动保存已开：修改后自动写盘", 2000); } catch (_) {}
       }
     } else {
       setStatus("自动保存已关闭", "仅手动保存写回文件 · 草稿仍会自动保存");
     }
   }
+  // Turn ON + already has disk target → flush dirty immediately.
+  if (next && hasDiskWriteTarget()) {
+    try {
+      if (State.currentFile && State.currentFile.dirty && canWriteLiveDocument()) {
+        Promise.resolve().then(() => autosaveNow()).catch(() => {});
+      }
+    } catch (_) {}
+  }
   return next;
+}
+
+/** User-gesture: turn AutoSave on and authorize write target if missing. */
+async function ensureAutoSaveDiskTargetFromGesture() {
+  setAutoSaveEnabled(true, { silent: true });
+  if (hasDiskWriteTarget()) {
+    try { syncToolbarActionState(); } catch (_) {}
+    if (State.currentFile && State.currentFile.dirty) {
+      try { await autosaveNow(); } catch (_) {}
+    }
+    try { showToast("自动保存已开：修改后自动写盘", 2000); } catch (_) {}
+    return { ok: true, already: true };
+  }
+  const up = await enableWriteBackForCurrent({
+    thenSave: !!(State.currentFile && State.currentFile.dirty),
+    preferSavePicker: true,
+  });
+  try { syncToolbarActionState(); } catch (_) {}
+  if (up && up.ok) {
+    setAutoSaveEnabled(true, { silent: true });
+    try {
+      setStatus("自动保存已开启", "已授权 · 停手后自动写盘");
+      showToast("已授权写盘 · 自动保存已开", 2600);
+    } catch (_) {}
+    if (!(up.saveResult && up.saveResult.ok) && State.currentFile && State.currentFile.dirty) {
+      try { await autosaveNow(); } catch (_) {}
+    }
+    return up;
+  }
+  if (up && up.cancelled) {
+    try { showToast("未授权写盘 · 自动保存暂仅草稿", 2800); } catch (_) {}
+    return up;
+  }
+  try { showToast("无法授权写盘: " + ((up && (up.error || up.message)) || "unknown"), 3200); } catch (_) {}
+  return up || { ok: false };
 }
 /** Preference ON and current doc can be written in place. */
 function isAutoSaveDiskActive() {
-  return getAutoSaveEnabled() && hasWriteHandle() && !State.readOnlyMode && canWriteLiveDocument();
+  return getAutoSaveEnabled() && hasDiskWriteTarget() && !State.readOnlyMode && canWriteLiveDocument();
 }
 function syncAutosaveToggleUi() {
   // Compatibility shim: AutoSave visuals come from the single toolbar renderer.
@@ -3057,6 +3153,14 @@ function hasWriteHandle() {
     State.currentFile.handle &&
     (State.saveMode === "mentor-handle" || State.saveMode === "handle")
   );
+}
+/** True when we can write the real .mentor on disk (FSA handle OR mentor-server abs path). */
+function hasDiskWriteTarget() {
+  if (hasWriteHandle()) return true;
+  try {
+    if (typeof resolveActiveMentorAbsPath === "function" && resolveActiveMentorAbsPath()) return true;
+  } catch (_) {}
+  return !!(State.externalWatchPath && isAbsMentorPath && isAbsMentorPath(State.externalWatchPath));
 }
 function isMentorPackMode() {
   const name = State.currentFile && State.currentFile.name || "";
@@ -3589,6 +3693,146 @@ async function runNamedVersionPin() {
     showToast("保存版本失败", 3000);
   }
 }
+
+/**
+ * Write current package to abs path via mentor-server (no FSA handle needed).
+ * Used for Word-style / pending-open / F5 path restore.
+ */
+async function writeCurrentViaServer(absPath, { reason = "manual", showProgress = false } = {}) {
+  const path = String(absPath || "").trim();
+  if (!path || !(typeof isAbsMentorPath === "function" ? isAbsMentorPath(path) : true)) {
+    return { ok: false, error: "no-path" };
+  }
+  if (!State.currentFile) return { ok: false, error: "no-document" };
+  if (State.readOnlyMode || (typeof canWriteLiveDocument === "function" && !canWriteLiveDocument())) {
+    return { ok: false, skipped: true, error: "live-follower" };
+  }
+  const token = (State.externalWatchToken || "") || (await ensureLocalSessionToken());
+  if (!token) return { ok: false, error: "no-token", message: "无 mentor-server token" };
+
+  let snapshot;
+  try {
+    snapshot = createSaveSnapshot({ skipHardAudit: reason === "autosave" });
+  } catch (e) {
+    return {
+      ok: false,
+      error: e && e.message ? e.message : String(e),
+      code: e && e.code || undefined,
+    };
+  }
+  let payload;
+  try {
+    if (showProgress) showExportProgress("正在保存到磁盘…");
+    payload = await buildMentorZipBlob(
+      snapshot.mdText,
+      snapshot.sidecar,
+      snapshot.mediaFiles,
+      snapshot.references,
+      { documentHtml: snapshot.documentHtml }
+    );
+  } catch (e) {
+    if (showProgress) hideExportProgress("保存失败");
+    return { ok: false, error: e && e.message ? e.message : String(e) };
+  }
+
+  // Ensure server allow-list knows this path
+  try {
+    await fetch(location.origin + "/allow-open", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token, path }),
+    });
+  } catch (_) {}
+
+  const q = new URLSearchParams({ token, path });
+  let res;
+  try {
+    res = await fetch(location.origin + "/write-mentor?" + q.toString(), {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/zip",
+        "X-Mentor-Token": token,
+        "X-Mentor-Path": path,
+      },
+      body: payload,
+    });
+  } catch (e) {
+    if (showProgress) hideExportProgress("保存失败");
+    return { ok: false, error: "network", message: e && e.message ? e.message : String(e) };
+  }
+  let data = null;
+  try { data = await res.json(); } catch (_) {}
+  if (!res.ok || !data || data.ok === false) {
+    if (showProgress) hideExportProgress("保存失败");
+    return {
+      ok: false,
+      error: (data && data.error) || ("http-" + res.status),
+      message: (data && data.message) || "",
+    };
+  }
+
+  // Mark clean + version via same coordinator as handle writes when possible
+  const diskMtime = data.mtimeNs ? Math.floor(Number(data.mtimeNs) / 1e6) : Date.now();
+  try {
+    State.externalWatchPath = path;
+    State.diskPathHint = path;
+    if (State.currentFile) {
+      State.currentFile.path = path;
+      State.fileMtime = diskMtime;
+    }
+  } catch (_) {}
+
+  let warnings = [];
+  try {
+    if (typeof finalizeOfficialCommit === "function") {
+      const fin = await finalizeOfficialCommit(snapshot, {
+        reason,
+        diskMtime,
+      });
+      if (fin && Array.isArray(fin.warnings)) warnings = fin.warnings;
+    } else {
+      if (typeof markClean === "function") markClean();
+      try { await putAtomicDraftForCurrent(); } catch (_) {}
+    }
+  } catch (e) {
+    warnings.push("finalize");
+    console.warn("[write-server] finalize", e);
+  }
+  if (showProgress) hideExportProgress("已保存");
+  try { snapshotActiveTab(); } catch (_) {}
+  try { startExternalWatchForCurrentDocument && startExternalWatchForCurrentDocument(); } catch (_) {}
+  return { ok: true, path, disk: true, via: "server", warnings, mtime: diskMtime };
+}
+
+/**
+ * Unified disk write: FSA handle first, else mentor-server path.
+ */
+async function writeCurrentToDisk(opts = {}) {
+  const reason = opts.reason || "manual";
+  const showProgress = !!opts.showProgress;
+  if (hasWriteHandle()) {
+    return writeCurrentToHandle({
+      reason,
+      showProgress,
+      forceOverwriteExternal: !!opts.forceOverwriteExternal,
+    });
+  }
+  let path = "";
+  try { path = resolveActiveMentorAbsPath(); } catch (_) { path = ""; }
+  if (!path && State.externalWatchPath) path = String(State.externalWatchPath || "");
+  if (!path) {
+    try { path = await resolveMentorPathByName(mentorBasenameHint()); } catch (_) {}
+  }
+  if (path) {
+    return writeCurrentViaServer(path, { reason, showProgress });
+  }
+  return {
+    ok: false,
+    error: "no-disk-target",
+    message: "没有可写回的磁盘目标（无文件句柄且无绝对路径）",
+  };
+}
+
 function startAutosaveTimer() {
   stopAutosaveTimer();
   if (!canWriteLiveDocument()) return;
@@ -3621,9 +3865,9 @@ function scheduleAutosaveDebounce() {
 /**
  * Autosave tick:
  * - Always keep DraftStore AutoRecover.
- * - When Office AutoSave toggle is ON and a write handle is available, also
- *   write the official file and markClean (Word/OneDrive-style).
- * - When toggle OFF or no handle: draft only; dirty stays until manual save.
+ * - When AutoSave ON: always try writeCurrentToDisk (FSA handle or mentor-server
+ *   abs path) and markClean on success — no Save button required.
+ * - When toggle OFF or no disk target: draft only; dirty stays until manual save.
  */
 async function autosaveNow() {
   if (!canWriteLiveDocument()) return { ok: false, skipped: true, error: "live-follower" };
@@ -3633,23 +3877,33 @@ async function autosaveNow() {
     return { ok: false, skipped: true, error: "external-paused" };
   }
   const time = (/* @__PURE__ */ new Date()).toLocaleTimeString();
-  const wantDisk = getAutoSaveEnabled() && hasWriteHandle();
+  // AutoSave ON ⇒ always attempt real disk write (handle or mentor-server path).
+  // writeCurrentToDisk may resolve basename→abs path; no Save button required.
+  const wantDisk = getAutoSaveEnabled();
   if (wantDisk) {
     try {
-      const wr = await writeCurrentToHandle({ reason: "autosave", showProgress: false });
+      const wr = await writeCurrentToDisk({ reason: "autosave", showProgress: false });
       if (wr && wr.ok) {
-        setStatus("已自动保存", time);
-        console.log(`[autosave] disk at ${time}`);
+        setStatus("已自动保存", time + (wr.via === "server" ? " · 磁盘" : ""));
+        console.log(`[autosave] disk at ${time}`, wr.via || "handle");
         try { syncAutosaveToggleUi(); } catch (_) {}
         try { syncToolbarActionState(); } catch (_) {}
-        return { ok: true, disk: true, draft: true };
+        return { ok: true, disk: true, draft: true, via: wr.via || "handle" };
       }
       if (wr && wr.skipped) {
         console.log("[autosave] disk skipped:", wr.error || "skipped");
       } else if (wr && wr.error === "need-permission") {
         console.log("[autosave] disk needs permission; draft only");
+      } else if (wr && wr.error === "no-disk-target") {
+        console.log("[autosave] no disk target yet; draft only");
+        try {
+          if (!autosaveNow._needAuthNoted) {
+            autosaveNow._needAuthNoted = true;
+            setStatus("自动保存 · 待授权", "点「自动保存」或 Ctrl+S 选文件后即可写盘");
+          }
+        } catch (_) {}
       } else if (wr && wr.error) {
-        console.warn("[autosave] disk failed:", wr.error);
+        console.warn("[autosave] disk failed:", wr.error, wr.message || "");
       }
     } catch (eDisk) {
       console.warn("[autosave] disk threw:", eDisk);
@@ -5766,29 +6020,66 @@ function annotationHasLiveMark(threadId) {
   });
   return found;
 }
+/** Range-mode only: true = OK (silent), false = not ready. */
+function threadAnchorOk(thread) {
+  if (!thread || typeof thread !== "object" || !thread.threadId) return false;
+  if (thread.deleted || thread.invalid) return false;
+  const status = thread.anchor && thread.anchor.status;
+  if (status === "orphaned" || status === "ambiguous" || status === "collision" || status === "image-missing") {
+    return false;
+  }
+  const hasImg = Array.isArray(thread.imageAnchors) && thread.imageAnchors.length > 0;
+  if (hasImg) {
+    return thread.imageAnchors.some((a) => a && a.src);
+  }
+  if (annotationHasLiveMark(thread.threadId)) return true;
+  if (thread.range && typeof thread.range.from === "number" && typeof thread.range.to === "number" && thread.range.from < thread.range.to) {
+    return true;
+  }
+  const md = State.currentFile && typeof State.currentFile.content === "string" ? State.currentFile.content : "";
+  if (md && typeof isMdRange === "function" && isMdRange(thread.mdRange)) {
+    try {
+      if (validateThreadMdRange(thread, md).ok) return true;
+    } catch (_) {}
+  }
+  return false;
+}
+/**
+ * Range-mode UI status. null = OK (no banner).
+ * kinds: orphaned | ambiguous | collision | image-missing
+ * Fuzzy / "" removed — only hard failures.
+ */
 function annotationWarningState(thread) {
   if (!thread || typeof thread !== "object") return null;
+  // Live mark ⇒ OK; clear lagging flags
+  if (thread.threadId && annotationHasLiveMark(thread.threadId)) {
+    if (thread.deleted || thread.invalid || thread.fuzzy || (thread.anchor && thread.anchor.status === "orphaned")) {
+      thread.deleted = false;
+      thread.invalid = false;
+      thread.fuzzy = false;
+      thread.invalidReason = void 0;
+      if (thread.anchor && typeof thread.anchor === "object") {
+        thread.anchor = { ...thread.anchor, status: "attached", confidence: 1 };
+      }
+    }
+    return null;
+  }
+  if (threadAnchorOk(thread)) return null;
+
   const status = thread.anchor && thread.anchor.status;
   const reason = thread.invalidReason || "";
   if (status === "ambiguous" || reason === "ambiguous") return { kind: "ambiguous" };
-  if (status === "collision" || reason === "mark-collision" || reason === "collision") return { kind: "collision" };
   if (status === "image-missing" || reason === "image-deleted") return { kind: "image-missing" };
-  // Live mark + lagging mark-missing flags ⇒ heal false orphan banner.
-  // Explicit orphaned/deleted (full-pass or user) still shows.
-  if (thread.threadId && annotationHasLiveMark(thread.threadId)) {
-    if (reason === "mark-missing" || reason === "mark-reattached-fuzzy") {
-      thread.deleted = false;
-      thread.invalid = false;
-      thread.invalidReason = void 0;
-      if (thread.anchor && thread.anchor.status === "orphaned") {
-        // Only clear status when it was driven by lagging mark-missing.
-        thread.anchor = { ...thread.anchor, status: "attached" };
-      }
-      return null;
-    }
+  if (status === "collision" || reason === "mark-collision" || reason === "collision") return { kind: "collision" };
+  if (status === "orphaned" || thread.deleted || reason === "text-deleted" || reason === "orphaned") {
+    return { kind: "orphaned" };
   }
-  if (status === "orphaned" || thread.deleted || thread.invalid) return { kind: "orphaned" };
-  return null;
+  // Range miss / mark-missing / generic invalid
+  if (thread.invalid || reason === "mark-missing" || reason === "mdRange-missing" || reason === "mdRange-map-fail") {
+    return { kind: "collision" };
+  }
+  // Not ok under range mode without finer tag → 锚点失效
+  return { kind: "collision" };
 }
 function activateAnnotationThread(threadId, options = {}) {
   if (!threadId) {
@@ -5879,6 +6170,759 @@ function revealSupervisionThread(threadId) {
   }
   return { found: true, filtered: Boolean(filtered) };
 }
+function isAbsMentorPath(p) {
+  const s = String(p || "").trim();
+  if (!s || !/\.mentor$/i.test(s)) return false;
+  return /^[A-Za-z]:[\\/]/.test(s) || s.startsWith("\\\\") || s.startsWith("/") || /[\\/]/.test(s);
+}
+
+function mentorBasenameHint() {
+  const raw =
+    (State.currentFile && State.currentFile.name) ||
+    State.diskPathHint ||
+    State.externalWatchPath ||
+    "";
+  const s = String(raw || "").trim();
+  if (!s) return "";
+  const ia = s.lastIndexOf("/");
+  const ib = s.lastIndexOf("\\");
+  const i = ia > ib ? ia : ib;
+  const base = i >= 0 ? s.slice(i + 1) : s;
+  return /\.mentor$/i.test(base) ? base : "";
+}
+
+function resolveActiveMentorAbsPath() {
+  const candidates = [
+    State.externalWatchPath,
+    State.currentFile && State.currentFile.path,
+    State.diskPathHint,
+    // Chromium/Electron non-standard: File.path on some open paths
+    State.currentFile && State.currentFile._filePath,
+  ];
+  for (const raw of candidates) {
+    const p = String(raw || "").trim();
+    if (isAbsMentorPath(p)) return p;
+  }
+  return "";
+}
+
+async function resolveMentorPathByName(name) {
+  const base = String(name || mentorBasenameHint() || "").trim();
+  if (!base) return "";
+  const token = (State.externalWatchToken || "") || (await ensureLocalSessionToken());
+  if (!token) return "";
+  try {
+    const q = new URLSearchParams({ token, name: base });
+    const res = await fetch(location.origin + "/resolve-mentor-path?" + q.toString(), { cache: "no-store" });
+    if (!res.ok) return "";
+    const data = await res.json();
+    if (data && data.ok && isAbsMentorPath(data.path)) {
+      State.externalWatchPath = data.path;
+      State.diskPathHint = data.path;
+      if (State.currentFile && !State.currentFile.path) State.currentFile.path = data.path;
+      return data.path;
+    }
+  } catch (_) {}
+  return "";
+}
+
+async function buildCurrentMentorZipBlobForFixMentor() {
+  // Prefer live save snapshot path used by writeCurrentToHandle.
+  if (typeof createSaveSnapshot === "function" && typeof buildMentorZipBlob === "function") {
+    try {
+      const snap = createSaveSnapshot({ skipHardAudit: true });
+      if (snap) {
+        const blob = await buildMentorZipBlob(
+          snap.mdText || "",
+          snap.sidecar,
+          snap.mediaFiles || State.mediaFiles || {},
+          snap.references || State.references,
+          { documentHtml: snap.documentHtml || null }
+        );
+        if (blob) return blob;
+      }
+    } catch (e) {
+      console.warn("[fix-mentor] createSaveSnapshot zip failed", e);
+    }
+  }
+  // Fallback: rebuild from editor state
+  let mdText = "";
+  try {
+    const flushed = flushSourceView();
+    mdText = flushed !== null ? flushed : (State.editor ? htmlToMarkdownMedia(State.editor.getHTML()) : (State.currentFile && State.currentFile.content) || "");
+  } catch (_) {
+    mdText = (State.currentFile && State.currentFile.content) || "";
+  }
+  const ann = {
+    version: "1",
+    document: (State.currentFile && State.currentFile.name) || "document.mentor",
+    updatedAt: new Date().toISOString(),
+    author: { id: State.authorId, name: State.author },
+    annotations: typeof buildAnnotationsSidecar === "function" ? buildAnnotationsSidecar() : (State.annotations || []),
+  };
+  return buildMentorZipBlob(
+    mdText,
+    ann,
+    State.mediaFiles || {},
+    State.references,
+    { documentHtml: State.editor ? htmlWithMediaPaths(State.editor.getHTML(), State.mediaUrls) : null }
+  );
+}
+
+async function applyFixMentorResultFromPath(absPath, { staged = false } = {}) {
+  if (!absPath) return { ok: false, error: "no-path" };
+  const token = (State.externalWatchToken || "") || (await ensureLocalSessionToken());
+  if (!token) return { ok: false, error: "no-token" };
+  try {
+    const file = await fetchExternalMentorFile(absPath, token);
+    if (!file) return { ok: false, error: "fetch-failed" };
+    // Keep write handle if present — reload package content into same doc.
+    const keepHandle = State.currentFile && State.currentFile.handle ? State.currentFile.handle : null;
+    const keepDocId = State.currentFile && State.currentFile.documentId;
+    const name = (State.currentFile && State.currentFile.name) || file.name;
+    const { mdText, annotations, references, mediaFiles, archive } = await readMentorZip(file);
+    await activateOpenedDocument({
+      name,
+      content: mdText,
+      annotations,
+      references,
+      mediaFiles,
+      handle: keepHandle,
+      documentId: keepDocId,
+      saveMode: keepHandle ? (State.saveMode || "mentor-handle") : "mentor-download",
+      quiet: true,
+      forceDisk: true,
+      diskMtime: file.lastModified,
+      structuralHtml: archive && archive.documentHtml || null,
+      archiveVerification: archive && archive.verification || null,
+    });
+    if (!staged && isAbsMentorPath(absPath)) {
+      State.externalWatchPath = absPath;
+      State.diskPathHint = absPath;
+      if (State.currentFile) State.currentFile.path = absPath;
+    }
+    // Write back to real disk: handle OR server path (Word-style)
+    let wrote = false;
+    try {
+      if (typeof writeCurrentToDisk === "function" && hasDiskWriteTarget()) {
+        const wr = await writeCurrentToDisk({ reason: "manual", showProgress: false, forceOverwriteExternal: true });
+        wrote = !!(wr && wr.ok);
+        if (wrote) showToast("AI 结果已写回磁盘", 2600);
+      } else if (keepHandle && typeof writeCurrentToHandle === "function") {
+        const wr = await writeCurrentToHandle({ reason: "manual", showProgress: false, forceOverwriteExternal: true });
+        wrote = !!(wr && wr.ok);
+        if (wrote) showToast("AI 结果已写回原文件", 2600);
+      }
+    } catch (e) {
+      console.warn("[fix-mentor] write-back failed", e);
+    }
+    if (!wrote && staged) {
+      showToast("AI 已处理。若未写盘，请 Ctrl+S 保存", 3600);
+    }
+    try { renderCommentList(); } catch (_) {}
+    try { startSupervisionPolling(); } catch (_) {}
+    return { ok: true };
+  } catch (e) {
+    console.warn("[fix-mentor] apply result failed", e);
+    return { ok: false, error: e && e.message ? e.message : String(e) };
+  }
+}
+
+
+/* ===== Hermes connection (warm worker) — separate from /fm job run ===== */
+function hermesConnLabel(state, health) {
+  const s = String(state || (health && health.state) || "unknown");
+  if (!health || health.reachable === false || s === "down" || s === "unavailable") return "Hermes 未连接";
+  if (s === "loading" || s === "starting") return "Hermes 预热中…";
+  if (s === "ready") return "Hermes 已就绪";
+  if (s === "busy") return "Hermes 忙碌";
+  if (s === "error") return "Hermes 错误";
+  if (health.agentReady) return "Hermes 已就绪";
+  return "Hermes " + s;
+}
+
+function syncHermesConnectionUi() {
+  const h = State.hermesConnection || {};
+  const chip = document.getElementById("hermes-conn-status");
+  const text = document.getElementById("hermes-conn-status-text");
+  if (!chip) return;
+  const state = h.state || (h.reachable ? "unknown" : "down");
+  chip.classList.remove("hidden");
+  chip.dataset.state = state;
+  chip.dataset.ready = h.agentReady ? "1" : "0";
+  chip.title = [
+    hermesConnLabel(state, h),
+    h.skills && h.skills.length ? ("skills: " + h.skills.join(",")) : "",
+    h.error || "",
+    h.mode ? ("mode=" + h.mode) : "",
+  ].filter(Boolean).join(" · ");
+  if (text) text.textContent = hermesConnLabel(state, h);
+}
+
+async function fetchHermesConnection(opts) {
+  opts = opts || {};
+  const warm = !!opts.warm;
+  const wait = opts.wait || 0;
+  try {
+    let token = State.externalWatchToken || "";
+    if (!token && typeof ensureLocalSessionToken === "function") {
+      try { token = await ensureLocalSessionToken(); } catch (_) {}
+    }
+    const q = new URLSearchParams();
+    if (token) q.set("token", token);
+    if (warm) q.set("warm", "1");
+    if (wait) q.set("wait", String(wait));
+    const res = await fetch(location.origin + "/hermes-connection?" + q.toString(), { cache: "no-store" });
+    if (!res.ok) return null;
+    const data = await res.json();
+    State.hermesConnection = {
+      state: data.state || (data.reachable ? "ready" : "down"),
+      reachable: !!data.reachable,
+      agentReady: !!data.agentReady,
+      error: data.error || "",
+      skills: data.skills || [],
+      mode: data.mode || "warm",
+      uptimeSec: data.uptimeSec,
+      busy: !!data.busy,
+      checkedAt: Date.now(),
+    };
+    try { syncHermesConnectionUi(); } catch (_) {}
+    return State.hermesConnection;
+  } catch (e) {
+    State.hermesConnection = {
+      state: "down",
+      reachable: false,
+      agentReady: false,
+      error: String(e && e.message || e),
+      checkedAt: Date.now(),
+    };
+    try { syncHermesConnectionUi(); } catch (_) {}
+    return State.hermesConnection;
+  }
+}
+
+function startHermesConnectionPolling() {
+  if (State._hermesConnTimer) return;
+  void fetchHermesConnection({ warm: true });
+  State._hermesConnTimer = setInterval(function () {
+    void fetchHermesConnection({ warm: false });
+  }, 4000);
+}
+
+function isFixMentorJobActive(status) {
+  return status === "saving" || status === "starting" || status === "running";
+}
+
+function fixMentorStatusLabel(st) {
+  switch (st) {
+    case "saving": return "保存中…";
+    case "starting": return "启动 Hermes…";
+    case "running": return "AI 处理中…";
+    case "done": return "AI 处理完成";
+    case "error": return "AI 处理失败";
+    default: return "";
+  }
+}
+
+function setFixMentorJobState( partial = {} ) {
+  const prev = State.fixMentorJob || {};
+  State.fixMentorJob = { ...prev, ...partial };
+  try { syncFixMentorJobUi(); } catch (_) {}
+}
+
+function formatFixMentorElapsed(sec) {
+  const n = Math.max(0, Math.floor(Number(sec) || 0));
+  const m = Math.floor(n / 60);
+  const s = n % 60;
+  return m + ":" + String(s).padStart(2, "0");
+}
+
+function pickFixMentorLogPreview(logTail, lastLog) {
+  const lines = Array.isArray(logTail) ? logTail.filter((x) => String(x || "").trim()) : [];
+  if (!lines.length) return lastLog ? String(lastLog) : "";
+  return lines.slice(-3).map((l) => String(l).slice(0, 160)).join("\n");
+}
+
+function syncFixMentorJobUi() {
+  const job = State.fixMentorJob || {};
+  const active = isFixMentorJobActive(job.status);
+  const label = fixMentorStatusLabel(job.status);
+  const phaseLabel = job.phaseLabel || "";
+  const detail = job.message || job.error || "";
+  const elapsedSec = job.elapsedSec != null
+    ? Number(job.elapsedSec)
+    : (job.startedAtClient ? Math.floor((Date.now() - job.startedAtClient) / 1000) : 0);
+  const elapsedLabel = job.elapsedLabel || formatFixMentorElapsed(elapsedSec);
+  const pct = Math.max(0, Math.min(100, Number(job.progress) || (active ? 12 : job.status === "done" ? 100 : 0)));
+  const logPreview = pickFixMentorLogPreview(job.logTail, job.lastLog);
+
+  document.querySelectorAll("[data-act=\"run-fix-mentor\"]").forEach((btn) => {
+    const tid = btn.dataset.thread || "";
+    btn.disabled = active;
+    btn.classList.toggle("is-running", active);
+    btn.classList.toggle("is-done", job.status === "done");
+    btn.classList.toggle("is-error", job.status === "error");
+    if (active) {
+      btn.setAttribute("aria-busy", "true");
+      btn.textContent = job.threadId && tid === job.threadId
+        ? ("处理中 " + elapsedLabel)
+        : ("排队 " + elapsedLabel);
+      btn.title = [label, phaseLabel, detail].filter(Boolean).join(" · ");
+    } else if (job.status === "done") {
+      btn.removeAttribute("aria-busy");
+      btn.textContent = "AI 处理";
+      btn.title = "保存并让 Hermes 处理待办 (@AI / AI 卡)";
+    } else if (job.status === "error") {
+      btn.removeAttribute("aria-busy");
+      btn.textContent = "重试 AI";
+      btn.title = detail || "上次失败，点击重试";
+    } else {
+      btn.removeAttribute("aria-busy");
+      btn.textContent = "AI 处理";
+      btn.title = "保存并让 Hermes 处理待办 (@AI / AI 卡)";
+    }
+  });
+
+  const name = (job.path || "").split(/[\\/]/).pop() || (job.sourceName || "") || "";
+  const chipLine = [
+    phaseLabel || label || "AI",
+    name,
+    detail && detail !== phaseLabel ? detail : "",
+  ].filter(Boolean).join(" · ");
+
+  // Primary: bottom statusbar chip
+  const chip = document.getElementById("fix-mentor-status");
+  const chipText = document.getElementById("fix-mentor-status-text");
+  const chipElapsed = document.getElementById("fix-mentor-status-elapsed");
+  if (chip) {
+    if (active || job.status === "error" || job.status === "done") {
+      chip.classList.remove("hidden");
+      chip.dataset.status = job.status || "idle";
+      chip.title = chipLine || "AI 批注处理";
+      if (chipText) {
+        chipText.textContent = active
+          ? ((phaseLabel || label || "AI 处理中") + (detail && detail !== phaseLabel ? " · " + String(detail).slice(0, 48) : ""))
+          : chipLine || label || "AI";
+      }
+      if (chipElapsed) {
+        chipElapsed.textContent = (active || job.status === "done" || job.status === "error")
+          ? elapsedLabel
+          : "";
+      }
+      if (job.status === "done") {
+        const doneId = job.id;
+        setTimeout(() => {
+          const cur = State.fixMentorJob || {};
+          if (cur.id === doneId && cur.status === "done") {
+            chip.classList.add("hidden");
+            chip.dataset.status = "idle";
+            if (chipText) chipText.textContent = "";
+            if (chipElapsed) chipElapsed.textContent = "";
+          }
+        }, 10000);
+      }
+    } else {
+      chip.classList.add("hidden");
+      chip.dataset.status = "idle";
+      if (chipText) chipText.textContent = "";
+      if (chipElapsed) chipElapsed.textContent = "";
+    }
+  }
+
+  // Secondary: sticky progress panel in comment pane
+  const banner = document.getElementById("fix-mentor-job-banner");
+  if (banner) {
+    const titleEl = document.getElementById("fm-prog-title");
+    const elEl = document.getElementById("fm-prog-elapsed");
+    const pctEl = document.getElementById("fm-prog-pct");
+    const fillEl = document.getElementById("fm-prog-fill");
+    const phaseEl = document.getElementById("fm-prog-phase");
+    const logEl = document.getElementById("fm-prog-log");
+
+    if (active || job.status === "error" || job.status === "done") {
+      banner.hidden = false;
+      banner.dataset.status = job.status || "idle";
+      banner.dataset.stale = job.stale ? "1" : "0";
+      if (titleEl) {
+        titleEl.textContent = job.status === "done"
+          ? "AI 处理完成"
+          : job.status === "error"
+            ? "AI 处理失败"
+            : "AI 处理进行中";
+      }
+      if (elEl) elEl.textContent = elapsedLabel;
+      if (pctEl) pctEl.textContent = (job.status === "error" ? "—" : (Math.round(pct) + "%"));
+      if (fillEl) {
+        fillEl.style.width = (job.status === "error" ? Math.max(pct, 20) : pct) + "%";
+      }
+      if (phaseEl) {
+        const bits = [phaseLabel || label, name].filter(Boolean);
+        if (job.stale && active) bits.push("输出少仍在跑");
+        phaseEl.textContent = bits.join(" · ");
+      }
+      if (logEl) {
+        if (job.status === "error") {
+          logEl.textContent = detail || job.error || logPreview || "";
+        } else {
+          logEl.textContent = logPreview || detail || "等待 Hermes 输出…";
+        }
+      }
+      if (job.status === "done") {
+        const doneId = job.id;
+        setTimeout(() => {
+          const cur = State.fixMentorJob || {};
+          if (cur.id === doneId && cur.status === "done") {
+            banner.hidden = true;
+            banner.dataset.status = "idle";
+          }
+        }, 10000);
+      }
+    } else {
+      banner.hidden = true;
+      banner.dataset.status = "idle";
+      banner.dataset.stale = "0";
+    }
+  }
+}
+
+function stopFixMentorJobPolling() {
+  const job = State.fixMentorJob || {};
+  if (job.pollTimer) {
+    try { clearInterval(job.pollTimer); } catch (_) {}
+    State.fixMentorJob.pollTimer = null;
+  }
+  if (job.tickTimer) {
+    try { clearInterval(job.tickTimer); } catch (_) {}
+    State.fixMentorJob.tickTimer = null;
+  }
+}
+
+async function fetchFixMentorJob(jobId, path) {
+  const token = (State.externalWatchToken || "") || (await ensureLocalSessionToken());
+  if (!token) return null;
+  const q = new URLSearchParams();
+  q.set("token", token);
+  if (jobId) q.set("id", jobId);
+  if (path) q.set("path", path);
+  const res = await fetch(location.origin + "/fix-mentor-job?" + q.toString(), { cache: "no-store" });
+  if (!res.ok) {
+    let err = "http-" + res.status;
+    try {
+      const body = await res.json();
+      err = (body && (body.error || body.message)) || err;
+    } catch (_) {}
+    return { ok: false, error: err, status: "error" };
+  }
+  return await res.json();
+}
+
+async function pollFixMentorJobOnce() {
+  const job = State.fixMentorJob || {};
+  if (!job.id && !job.path) return;
+  try {
+    const data = await fetchFixMentorJob(job.id, job.path);
+    if (!data) return;
+    const st = String(data.status || "");
+    if (st === "idle" && !job.id) {
+      setFixMentorJobState({ status: "idle", message: "", error: "" });
+      stopFixMentorJobPolling();
+      return;
+    }
+    setFixMentorJobState({
+      id: data.id || job.id,
+      status: st === "queued" || st === "starting" || st === "running" ? (st === "running" ? "running" : "starting")
+        : st === "done" ? "done"
+        : st === "error" || st === "cancelled" ? "error"
+        : job.status,
+      path: data.path || job.path,
+      threadId: data.threadId || job.threadId,
+      message: data.message || "",
+      error: data.error || "",
+      exitCode: data.exitCode,
+      staged: data.staged != null ? !!data.staged : !!job.staged,
+      phase: data.phase || job.phase || "",
+      phaseLabel: data.phaseLabel || job.phaseLabel || "",
+      step: data.step != null ? data.step : job.step,
+      progress: data.progress != null ? data.progress : job.progress,
+      elapsedSec: data.elapsedSec != null ? data.elapsedSec : job.elapsedSec,
+      elapsedLabel: data.elapsedLabel || job.elapsedLabel || "",
+      lastLog: data.lastLog || job.lastLog || "",
+      logTail: Array.isArray(data.logTail) ? data.logTail : (job.logTail || []),
+      stale: !!data.stale,
+      sourceName: data.sourceName || job.sourceName || "",
+    });
+    if (st === "done" || st === "error" || st === "cancelled") {
+      stopFixMentorJobPolling();
+      if (st === "done") {
+        const staged = !!(data.staged || job.staged);
+        const resultPath = data.path || job.path || "";
+        showToast(staged ? "AI 处理完成 · 正在写回…" : "AI 处理完成", 2800);
+        try { startSupervisionPolling(); } catch (_) {}
+        try {
+          if (staged && resultPath) {
+            void applyFixMentorResultFromPath(resultPath, { staged: true }).then((r) => {
+              if (!r || !r.ok) {
+                showToast("结果写回失败，请手动重开磁盘文件", 4000);
+              }
+              try { syncFixMentorJobUi(); } catch (_) {}
+            });
+          } else {
+            if (typeof scheduleExternalRefresh === "function") {
+              scheduleExternalRefresh({
+                generation: State.externalWatch && State.externalWatch.generation,
+                hint: { cause: "fix-mentor-done" },
+              });
+            }
+            if (typeof refreshFromExternalDisk === "function") {
+              const gen = State.externalWatch && State.externalWatch.generation;
+              setTimeout(() => {
+                void refreshFromExternalDisk({ generation: gen }).catch(() => {});
+              }, 400);
+            }
+            // Soft re-render after a beat
+            setTimeout(() => {
+              try { renderCommentList(); } catch (_) {}
+              try { syncFixMentorJobUi(); } catch (_) {}
+            }, 1200);
+          }
+        } catch (_) {}
+      } else {
+        showToast("AI 处理失败: " + (data.message || data.error || "unknown"), 4500);
+      }
+    }
+  } catch (e) {
+    console.warn("[fix-mentor-job] poll failed", e);
+  }
+}
+
+function startFixMentorJobPolling() {
+  stopFixMentorJobPolling();
+  if (!State.fixMentorJob.startedAtClient) {
+    State.fixMentorJob.startedAtClient = Date.now();
+  }
+  State.fixMentorJob.pollTimer = setInterval(() => {
+    void pollFixMentorJobOnce();
+  }, 800);
+  // Local elapsed tick so the clock moves even when Hermes is quiet
+  State.fixMentorJob.tickTimer = setInterval(() => {
+    const j = State.fixMentorJob || {};
+    if (!isFixMentorJobActive(j.status)) return;
+    const base = j.startedAtClient || Date.now();
+    const sec = Math.floor((Date.now() - base) / 1000);
+    // Prefer server elapsed when larger (clock skew / resume)
+    const elapsedSec = Math.max(sec, Number(j.elapsedSec) || 0);
+    // Soft local creep of progress while waiting for server
+    let progress = Number(j.progress) || 10;
+    if (progress < 92) progress = Math.min(92, progress + 0.15);
+    setFixMentorJobState({
+      elapsedSec,
+      elapsedLabel: formatFixMentorElapsed(elapsedSec),
+      progress,
+    });
+  }, 1000);
+  void pollFixMentorJobOnce();
+}
+
+async function ensureDiskSavedForFixMentor() {
+  if (!State.currentFile) {
+    return { ok: false, error: "no-document", message: "请先打开 .mentor 文件" };
+  }
+  if (!/\.mentor$/i.test(String(State.currentFile.name || State.diskPathHint || ""))) {
+    return { ok: false, error: "not-mentor", message: "AI 处理仅支持 .mentor 包" };
+  }
+  if (State.readOnlyMode || (typeof canWriteLiveDocument === "function" && !canWriteLiveDocument())) {
+    return { ok: false, error: "read-only", message: "当前为只读查看，请先接管编辑" };
+  }
+
+  // Absolute path only — no stage / no silent temp copy.
+  let path = "";
+  try { path = resolveActiveMentorAbsPath(); } catch (_) { path = ""; }
+  if (!path) {
+    setFixMentorJobState({ status: "saving", message: "正在解析文件路径…", error: "" });
+    try { path = await resolveMentorPathByName(mentorBasenameHint()); } catch (_) { path = ""; }
+  }
+  if (!path || !isAbsMentorPath(path)) {
+    return {
+      ok: false,
+      error: "no-disk-path",
+      message: "没有磁盘路径。请用 mentor.cmd / 桌面图标打开 .mentor（经 mentor-server），不要只拖进浏览器。",
+    };
+  }
+
+  const dirty = !!(State.currentFile.dirty);
+  if (dirty) {
+    setFixMentorJobState({ status: "saving", message: "正在保存到磁盘…", path, error: "" });
+    const result = await writeCurrentToDisk({ reason: "manual", showProgress: true });
+    if (!result || !result.ok) {
+      return {
+        ok: false,
+        error: (result && result.error) || "save-failed",
+        message: "保存失败: " + ((result && (result.message || result.error)) || "unknown"),
+      };
+    }
+  }
+  return { ok: true, path, stage: false, writeBackPath: path };
+}
+
+/**
+ * Card / pane: save current .mentor then spawn Hermes fix-mentor via mentor-server.
+ * @param {object} [opts]
+ * @param {string} [opts.threadId]
+ * @param {'all'|'thread'} [opts.scope]
+ */
+async function runFixMentorFromUi(opts = {}) {
+  const threadId = String(opts.threadId || "").trim();
+  const scope = opts.scope === "thread" ? "thread" : "all";
+  const cur = State.fixMentorJob || {};
+  if (isFixMentorJobActive(cur.status)) {
+    showToast("已有 AI 任务在运行", 2200);
+    return { ok: false, error: "busy" };
+  }
+
+  // Flush composer draft for this thread if user typed but didn't submit
+  if (threadId) {
+    try {
+      const ta = document.querySelector(`[data-thread-input="${threadId}"]`);
+      const draft = (ta && ta.value) || State.replyDrafts[threadId] || "";
+      if (String(draft).trim()) {
+        // Prefer submitting so the agent sees the instruction
+        if (typeof addReply === "function") {
+          addReply(threadId, draft);
+        }
+      }
+    } catch (_) {}
+  }
+
+  // Gate: Hermes warm worker must be ready — no cold spawn fallback.
+  try {
+    const conn = await fetchHermesConnection({ warm: true, wait: 12 });
+    if (!conn || !conn.agentReady) {
+      const msg = "Hermes 未就绪（底栏连接芯片）。等「Hermes 已就绪」再点 AI，或重启 mentor-server。";
+      setFixMentorJobState({
+        status: "error",
+        error: "hermes-not-ready",
+        message: msg,
+      });
+      showToast(msg, 4500);
+      return { ok: false, error: "hermes-not-ready", message: msg };
+    }
+  } catch (_) {
+    const msg = "无法检查 Hermes 连接";
+    setFixMentorJobState({ status: "error", error: "hermes-conn-check", message: msg });
+    showToast(msg, 4200);
+    return { ok: false, error: "hermes-conn-check", message: msg };
+  }
+
+  const saved = await ensureDiskSavedForFixMentor();
+  if (!saved.ok) {
+    setFixMentorJobState({ status: "error", error: saved.error || "precheck", message: saved.message || "" });
+    showToast(saved.message || "无法启动 AI", 4200);
+    return saved;
+  }
+  if (!saved.path) {
+    const msg = "没有磁盘路径，已禁止暂存回落。请经 mentor-server 打开真实 .mentor。";
+    setFixMentorJobState({ status: "error", error: "no-disk-path", message: msg });
+    showToast(msg, 4500);
+    return { ok: false, error: "no-disk-path", message: msg };
+  }
+
+  const token = (State.externalWatchToken || "") || (await ensureLocalSessionToken());
+  if (!token) {
+    const msg = "无法获取 mentor-server session token（请确认通过 http://127.0.0.1:8787 打开）";
+    setFixMentorJobState({ status: "error", error: "no-token", message: msg, path: saved.path || "" });
+    showToast(msg, 4200);
+    return { ok: false, error: "no-token", message: msg };
+  }
+
+  setFixMentorJobState({
+    status: "starting",
+    id: "",
+    path: saved.path,
+    threadId,
+    scope,
+    message: "提交到 warm Hermes…",
+    error: "",
+    exitCode: null,
+    startedAt: Date.now(),
+    staged: false,
+    writeBackPath: saved.writeBackPath || saved.path,
+  });
+  showToast("提交 AI 任务…", 1600);
+
+  try {
+    await fetch(location.origin + "/supervision/register", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token, path: saved.path }),
+    });
+  } catch (_) {}
+  try { startSupervisionPolling(); } catch (_) {}
+
+  let res;
+  try {
+    res = await fetch(location.origin + "/run-fix-mentor", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        token,
+        path: saved.path,
+        name: mentorBasenameHint() || undefined,
+        threadId: threadId || undefined,
+        scope,
+      }),
+    });
+  } catch (e) {
+    const msg = "无法连接 mentor-server: " + (e && e.message ? e.message : e);
+    setFixMentorJobState({ status: "error", error: "network", message: msg });
+    showToast(msg, 4200);
+    return { ok: false, error: "network", message: msg };
+  }
+
+  let data = null;
+  try { data = await res.json(); } catch (_) { data = null; }
+
+  if (res.status === 409 && data) {
+    // Already running — attach to existing job
+    setFixMentorJobState({
+      id: data.id || "",
+      status: data.status === "running" ? "running" : "starting",
+      path: data.path || saved.path || "",
+      threadId: data.threadId || threadId,
+      message: data.message || "已有任务在运行",
+      error: "",
+      staged: false,
+    });
+    State.fixMentorJob.startedAtClient = Date.now();
+    startFixMentorJobPolling();
+    showToast(data.message || "已有 AI 任务在运行", 2500);
+    return { ok: true, attached: true, job: data };
+  }
+
+  if (!res.ok || !data || data.ok === false && !data.id) {
+    const err = (data && (data.error || data.message)) || ("http-" + res.status);
+    const msg = (data && data.message) || err;
+    setFixMentorJobState({ status: "error", error: err, message: msg, path: saved.path });
+    showToast(msg, 4500);
+    return { ok: false, error: err, message: msg };
+  }
+
+  setFixMentorJobState({
+    id: data.id || "",
+    status: data.status === "running" ? "running" : "starting",
+    path: data.path || saved.path,
+    threadId: data.threadId || threadId,
+    scope: data.scope || scope,
+    message: data.message || "Hermes 已启动",
+    error: "",
+    startedAt: Date.now(),
+    staged: false,
+  });
+  State.fixMentorJob.startedAtClient = Date.now();
+    startFixMentorJobPolling();
+  showToast("AI 任务已提交 · warm Hermes", 2400);
+  return { ok: true, job: data };
+}
+
 /** Explicit card @AI invoke — seeds composer only for this thread. */
 function invokeAiForThread(threadId) {
   if (!threadId) return false;
@@ -6032,8 +7076,8 @@ function renderCommentList() {
     const threadType = threadTypeOf(thread);
     const safeThreadId = escapeHtml(thread.threadId);
     return `
-      <div class="comment-thread ${isActive2 ? "is-active" : ""} ${thread.resolved ? "is-resolved" : ""} ${thread.fuzzy ? "is-fuzzy" : ""} ${thread.deleted ? "is-deleted" : ""} ${(warnKind === "ambiguous" || thread.invalidReason === "ambiguous") ? "is-ambiguous" : ""} ${isCollapsed ? "is-collapsed" : ""} ${thread.pending ? "is-pending" : ""}${threadTypeClass(thread)}" data-thread="${safeThreadId}" data-thread-type="${threadType || ""}">
-        ${(warnKind === "orphaned" || thread.deleted) ? '<div class="deleted-banner">📍 原文已被删除 - <button class="link-btn" data-act="reattach" data-thread="' + safeThreadId + '">重新选择正文</button> · <button class="link-btn link-danger" data-act="delete-orphan" data-thread="' + safeThreadId + '">删除</button></div>' : (warnKind === "ambiguous") ? '<div class="ambiguous-banner">⚠ 无法唯一确定原文位置（重复锚点）— <button class="link-btn" data-act="reattach" data-thread="' + safeThreadId + '">重新选择正文</button> · <button class="link-btn link-danger" data-act="delete-orphan" data-thread="' + safeThreadId + '">删除</button></div>' : (warnKind === "collision" || warnKind === "image-missing" || (thread.invalid && !thread.deleted)) ? '<div class="invalid-banner">⚠ 批注锚点失效 — <button class="link-btn" data-act="reattach" data-thread="' + safeThreadId + '">重新选择正文</button> · <button class="link-btn link-danger" data-act="delete-orphan" data-thread="' + safeThreadId + '">删除</button></div>' : thread.fuzzy ? '<div class="fuzzy-banner">⚠ 位置可能偏移 - 请检查文档</div>' : ""}
+      <div class="comment-thread ${isActive2 ? "is-active" : ""} ${thread.resolved ? "is-resolved" : ""} ${(warnKind === "orphaned" || thread.deleted) ? "is-deleted" : ""} ${(warnKind === "ambiguous") ? "is-ambiguous" : ""} ${(warnKind === "collision" || warnKind === "image-missing" || (thread.invalid && !thread.deleted && warnKind)) ? "is-anchor-bad" : ""} ${isCollapsed ? "is-collapsed" : ""} ${thread.pending ? "is-pending" : ""}${threadTypeClass(thread)}" data-thread="${safeThreadId}" data-thread-type="${threadType || ""}">
+        ${(warnKind === "orphaned" || thread.deleted) ? '<div class="deleted-banner">📍 原文已被删除 - <button class="link-btn" data-act="reattach" data-thread="' + safeThreadId + '">重新选择正文</button> · <button class="link-btn link-danger" data-act="delete-orphan" data-thread="' + safeThreadId + '">删除</button></div>' : (warnKind === "ambiguous") ? '<div class="ambiguous-banner">⚠ 无法唯一确定原文位置（重复锚点）— <button class="link-btn" data-act="reattach" data-thread="' + safeThreadId + '">重新选择正文</button> · <button class="link-btn link-danger" data-act="delete-orphan" data-thread="' + safeThreadId + '">删除</button></div>' : (warnKind === "collision" || warnKind === "image-missing" || (thread.invalid && !thread.deleted)) ? '<div class="invalid-banner">⚠ 批注锚点失效 — <button class="link-btn" data-act="reattach" data-thread="' + safeThreadId + '">重新选择正文</button> · <button class="link-btn link-danger" data-act="delete-orphan" data-thread="' + safeThreadId + '">删除</button></div>' : ""}
         <!-- card header: number + quote + menu -->
         <div class="comment-quote" data-thread="${safeThreadId}" title="点击收起/展开批注">
           <span class="comment-number-badge" data-number="${number}" title="批注 #${number}">${number}</span>
@@ -6093,6 +7137,7 @@ function renderCommentList() {
               <textarea data-thread-input="${safeThreadId}" rows="1" placeholder="${escapeHtml(markerPlaceholder(threadType, !!first3.body))}" autocomplete="off"></textarea>
               <div class="form-actions">
                 <button type="button" class="comment-invoke-ai-btn" data-act="invoke-ai" data-thread="${safeThreadId}" title="在回复中插入 @AI（显式唤起 AI）" aria-label="插入 @AI">@AI</button>
+                <button type="button" class="comment-run-ai-btn" data-act="run-fix-mentor" data-thread="${safeThreadId}" title="保存并让 Hermes 处理待办 (@AI / AI 卡)" aria-label="AI 处理">AI 处理</button>
                 <button class="comment-resolve-btn ${thread.resolved ? "is-resolved" : ""}" data-act="resolve" data-thread="${safeThreadId}" title="${thread.resolved ? "重新打开此批注" : "标记为已解决"}" aria-label="${thread.resolved ? "重新打开" : "标记为已解决"}">${thread.resolved ? "重开" : "解决"}</button>
                 <button data-act="submit-reply" data-thread="${safeThreadId}" class="primary" disabled title="输入后可回复 (Ctrl+Enter)">回复</button>
               </div>
@@ -6222,6 +7267,14 @@ function renderCommentList() {
       invokeAiForThread(btn.dataset.thread);
     });
   });
+  list.querySelectorAll('[data-act="run-fix-mentor"]').forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      void runFixMentorFromUi({ threadId: btn.dataset.thread || "", scope: "all" });
+    });
+  });
+  try { syncFixMentorJobUi(); } catch (_) {}
   list.querySelectorAll('[data-act="edit-comment"]').forEach((btn) => {
     btn.addEventListener("click", (e) => {
       e.stopPropagation();
@@ -6602,8 +7655,8 @@ function scrollToThread(threadId) {
       try {
         syncThreadAnchorEvidence(thread, editor2.state.doc, recovered, {
           exact: thread.text || "",
-          status: (recovered.fuzzy && thread.fuzzy !== false) ? "edited" : "attached",
-          confidence: (recovered.fuzzy && thread.fuzzy !== false) ? 0.5 : 1
+          status: "attached",
+          confidence: 1
         });
       } catch (_) {}
       thread.deleted = false;
@@ -6612,9 +7665,9 @@ function scrollToThread(threadId) {
         thread.invalid = false;
         thread.invalidReason = void 0;
       } else {
-        thread.fuzzy = !!recovered.fuzzy;
-        thread.invalid = !!recovered.fuzzy;
-        thread.invalidReason = recovered.fuzzy ? (thread.invalidReason || "mark-reattached-fuzzy") : void 0;
+        thread.fuzzy = false;
+        thread.invalid = false;
+        thread.invalidReason = void 0;
       }
       try { markDirty(); } catch (_) {}
       try { renderCommentList(); } catch (_) {}
@@ -7028,8 +8081,8 @@ function flushSourceView() {
         } catch (_) {}
         syncThreadAnchorEvidence(ann, editor2.state.doc, found2, {
           exact: ann.text,
-          status: (found2.fuzzy && ann.fuzzy !== false) ? "edited" : "attached",
-          confidence: (found2.fuzzy && ann.fuzzy !== false) ? 0.5 : 1
+          status: "attached",
+          confidence: 1
         });
         // md-emphasis normalize may have cleared fuzzy
         if (ann.fuzzy === false) {
@@ -7037,10 +8090,10 @@ function flushSourceView() {
           ann.deleted = false;
           ann.invalidReason = void 0;
         } else {
-          ann.fuzzy = !!found2.fuzzy;
-          ann.invalid = !!found2.fuzzy;
+          ann.fuzzy = false;
+          ann.invalid = false;
           ann.deleted = false;
-          ann.invalidReason = found2.fuzzy ? "text-changed" : void 0;
+          ann.invalidReason = void 0;
         }
       } else {
         failedThreadIds.add(snap.threadId);
@@ -7052,7 +8105,7 @@ function flushSourceView() {
     editor2.view.dispatch(tr2);
     for (const ann of State.annotations) {
       if (failedThreadIds.has(ann.threadId)) {
-        ann.fuzzy = true;
+        ann.fuzzy = false;
         ann.invalid = true;
         ann.invalidReason = ann.invalidReason || "text-changed";
         if (ann.anchor && typeof ann.anchor === "object") {
@@ -7632,7 +8685,7 @@ function rebuildAnnotationMarks(markSnapshot) {
           const thr = State.annotations.find((x) => x && x.threadId === snap.threadId);
           if (thr) {
             thr.invalid = true;
-            thr.fuzzy = !!(found && found.ambiguous);
+            thr.fuzzy = false; if (found && found.ambiguous) { thr.invalid = true; thr.invalidReason = "ambiguous"; }
             thr.invalidReason = found && found.ambiguous ? "ambiguous" : "text-not-found";
             thr.range = null;
             if (thr.anchor && typeof thr.anchor === "object") {
@@ -7740,7 +8793,7 @@ function syncToolbarActionState() {
   const busyAction = typeof State._toolbarBusyAction === "string" ? State._toolbarBusyAction : "";
   const actionState = getToolbarActionState({
     hasDocument: !!State.currentFile,
-    hasWriteHandle: hasWriteHandle(),
+    hasWriteHandle: hasDiskWriteTarget(),
     dirty: !!(State.currentFile && State.currentFile.dirty),
     readOnly: !!State.readOnlyMode || !canWriteLiveDocument(),
     saveMode: State.saveMode,
@@ -8663,81 +9716,33 @@ function loadMarkdownIntoEditor(name, content, annotationsData = null, options =
     } else if (cap > 0 && validAnns.length > cap * 0.8) {
       showToast(`\u26A0 \u6587\u6863\u542B ${validAnns.length}/${cap} \u6761\u6279\u6CE8, \u63A5\u8FD1\u4E0A\u9650. \u2699 \u53EF\u8C03\u6574`, 4e3);
     }
-    const annsToProcess = validAnns;
+    // RANGE MODE ONLY (no quote/fuzzy fallback): attach via mdRange → PM map
+    const mdSource = typeof content === "string" ? content : "";
+    const doc5 = State.editor.state.doc;
     const seenThreadIds = /* @__PURE__ */ new Set();
-    const plainForAnchorSet = State.editor.state.doc.textBetween(0, State.editor.state.doc.content.size, " ");
-    const anchorSetJobs = validAnns.filter((ann) => {
-      if (!ann || !ann.threadId || !ann.text) return false;
-      if (Array.isArray(ann.imageAnchors) && ann.imageAnchors.length) return false;
-      if (Array.isArray(ann.ranges) && ann.ranges.length > 1) return false;
-      // Legacy sidecars may carry an expanded range while `text` still contains
-      // the shorter quote (e.g. nested-extension comments). Those ranges are
-      // intentionally distinct and must not be collapsed into one quote claim.
-      const saved = ann.anchor && ann.anchor.position || ann.range;
-      if (saved && typeof saved.from === "number" && typeof saved.to === "number" && saved.to - saved.from !== String(ann.text).length) return false;
-      return true;
-    });
-    const anchorSet = resolveAnchorSet(plainForAnchorSet, anchorSetJobs);
-    const anchorSetById = new Map(anchorSetJobs.map((ann) => [ann.threadId, ann]));
-    const anchorSetCollisionIds = new Set();
-    for (const collision of anchorSet.collisions || []) {
-      const ann = anchorSetById.get(collision.threadId);
-      const saved = ann && (ann.anchor && ann.anchor.position || ann.range);
-      const savedFrom = saved && typeof saved.from === "number"
-        ? State.editor.state.doc.textBetween(0, Math.max(0, Math.min(State.editor.state.doc.content.size, saved.from)), " ").length
-        : null;
-      // If two comments intentionally shared a healthy live range, preserve them.
-      // A collision is dangerous only when saved identity does not corroborate the
-      // shared candidate (external/legacy duplicate claim).
-      if (savedFrom == null || savedFrom !== collision.range.from || ann.invalid || ann.deleted || ann.fuzzy) {
-        anchorSetCollisionIds.add(collision.threadId);
-      }
-    }
-    for (const ann of annsToProcess) {
+    let rangeAttached = 0;
+    let rangeOrphaned = 0;
+    for (const ann of validAnns) {
       const isDuplicate = ann.threadId && seenThreadIds.has(ann.threadId);
       if (ann.threadId) seenThreadIds.add(ann.threadId);
-      const isAnchorCollision = !!(ann.threadId && anchorSetCollisionIds.has(ann.threadId));
-      const isIncomplete = !ann.threadId || !ann.text;
-      const doc5 = State.editor.state.doc;
       const hasImgAnchors = Array.isArray(ann.imageAnchors) && ann.imageAnchors.length > 0;
-      const hasTextRanges = Array.isArray(ann.ranges) && ann.ranges.length > 1;
-      const resolveSavedRanges = () => {
-        if (!hasTextRanges) return null;
-        const live = [];
-        const used = new Set();
-        for (const saved of ann.ranges) {
-          if (!saved || typeof saved.from !== "number" || typeof saved.to !== "number" || saved.from >= saved.to) return null;
-          const expected = (() => {
-            if (saved.text != null && String(saved.text)) return String(saved.text);
-            // Legacy sidecars lack per-range text. Use the saved slice only when
-            // it still belongs to the aggregate exact text; otherwise derive the
-            // component by ordered whitespace-separated parts.
-            try {
-              const atSaved = doc5.textBetween(saved.from, saved.to, " ");
-              if (atSaved && String(ann.text || "").includes(atSaved)) return atSaved;
-            } catch (_) {}
-            const parts = String(ann.text || "").split(/\s+/).filter(Boolean);
-            const idx = ann.ranges.indexOf(saved);
-            return parts[idx] || "";
-          })();
-          if (!expected) return null;
-          const candidate = findAnnotationRange(doc5, {
-            text: expected,
-            prefix: saved.prefix || "",
-            suffix: saved.suffix || "",
-            range: saved,
-            anchor: { position: saved }
-          });
-          if (!candidate || candidate.ambiguous || typeof candidate.from !== "number" || candidate.from >= candidate.to) return null;
-          const key = `${candidate.from}:${candidate.to}`;
-          if (used.has(key)) return null;
-          used.add(key);
-          live.push({ from: candidate.from, to: candidate.to });
-        }
-        return live.length === ann.ranges.length ? live : null;
-      };
       const pureImageLabel = !!(ann.text && (/^\[图片\]$/i.test(String(ann.text).trim()) || /^\[image\]$/i.test(String(ann.text).trim())));
-      if (!isDuplicate && !isIncomplete && hasImgAnchors) {
+      const savedStatus = ann.anchor && ann.anchor.status;
+      const intentionallyOrphan = savedStatus === "orphaned" || savedStatus === "collision" || !!ann.deleted;
+
+      if (isDuplicate) {
+        State.annotations.push({
+          ...ann,
+          authorColor: annotationAuthorColor(ann),
+          range: null,
+          invalid: true,
+          invalidReason: "duplicate-threadId"
+        });
+        rangeOrphaned++;
+        continue;
+      }
+
+      if (hasImgAnchors) {
         const thread = {
           ...ann,
           authorColor: annotationAuthorColor(ann),
@@ -8750,185 +9755,146 @@ function loadMarkdownIntoEditor(name, content, annotationsData = null, options =
         const sync = resyncImageAnchors(thread, doc5);
         if (sync.resolved > 0 && thread.imageAnchors && thread.imageAnchors.length) {
           State.annotations.push(thread);
-          const pure = !thread.ranges || !thread.ranges.length;
-          if (!pure && thread.range && typeof thread.range.from === "number") {
-            const tr2 = State.editor.state.tr;
-            tr2.addMark(
-              thread.range.from,
-              thread.range.to,
-              State.editor.schema.marks.annotation.create(annotationMarkAttrs(thread))
-            );
-            tr2.setMeta("addToHistory", false);
-            tr2.setMeta("__activeMarkSync", true);
-            State.editor.view.dispatch(tr2);
-          }
+          rangeAttached++;
           continue;
         }
         State.annotations.push({
           ...thread,
           range: null,
           invalid: true,
-          invalidReason: "image-deleted"
+          invalidReason: "image-anchor-missing",
+          anchor: ann.anchor && typeof ann.anchor === "object"
+            ? { ...ann.anchor, status: "orphaned", confidence: 0 }
+            : { version: "1", status: "orphaned", confidence: 0, updatedAt: nowISO() }
         });
+        rangeOrphaned++;
         continue;
       }
-      if (isAnchorCollision) {
-        const thr = {
+
+      if (intentionallyOrphan) {
+        State.annotations.push({
           ...ann,
           authorColor: annotationAuthorColor(ann),
           range: null,
           invalid: true,
-          fuzzy: true,
-          deleted: false,
-          invalidReason: "collision"
-        };
-        thr.anchor = ann.anchor && typeof ann.anchor === "object"
-          ? { ...ann.anchor, status: "collision", confidence: 0 }
-          : {
-              version: "1",
-              quote: { exact: ann.text || "", prefix: ann.prefix || "", suffix: ann.suffix || "" },
-              status: "collision",
-              confidence: 0,
-              updatedAt: nowISO()
-            };
-        State.annotations.push(thr);
+          deleted: !!ann.deleted,
+          fuzzy: false,
+          invalidReason: ann.invalidReason || savedStatus || "orphaned"
+        });
+        rangeOrphaned++;
         continue;
       }
-      const resolvedTextRanges = !isDuplicate && !isIncomplete ? resolveSavedRanges() : null;
-      if (resolvedTextRanges) {
-        const first = resolvedTextRanges[0];
-        const last = resolvedTextRanges[resolvedTextRanges.length - 1];
-        const thread = {
+
+      // Canonical path: mdRange required
+      const mr = ann.mdRange;
+      const v = validateThreadMdRange(ann, mdSource);
+      if (!v.ok) {
+        State.annotations.push({
           ...ann,
           authorColor: annotationAuthorColor(ann),
-          ranges: resolvedTextRanges,
-          range: { from: first.from, to: last.to },
-          invalid: false,
+          range: null,
+          invalid: true,
           deleted: false,
           fuzzy: false,
-          invalidReason: void 0
-        };
-        const parts = resolvedTextRanges.map((r) => {
-          try { return doc5.textBetween(r.from, r.to, " "); } catch (_) { return ""; }
-        }).filter(Boolean);
-        if (parts.length) thread.text = parts.join(" ");
-        syncThreadAnchorEvidence(thread, doc5, thread.range, {
-          exact: thread.text,
-          status: "attached",
-          confidence: 1
+          invalidReason: v.reason || "missing-mdRange",
+          anchor: ann.anchor && typeof ann.anchor === "object"
+            ? { ...ann.anchor, status: "orphaned", confidence: 0 }
+            : {
+                version: "1",
+                quote: { exact: ann.text || "", prefix: ann.prefix || "", suffix: ann.suffix || "" },
+                status: "orphaned",
+                confidence: 0,
+                updatedAt: nowISO()
+              }
         });
-        State.annotations.push(thread);
-        const tr2 = State.editor.state.tr;
-        const mark = State.editor.schema.marks.annotation.create(annotationMarkAttrs(thread));
-        for (const r of resolvedTextRanges) tr2.addMark(r.from, r.to, mark);
-        tr2.setMeta("addToHistory", false);
-        tr2.setMeta("__activeMarkSync", true);
-        State.editor.view.dispatch(tr2);
+        rangeOrphaned++;
         continue;
       }
-      const positions = isDuplicate || isAnchorCollision || isIncomplete || hasTextRanges ? null : findAnnotationRange(doc5, ann);
-            if (positions && positions.ambiguous) {
-              const thr = {
-                ...ann,
-                authorColor: annotationAuthorColor(ann),
-                range: null,
-                invalid: true,
-                fuzzy: true,
-                deleted: false,
-                invalidReason: "ambiguous"
-              };
-              if (thr.anchor && typeof thr.anchor === "object") {
-                thr.anchor = { ...thr.anchor, status: "ambiguous" };
-              } else {
-                thr.anchor = {
-                  version: "1",
-                  quote: { exact: ann.text || "", prefix: ann.prefix || "", suffix: ann.suffix || "" },
-                  status: "ambiguous",
-                  confidence: 0,
-                  updatedAt: nowISO()
-                };
+
+      const pm = pmRangeFromMdRange(doc5, mdSource, mr, " ");
+      if (!pm || typeof pm.from !== "number" || pm.from >= pm.to) {
+        State.annotations.push({
+          ...ann,
+          authorColor: annotationAuthorColor(ann),
+          range: null,
+          invalid: true,
+          deleted: false,
+          fuzzy: false,
+          invalidReason: "mdRange-pm-unmapped",
+          anchor: ann.anchor && typeof ann.anchor === "object"
+            ? { ...ann.anchor, status: "orphaned", confidence: 0 }
+            : {
+                version: "1",
+                quote: { exact: ann.text || "", prefix: ann.prefix || "", suffix: ann.suffix || "" },
+                status: "orphaned",
+                confidence: 0,
+                updatedAt: nowISO()
               }
-              State.annotations.push(thr);
-            } else if (positions && typeof positions.from === "number" && typeof positions.to === "number") {
-              const thread = {
-                ...ann,
-                authorColor: annotationAuthorColor(ann),
-                range: { from: positions.from, to: positions.to },
-                fuzzy: !!positions.fuzzy
-                // P1-A: 降级匹配时标 fuzzy
-              };
-              try {
-                normalizeThreadQuoteToLive(thread, doc5, positions.from, positions.to);
-              } catch (_) {}
-              if (thread.anchor && typeof thread.anchor === "object") {
-                thread.anchor = {
-                  ...thread.anchor,
-                  status: positions.fuzzy ? "edited" : "attached",
-                  position: {
-                    from: positions.from,
-                    to: positions.to,
-                    startAssoc: 1,
-                    endAssoc: -1
-                  }
-                };
-              } else {
-                try {
-                  const plain = doc5.textBetween(0, doc5.content.size, String.fromCharCode(10), String.fromCharCode(10));
-                  const pf = plain.indexOf(ann.text || "");
-                  const ev = captureAnchorEvidence(plain, pf >= 0 ? pf : 0, pf >= 0 ? pf + String(ann.text || "").length : 0, { now: nowISO() });
-                  ev.position = { from: positions.from, to: positions.to, startAssoc: 1, endAssoc: -1 };
-                  ev.quote = { exact: ann.text || "", prefix: ann.prefix || "", suffix: ann.suffix || "" };
-                  ev.status = positions.fuzzy ? "edited" : "attached";
-                  thread.anchor = ev;
-                } catch (_) {}
-              }
-              if (hasImgAnchors) {
-                thread.imageAnchors = ann.imageAnchors.map((a) => ({ ...a }));
-                resyncImageAnchors(thread, doc5);
-              }
-              State.annotations.push(thread);
-              const skipMark = pureImageLabel || thread.imageAnchors && thread.imageAnchors.length === 1 && thread.range && thread.imageAnchors[0].from === thread.range.from && thread.imageAnchors[0].to === thread.range.to;
-              if (!skipMark) {
-                const tr2 = State.editor.state.tr;
-                tr2.addMark(
-                  positions.from,
-                  positions.to,
-                  State.editor.schema.marks.annotation.create(annotationMarkAttrs(thread))
-                );
-                tr2.setMeta("addToHistory", false);
-                tr2.setMeta("__activeMarkSync", true);
-                State.editor.view.dispatch(tr2);
-              }
-            } else {
-              let reason = isDuplicate ? "duplicate-threadId" : isIncomplete ? "incomplete-data" : "text-not-found";
-              if (reason === "text-not-found" && hasTextRanges) {
-                reason = "multi-range-not-found";
-              }
-              if (reason === "text-not-found" && ann.text && ann.text.includes("\n")) {
-                reason = "cross-block";
-              }
-              if (reason === "text-not-found" && pureImageLabel) {
-                reason = "image-anchor-missing";
-              }
-              State.annotations.push({
-                ...ann,
-                authorColor: annotationAuthorColor(ann),
-                range: null,
-                invalid: true,
-                invalidReason: reason,
-                anchor: ann.anchor && typeof ann.anchor === "object"
-                  ? { ...ann.anchor, status: "orphaned" }
-                  : {
-                    version: "1",
-                    quote: { exact: ann.text || "", prefix: ann.prefix || "", suffix: ann.suffix || "" },
-                    status: "orphaned",
-                    confidence: 0,
-                    updatedAt: nowISO()
-                  }
-              });
-            }
+        });
+        rangeOrphaned++;
+        continue;
+      }
+
+      const thread = {
+        ...ann,
+        authorColor: annotationAuthorColor(ann),
+        range: { from: pm.from, to: pm.to },
+        mdRange: { from: mr.from, to: mr.to },
+        invalid: false,
+        deleted: false,
+        fuzzy: false,
+        invalidReason: void 0
+      };
+      try {
+        normalizeThreadQuoteToLive(thread, doc5, pm.from, pm.to);
+      } catch (_) {}
+      if (thread.anchor && typeof thread.anchor === "object") {
+        thread.anchor = {
+          ...thread.anchor,
+          status: "attached",
+          confidence: 1,
+          position: { from: pm.from, to: pm.to, startAssoc: 1, endAssoc: -1 },
+          quote: {
+            exact: thread.text || ann.text || "",
+            prefix: thread.prefix || ann.prefix || "",
+            suffix: thread.suffix || ann.suffix || ""
+          }
+        };
+      } else {
+        try {
+          const plain = doc5.textBetween(0, doc5.content.size, String.fromCharCode(10), String.fromCharCode(10));
+          const ev = captureAnchorEvidence(plain, 0, 0, { now: nowISO() });
+          ev.position = { from: pm.from, to: pm.to, startAssoc: 1, endAssoc: -1 };
+          ev.quote = {
+            exact: thread.text || ann.text || "",
+            prefix: thread.prefix || "",
+            suffix: thread.suffix || ""
+          };
+          ev.status = "attached";
+          thread.anchor = ev;
+        } catch (_) {}
+      }
+      State.annotations.push(thread);
+      const tr2 = State.editor.state.tr;
+      tr2.addMark(
+        pm.from,
+        pm.to,
+        State.editor.schema.marks.annotation.create(annotationMarkAttrs(thread))
+      );
+      tr2.setMeta("addToHistory", false);
+      tr2.setMeta("__activeMarkSync", true);
+      State.editor.view.dispatch(tr2);
+      rangeAttached++;
     }
+    console.log(`[md-range] restore attached=${rangeAttached} orphaned=${rangeOrphaned}`);
+    if (rangeOrphaned > 0) {
+      try {
+        showToast(`\u26A0 ${rangeOrphaned} \u6761\u6279\u6CE8\u65E0\u6548 mdRange\uFF08\u5DF2 orphan\uFF0C\u4E0D\u518D quote \u641C\u7D22\uFF09`, 4500);
+      } catch (_) {}
+    }
+
   }
+
   // Collision audit: identical ranges are valid for distinct threadIds because
   // overlapping/nested comments are a supported editor feature. Ambiguity is
   // determined by resolver evidence, not by range equality after resolution.
@@ -8938,7 +9904,7 @@ function loadMarkdownIntoEditor(name, content, annotationsData = null, options =
       if (!t || !t.threadId) continue;
       if (seenThreadIds.has(t.threadId)) {
         t.invalid = true;
-        t.fuzzy = true;
+        t.fuzzy = false;
         t.invalidReason = "duplicate-threadId";
         if (t.anchor && typeof t.anchor === "object") t.anchor = { ...t.anchor, status: "ambiguous", confidence: 0 };
       }
@@ -8954,6 +9920,18 @@ function loadMarkdownIntoEditor(name, content, annotationsData = null, options =
       State.editor.view.dispatch(trSeed);
     }
   } catch (_) {}
+  // Range mode: after any restore path, stamp mdRange onto live threads from content.md
+  try {
+    if (typeof content === "string" && content && Array.isArray(State.annotations)) {
+      for (const th of State.annotations) {
+        if (!th || th.invalid || th.deleted) continue;
+        if (Array.isArray(th.imageAnchors) && th.imageAnchors.length && (!th.range)) continue;
+        stampThreadMdRange(th, content);
+      }
+    }
+  } catch (eStampLive) {
+    console.warn("[md-range] live stamp after load", eStampLive);
+  }
   if (preservedTabThreadId && State.annotations.some((a) => a && a.threadId === preservedTabThreadId)) {
     State.activeThreadId = preservedTabThreadId;
   }
@@ -9119,7 +10097,7 @@ function findAnnotationRange(doc5, annotation) {
   };
   const makeRange = (from2, to, fuzzy) => {
     const r = { from: posAtOffset(from2), to: posAtOffset(to) };
-    if (fuzzy) r.fuzzy = true;
+    if (fuzzy) r.fuzzy = false;
     return r;
   };
   // Exact quote resolution is owned by modules/annotation-anchor.js. Convert
@@ -9678,6 +10656,193 @@ async function ensureWritePermission(fileHandle) {
     return "unknown";
   }
 }
+
+/** Attach an FS handle to the current doc without reloading body. */
+async function attachWriteHandle(handle, { source = "picker", allowRename = false } = {}) {
+  if (!handle || !State.currentFile) return { ok: false, error: "no-doc" };
+  const want = String(State.currentFile.name || "").toLowerCase();
+  const got = String(handle.name || "").toLowerCase();
+  const mayRename = allowRename || source === "save-picker" || source === "save";
+  if (want && got && want !== got && !mayRename) {
+    return { ok: false, error: "name-mismatch", expected: State.currentFile.name, got: handle.name };
+  }
+  if (mayRename && handle.name) {
+    try { State.currentFile.name = handle.name; } catch (_) {}
+  }
+  try {
+    const perm = await ensureWritePermission(handle);
+    if (perm !== "granted") {
+      let q = "unknown";
+      try { q = await handle.queryPermission({ mode: "readwrite" }); } catch (_) {}
+      if (q !== "granted") return { ok: false, error: "permission-denied" };
+    }
+  } catch (e) {
+    return { ok: false, error: e && e.message ? e.message : "permission-denied" };
+  }
+  State.currentFile.handle = handle;
+  const nm = handle.name || State.currentFile.name || "";
+  State.saveMode = /\.mentor$/i.test(nm) ? "mentor-handle" : "handle";
+  try { await rememberOpenedFile(State.currentFile.name || nm, handle); } catch (_) {}
+  try { snapshotActiveTab(); } catch (_) {}
+  try { renderFilePaneCurrent(); } catch (_) {}
+  try { syncToolbarActionState(); } catch (_) {}
+  try {
+    if (typeof startExternalWatchForCurrentDocument === "function") {
+      await startExternalWatchForCurrentDocument();
+    }
+  } catch (_) {}
+  try {
+    setStatus("已启用写回", `${State.currentFile.name} · 自动保存将写盘`);
+  } catch (_) {}
+  try {
+    if (getAutoSaveEnabled() && State.currentFile.dirty) {
+      Promise.resolve().then(() => autosaveNow()).catch(() => {});
+    }
+  } catch (_) {}
+  return { ok: true, source };
+}
+
+/** Silent: reuse IDB handle only if permission already granted (no gesture). */
+async function tryAttachStoredWriteHandle(fileName = null) {
+  if (hasWriteHandle()) return { ok: true, already: true, source: "existing" };
+  if (!State.currentFile && !fileName) return { ok: false, error: "no-doc" };
+  const name = fileName || (State.currentFile && State.currentFile.name) || "";
+  if (!name) return { ok: false, error: "no-name" };
+  let handle = null;
+  try {
+    const docId = State.currentFile && State.currentFile.documentId;
+    if (docId) handle = await HandleStore.getFile(docId);
+    if (!handle) handle = await HandleStore.getFile(name);
+  } catch (e) {
+    console.warn("[tryAttachStoredWriteHandle]", e);
+  }
+  if (!handle) return { ok: false, error: "no-stored-handle" };
+  let perm = "prompt";
+  try { perm = await handle.queryPermission({ mode: "readwrite" }); } catch (_) { perm = "prompt"; }
+  if (perm !== "granted") return { ok: false, error: "need-permission", handle };
+  return attachWriteHandle(handle, { source: "idb" });
+}
+
+/**
+ * User-gesture path: IDB re-prompt or showOpenFilePicker for same basename.
+ * opts.thenSave → writeCurrentToDisk after attach.
+ */
+async function enableWriteBackForCurrent(opts = {}) {
+  const thenSave = !!opts.thenSave;
+  const preferSavePicker = opts.preferSavePicker !== false; // default: Save picker (any path)
+  if (hasDiskWriteTarget() && !hasWriteHandle()) {
+    if (thenSave) {
+      const result = await writeCurrentToDisk({ reason: "manual", showProgress: isMentorPackMode() });
+      return { ok: true, already: true, via: "server", saveResult: result };
+    }
+    return { ok: true, already: true, via: "server" };
+  }
+  if (hasWriteHandle()) {
+    if (thenSave) {
+      const result = await writeCurrentToDisk({ reason: "manual", showProgress: isMentorPackMode() });
+      return { ok: true, already: true, saveResult: result };
+    }
+    return { ok: true, already: true };
+  }
+  if (!State.currentFile) return { ok: false, error: "no-doc" };
+
+  // IDB handle re-prompt (user gesture)
+  let stored = null;
+  try {
+    const docId = State.currentFile.documentId;
+    if (docId) stored = await HandleStore.getFile(docId);
+    if (!stored) stored = await HandleStore.getFile(State.currentFile.name);
+  } catch (_) {}
+  if (stored) {
+    const att = await attachWriteHandle(stored, { source: "idb-prompt", allowRename: true });
+    if (att.ok) {
+      if (thenSave) {
+        const result = await writeCurrentToDisk({ reason: "manual", showProgress: isMentorPackMode() });
+        return { ...att, saveResult: result };
+      }
+      return att;
+    }
+  }
+
+  const canOpen = typeof window.showOpenFilePicker === "function";
+  const canSave = typeof window.showSaveFilePicker === "function";
+  if (!(FS_API && FS_API.supported) || (!canOpen && !canSave)) {
+    return { ok: false, error: "unsupported" };
+  }
+
+  const suggested = (() => {
+    const n = String(State.currentFile.name || "document.mentor");
+    if (/\.mentor$/i.test(n)) return n;
+    if (/^(untitled|未命名)/i.test(n) || !n.trim()) return "document.mentor";
+    return n.replace(/\.(md|markdown)$/i, "") + ".mentor";
+  })();
+  const isPlaceholder = /^(untitled|未命名)/i.test(String(State.currentFile.name || "")) || !State.currentFile.name;
+
+  try {
+    let handle = null;
+    let source = "picker";
+    // Prefer Save picker: works for new docs AND "pick any folder/file to own write".
+    // Open picker: pick existing same file when user prefers.
+    if (preferSavePicker && canSave) {
+      handle = await window.showSaveFilePicker({
+        suggestedName: suggested,
+        types: [{
+          description: "Mentor 单文件包 (.mentor)",
+          accept: { "application/zip": [".mentor"] }
+        }]
+      });
+      source = "save-picker";
+    } else if (canOpen) {
+      const handles = await window.showOpenFilePicker({
+        multiple: false,
+        types: [{
+          description: "Mentor 单文件包 (.mentor)",
+          accept: { "application/zip": [".mentor"] }
+        }],
+        excludeAcceptAllOption: false
+      });
+      handle = handles && handles[0] || null;
+      source = "open-picker";
+    } else if (canSave) {
+      handle = await window.showSaveFilePicker({
+        suggestedName: suggested,
+        types: [{
+          description: "Mentor 单文件包 (.mentor)",
+          accept: { "application/zip": [".mentor"] }
+        }]
+      });
+      source = "save-picker";
+    }
+    if (!handle) return { ok: false, cancelled: true };
+
+    // Existing named doc + open picker: soft-warn on basename mismatch but still allow (user OK to authorize any).
+    if (source === "open-picker" && !isPlaceholder) {
+      const want = String(State.currentFile.name || "").toLowerCase();
+      const got = String(handle.name || "").toLowerCase();
+      if (want && got && want !== got) {
+        try {
+          showToast(`已授权 ${handle.name}（原名 ${State.currentFile.name}）· 之后自动写此文件`, 3600);
+        } catch (_) {}
+      }
+    }
+
+    const att = await attachWriteHandle(handle, { source, allowRename: true });
+    if (!att.ok) return att;
+    if (thenSave) {
+      const result = await writeCurrentToDisk({ reason: "manual", showProgress: isMentorPackMode() });
+      if (result && result.ok) {
+        try { showToast("已写回磁盘 · 自动保存将继续写盘", 2600); } catch (_) {}
+      }
+      return { ...att, saveResult: result };
+    }
+    try { showToast("已授权写盘 · 自动保存开启后会写回", 2400); } catch (_) {}
+    return att;
+  } catch (e) {
+    if (e && e.name === "AbortError") return { ok: false, cancelled: true };
+    return { ok: false, error: e && e.message ? e.message : String(e) };
+  }
+}
+
 async function openFromHandle(fileHandle, sidecarHandle = null, options = {}) {
   const quiet = !!(options && options.quiet);
   await ensureWritePermission(fileHandle);
@@ -9717,7 +10882,9 @@ async function openFromHandle(fileHandle, sidecarHandle = null, options = {}) {
   }
 }
 async function openFromMentorHandle(fileHandle, options = {}) {
-  clearExternalWatchSource();
+  if (!(options && options.preserveExternalWatch)) {
+    clearExternalWatchSource();
+  }
   const quiet = !!(options && options.quiet);
   const preferDraft = !!(options && options.preferDraft);
   const forceDisk = !!(options && options.forceDisk);
@@ -9743,6 +10910,14 @@ async function openFromMentorHandle(fileHandle, options = {}) {
     archiveVerification: archive && archive.verification || null
   });
   if (!State.diskPathHint) State.diskPathHint = file.name;
+  // Best-effort: recover absolute path by basename (prior pending-open / register)
+  try {
+    void resolveMentorPathByName(file.name).then((p) => {
+      if (p) {
+        try { startSupervisionPolling(); } catch (_) {}
+      }
+    });
+  } catch (_) {}
   try { startSupervisionPolling(); } catch (_) {}
   const mediaCount = Object.keys(mediaFiles || {}).length;
   const blobUrlCount = (mdText.match(/!\[[^\]]*\]\(blob:[^)]+\)/g) || []).length;
@@ -11243,6 +12418,14 @@ async function openFromMentorFile(file, options = {}) {
     structuralHtml: archive && archive.documentHtml || null,
     archiveVerification: archive && archive.verification || null
   });
+  // Keep server path write-back target when opened via /open or pending-open
+  try {
+    const p = State.externalWatchPath || State.diskPathHint || "";
+    if (p && isAbsMentorPath(p) && State.currentFile) {
+      State.currentFile.path = p;
+      State.diskPathHint = p;
+    }
+  } catch (_) {}
   try { startSupervisionPolling(); } catch (_) {}
   const mediaCount = Object.keys(mediaFiles || {}).length;
   const blobUrlCount = (mdText.match(/!\[[^\]]*\]\(blob:[^)]+\)/g) || []).length;
@@ -11618,8 +12801,23 @@ async function runManualSave() {
         return result;
       }
       if (result.error === "权限被拒" || result.error === "need-permission") {
-        const choice = await openSaveDialog(buildSaveDialogModel({ kind: "permission-denied", fileName: State.currentFile.name }));
+        const canAuthorize = !!(FS_API && FS_API.supported && (typeof window.showSaveFilePicker === "function" || typeof window.showOpenFilePicker === "function"));
+        const choice = await openSaveDialog(buildSaveDialogModel({ kind: "permission-denied", fileName: State.currentFile.name, canAuthorize }));
         if (choice === "primary") {
+          if (canAuthorize) {
+            const up = await enableWriteBackForCurrent({ thenSave: true, preferSavePicker: true });
+            if (up.ok && up.saveResult) return up.saveResult;
+            if (up.ok) {
+              return await writeCurrentToDisk({ reason: "manual", showProgress: isMentorPackMode() });
+            }
+            if (up.cancelled) return { ok: false, cancelled: true };
+            showToast("授权未完成，可另存副本", 2800);
+            return { ok: false, error: up.error || "permission-denied" };
+          }
+          const snap = createSaveSnapshot();
+          return await downloadMentorSnapshot(snap, { markCleanOnSuccess: false });
+        }
+        if (choice === "secondary" && canAuthorize) {
           const snap = createSaveSnapshot();
           return await downloadMentorSnapshot(snap, { markCleanOnSuccess: false });
         }
@@ -11645,7 +12843,33 @@ async function runManualSave() {
       return result;
     }
 
-    // No write handle: explain + recommend .mentor
+    // No FSA handle: if mentor-server abs path known → write disk directly
+    {
+      const pathOnly = resolveActiveMentorAbsPath() || State.externalWatchPath || "";
+      if (pathOnly && isAbsMentorPath(pathOnly)) {
+        let result = await writeCurrentViaServer(pathOnly, { reason: "manual", showProgress: isMentorPackMode() });
+        if (result && result.ok) {
+          const copy = buildSaveResultCopy({ kind: "write-current", fileName: State.currentFile.name });
+          const warnings = result.warnings || [];
+          if (warnings.length) {
+            setStatus("已保存", "文件已保存，但本地恢复记录不完整");
+            showToast("已保存到磁盘 ✓ · 恢复点未完整写入", 3200);
+          } else {
+            setStatus(copy.status || "已保存", (copy.detail || "") + " · 路径写回");
+            showToast("已保存到磁盘 ✓ (.mentor)", 2400);
+          }
+          try { snapshotActiveTab(); } catch {}
+          return result;
+        }
+        if (result && result.error && /ANNOTATION_ANCHOR_AUDIT_FAILED|批注锚点/.test(String(result.error))) {
+          // fall through to dialog paths below via snapshot catch
+        } else if (result && result.error && result.error !== "no-token") {
+          showToast("路径写回失败: " + (result.message || result.error) + " — 将尝试其它方式", 3600);
+        }
+      }
+    }
+
+    // No FSA handle + no server path: authorize once (Chrome/Edge) or download.
         let snapshot;
         try {
           snapshot = createSaveSnapshot();
@@ -11668,21 +12892,46 @@ async function runManualSave() {
           showToast("保存失败: " + msg, 4000);
           return { ok: false, error: msg };
         }
+    const canAuthorize = !!(FS_API && FS_API.supported && (typeof window.showSaveFilePicker === "function" || typeof window.showOpenFilePicker === "function"));
+    // If AutoSave wants disk and user is saving — go straight to authorize (still one dialog for clarity).
     const model = buildSaveDialogModel({
       kind: "no-handle",
       fileName: snapshot.name,
       annotations: (snapshot.sidecar && snapshot.sidecar.annotations || []).length,
       references: (snapshot.references && snapshot.references.entries || []).length,
       media: Object.keys(snapshot.mediaFiles || {}).length,
+      canAuthorize,
     });
     const choice = await openSaveDialog(model);
     if (choice === "primary") {
+      if (canAuthorize) {
+        const up = await enableWriteBackForCurrent({ thenSave: true, preferSavePicker: true });
+        if (up.ok && up.saveResult) {
+          if (up.saveResult.ok) {
+            const copy = buildSaveResultCopy({ kind: "write-current", fileName: State.currentFile.name });
+            setStatus(copy.status, copy.detail);
+            showToast("已写回磁盘 ✓ · 自动保存可继续写盘", 2800);
+            try { snapshotActiveTab(); } catch {}
+            // Keep AutoSave ON after first authorize (user intent: always write disk).
+            try { setAutoSaveEnabled(true, { silent: true }); } catch (_) {}
+          }
+          return up.saveResult;
+        }
+        if (up.cancelled) return { ok: false, cancelled: true };
+        showToast("未完成授权，已改为下载副本", 2800);
+      }
       try {
         await AnnotationStore.put(snapshot.name, snapshot.sidecar);
       } catch {}
       return await downloadMentorSnapshot(snapshot, { markCleanOnSuccess: true });
     }
     if (choice === "secondary") {
+      if (canAuthorize) {
+        try {
+          await AnnotationStore.put(snapshot.name, snapshot.sidecar);
+        } catch {}
+        return await downloadMentorSnapshot(snapshot, { markCleanOnSuccess: false });
+      }
       return await exportMarkdownSnapshot(snapshot, { markCleanOnSuccess: false });
     }
     return { ok: false, cancelled: true };
@@ -13737,8 +14986,18 @@ try {
   const autoBtn = document.querySelector("#btn-autosave");
   if (autoBtn && !autoBtn.dataset.boundAutosave) {
     autoBtn.dataset.boundAutosave = "1";
-    autoBtn.addEventListener("click", () => {
-      setAutoSaveEnabled(!getAutoSaveEnabled());
+    autoBtn.addEventListener("click", async () => {
+      const turningOn = !getAutoSaveEnabled();
+      if (turningOn) {
+        // Any open path: if no disk target yet, authorize once (user gesture).
+        if (!hasDiskWriteTarget()) {
+          await ensureAutoSaveDiskTargetFromGesture();
+          return;
+        }
+        setAutoSaveEnabled(true);
+        return;
+      }
+      setAutoSaveEnabled(false);
     });
   }
   syncAutosaveToggleUi();
@@ -14781,6 +16040,7 @@ async function boot() {
   if (!launchOpened) {
     await tryReconnect();
   }
+  try { startHermesConnectionPolling(); } catch (_) {}
   try {
     initUpdateUi();
   } catch (e) {
@@ -14803,12 +16063,55 @@ async function restoreWorkspaceEntry(entry) {
     let permission = "prompt";
     try { permission = await handle.queryPermission({ mode: "readwrite" }); } catch (_) {}
     if (permission === "granted") {
+      const p = entry.path || "";
+      if (p && typeof isAbsMentorPath === "function" && isAbsMentorPath(p)) {
+        State.diskPathHint = p;
+        State.externalWatchPath = p;
+      }
       await openFromMentorHandle(handle, {
         quiet: true,
         preferDraft: true,
         documentId: entry.documentId
       });
+      if (p && isAbsMentorPath(p)) {
+        State.externalWatchPath = p;
+        State.diskPathHint = p;
+        if (State.currentFile) State.currentFile.path = p;
+        try {
+          const token = await ensureLocalSessionToken();
+          if (token) State.externalWatchToken = token;
+        } catch (_) {}
+        try { startExternalWatchForCurrentDocument && startExternalWatchForCurrentDocument(); } catch (_) {}
+      }
       return true;
+    }
+  }
+  // F5 path restore via mentor-server (Word-style) — real disk, not draft-only
+  const entryPath = entry.path || "";
+  if (entryPath && typeof isAbsMentorPath === "function" && isAbsMentorPath(entryPath)) {
+    try {
+      const token = await ensureLocalSessionToken();
+      if (token) {
+        const opened = await _openMentorAbsolutePath(entryPath, token);
+        if (opened) {
+          // Overlay newer draft body/ann if present (crash recovery) without losing path write-back
+          try {
+            const draft = await restoreDraftIfAny(entry.documentId, entry.name);
+            if (draft && State.currentFile && draft.updatedAt && State.currentFile.dirty) {
+              /* already preferDraft paths handled inside open when handle */
+            }
+          } catch (_) {}
+          if (State.currentFile) {
+            State.currentFile.documentId = entry.documentId || State.currentFile.documentId;
+            State.currentFile.path = entryPath;
+          }
+          State.externalWatchPath = entryPath;
+          State.diskPathHint = entryPath;
+          return true;
+        }
+      }
+    } catch (e) {
+      console.warn("[workspace] path restore failed", entryPath, e);
     }
   }
   const draft = await restoreDraftIfAny(entry.documentId, entry.name);
@@ -14824,6 +16127,16 @@ async function restoreWorkspaceEntry(entry) {
     preferDraft: false,
     forceDisk: true
   });
+  // Keep path hint if we still know it so later Ctrl+S/autosave can server-write
+  if (entryPath && isAbsMentorPath(entryPath)) {
+    State.externalWatchPath = entryPath;
+    State.diskPathHint = entryPath;
+    if (State.currentFile) State.currentFile.path = entryPath;
+    try {
+      const token = await ensureLocalSessionToken();
+      if (token) State.externalWatchToken = token;
+    } catch (_) {}
+  }
   return true;
 }
 async function restoreWorkspaceSession() {
@@ -14969,7 +16282,12 @@ async function _openMentorAbsolutePath(openPath, token) {
             }
           } catch (_) {}
           opened = true;
-          showToast("已打开并可写回 " + baseName, 2500);
+          showToast("已打开并可自动写盘 " + baseName, 2500);
+          try {
+            if (getAutoSaveEnabled() && State.currentFile && State.currentFile.dirty) {
+              Promise.resolve().then(() => autosaveNow()).catch(() => {});
+            }
+          } catch (_) {}
         }
       }
     } catch (e) {
@@ -15000,11 +16318,16 @@ async function _openMentorAbsolutePath(openPath, token) {
             const up = await tryAttachStoredWriteHandle(baseName);
             upgraded = !!(up && up.ok);
           } catch (_) {}
-          if (upgraded) {
-            showToast("已打开并可写回 " + baseName, 2500);
+          if (upgraded || hasDiskWriteTarget()) {
+            showToast("已打开并可自动写盘 " + baseName, 2500);
+            try {
+              if (getAutoSaveEnabled() && State.currentFile && State.currentFile.dirty) {
+                Promise.resolve().then(() => autosaveNow()).catch(() => {});
+              }
+            } catch (_) {}
           } else {
-            showToast("已打开 " + baseName + " · 保存时授权一次即可写回", 3200);
-            try { setStatus("已打开", baseName + " · 保存时点「授权写回」"); } catch (_) {}
+            showToast("已打开 " + baseName + " · 点「自动保存」或 Ctrl+S 授权一次即可写盘", 3600);
+            try { setStatus("已打开", baseName + " · 点自动保存/保存授权写盘"); } catch (_) {}
           }
         } else {
           console.warn("[launch-open] openFromMentorFile 不可用或 editor 未就绪");
@@ -15352,7 +16675,16 @@ window.__mdAnnotator = {
   shouldPromptUnload,
   scheduleAutosaveDebounce,
   hasWriteHandle,
+  attachWriteHandle,
+  tryAttachStoredWriteHandle,
+  enableWriteBackForCurrent,
+  ensureAutoSaveDiskTargetFromGesture,
   writeCurrentToHandle,
+  writeCurrentToDisk,
+  writeCurrentViaServer,
+  hasDiskWriteTarget,
+  fetchHermesConnection,
+  startHermesConnectionPolling,
   writeToHandle,
   finalizeOfficialCommit,
   classifySaveOutcome,
@@ -15628,6 +16960,10 @@ window.__mdAnnotator = {
   activateAndRevealThread: (tid, opts) => activateAndRevealThread(tid, opts),
   revealSupervisionThread: (tid) => revealSupervisionThread(tid),
   invokeAiForThread: (tid) => invokeAiForThread(tid),
+  runFixMentorFromUi: (opts) => runFixMentorFromUi(opts || {}),
+  resolveActiveMentorAbsPath,
+  getFixMentorJob: () => ({ ...(State.fixMentorJob || {}) }),
+  threadAnchorOk: (thread) => threadAnchorOk(thread),
   annotationWarningState: (thread) => annotationWarningState(thread),
   ensureCommentCardVisible: (tid) => ensureCommentCardVisible(tid),
   ensureFilterIncludesThread: (th) => ensureFilterIncludesThread(th),
