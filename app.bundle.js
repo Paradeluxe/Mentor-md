@@ -60049,8 +60049,7 @@ var State2 = {
     exitCode: null,
     startedAt: 0,
     pollTimer: null,
-    lastToastAt: 0,
-    staged: false
+    lastToastAt: 0
   },
   externalWatch: {
     mode: "off",
@@ -61693,7 +61692,6 @@ function patchCommentCard(ann) {
   if (!el) return false;
   const warn2 = annotationWarningState(ann);
   const warnKind = warn2 && warn2.kind;
-  el.classList.toggle("is-fuzzy", false);
   el.classList.toggle("is-deleted", warnKind === "orphaned" || !!ann.deleted);
   el.classList.toggle("is-ambiguous", warnKind === "ambiguous");
   el.classList.toggle("is-anchor-bad", warnKind === "collision" || warnKind === "image-missing");
@@ -61710,7 +61708,7 @@ function patchCommentCard(ann) {
     const tx = String(ann.text || "");
     qt.textContent = tx.slice(0, 200) + (tx.length > 200 ? "\u2026" : "");
   }
-  let banner = el.querySelector(".deleted-banner, .fuzzy-banner, .invalid-banner, .ambiguous-banner");
+  let banner = el.querySelector(".deleted-banner, .invalid-banner, .ambiguous-banner");
   const safeThreadId = escapeHtml(ann.threadId);
   const actions = ' <button class="link-btn" data-act="reattach" data-thread="' + safeThreadId + '">\u91CD\u65B0\u9009\u62E9\u6B63\u6587</button> \xB7 <button class="link-btn link-danger" data-act="delete-orphan" data-thread="' + safeThreadId + '">\u5220\u9664</button>';
   let wantClass = "";
@@ -62077,7 +62075,6 @@ function exportAnchorDiagnosis() {
     prefix: t.prefix,
     suffix: t.suffix,
     range: t.range,
-    fuzzy: !!t.fuzzy,
     invalid: !!t.invalid,
     deleted: !!t.deleted,
     invalidReason: t.invalidReason,
@@ -63155,7 +63152,7 @@ function shouldPromptUnload() {
 }
 function onBeforeUnload(e) {
   try {
-    _closeDocChannelFull();
+    closeLiveSync();
   } catch (_) {
   }
   if (!shouldPromptUnload()) return;
@@ -63934,7 +63931,6 @@ function applyThreadType(threadId, type) {
   renderCommentList();
   focusThreadInput(threadId);
 }
-var AI_MENTION_PREFIX = MENTION_TYPES.ai.prefix;
 function bodyHasAiMarker(body) {
   return getMarkerType(body) === "ai";
 }
@@ -65342,7 +65338,7 @@ async function resolveMentorPathByName(name) {
   }
   return "";
 }
-async function applyFixMentorResultFromPath(absPath, { staged = false } = {}) {
+async function applyFixMentorResultFromPath(absPath) {
   if (!absPath) return { ok: false, error: "no-path" };
   const token = State2.externalWatchToken || "" || await ensureLocalSessionToken();
   if (!token) return { ok: false, error: "no-token" };
@@ -65368,27 +65364,21 @@ async function applyFixMentorResultFromPath(absPath, { staged = false } = {}) {
       structuralHtml: archive && archive.documentHtml || null,
       archiveVerification: archive && archive.verification || null
     });
-    if (!staged && isAbsMentorPath(absPath)) {
+    if (isAbsMentorPath(absPath)) {
       State2.externalWatchPath = absPath;
       State2.diskPathHint = absPath;
       if (State2.currentFile) State2.currentFile.path = absPath;
     }
-    let wrote = false;
     try {
       if (typeof writeCurrentToDisk === "function" && hasDiskWriteTarget()) {
         const wr = await writeCurrentToDisk({ reason: "manual", showProgress: false, forceOverwriteExternal: true });
-        wrote = !!(wr && wr.ok);
-        if (wrote) showToast("AI \u7ED3\u679C\u5DF2\u5199\u56DE\u78C1\u76D8", 2600);
+        if (wr && wr.ok) showToast("AI \u7ED3\u679C\u5DF2\u5199\u56DE\u78C1\u76D8", 2600);
       } else if (keepHandle && typeof writeCurrentToHandle === "function") {
         const wr = await writeCurrentToHandle({ reason: "manual", showProgress: false, forceOverwriteExternal: true });
-        wrote = !!(wr && wr.ok);
-        if (wrote) showToast("AI \u7ED3\u679C\u5DF2\u5199\u56DE\u539F\u6587\u4EF6", 2600);
+        if (wr && wr.ok) showToast("AI \u7ED3\u679C\u5DF2\u5199\u56DE\u539F\u6587\u4EF6", 2600);
       }
     } catch (e) {
       console.warn("[fix-mentor] write-back failed", e);
-    }
-    if (!wrote && staged) {
-      showToast("AI \u5DF2\u5904\u7406\u3002\u82E5\u672A\u5199\u76D8\uFF0C\u8BF7 Ctrl+S \u4FDD\u5B58", 3600);
     }
     try {
       renderCommentList();
@@ -65704,7 +65694,6 @@ async function pollFixMentorJobOnce() {
       message: data.message || "",
       error: data.error || "",
       exitCode: data.exitCode,
-      staged: data.staged != null ? !!data.staged : !!job.staged,
       phase: data.phase || job.phase || "",
       phaseLabel: data.phaseLabel || job.phaseLabel || "",
       step: data.step != null ? data.step : job.step,
@@ -65719,17 +65708,22 @@ async function pollFixMentorJobOnce() {
     if (st === "done" || st === "error" || st === "cancelled") {
       stopFixMentorJobPolling();
       if (st === "done") {
-        const staged = !!(data.staged || job.staged);
         const resultPath = data.path || job.path || "";
-        showToast(staged ? "AI \u5904\u7406\u5B8C\u6210 \xB7 \u6B63\u5728\u5199\u56DE\u2026" : "AI \u5904\u7406\u5B8C\u6210", 2800);
+        showToast("AI \u5904\u7406\u5B8C\u6210", 2800);
         try {
           startSupervisionPolling();
         } catch (_) {
         }
         try {
-          if (staged && resultPath) {
-            void applyFixMentorResultFromPath(resultPath, { staged: true }).then((r) => {
+          if (resultPath) {
+            void applyFixMentorResultFromPath(resultPath).then((r) => {
               if (!r || !r.ok) {
+                if (typeof scheduleExternalRefresh === "function") {
+                  scheduleExternalRefresh({
+                    generation: State2.externalWatch && State2.externalWatch.generation,
+                    hint: { cause: "fix-mentor-done" }
+                  });
+                }
                 showToast("\u7ED3\u679C\u5199\u56DE\u5931\u8D25\uFF0C\u8BF7\u624B\u52A8\u91CD\u5F00\u78C1\u76D8\u6587\u4EF6", 4e3);
               }
               try {
@@ -65737,30 +65731,11 @@ async function pollFixMentorJobOnce() {
               } catch (_) {
               }
             });
-          } else {
-            if (typeof scheduleExternalRefresh === "function") {
-              scheduleExternalRefresh({
-                generation: State2.externalWatch && State2.externalWatch.generation,
-                hint: { cause: "fix-mentor-done" }
-              });
-            }
-            if (typeof refreshFromExternalDisk === "function") {
-              const gen = State2.externalWatch && State2.externalWatch.generation;
-              setTimeout(() => {
-                void refreshFromExternalDisk({ generation: gen }).catch(() => {
-                });
-              }, 400);
-            }
-            setTimeout(() => {
-              try {
-                renderCommentList();
-              } catch (_) {
-              }
-              try {
-                syncFixMentorJobUi();
-              } catch (_) {
-              }
-            }, 1200);
+          } else if (typeof scheduleExternalRefresh === "function") {
+            scheduleExternalRefresh({
+              generation: State2.externalWatch && State2.externalWatch.generation,
+              hint: { cause: "fix-mentor-done" }
+            });
           }
         } catch (_) {
         }
@@ -65908,7 +65883,6 @@ async function runFixMentorFromUi(opts = {}) {
     error: "",
     exitCode: null,
     startedAt: Date.now(),
-    staged: false,
     writeBackPath: saved.writeBackPath || saved.path
   });
   showToast("\u63D0\u4EA4 AI \u4EFB\u52A1\u2026", 1600);
@@ -65956,8 +65930,7 @@ async function runFixMentorFromUi(opts = {}) {
       path: data.path || saved.path || "",
       threadId: data.threadId || threadId,
       message: data.message || "\u5DF2\u6709\u4EFB\u52A1\u5728\u8FD0\u884C",
-      error: "",
-      staged: false
+      error: ""
     });
     State2.fixMentorJob.startedAtClient = Date.now();
     startFixMentorJobPolling();
@@ -65979,8 +65952,7 @@ async function runFixMentorFromUi(opts = {}) {
     scope: data.scope || scope,
     message: data.message || "Hermes \u5DF2\u542F\u52A8",
     error: "",
-    startedAt: Date.now(),
-    staged: false
+    startedAt: Date.now()
   });
   State2.fixMentorJob.startedAtClient = Date.now();
   startFixMentorJobPolling();
@@ -66692,7 +66664,7 @@ function scrollToThread(threadId) {
         if (f < tt2) {
           const slice2 = editor2.state.doc.textBetween(f, tt2, " ");
           if (slice2 && thread.text && (slice2 === thread.text || slice2.includes(thread.text) || thread.text.includes(slice2))) {
-            recovered = { from: f, to: tt2, fuzzy: slice2 !== thread.text };
+            recovered = { from: f, to: tt2 };
           }
         }
       } catch (_) {
@@ -70987,9 +70959,6 @@ function _getDocPath() {
 }
 function _openDocChannel() {
   openLiveSyncForCurrentDocument();
-}
-function _closeDocChannelFull() {
-  closeLiveSync();
 }
 window.addEventListener("beforeunload", onBeforeUnload);
 window.addEventListener("pagehide", () => {
@@ -75940,7 +75909,7 @@ window.__mdAnnotator__diagTab = () => ({
   live: getLiveSyncState()
 });
 window.__mdAnnotator__openDocChannel = _openDocChannel;
-window.__mdAnnotator__closeDocChannel = _closeDocChannelFull;
+window.__mdAnnotator__closeDocChannel = closeLiveSync;
 window.__mdAnnotator__getDocPath = _getDocPath;
 /*! Bundled license information:
 

@@ -212,6 +212,7 @@ const t = async (name, fn) => {
   });
 
   await t('projectLegacyFlags from status', async () => {
+    // Product: fuzzy UX removed — projectLegacyFlags never sets fuzzy:true.
     assert.deepStrictEqual(mod.projectLegacyFlags('attached'), {
       fuzzy: false, invalid: false, deleted: false, invalidReason: undefined
     });
@@ -219,10 +220,10 @@ const t = async (name, fn) => {
       fuzzy: false, invalid: true, deleted: true, invalidReason: 'orphaned'
     });
     assert.deepStrictEqual(mod.projectLegacyFlags('ambiguous'), {
-      fuzzy: true, invalid: true, deleted: false, invalidReason: 'ambiguous'
+      fuzzy: false, invalid: true, deleted: false, invalidReason: 'ambiguous'
     });
     assert.deepStrictEqual(mod.projectLegacyFlags('edited'), {
-      fuzzy: true, invalid: false, deleted: false, invalidReason: 'text-edited'
+      fuzzy: false, invalid: false, deleted: false, invalidReason: undefined
     });
   });
 
