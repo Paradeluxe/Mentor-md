@@ -1148,37 +1148,9 @@ body.comment-pane-collapsed #expand-comment-pane-btn {
   border-top-left-radius: var(--rounded-md);
   border-bottom-left-radius: var(--rounded-md);
 }
-.pane-toggle-bar {
-  display: none;
-  gap: 6px;
-  padding: 4px 8px;
-  align-items: center;
-  background: var(--panel-2, #f7f7f4);
-  border-bottom: 1px solid var(--border-warm, rgba(38,37,30,0.09));
-  flex-shrink: 0;
-}
-.pane-toggle-chip {
-  appearance: none;
-  border: 1px solid var(--border-warm-medium, rgba(38,37,30,0.16));
-  background: var(--panel, #fff);
-  color: var(--text-2, rgba(38,37,30,0.62));
-  border-radius: 999px;
-  padding: 4px 10px;
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  touch-action: manipulation;
-}
-.pane-toggle-chip.is-active {
-  color: var(--text, #26251e);
-  border-color: var(--accent, #f54e00);
-  background: var(--accent-soft, rgba(245, 78, 0, 0.08));
-}
-/* 窄屏 / 触控：显示折叠芯片，侧栏可收起 */
+
+/* 窄屏 / 触控：侧栏可收起 */
 @media (max-width: 900px) {
-  .pane-toggle-bar {
-    display: flex;
-  }
   #file-pane,
   #comment-pane {
     position: relative;
@@ -1563,7 +1535,6 @@ body.comment-pane-collapsed #expand-comment-pane-btn {
   /* 统一AI/人改/其他feature badge颜色和交互 */
 }
 .save-mode-badge .icon { width: 10px; height: 10px; color: var(--success); }
-.save-mode-badge .badge-download .icon { color: var(--warning); }
 .save-mode-badge .badge-check .icon { color: var(--success); }
 
 /* ============ Editor pane ============ */
@@ -2925,12 +2896,6 @@ body.refs-pane-collapsed #expand-refs-pane-btn {
 .comment-thread.is-resolved .comment-quote-text {
   color: var(--text-2);
 }
-.comment-thread.is-fuzzy {
-  border-color: rgba(217, 119, 6, 0.35);
-  box-shadow:
-    0 0 0 1px rgba(217, 119, 6, 0.12),
-    0 2px 8px rgba(217, 119, 6, 0.06);
-}
 
 /* 类型只定义一套色阶；active 调整强度，不切换为其他功能色。 */
 .comment-thread.is-ai {
@@ -3034,18 +2999,6 @@ body.refs-pane-collapsed #expand-refs-pane-btn {
   color: var(--danger);
 }
 
-.comment-thread .fuzzy-banner {
-  padding: 7px 14px;
-  font-size: var(--font-xs, 11px);
-  font-weight: 500;
-  letter-spacing: 0.01em;
-  border-bottom: 1px solid rgba(217, 119, 6, 0.12);
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  background: rgba(217, 119, 6, 0.07);
-  color: var(--warning);
-}
 .comment-thread.is-deleted {
   border-color: rgba(38, 37, 30, 0.14);
   opacity: 0.88;
@@ -3285,21 +3238,12 @@ body.refs-pane-collapsed #expand-refs-pane-btn {
   -webkit-mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M3 6h18'/><path d='M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6'/><path d='M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2'/><path d='M10 11v6'/><path d='M14 11v6'/></svg>");
   mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M3 6h18'/><path d='M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6'/><path d='M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2'/><path d='M10 11v6'/><path d='M14 11v6'/></svg>");
 }
-/* v1.32: 删除 .comment-collapse-btn CSS 块 (SVG mask + ::before/::after)
-   +-折叠按钮 DOM/handler 已删 (用户表态'不必要'), CSS 一并清理不再用.
-   v1.30 纪律: 不要保留 dead CSS, 跟 dead element 一齐删.
-*/
-/* (v1.31 折叠按钮 CSS 块删除) */
+/* v1.32+: collapse/resolved-badge DOM removed — no dead CSS retained */
 
 /* P-card: 解决后卡片折叠 (Word 风格) — 只显示 header, body-wrap 隐藏 */
 .comment-thread.is-collapsed .comment-body-wrap {
   display: none;
 }
-/* v1.32: 折叠态已不显示 '点击展开' hover 文字 (commit 6d606f3)
-   用户已无需 hover tooltip: quote 区域点击折叠/展开 (v1.17), 已够用 */
-
-/* 已解决状态由绿色 mark、卡片和重新打开按钮共同表达，不再显示大块徽章。 */
-.comment-resolved-badge { display: none !important; }
 
 /* 主批注体 — Notion/Linear: 宽松留白, avatar 左对齐 */
 .comment-thread {
@@ -3644,33 +3588,6 @@ body.refs-pane-collapsed #expand-refs-pane-btn {
   border-color: color-mix(in srgb, var(--danger, #c44) 50%, var(--border-warm));
   background: color-mix(in srgb, var(--danger, #c44) 10%, var(--panel, #fff));
   color: var(--danger, #b91c1c);
-}
-
-/* Reply-toggle details — "↳ 回复" expander */
-.comment-thread .reply-toggle {
-  margin: 2px 12px 6px 12px;
-  font-size: var(--font-xs, 11px);
-  color: var(--text-3);
-}
-.comment-thread .reply-toggle summary {
-  cursor: pointer;
-  padding: 3px 0;
-  list-style: none;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  user-select: none;
-  font-size: var(--font-xs, 11px);
-  color: var(--text-3);
-  font-weight: 500;
-  letter-spacing: 0.01px;
-  transition: color 0.12s;
-}
-.comment-thread .reply-toggle summary::-webkit-details-marker { display: none; }
-.comment-thread .reply-toggle summary:hover { color: var(--thread-accent); }
-.comment-thread .reply-toggle summary::before {
-  content: "↳";
-  font-size: 13px;
 }
 
 /* Reply form — shadow only while composing (focus within) */
@@ -5446,8 +5363,7 @@ body.supervision-active[data-supervision-lock="document"] .editor-scroll::after 
 @media (prefers-reduced-motion: reduce) {
   .ProseMirror .supervision-pet.is-working .supervision-pet-face,
   .ProseMirror .supervision-pet-body,
-  #statusbar .supervision-signal[data-phase="working"],
-  #statusbar .supervision-banner .supervision-banner-dot {
+  #statusbar .supervision-signal[data-phase="working"] {
     animation: none !important;
   }
   .ProseMirror .supervision-pet.is-working .supervision-pet-face,

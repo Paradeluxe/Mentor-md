@@ -2460,7 +2460,6 @@ function patchCommentCard(ann) {
   if (!el) return false;
   const warn = annotationWarningState(ann);
   const warnKind = warn && warn.kind;
-  el.classList.toggle("is-fuzzy", false);
   el.classList.toggle("is-deleted", warnKind === "orphaned" || !!ann.deleted);
   el.classList.toggle("is-ambiguous", warnKind === "ambiguous");
   el.classList.toggle("is-anchor-bad", warnKind === "collision" || warnKind === "image-missing");
@@ -2477,7 +2476,7 @@ function patchCommentCard(ann) {
     const tx = String(ann.text || "");
     qt.textContent = tx.slice(0, 200) + (tx.length > 200 ? "\u2026" : "");
   }
-  let banner = el.querySelector(".deleted-banner, .fuzzy-banner, .invalid-banner, .ambiguous-banner");
+  let banner = el.querySelector(".deleted-banner, .invalid-banner, .ambiguous-banner");
   const safeThreadId = escapeHtml(ann.threadId);
   const actions = ' <button class="link-btn" data-act="reattach" data-thread="' + safeThreadId + '">\u91CD\u65B0\u9009\u62E9\u6B63\u6587</button> \xB7 <button class="link-btn link-danger" data-act="delete-orphan" data-thread="' + safeThreadId + '">\u5220\u9664</button>';
   let wantClass = "";
@@ -2863,7 +2862,6 @@ function exportAnchorDiagnosis() {
     prefix: t.prefix,
     suffix: t.suffix,
     range: t.range,
-    fuzzy: !!t.fuzzy,
     invalid: !!t.invalid,
     deleted: !!t.deleted,
     invalidReason: t.invalidReason,
@@ -7559,7 +7557,7 @@ function scrollToThread(threadId) {
         if (f < tt) {
           const slice = editor2.state.doc.textBetween(f, tt, " ");
           if (slice && thread.text && (slice === thread.text || slice.includes(thread.text) || thread.text.includes(slice))) {
-            recovered = { from: f, to: tt, fuzzy: slice !== thread.text };
+            recovered = { from: f, to: tt };
           }
         }
       } catch (_) {}

@@ -44,7 +44,6 @@ FIX_MENTOR_JOBS = {}
 FIX_MENTOR_LOCK = threading.Lock()
 FIX_MENTOR_LOG_MAX = 120
 FIX_MENTOR_JOB_TTL_SEC = 3600
-FIX_MENTOR_STAGE_DIR = os.path.join(HTML_DIR, 'tmp', 'fix-mentor-stage')
 HERMES_WORKER_PORT = int(os.environ.get('MENTOR_HERMES_WORKER_PORT') or '8788')
 HERMES_WORKER_HOST = '127.0.0.1'
 HERMES_WORKER_URL = f'http://{HERMES_WORKER_HOST}:{HERMES_WORKER_PORT}'
@@ -529,7 +528,7 @@ def public_fix_mentor_job(job):
         'elapsedLabel': prog.get('elapsedLabel') or '',
         'lastLog': prog.get('lastLog') or '',
         'stale': bool(prog.get('stale')),
-        'via': job.get('via') or ('warm-worker' if job.get('workerJobId') else 'cold-spawn'),
+        'via': job.get('via') or 'warm-worker',
     }
 
 
@@ -658,11 +657,6 @@ def write_mentor_package_to_path(path, raw_bytes):
         return None, 'write-failed:%s' % (str(exc)[:180],)
 
 
-def ensure_fix_mentor_stage_dir():
-    os.makedirs(FIX_MENTOR_STAGE_DIR, exist_ok=True)
-    return FIX_MENTOR_STAGE_DIR
-
-
 def resolve_mentor_path_by_name(name):
     """Resolve basename -> absolute path via supervision index / allow list."""
     if not name:
@@ -689,43 +683,7 @@ def resolve_mentor_path_by_name(name):
             uniq.append(m)
     if len(uniq) == 1:
         return uniq[0]
-    try:
-        ensure_fix_mentor_stage_dir()
-        cands = []
-        for root, _dirs, files in os.walk(FIX_MENTOR_STAGE_DIR):
-            for fn in files:
-                if fn.lower() == key:
-                    fp = os.path.join(root, fn)
-                    if os.path.isfile(fp):
-                        cands.append(fp)
-        if cands:
-            cands.sort(key=lambda p: os.path.getmtime(p), reverse=True)
-            return os.path.abspath(cands[0])
-    except Exception:
-        pass
     return None
-
-
-def write_staged_mentor_package(name, raw_bytes):
-    """Write uploaded .mentor bytes to a unique stage path. Returns abs path."""
-    if not raw_bytes:
-        raise ValueError('empty-package')
-    base = os.path.basename(str(name or 'document.mentor')).strip() or 'document.mentor'
-    if not base.lower().endswith('.mentor'):
-        base = base + '.mentor'
-    base = ''.join(ch if ch.isalnum() or ch in '._- ()[]' else '_' for ch in base)
-    ensure_fix_mentor_stage_dir()
-    job_dir = os.path.join(FIX_MENTOR_STAGE_DIR, secrets.token_hex(8))
-    os.makedirs(job_dir, exist_ok=True)
-    out = os.path.abspath(os.path.join(job_dir, base))
-    with open(out, 'wb') as f:
-        f.write(raw_bytes)
-    ALLOWED_OPEN_PATHS.add(out)
-    try:
-        register_supervision_path(out)
-    except Exception:
-        pass
-    return out
 
 
 def _build_fix_mentor_command(abspath, thread_id='', scope='all'):
