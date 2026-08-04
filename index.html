@@ -7,7 +7,7 @@
 <meta name="build" content="v1.48.0 cache-bust v=250" />
 <!-- v1.43.37 offline: local fonts + KaTeX (no CDN) -->
 <link rel="stylesheet" href="vendor/fonts/local-fonts.css?v=250" />
-<link rel="stylesheet" href="styles.css?v=252" />
+<link rel="stylesheet" href="styles.css?v=253" />
 <link rel="stylesheet" href="vendor/katex/katex.min.css?v=250" />
 <!-- 字体：系统无衬线 + 等宽（侧栏时间戳、文件名） -->
 <style>
@@ -276,7 +276,7 @@
           <span id="supervision-signal" class="supervision-signal" data-phase="off" data-health="ok" title="监管未开启" aria-hidden="true"></span>
           <span id="supervision-banner-text"></span>
         </div>
-                <div id="hermes-conn-status" class="hermes-conn-status" role="status" aria-live="polite" data-state="unknown" data-ready="0" title="Hermes 连接">
+                <div id="hermes-conn-status" class="hermes-conn-status" role="status" aria-live="polite" data-state="unknown" data-ready="0" title="Hermes 连接 · 点击打开 Doctor" data-act="open-doctor">
           <span class="hermes-conn-dot" aria-hidden="true"></span>
           <span id="hermes-conn-status-text" class="hermes-conn-status-text">Hermes …</span>
         </div>
@@ -304,6 +304,30 @@
   </div>
 </div>
 
+
+
+<!-- Mentor Doctor — in-app diagnostics / repair -->
+<div id="doctor-modal" class="modal doctor-modal hidden" role="dialog" aria-modal="true" aria-labelledby="doctor-modal-title">
+  <div class="modal-content doctor-modal-content">
+    <div class="doctor-modal-head">
+      <h3 id="doctor-modal-title">Mentor Doctor</h3>
+      <button type="button" class="doctor-close" data-act="close-doctor" aria-label="关闭">×</button>
+    </div>
+    <p class="doctor-lead" id="doctor-lead">诊断 Mentor 服务、Hermes warm worker 与 AI 前置条件。可一键预热/重启 worker。</p>
+    <div id="doctor-overall" class="doctor-overall" data-overall="unknown">检测中…</div>
+    <ul id="doctor-checks" class="doctor-checks" aria-live="polite"></ul>
+    <div class="doctor-actions">
+      <button type="button" class="modal-btn-secondary" data-act="doctor-refresh">重新检测</button>
+      <button type="button" class="modal-btn-primary" data-act="doctor-warm">启动 / 预热 Hermes</button>
+      <button type="button" class="modal-btn-secondary" data-act="doctor-restart-worker">重启 worker</button>
+    </div>
+    <pre id="doctor-fix-cmd" class="doctor-fix-cmd hidden" hidden></pre>
+    <div class="doctor-foot">
+      <button type="button" class="modal-btn-secondary" data-act="doctor-copy-cmd" id="doctor-copy-cmd-btn" hidden>复制修复命令</button>
+      <button type="button" class="modal-btn-primary" data-act="close-doctor">完成</button>
+    </div>
+  </div>
+</div>
 
 <!-- 引用条目编辑 / 单条导入确认 -->
 <div id="reference-editor-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="reference-editor-title">
@@ -384,7 +408,7 @@
 
 <!-- v1.43.37 offline: bundled app (esbuild) + local icons; no esm.sh -->
 <script src="icons.js?v=250"></script>
-<script type="module" src="app.bundle.js?v=252"></script>
+<script type="module" src="app.bundle.js?v=253"></script>
 <!-- 帮助 popover (浮在 body 顶层, 位置由 JS 动态计算) -->
 <div id="help-popover" class="help-popover hidden" role="dialog" aria-modal="false" aria-labelledby="help-popover-title">
   <div class="help-popover-arrow"></div>
@@ -467,6 +491,13 @@
         </div>
         <p class="settings-current" id="settings-version-max-current"></p>
       </div>
+  <div class="settings-section">
+    <label class="settings-label">诊断</label>
+    <p class="settings-hint">Mentor Doctor：检测假 http.server、Hermes 未就绪、worker 挂掉等问题，并可在应用内预热/重启。</p>
+    <div class="settings-options">
+      <button type="button" class="settings-opt" data-act="open-doctor">打开 Doctor</button>
+    </div>
+  </div>
   <div class="settings-section settings-section-version">
     <label class="settings-label">版本</label>
     <p class="settings-hint" id="settings-version-current">当前 —</p>

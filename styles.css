@@ -5718,6 +5718,11 @@ body.supervision-active[data-supervision-lock="document"] .editor-scroll::after 
   font-size: 12px;
   max-width: min(28vw, 220px);
   margin-right: 6px;
+  cursor: pointer;
+}
+#statusbar .hermes-conn-status:hover {
+  border-color: color-mix(in srgb, var(--danger, #cf2d56) 35%, transparent);
+  color: var(--danger, #cf2d56);
 }
 #statusbar .hermes-conn-status.hidden { display: none !important; }
 #statusbar .hermes-conn-dot {
@@ -5754,3 +5759,126 @@ body.supervision-active[data-supervision-lock="document"] .editor-scroll::after 
 #statusbar .hermes-conn-status-text {
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
+
+/* Mentor Doctor modal */
+.doctor-modal .doctor-modal-content {
+  width: min(520px, 94vw);
+  max-height: min(86vh, 720px);
+  overflow: auto;
+  text-align: left;
+}
+.doctor-modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 6px;
+}
+.doctor-modal-head h3 { margin: 0; font-size: 18px; }
+.doctor-close {
+  border: none;
+  background: transparent;
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+  color: var(--text-2);
+  padding: 2px 8px;
+  border-radius: 6px;
+}
+.doctor-close:hover { color: var(--danger); background: var(--panel-2); }
+.doctor-lead {
+  margin: 0 0 12px;
+  font-size: 13px;
+  color: var(--text-2);
+  line-height: 1.45;
+}
+.doctor-overall {
+  padding: 10px 12px;
+  border-radius: 10px;
+  font-size: 13.5px;
+  font-weight: 600;
+  margin-bottom: 12px;
+  border: 1px solid var(--border-warm);
+  background: var(--panel-2);
+}
+.doctor-overall[data-overall="ok"] {
+  border-color: color-mix(in srgb, var(--success) 35%, transparent);
+  background: color-mix(in srgb, var(--success) 12%, var(--panel));
+  color: var(--success);
+}
+.doctor-overall[data-overall="warn"] {
+  border-color: color-mix(in srgb, var(--warning, #b45309) 40%, transparent);
+  background: color-mix(in srgb, var(--warning, #b45309) 12%, var(--panel));
+  color: var(--warning, #b45309);
+}
+.doctor-overall[data-overall="error"] {
+  border-color: color-mix(in srgb, var(--danger) 40%, transparent);
+  background: color-mix(in srgb, var(--danger) 10%, var(--panel));
+  color: var(--danger);
+}
+.doctor-checks {
+  list-style: none;
+  margin: 0 0 14px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.doctor-check {
+  border: 1px solid var(--border-warm);
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: var(--panel);
+}
+.doctor-check[data-severity="ok"] { border-color: color-mix(in srgb, var(--success) 28%, var(--border-warm)); }
+.doctor-check[data-severity="warn"] { border-color: color-mix(in srgb, var(--warning, #b45309) 35%, var(--border-warm)); }
+.doctor-check[data-severity="error"] { border-color: color-mix(in srgb, var(--danger) 40%, var(--border-warm)); }
+.doctor-check-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+.doctor-check-badge {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--panel-2);
+  color: var(--text-2);
+}
+.doctor-check[data-severity="ok"] .doctor-check-badge { background: color-mix(in srgb, var(--success) 16%, transparent); color: var(--success); }
+.doctor-check[data-severity="warn"] .doctor-check-badge { background: color-mix(in srgb, var(--warning, #b45309) 16%, transparent); color: var(--warning, #b45309); }
+.doctor-check[data-severity="error"] .doctor-check-badge { background: color-mix(in srgb, var(--danger) 14%, transparent); color: var(--danger); }
+.doctor-check-detail {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--text-2);
+  line-height: 1.4;
+  word-break: break-word;
+}
+.doctor-actions, .doctor-foot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.doctor-foot { margin-top: 12px; justify-content: flex-end; }
+.doctor-fix-cmd {
+  margin: 12px 0 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #1e1e1e;
+  color: #e8e8e8;
+  font-size: 11.5px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 140px;
+  overflow: auto;
+}
+.doctor-fix-cmd.hidden { display: none !important; }
+

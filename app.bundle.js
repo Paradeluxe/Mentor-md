@@ -65690,6 +65690,7 @@ function syncHermesConnectionUi() {
   chip.dataset.ready = h.agentReady ? "1" : "0";
   chip.title = [
     hermesConnLabel(state, h),
+    "\u70B9\u51FB\u6253\u5F00 Doctor",
     h.skills && h.skills.length ? "skills: " + h.skills.join(",") : "",
     h.error || "",
     h.mode ? "mode=" + h.mode : ""
@@ -65768,6 +65769,192 @@ function startHermesConnectionPolling() {
   State2._hermesConnTimer = setInterval(function() {
     void fetchHermesConnection({ warm: false });
   }, 4e3);
+}
+function doctorKillServerCmd() {
+  const port = location.port || "8787";
+  const root2 = "E:\\hermes_playground\\Mentor";
+  return [
+    "# PowerShell \u2014 free port " + port + " and start real mentor-server",
+    "$p = Get-NetTCPConnection -LocalPort " + port + " -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique",
+    "if ($p) { $p | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue } }",
+    "Start-Sleep -Milliseconds 400",
+    "cd '" + root2 + "'",
+    "Start-Process -WindowStyle Minimized -FilePath python -ArgumentList 'mentor-server.py','--port','" + port + "'",
+    'Start-Process "http://127.0.0.1:' + port + '/index.html"'
+  ].join("\n");
+}
+function buildOfflineDoctorReport(sessionStatus, hermesStatus) {
+  const checks = [];
+  const notServer = sessionStatus === 404 || hermesStatus === 404;
+  checks.push({
+    id: "mentor-server",
+    ok: !notServer && sessionStatus === 200,
+    severity: notServer || sessionStatus !== 200 ? "error" : "ok",
+    title: notServer ? "8787 \u4E0D\u662F mentor-server" : sessionStatus === 200 ? "mentor-server \u5728\u7EBF" : "session HTTP " + sessionStatus,
+    detail: notServer ? "\u5E38\u89C1\u539F\u56E0\uFF1Apython -m http.server \u5360\u7AEF\u53E3\u3002\u9759\u6001\u9875\u80FD\u5F00\uFF0C\u4F46 /session /hermes-connection /doctor \u5168 404\uFF0CAI \u5FC5\u6302\u3002" : "GET /session",
+    fix: notServer ? "restart-mentor-server" : null
+  });
+  checks.push({
+    id: "warm-worker",
+    ok: false,
+    severity: "error",
+    title: "\u65E0\u6CD5\u68C0\u6D4B Hermes worker",
+    detail: notServer ? "\u5148\u6062\u590D\u771F\u5B9E mentor-server\uFF0C\u518D\u70B9\u300C\u542F\u52A8 / \u9884\u70ED Hermes\u300D" : "/hermes-connection HTTP " + hermesStatus,
+    fix: notServer ? "restart-mentor-server" : "warm-worker"
+  });
+  return {
+    ok: true,
+    overall: "error",
+    offline: true,
+    checks,
+    fixCmd: doctorKillServerCmd(),
+    hints: ["\u590D\u5236\u4E0B\u65B9\u547D\u4EE4\u5230 PowerShell \u8FD0\u884C\uFF0C\u6216\u5173\u95ED\u5047 server \u540E\u53CC\u51FB mentor.cmd"]
+  };
+}
+function renderDoctorReport(report) {
+  const overallEl = document.getElementById("doctor-overall");
+  const list = document.getElementById("doctor-checks");
+  const cmdEl = document.getElementById("doctor-fix-cmd");
+  const copyBtn = document.getElementById("doctor-copy-cmd-btn");
+  if (!overallEl || !list) return;
+  const overall = report && report.overall || "unknown";
+  overallEl.dataset.overall = overall;
+  const nErr = (report && report.checks || []).filter((c) => c.severity === "error").length;
+  const nWarn = (report && report.checks || []).filter((c) => c.severity === "warn").length;
+  if (overall === "ok") overallEl.textContent = "\u5168\u90E8\u901A\u8FC7 \xB7 \u53EF\u4EE5\u70B9 AI \u5904\u7406";
+  else if (overall === "warn") overallEl.textContent = "\u6709\u8B66\u544A\uFF08" + nWarn + "\uFF09\xB7 \u5EFA\u8BAE\u9884\u70ED Hermes";
+  else if (overall === "error") overallEl.textContent = "\u53D1\u73B0\u95EE\u9898\uFF08" + nErr + "\uFF09\xB7 \u89C1\u4E0B\u65B9\u6761\u76EE\u4E0E\u4E00\u952E\u4FEE\u590D";
+  else overallEl.textContent = "\u68C0\u6D4B\u4E2D\u2026";
+  const badge = { ok: "OK", warn: "WARN", error: "ERR" };
+  list.innerHTML = (report && report.checks || []).map((c) => {
+    const sev = c.severity || (c.ok ? "ok" : "error");
+    const title = String(c.title || c.id || "").replace(/</g, "&lt;");
+    const detail = String(c.detail || "").replace(/</g, "&lt;");
+    return '<li class="doctor-check" data-severity="' + sev + '"><div class="doctor-check-title"><span class="doctor-check-badge">' + (badge[sev] || sev) + "</span>" + title + "</div>" + (detail ? '<div class="doctor-check-detail">' + detail + "</div>" : "") + "</li>";
+  }).join("");
+  const cmd = report && report.fixCmd || "";
+  State2._doctorFixCmd = cmd;
+  if (cmdEl) {
+    if (cmd) {
+      cmdEl.textContent = cmd;
+      cmdEl.hidden = false;
+      cmdEl.classList.remove("hidden");
+    } else {
+      cmdEl.textContent = "";
+      cmdEl.hidden = true;
+      cmdEl.classList.add("hidden");
+    }
+  }
+  if (copyBtn) copyBtn.hidden = !cmd;
+}
+async function fetchDoctorReport(opts) {
+  opts = opts || {};
+  let token = State2.externalWatchToken || "";
+  if (!token && typeof ensureLocalSessionToken === "function") {
+    try {
+      token = await ensureLocalSessionToken();
+    } catch (_) {
+    }
+  }
+  const q = new URLSearchParams();
+  if (token) q.set("token", token);
+  if (opts.warm) q.set("warm", "1");
+  if (opts.wait) q.set("wait", String(opts.wait));
+  try {
+    const res = await fetch(location.origin + "/doctor?" + q.toString(), { cache: "no-store" });
+    if (!res.ok) {
+      let sessionStatus = res.status;
+      try {
+        const s = await fetch(location.origin + "/session", { cache: "no-store" });
+        sessionStatus = s.status;
+      } catch (_) {
+      }
+      return buildOfflineDoctorReport(sessionStatus, res.status);
+    }
+    const data = await res.json();
+    try {
+      const pathOk = !!(State2.externalWatchPath || State2.currentFile && State2.currentFile.path || typeof hasDiskWriteTarget === "function" && hasDiskWriteTarget());
+      const checks = Array.isArray(data.checks) ? data.checks.slice() : [];
+      checks.push({
+        id: "disk-path",
+        ok: pathOk,
+        severity: pathOk ? "ok" : "warn",
+        title: pathOk ? "\u5F53\u524D\u6587\u7A3F\u6709\u78C1\u76D8\u8DEF\u5F84" : "\u5F53\u524D\u6587\u7A3F\u65E0\u78C1\u76D8\u8DEF\u5F84",
+        detail: pathOk ? String(State2.externalWatchPath || State2.currentFile && State2.currentFile.path || "handle/server path") : "AI \u9700\u8981\u7ECF mentor.cmd / \u684C\u9762\u6253\u5F00\u771F\u5B9E .mentor\uFF0C\u4E0D\u80FD\u53EA\u62D6\u8FDB\u9759\u6001\u9875",
+        fix: null
+      });
+      data.checks = checks;
+      if (!pathOk && data.overall === "ok") data.overall = "warn";
+    } catch (_) {
+    }
+    return data;
+  } catch (e) {
+    return buildOfflineDoctorReport(0, 0);
+  }
+}
+async function runDoctorRepair(action) {
+  let token = State2.externalWatchToken || "";
+  if (!token && typeof ensureLocalSessionToken === "function") {
+    try {
+      token = await ensureLocalSessionToken();
+    } catch (_) {
+    }
+  }
+  const res = await fetch(location.origin + "/doctor/repair", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ token, action, wait: 30 })
+  });
+  if (!res.ok) {
+    if (res.status === 404) {
+      const rep = buildOfflineDoctorReport(404, 404);
+      renderDoctorReport(rep);
+      showToast("\u5F53\u524D\u4E0D\u662F mentor-server\uFF0C\u65E0\u6CD5\u5728\u5E94\u7528\u5185\u4FEE\u590D worker", 4200);
+      return rep;
+    }
+    const errText = await res.text().catch(() => "");
+    throw new Error("repair failed HTTP " + res.status + " " + String(errText).slice(0, 120));
+  }
+  const data = await res.json();
+  const report = data.report || await fetchDoctorReport({ warm: true, wait: 5 });
+  renderDoctorReport(report);
+  try {
+    await fetchHermesConnection({ warm: false });
+  } catch (_) {
+  }
+  return report;
+}
+async function openDoctorPanel() {
+  const modal = document.getElementById("doctor-modal");
+  if (!modal) {
+    showToast("Doctor UI \u7F3A\u5931\uFF08\u786C\u5237 ?v=\uFF09", 3e3);
+    return;
+  }
+  modal.classList.remove("hidden");
+  const overallEl = document.getElementById("doctor-overall");
+  if (overallEl) {
+    overallEl.dataset.overall = "unknown";
+    overallEl.textContent = "\u68C0\u6D4B\u4E2D\u2026";
+  }
+  try {
+    const report = await fetchDoctorReport({ warm: true, wait: 8 });
+    renderDoctorReport(report);
+  } catch (e) {
+    renderDoctorReport(buildOfflineDoctorReport(0, 0));
+  }
+}
+function closeDoctorPanel() {
+  const modal = document.getElementById("doctor-modal");
+  if (modal) modal.classList.add("hidden");
+}
+async function doctorCopyFixCmd() {
+  const cmd = State2._doctorFixCmd || doctorKillServerCmd();
+  try {
+    await navigator.clipboard.writeText(cmd);
+    showToast("\u5DF2\u590D\u5236\u4FEE\u590D\u547D\u4EE4", 2e3);
+  } catch (_) {
+    showToast("\u590D\u5236\u5931\u8D25\uFF0C\u8BF7\u624B\u52A8\u9009\u4E2D\u547D\u4EE4", 2500);
+  }
 }
 function isFixMentorJobActive(status) {
   return status === "saving" || status === "starting" || status === "running";
@@ -74562,6 +74749,48 @@ function setupToolbar() {
     if (e.target.closest('[data-act="toggle-file-pane"]')) {
       toggleFilePane();
     }
+    if (e.target.closest('[data-act="open-doctor"]')) {
+      e.preventDefault();
+      try {
+        if (typeof closeSettingsPopover === "function") closeSettingsPopover();
+      } catch (_) {
+      }
+      void openDoctorPanel();
+      return;
+    }
+    if (e.target.closest('[data-act="close-doctor"]')) {
+      e.preventDefault();
+      closeDoctorPanel();
+      return;
+    }
+    if (e.target.closest('[data-act="doctor-refresh"]')) {
+      e.preventDefault();
+      void openDoctorPanel();
+      return;
+    }
+    if (e.target.closest('[data-act="doctor-warm"]')) {
+      e.preventDefault();
+      showToast("\u6B63\u5728\u9884\u70ED Hermes\u2026", 1800);
+      void runDoctorRepair("warm-worker").then((r) => {
+        const ok = r && r.overall === "ok";
+        showToast(ok ? "Hermes \u5DF2\u5C31\u7EEA" : "\u9884\u70ED\u7ED3\u675F \xB7 \u89C1 Doctor \u7ED3\u679C", 2800);
+      }).catch((err) => showToast(String(err && err.message || err), 3500));
+      return;
+    }
+    if (e.target.closest('[data-act="doctor-restart-worker"]')) {
+      e.preventDefault();
+      showToast("\u6B63\u5728\u91CD\u542F worker\u2026", 1800);
+      void runDoctorRepair("restart-worker").then((r) => {
+        const ok = r && r.overall === "ok";
+        showToast(ok ? "Worker \u5DF2\u91CD\u542F\u5E76\u5C31\u7EEA" : "\u91CD\u542F\u7ED3\u675F \xB7 \u89C1 Doctor \u7ED3\u679C", 2800);
+      }).catch((err) => showToast(String(err && err.message || err), 3500));
+      return;
+    }
+    if (e.target.closest('[data-act="doctor-copy-cmd"]')) {
+      e.preventDefault();
+      void doctorCopyFixCmd();
+      return;
+    }
     if (e.target.closest('[data-act="toggle-comment-pane"]')) {
       toggleCommentPane();
     }
@@ -75946,6 +76175,10 @@ window.__mdAnnotator = {
   hasDiskWriteTarget,
   fetchHermesConnection,
   startHermesConnectionPolling,
+  openDoctorPanel,
+  closeDoctorPanel,
+  fetchDoctorReport,
+  runDoctorRepair,
   writeToHandle,
   finalizeOfficialCommit,
   classifySaveOutcome,
