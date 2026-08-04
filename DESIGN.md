@@ -19,11 +19,11 @@ colors:
   "accent-soft": "rgba(245, 78, 0, 0.1)"
   highlight: "#fef3c7"
   "highlight-active": "#fcd34d"
-  resolved: "#187357"
+  resolved: "#1f8a65"
   "comment-bg": "#fff8e1"
   "reply-bg": "#f3f4f6"
-  danger: "#b4234d"
-  success: "#187357"
+  danger: "#cf2d56"
+  success: "#1f8a65"
   warning: "#b45309"
   "code-bg": "#1f1d1a"
   "code-fg": "#f5f2eb"
@@ -43,9 +43,9 @@ colors:
   "action-primary-hover": "#962f00"
   "action-primary-soft": "rgba(245, 78, 0, 0.1)"
   "focus-color": "#b93800"
-  "status-success": "#187357"
+  "status-success": "#1f8a65"
   "status-warning": "#b45309"
-  "status-danger": "#b4234d"
+  "status-danger": "#cf2d56"
   "type-ai": "#0e7490"
   "type-review": "#6d28d9"
   selection: "#fcd34d"
@@ -266,17 +266,23 @@ Mentor 是给**写学术论文的人**用的 Markdown 编辑器，右侧带 docx
 - **text (#1a1a1a)** — 正文。比纯黑 #000 柔和，长阅读不刺眼。
 - **muted (#6b6b6b)** — 次要文字（时间戳、提示、文件大小）。对比度 4.6:1，过 WCAG AA。
 
-### 交互 accent（蓝）
+### 交互 accent（橙 · Cursor）
 
-- **accent (#2563eb)** — 主动作色（保存、激活文件、链接）。**唯一的高饱和冷色**，跟黄色的批注系统形成「批注=暖，交互=冷」的语义对比。
-- **accent-soft (#dbeafe)** — active tree node 背景。
+- **accent (#f54e00 / --action-primary #b93800)** — 主动作色（保存、激活文件、链接）。**暖橙**，与奶油纸面同系；**禁止冷蓝 #2563eb 作主交互色**。
+- **accent-soft** — active tree / soft highlight。
+
+### 状态色（Cursor）
+
+- **danger (#cf2d56)** — 删除、hover 可点 chrome 字色、危险操作。
+- **success (#1f8a65)** — 已解决 / 成功。
+- **warning (#b45309)** — 警告硬条（非 soft fuzzy）。
 
 ### 批注体系（暖黄三件套）
 
 - **highlight (#fef3c7)** — 文档正文里的批注 mark 默认底色。最浅，能在黄底白字论文上也不刺眼。
 - **highlight-active (#fcd34d)** — 当前光标所在的批注 mark。比默认高饱和一档，「这一个我正在看」。
 - **comment-bg (#fff8e1)** — 侧栏批注卡片的左边框颜色。**比 highlight 略偏暖**，暗示「这是批注本身，不是文档高亮」。
-- **resolved (#e5e7eb)** — 已解决批注的底色。**冷灰色，跟暖黄形成强对比**，一眼能看出哪些还没处理。
+- **resolved** — 已解决批注弱化；与 open 对比清晰。
 
 ### 状态色
 
@@ -361,38 +367,27 @@ Mentor 是给**写学术论文的人**用的 Markdown 编辑器，右侧带 docx
 - **为什么**: tree-node hover 时 bg 变 var(--panel-2) (#f7f7f4)，6px 圆点直接放在 bg 上视觉上是"被吃了一半"。1.5px panel 色 ring 把圆点"提"出来。
 - active 态 ring 用 var(--accent-soft) (orange tint) 而不是 panel。
 
-## 批注重定位策略 (4 优先级鲁棒匹配)
+## 批注定位（range-only · 与 DOCX 同语义）
 
-批注在主 .md 文件被改后, **mark 仍能跟到文字**——通过 4 优先级匹配:
+| 层 | 权威 |
+|----|------|
+| 磁盘 | `thread.mdRange = {from,to}` → `content.md` 字符偏移 |
+| 编辑 | ProseMirror annotation marks + `annotation-anchor-plugin` 映射 |
+| DOCX | `w:commentRangeStart/End` 夹住 **同一明文切片**（字符级，非整段 wrap） |
+| quote 字段 | 仅展示 / 导出证据，**不是** open locator |
 
-| 优先级 | 算法 | 适用场景 |
-|---|---|---|
-| **P0** | 精确匹配 `text` | 旧数据无 prefix/suffix; 文字没改 |
-| **P1** | prefix 末 5 字符 + suffix 前 5 字符 拼接 (中间 text 长度估算) | 改字, 但前后文还在 (最常见, 错别字) |
-| **P2** | prefix 末 5 字符 + text 前 5 字符 拼接 | prefix 短到不足 5 字符 (corner case) |
-| **P3 (失效)** | 全失败 | 整段被删 / 结构大改 |
+**合同：**
+- 打开文档：只用 mdRange→PM；失败 = orphan。
+- 禁止：quote fuzzy open、prefix/suffix 指纹重绑、soft「位置可能偏移」、统一「锚点未就绪」。
+- UI 硬条仅三套：原文已被删除 / 无法唯一确定（重复锚点）/ 批注锚点失效。
+- 导出找不到 quote：warning，**不**静默挂到第一段。
 
-**为什么需要 P1**: P0 要求 `text` 精确, 改字就失效。**C 方案的核心**是用 prefix/suffix 当"指纹"——前后文还在就能跟到。
+实现：`modules/md-range.js`、`modules/docx-export-range.js`、`modules/docx-import.js`。见 `references/range-mode-v1499.md`。
 
-**存储格式** (在 .annotations.json):
-```json
-{
-  "threadId": "uuid-1",
-  "text": "WYSIWYG 编辑",        // 锚定文字
-  "prefix": "## 第一章\n- ",     // text 前 20 字符 (换行截断)
-  "suffix": "\n- 选区级批注",     // text 后 20 字符
-  "comments": [...]
-}
-```
+## 批注多选删除
 
-**为什么 max 20 字符**: 太短匹配鲁棒性差 (prefix 重复概率高), 太长保存体积大。**20 字符是 sweet spot**——自然语言中 20 字符足够独特。
-
-**失效是 fail-safe**: 4 优先级都失败 → 标 `invalid: true`, 侧栏显示 "⚠ 位置已失效", 数据不丢, 用户手动处理。
-
-**已知限制**:
-- 改字 + 前后文也变 (P1 找到的话) → 可能错位 (但仍定位) — **P1-A 会在侧栏加 `fuzzy-banner` 警告**
-- 整段删除 → 必然失效 (合理)
-- 改 prefix 位置 (在批注前插入新内容) → P1 找不到
+- 卡头 checkbox + 批量条「全选可见 / 取消 / 删除」。
+- `deleteThreads(ids)` 一次 confirm、一次 history。
 
 ## 数据安全 (P0)
 
@@ -420,14 +415,6 @@ Mentor 是给**写学术论文的人**用的 Markdown 编辑器，右侧带 docx
 - **限制**: mtime 在某些 FS (NFS, FAT32) 不准. 跨浏览器无解
 
 ## 用户感知 (P1)
-
-### P1-A: 错位提示 (fuzzy banner)
-- **问题**: P1/P2 降级匹配 (改字后) 可能**错位** — 静默 bug
-- **解决**: `findAnnotationRange` 返回 `{ range, fuzzy: true }`, 加载时存到 `ann.fuzzy`. 侧栏批注卡片:
-  - 加 `.fuzzy-banner` div: "⚠ 位置可能偏移 - 请检查文档"
-  - 加 `.is-fuzzy` class: 边框改 warning 色
-  - 用户看到**知道 mark 范围可能错位, 可手动对齐**
-- **不修错位本身** (C 方案 trade-off)
 
 ### P1-B: 跨块批注失效检测
 - **问题**: ProseMirror mark 不能跨 block. 跨行锚定 (text 含 `\n`) 加载时**永远找不到**

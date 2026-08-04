@@ -160,6 +160,8 @@ import {
   buildSaveResultCopy
 } from './modules/save-dialog.js';
 import { buildCommentsParts } from './modules/docx-export-comments.js';
+import { injectCommentRangeMarkers } from './modules/docx-export-range.js';
+import { createCommentSelection } from './modules/comment-selection.js';
 import { parseDocxToMentor } from './modules/docx-import.js';
 import {
   classifySaveOutcome,
@@ -178,6 +180,9 @@ import {
   SUPERVISION_BYPASS_META,
 } from './modules/supervision.js';
 import { createSupervisionPoller, SupervisionPollError } from './modules/supervision-poller.js';
+
+const commentSelection = createCommentSelection();
+
 
 var KatexInline = Node.create({
   name: "katex",
@@ -5901,10 +5906,18 @@ function applyReattach() {
   renderCommentList();
   emitAI("threadChange", { threadId: tid, change: "reattach", range: thread.range, text: newText });
 }
-function deleteThread(threadId) {
-  if (!confirm("\u5220\u9664\u6B64\u6279\u6CE8\u7EBF\u7A0B\uFF1F\u6B64\u64CD\u4F5C\u4E0D\u53EF\u64A4\u9500\u3002")) return;
-  const thread = State.annotations.find((t) => t && typeof t === "object" && t.threadId === threadId);
-  if (!thread) return;
+function deleteThreads(threadIds, opts = {}) {
+  const ids = [...new Set((threadIds || []).filter(Boolean))];
+  if (!ids.length) return { ok: false, reason: "empty" };
+  const idSet = new Set(ids);
+  const existing = State.annotations.filter((t) => t && typeof t === "object" && idSet.has(t.threadId));
+  if (!existing.length) return { ok: false, reason: "missing" };
+  if (opts.confirm !== false) {
+    const msg = ids.length === 1
+      ? "\u5220\u9664\u6B64\u6279\u6CE8\u7EBF\u7A0B\uFF1F\u6B64\u64CD\u4F5C\u4E0D\u53EF\u64A4\u9500\u3002"
+      : `\u5220\u9664 ${ids.length} \u6761\u6279\u6CE8\u7EBF\u7A0B\uFF1F\u6B64\u64CD\u4F5C\u4E0D\u53EF\u64A4\u9500\u3002`;
+    if (!confirm(msg)) return { ok: false, reason: "cancelled" };
+  }
   pushHistory();
   const editor2 = State.editor;
   const tr2 = editor2.state.tr;
@@ -5912,7 +5925,7 @@ function deleteThread(threadId) {
   const oldSel = { from: editor2.state.selection.from, to: editor2.state.selection.to };
   editor2.state.doc.descendants((node, pos) => {
     node.marks.forEach((m) => {
-      if (m.type === markType && m.attrs.threadId === threadId) {
+      if (m.type === markType && idSet.has(m.attrs.threadId)) {
         tr2.removeMark(pos, pos + node.nodeSize, m);
       }
     });
@@ -5920,15 +5933,17 @@ function deleteThread(threadId) {
   tr2.setMeta("addToHistory", false);
   tr2.setMeta("__activeMarkSync", true);
   editor2.view.dispatch(tr2);
-  State.annotations = State.annotations.filter((t) => t.threadId !== threadId);
-  if (State.activeThreadId === threadId) State.activeThreadId = null;
+  State.annotations = State.annotations.filter((t) => !idSet.has(t.threadId));
+  if (idSet.has(State.activeThreadId)) State.activeThreadId = null;
+  try { commentSelection.pruneTo(State.annotations.map((t) => t && t.threadId).filter(Boolean)); } catch (_) {}
   commitHistoryIfNeeded();
   markDirty();
-  try { syncAnnotationMarkModeAttrs(threadId); } catch (_) {}
+  for (const tid of ids) {
+    try { syncAnnotationMarkModeAttrs(tid); } catch (_) {}
+  }
   renderCommentList();
   updateDocMeta();
   positionMarkDeletePopover();
-  // Restore caret only — never briefly select 0..docSize (that flashes "select all").
   try {
     const size = editor2.state.doc.content.size;
     const from2 = Math.max(0, Math.min(oldSel.from, size));
@@ -5937,8 +5952,14 @@ function deleteThread(threadId) {
     else editor2.commands.setTextSelection({ from: from2, to });
   } catch (e) {
   }
-  emitAI("threadChange", { threadId, change: "delete" });
+  for (const threadId of ids) {
+    emitAI("threadChange", { threadId, change: "delete" });
+  }
   refreshAnnotationImageDecos();
+  return { ok: true, deleted: ids };
+}
+function deleteThread(threadId) {
+  return deleteThreads([threadId]);
 }
 function threadHiddenByFilter(thread) {
   if (!thread) return true;
@@ -6919,7 +6940,46 @@ function scrollCommentMessagesToBottom(root = document) {
     } catch (_) {}
   });
 }
+function getVisibleThreadIdsForSelection() {
+  const all = Array.isArray(State.annotations) ? State.annotations : [];
+  return all
+    .filter((t) => t && typeof t === "object" && t.threadId && !threadHiddenByFilter(t))
+    .map((t) => t.threadId);
+}
+function syncCommentBulkBar() {
+  const bar = document.getElementById("comment-bulk-bar");
+  const countEl = document.getElementById("comment-bulk-count");
+  if (!bar) return;
+  const n = commentSelection.size();
+  if (countEl) countEl.textContent = n ? ("已选 " + n) : "已选 0";
+  if (n > 0) bar.removeAttribute("hidden");
+  else bar.setAttribute("hidden", "");
+  const delBtn = bar.querySelector('[data-act="delete-selected"]');
+  if (delBtn) delBtn.disabled = n === 0;
+}
+function selectVisibleCommentThreads() {
+  commentSelection.setAll(getVisibleThreadIdsForSelection());
+  renderCommentList();
+}
+function clearCommentSelection() {
+  commentSelection.clear();
+  renderCommentList();
+}
+function deleteSelectedCommentThreads() {
+  const ids = commentSelection.ids();
+  if (!ids.length) return;
+  const res = deleteThreads(ids);
+  if (res && res.ok) {
+    commentSelection.clear();
+    syncCommentBulkBar();
+  }
+}
+
 function renderCommentList() {
+  try {
+    commentSelection.pruneTo((State.annotations || []).map((t) => t && t.threadId).filter(Boolean));
+  } catch (_) {}
+
   const list = $("#comment-list");
   const empty4 = $("#comment-empty");
   queueMicrotask(() => refreshAnnotationImageDecos());
@@ -7005,10 +7065,13 @@ function renderCommentList() {
     const threadType = threadTypeOf(thread);
     const safeThreadId = escapeHtml(thread.threadId);
     return `
-      <div class="comment-thread ${isActive2 ? "is-active" : ""} ${thread.resolved ? "is-resolved" : ""} ${(warnKind === "orphaned" || thread.deleted) ? "is-deleted" : ""} ${(warnKind === "ambiguous") ? "is-ambiguous" : ""} ${(warnKind === "collision" || warnKind === "image-missing" || (thread.invalid && !thread.deleted && warnKind)) ? "is-anchor-bad" : ""} ${isCollapsed ? "is-collapsed" : ""} ${thread.pending ? "is-pending" : ""}${threadTypeClass(thread)}" data-thread="${safeThreadId}" data-thread-type="${threadType || ""}">
+      <div class="comment-thread ${isActive2 ? "is-active" : ""} ${commentSelection.has(thread.threadId) ? "is-selected" : ""} ${thread.resolved ? "is-resolved" : ""} ${(warnKind === "orphaned" || thread.deleted) ? "is-deleted" : ""} ${(warnKind === "ambiguous") ? "is-ambiguous" : ""} ${(warnKind === "collision" || warnKind === "image-missing" || (thread.invalid && !thread.deleted && warnKind)) ? "is-anchor-bad" : ""} ${isCollapsed ? "is-collapsed" : ""} ${thread.pending ? "is-pending" : ""}${threadTypeClass(thread)}" data-thread="${safeThreadId}" data-thread-type="${threadType || ""}">
         ${(warnKind === "orphaned" || thread.deleted) ? '<div class="deleted-banner">📍 原文已被删除 - <button class="link-btn" data-act="reattach" data-thread="' + safeThreadId + '">重新选择正文</button> · <button class="link-btn link-danger" data-act="delete-orphan" data-thread="' + safeThreadId + '">删除</button></div>' : (warnKind === "ambiguous") ? '<div class="ambiguous-banner">⚠ 无法唯一确定原文位置（重复锚点）— <button class="link-btn" data-act="reattach" data-thread="' + safeThreadId + '">重新选择正文</button> · <button class="link-btn link-danger" data-act="delete-orphan" data-thread="' + safeThreadId + '">删除</button></div>' : (warnKind === "collision" || warnKind === "image-missing" || (thread.invalid && !thread.deleted)) ? '<div class="invalid-banner">⚠ 批注锚点失效 — <button class="link-btn" data-act="reattach" data-thread="' + safeThreadId + '">重新选择正文</button> · <button class="link-btn link-danger" data-act="delete-orphan" data-thread="' + safeThreadId + '">删除</button></div>' : ""}
         <!-- card header: number + quote + menu -->
         <div class="comment-quote" data-thread="${safeThreadId}" title="点击收起/展开批注">
+          <label class="comment-select" title="选择批注" onclick="event.stopPropagation()">
+            <input type="checkbox" data-act="toggle-select" data-thread="${safeThreadId}" ${commentSelection.has(thread.threadId) ? "checked" : ""} />
+          </label>
           <span class="comment-number-badge" data-number="${number}" title="批注 #${number}">${number}</span>
           <span class="comment-quote-text">${escapeHtml((thread.text || "").slice(0, 200))}${(thread.text || "").length > 200 ? "…" : ""}</span>
           ${threadType === "ai" ? '<span class="comment-type-badge is-ai" title="AI">AI</span>' : threadType === "review" ? '<span class="comment-type-badge is-review" title="历史审阅">审阅</span>' : ""}
@@ -7302,11 +7365,23 @@ function renderCommentList() {
     btn.addEventListener("click", (e) => {
       e.stopPropagation();
       if (confirm("\u786E\u5B9A\u5220\u9664\u6B64\u6279\u6CE8\uFF1F\u6B64\u64CD\u4F5C\u65E0\u6CD5\u64A4\u9500\u3002")) {
-        deleteThread(btn.dataset.thread);
+        deleteThreads([btn.dataset.thread], { confirm: false });
       }
     });
   });
-  list.querySelectorAll('[data-act="copy"]').forEach((btn) => {
+  
+  list.querySelectorAll('[data-act="toggle-select"]').forEach((input) => {
+    input.addEventListener("click", (e) => e.stopPropagation());
+    input.addEventListener("change", (e) => {
+      e.stopPropagation();
+      commentSelection.toggle(input.dataset.thread);
+      syncCommentBulkBar();
+      const card = input.closest(".comment-thread");
+      if (card) card.classList.toggle("is-selected", input.checked);
+    });
+  });
+  syncCommentBulkBar();
+list.querySelectorAll('[data-act="copy"]').forEach((btn) => {
     btn.addEventListener("click", async (e) => {
       e.stopPropagation();
       const tid = btn.dataset.thread;
@@ -13075,79 +13150,6 @@ async function exportDocx() {
  * the thread quote. Replies share the root range (no separate markers).
  */
 
-function injectCommentRangeMarkers(bodyXml, commentsParts) {
-  if (!commentsParts || !Array.isArray(commentsParts.commentEntries)) return bodyXml;
-  const roots = commentsParts.commentEntries.filter((e) => e && e.isRoot);
-  if (!roots.length) return bodyXml;
-
-  function paraPlainText(pXml) {
-    let t = "";
-    const re = /<w:t(?:\s[^>]*)?>([^<]*)<\/w:t>/g;
-    let m;
-    while ((m = re.exec(pXml)) !== null) t += m[1];
-    return t;
-  }
-
-  function wrapPara(pXml, commentId) {
-    // Keep optional <w:pPr>...</w:pPr> at front; wrap the rest of the content.
-    const openEnd = pXml.indexOf(">");
-    if (openEnd < 0) return pXml;
-    const closeIdx = pXml.lastIndexOf("</w:p>");
-    if (closeIdx < 0) return pXml;
-    const openTag = pXml.slice(0, openEnd + 1);
-    const inner = pXml.slice(openEnd + 1, closeIdx);
-    const pPrMatch = inner.match(/^(\s*<w:pPr\b[\s\S]*?<\/w:pPr>)/);
-    const pPr = pPrMatch ? pPrMatch[1] : "";
-    const rest = pPrMatch ? inner.slice(pPrMatch[1].length) : inner;
-    const id = String(commentId);
-    return (
-      openTag +
-      pPr +
-      `<w:commentRangeStart w:id="${id}"/>` +
-      rest +
-      `<w:commentRangeEnd w:id="${id}"/>` +
-            `<w:r><w:rPr><w:rStyle w:val="CommentReference"/></w:rPr><w:commentReference w:id="${id}"/></w:r>` +
-            "</w:p>"
-          );
-  }
-
-  // Split body into paragraph chunks while preserving non-p content order.
-  // Match each top-level <w:p ...>...</w:p> (non-greedy, no nesting of p in this emitter).
-  const parts = [];
-  const reP = /<w:p\b[\s\S]*?<\/w:p>/g;
-  let last = 0;
-  let m;
-  const src = String(bodyXml || "");
-  while ((m = reP.exec(src)) !== null) {
-    if (m.index > last) parts.push({ type: "raw", xml: src.slice(last, m.index) });
-    parts.push({ type: "p", xml: m[0] });
-    last = m.index + m[0].length;
-  }
-  if (last < src.length) parts.push({ type: "raw", xml: src.slice(last) });
-
-  const usedQuoteKeys = new Set();
-  for (const entry of roots) {
-    const quote = String(entry.quoteText || "").trim();
-    // Empty quote: attach to first unused paragraph if any.
-    for (let i = 0; i < parts.length; i++) {
-      if (parts[i].type !== "p") continue;
-      if (parts[i]._used) continue;
-      const plain = paraPlainText(parts[i].xml);
-      const hit = quote ? plain.includes(quote) : plain.length > 0;
-      if (!hit) continue;
-      // Avoid double-wrapping same quote key across threads if identical quote
-      const key = quote || `__p${i}`;
-      if (quote && usedQuoteKeys.has(key) && plain.indexOf(quote) === plain.lastIndexOf(quote)) {
-        // same single occurrence already claimed — still allow if paragraph not used
-      }
-      parts[i] = { type: "p", xml: wrapPara(parts[i].xml, entry.commentId), _used: true };
-      if (quote) usedQuoteKeys.add(key);
-      break;
-    }
-  }
-
-  return parts.map((p) => p.xml).join("");
-}
 async function buildDocxBlob(html, mediaFiles, annotations = []) {
   if (typeof JSZip === "undefined") throw new Error("JSZip not loaded");
   const zip = new JSZip();
@@ -15210,9 +15212,21 @@ $("#btn-save").addEventListener("click", () => runToolbarAction("save", saveCurr
       toggleFilePane();
     }
     if (e.target.closest('[data-act="toggle-comment-pane"]')) {
-      toggleCommentPane();
-    }
-  });
+          toggleCommentPane();
+        }
+        if (e.target.closest('[data-act="select-visible"]')) {
+          e.preventDefault();
+          selectVisibleCommentThreads();
+        }
+        if (e.target.closest('[data-act="clear-selection"]')) {
+          e.preventDefault();
+          clearCommentSelection();
+        }
+        if (e.target.closest('[data-act="delete-selected"]')) {
+          e.preventDefault();
+          deleteSelectedCommentThreads();
+        }
+      });
   document.addEventListener("keydown", (e) => {
     if ((e.metaKey || e.ctrlKey) && e.key === "[") {
       e.preventDefault();
@@ -15251,13 +15265,18 @@ $("#btn-save").addEventListener("click", () => runToolbarAction("save", saveCurr
   });
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") {
-      const hasOpenMenu = document.querySelector(".comment-menu:not(.hidden)");
-      if (hasOpenMenu) {
-        e.preventDefault();
-        closeAllCommentMenus();
-        return;
-      }
-    }
+          const hasOpenMenu = document.querySelector(".comment-menu:not(.hidden)");
+          if (hasOpenMenu) {
+            e.preventDefault();
+            closeAllCommentMenus();
+            return;
+          }
+          if (commentSelection.size() > 0) {
+            e.preventDefault();
+            clearCommentSelection();
+            return;
+          }
+        }
     if ((e.ctrlKey || e.metaKey) && e.key === "s") {
       e.preventDefault();
       saveCurrent();
@@ -16865,6 +16884,19 @@ window.__mdAnnotator = {
       window.confirm = origConfirm;
     }
   },
+  _testDeleteThreads(threadIds) {
+    return deleteThreads(threadIds || [], { confirm: false });
+  },
+  _testSelectThreads(threadIds) {
+    commentSelection.setAll(threadIds || []);
+    renderCommentList();
+    return commentSelection.ids();
+  },
+  _testClearCommentSelection() {
+    clearCommentSelection();
+  },
+  deleteThreads,
+  commentSelection,
   getAnnotations: () => State.annotations,
   getEditorHTML: () => State.editor.getHTML(),
   // 当前用户身份 (id 永不变, name 可改)

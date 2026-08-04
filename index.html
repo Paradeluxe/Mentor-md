@@ -6,9 +6,9 @@
 <title>Mentor — 像 docx 一样批注 Markdown</title>
 <meta name="build" content="v1.48.0 cache-bust v=250" />
 <!-- v1.43.37 offline: local fonts + KaTeX (no CDN) -->
-<link rel="stylesheet" href="vendor/fonts/local-fonts.css?v=249" />
+<link rel="stylesheet" href="vendor/fonts/local-fonts.css?v=250" />
 <link rel="stylesheet" href="styles.css?v=250" />
-<link rel="stylesheet" href="vendor/katex/katex.min.css?v=249" />
+<link rel="stylesheet" href="vendor/katex/katex.min.css?v=250" />
 <!-- 字体：系统无衬线 + 等宽（侧栏时间戳、文件名） -->
 <style>
   /* FOUC only before styles.css paints — do NOT pin legacy aliases here
@@ -179,8 +179,14 @@
                 <button class="filter-tab" data-filter-tab="all" title="所有批注 (Word 风格 All tab)">全部 <span class="filter-tab-count" data-count-for="all">0</span></button>
               </div>
             </div>
-          </div>
-          <div id="fix-mentor-job-banner" class="fix-mentor-job-banner" hidden data-status="idle" role="status" aria-live="polite">
+                      </div>
+                      <div id="comment-bulk-bar" class="comment-bulk-bar" hidden>
+                        <span id="comment-bulk-count">已选 0</span>
+                        <button type="button" class="comment-bulk-btn" data-act="select-visible" title="全选当前筛选下的批注">全选可见</button>
+                        <button type="button" class="comment-bulk-btn" data-act="clear-selection">取消</button>
+                        <button type="button" class="comment-bulk-btn danger" data-act="delete-selected">删除</button>
+                      </div>
+                      <div id="fix-mentor-job-banner" class="fix-mentor-job-banner" hidden data-status="idle" role="status" aria-live="polite">
             <div class="fm-prog-top">
               <span class="fm-prog-title" id="fm-prog-title">AI 处理</span>
               <span class="fm-prog-elapsed" id="fm-prog-elapsed"></span>
@@ -377,7 +383,7 @@
 <div id="toast" class="toast hidden"></div>
 
 <!-- v1.43.37 offline: bundled app (esbuild) + local icons; no esm.sh -->
-<script src="icons.js?v=249"></script>
+<script src="icons.js?v=250"></script>
 <script type="module" src="app.bundle.js?v=250"></script>
 <!-- 帮助 popover (浮在 body 顶层, 位置由 JS 动态计算) -->
 <div id="help-popover" class="help-popover hidden" role="dialog" aria-modal="false" aria-labelledby="help-popover-title">

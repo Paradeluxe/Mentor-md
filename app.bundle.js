@@ -58023,6 +58023,262 @@ function renderCommentsExtensibleXml(items) {
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w16cex:commentsExtensible xmlns:w16cex="${NS_W16CEX}" xmlns:w="${NS_W}" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" mc:Ignorable="w16cex">${inner2}</w16cex:commentsExtensible>`;
 }
 
+// modules/docx-export-range.js
+function paraPlainText(pXml) {
+  let t = "";
+  const re = /<w:t(?:\s[^>]*)?>([^<]*)<\/w:t>/g;
+  let m;
+  while ((m = re.exec(pXml)) !== null) t += m[1];
+  return t;
+}
+function wrapQuoteInParagraph(pXml, commentId, quote) {
+  const q = String(quote || "");
+  if (!q) {
+    return { xml: pXml, ok: false, reason: "empty-quote" };
+  }
+  const plain = paraPlainText(pXml);
+  const from2 = plain.indexOf(q);
+  if (from2 < 0) {
+    return { xml: pXml, ok: false, reason: "quote-not-in-para" };
+  }
+  const to = from2 + q.length;
+  const id = String(commentId);
+  const openEnd = pXml.indexOf(">");
+  if (openEnd < 0) return { xml: pXml, ok: false, reason: "bad-p" };
+  const closeIdx = pXml.lastIndexOf("</w:p>");
+  if (closeIdx < 0) return { xml: pXml, ok: false, reason: "bad-p" };
+  const openTag = pXml.slice(0, openEnd + 1);
+  const inner2 = pXml.slice(openEnd + 1, closeIdx);
+  const pPrMatch = inner2.match(/^(\s*<w:pPr\b[\s\S]*?<\/w:pPr>)/);
+  const pPr = pPrMatch ? pPrMatch[1] : "";
+  const rest = pPrMatch ? inner2.slice(pPrMatch[1].length) : inner2;
+  const tRe = /<w:t(\s[^>]*)?>([^<]*)<\/w:t>/g;
+  const pieces = [];
+  let last = 0;
+  let m;
+  let offset = 0;
+  const hits = [];
+  while ((m = tRe.exec(rest)) !== null) {
+    if (m.index > last) {
+      pieces.push({ type: "raw", xml: rest.slice(last, m.index) });
+    }
+    const attrs = m[1] || "";
+    const text3 = m[2];
+    const start = offset;
+    const end = offset + text3.length;
+    hits.push({ attrs, text: text3, start, end, pieceIndex: pieces.length });
+    pieces.push({ type: "t", attrs, text: text3, start, end });
+    offset = end;
+    last = m.index + m[0].length;
+  }
+  if (last < rest.length) pieces.push({ type: "raw", xml: rest.slice(last) });
+  if (offset < to) {
+    return { xml: pXml, ok: false, reason: "offset-short" };
+  }
+  function tTag(attrs, text3) {
+    let a = attrs || "";
+    if ((/^\s|\s$/.test(text3) || text3 === "") && !/xml:space=/.test(a)) {
+      a = (a ? a + " " : " ") + 'xml:space="preserve"';
+      if (!a.startsWith(" ") && a.length) a = " " + a.trim();
+      a = a.replace(/^\s*/, " ").replace(/\s+$/, "");
+      if (!a.startsWith(" ")) a = " " + a.trim();
+    }
+    if (a && !a.startsWith(" ")) a = " " + a.trim();
+    return `<w:t${a}>${text3}</w:t>`;
+  }
+  let out = "";
+  let insertedStart = false;
+  let insertedEnd = false;
+  const startMarker = `<w:commentRangeStart w:id="${id}"/>`;
+  const endMarker = `<w:commentRangeEnd w:id="${id}"/>`;
+  const refRun = `<w:r><w:rPr><w:rStyle w:val="CommentReference"/></w:rPr><w:commentReference w:id="${id}"/></w:r>`;
+  for (const piece of pieces) {
+    if (piece.type === "raw") {
+      out += piece.xml;
+      continue;
+    }
+    const { attrs, text: text3, start, end } = piece;
+    if (end <= from2 || start >= to) {
+      if (!insertedStart && start >= from2 && from2 === end) {
+      }
+      if (!insertedStart && start === from2) {
+        out += startMarker;
+        insertedStart = true;
+      }
+      out += `<w:r>${tTag(attrs, text3)}</w:r>`;
+    }
+  }
+  out = "";
+  last = 0;
+  offset = 0;
+  insertedStart = false;
+  insertedEnd = false;
+  tRe.lastIndex = 0;
+  const rest2 = rest;
+  const re2 = /<w:t(\s[^>]*)?>([^<]*)<\/w:t>/g;
+  while ((m = re2.exec(rest2)) !== null) {
+    out += rest2.slice(last, m.index);
+    const attrs = m[1] || "";
+    const text3 = m[2];
+    const start = offset;
+    const end = offset + text3.length;
+    last = m.index + m[0].length;
+    if (end <= from2 || start >= to) {
+      if (!insertedStart && start === from2) {
+        out += startMarker + m[0];
+        insertedStart = true;
+      } else if (!insertedEnd && start === to) {
+        out += endMarker + m[0];
+        insertedEnd = true;
+      } else {
+        out += m[0];
+      }
+      offset = end;
+      continue;
+    }
+    const localFrom = Math.max(0, from2 - start);
+    const localTo = Math.min(text3.length, to - start);
+    const before = text3.slice(0, localFrom);
+    const mid = text3.slice(localFrom, localTo);
+    const after = text3.slice(localTo);
+    if (before) {
+      out += tTag(attrs, before);
+    }
+    if (!insertedStart && localFrom >= 0 && from2 >= start && from2 < end) {
+      out += startMarker;
+      insertedStart = true;
+    }
+    if (mid) {
+      out += tTag(attrs, mid);
+    }
+    if (!insertedEnd && to > start && to <= end) {
+      out += endMarker;
+      insertedEnd = true;
+    }
+    if (after) {
+      out += tTag(attrs, after);
+    }
+    offset = end;
+  }
+  out += rest2.slice(last);
+  if (!insertedStart || !insertedEnd) {
+    return { xml: pXml, ok: false, reason: "markers-not-inserted" };
+  }
+  const endTok = `<w:commentRangeEnd w:id="${id}"/>`;
+  const ei = out.indexOf(endTok);
+  if (ei >= 0) {
+    out = out.slice(0, ei + endTok.length) + refRun + out.slice(ei + endTok.length);
+  } else {
+    out += refRun;
+  }
+  const xml = openTag + pPr + out + "</w:p>";
+  const between = xml.split(startMarker)[1];
+  const midXml = between ? between.split(endTok)[0] : "";
+  const midPlain = (midXml.match(/<w:t(?:\s[^>]*)?>([^<]*)<\/w:t>/g) || []).map((tag) => {
+    const mm = tag.match(/<w:t(?:\s[^>]*)?>([^<]*)<\/w:t>/);
+    return mm ? mm[1] : "";
+  }).join("");
+  if (midPlain !== q) {
+    return { xml: pXml, ok: false, reason: "verify-mismatch:" + midPlain };
+  }
+  return { xml, ok: true };
+}
+function injectCommentRangeMarkers(bodyXml, commentsParts) {
+  if (!commentsParts || !Array.isArray(commentsParts.commentEntries)) return bodyXml;
+  const roots = commentsParts.commentEntries.filter((e) => e && e.isRoot);
+  if (!roots.length) return bodyXml;
+  const parts = [];
+  const reP = /<w:p\b[\s\S]*?<\/w:p>/g;
+  let last = 0;
+  let m;
+  const src = String(bodyXml || "");
+  while ((m = reP.exec(src)) !== null) {
+    if (m.index > last) parts.push({ type: "raw", xml: src.slice(last, m.index) });
+    parts.push({ type: "p", xml: m[0], used: false });
+    last = m.index + m[0].length;
+  }
+  if (last < src.length) parts.push({ type: "raw", xml: src.slice(last) });
+  const warnings = [];
+  for (const entry of roots) {
+    const quote = String(entry.quoteText || "").trim();
+    if (!quote) {
+      warnings.push({ commentId: entry.commentId, reason: "empty-quote" });
+      continue;
+    }
+    let placed = false;
+    const candidates = [];
+    for (let i = 0; i < parts.length; i++) {
+      if (parts[i].type !== "p" || parts[i].used) continue;
+      const plain = paraPlainText(parts[i].xml);
+      if (plain.includes(quote)) candidates.push(i);
+    }
+    if (!candidates.length) {
+      warnings.push({ commentId: entry.commentId, reason: "quote-not-found", quote });
+      continue;
+    }
+    if (candidates.length > 1) {
+      warnings.push({
+        commentId: entry.commentId,
+        reason: "ambiguous-paragraph",
+        quote,
+        count: candidates.length
+      });
+    }
+    const idx = candidates[0];
+    const wrapped = wrapQuoteInParagraph(parts[idx].xml, entry.commentId, quote);
+    if (!wrapped.ok) {
+      warnings.push({ commentId: entry.commentId, reason: wrapped.reason, quote });
+      continue;
+    }
+    parts[idx] = { type: "p", xml: wrapped.xml, used: true };
+    placed = true;
+    void placed;
+  }
+  if (warnings.length && typeof console !== "undefined" && console.warn) {
+    console.warn("[docx-export-range] inject warnings", warnings);
+  }
+  return parts.map((p) => p.xml).join("");
+}
+
+// modules/comment-selection.js
+function createCommentSelection() {
+  const selected = /* @__PURE__ */ new Set();
+  return {
+    has(id) {
+      return selected.has(id);
+    },
+    toggle(id) {
+      if (id == null || id === "") return selected.size;
+      if (selected.has(id)) selected.delete(id);
+      else selected.add(id);
+      return selected.size;
+    },
+    setAll(ids) {
+      selected.clear();
+      for (const id of ids || []) {
+        if (id != null && id !== "") selected.add(id);
+      }
+      return selected.size;
+    },
+    clear() {
+      selected.clear();
+    },
+    ids() {
+      return [...selected];
+    },
+    size() {
+      return selected.size;
+    },
+    pruneTo(existingIds) {
+      const allow = new Set(existingIds || []);
+      for (const id of [...selected]) {
+        if (!allow.has(id)) selected.delete(id);
+      }
+      return selected.size;
+    }
+  };
+}
+
 // modules/docx-import.js
 var import_jszip = __toESM(require_jszip_min());
 var DOCX_MAX_BYTES = 25 * 1024 * 1024;
@@ -59468,6 +59724,7 @@ function createSupervisionPoller({
 }
 
 // app.js
+var commentSelection = createCommentSelection();
 var KatexInline = Node2.create({
   name: "katex",
   group: "inline",
@@ -65048,10 +65305,16 @@ function applyReattach() {
   renderCommentList();
   emitAI("threadChange", { threadId: tid, change: "reattach", range: thread.range, text: newText });
 }
-function deleteThread(threadId) {
-  if (!confirm("\u5220\u9664\u6B64\u6279\u6CE8\u7EBF\u7A0B\uFF1F\u6B64\u64CD\u4F5C\u4E0D\u53EF\u64A4\u9500\u3002")) return;
-  const thread = State2.annotations.find((t) => t && typeof t === "object" && t.threadId === threadId);
-  if (!thread) return;
+function deleteThreads(threadIds, opts = {}) {
+  const ids = [...new Set((threadIds || []).filter(Boolean))];
+  if (!ids.length) return { ok: false, reason: "empty" };
+  const idSet = new Set(ids);
+  const existing = State2.annotations.filter((t) => t && typeof t === "object" && idSet.has(t.threadId));
+  if (!existing.length) return { ok: false, reason: "missing" };
+  if (opts.confirm !== false) {
+    const msg = ids.length === 1 ? "\u5220\u9664\u6B64\u6279\u6CE8\u7EBF\u7A0B\uFF1F\u6B64\u64CD\u4F5C\u4E0D\u53EF\u64A4\u9500\u3002" : `\u5220\u9664 ${ids.length} \u6761\u6279\u6CE8\u7EBF\u7A0B\uFF1F\u6B64\u64CD\u4F5C\u4E0D\u53EF\u64A4\u9500\u3002`;
+    if (!confirm(msg)) return { ok: false, reason: "cancelled" };
+  }
   pushHistory();
   const editor2 = State2.editor;
   const tr2 = editor2.state.tr;
@@ -65059,7 +65322,7 @@ function deleteThread(threadId) {
   const oldSel = { from: editor2.state.selection.from, to: editor2.state.selection.to };
   editor2.state.doc.descendants((node, pos) => {
     node.marks.forEach((m) => {
-      if (m.type === markType && m.attrs.threadId === threadId) {
+      if (m.type === markType && idSet.has(m.attrs.threadId)) {
         tr2.removeMark(pos, pos + node.nodeSize, m);
       }
     });
@@ -65067,13 +65330,19 @@ function deleteThread(threadId) {
   tr2.setMeta("addToHistory", false);
   tr2.setMeta("__activeMarkSync", true);
   editor2.view.dispatch(tr2);
-  State2.annotations = State2.annotations.filter((t) => t.threadId !== threadId);
-  if (State2.activeThreadId === threadId) State2.activeThreadId = null;
+  State2.annotations = State2.annotations.filter((t) => !idSet.has(t.threadId));
+  if (idSet.has(State2.activeThreadId)) State2.activeThreadId = null;
+  try {
+    commentSelection.pruneTo(State2.annotations.map((t) => t && t.threadId).filter(Boolean));
+  } catch (_) {
+  }
   commitHistoryIfNeeded();
   markDirty();
-  try {
-    syncAnnotationMarkModeAttrs(threadId);
-  } catch (_) {
+  for (const tid of ids) {
+    try {
+      syncAnnotationMarkModeAttrs(tid);
+    } catch (_) {
+    }
   }
   renderCommentList();
   updateDocMeta();
@@ -65086,8 +65355,14 @@ function deleteThread(threadId) {
     else editor2.commands.setTextSelection({ from: from2, to });
   } catch (e) {
   }
-  emitAI("threadChange", { threadId, change: "delete" });
+  for (const threadId of ids) {
+    emitAI("threadChange", { threadId, change: "delete" });
+  }
   refreshAnnotationImageDecos();
+  return { ok: true, deleted: ids };
+}
+function deleteThread(threadId) {
+  return deleteThreads([threadId]);
 }
 function threadHiddenByFilter(thread) {
   if (!thread) return true;
@@ -66028,7 +66303,43 @@ function scrollCommentMessagesToBottom(root2 = document) {
     }
   });
 }
+function getVisibleThreadIdsForSelection() {
+  const all = Array.isArray(State2.annotations) ? State2.annotations : [];
+  return all.filter((t) => t && typeof t === "object" && t.threadId && !threadHiddenByFilter(t)).map((t) => t.threadId);
+}
+function syncCommentBulkBar() {
+  const bar = document.getElementById("comment-bulk-bar");
+  const countEl = document.getElementById("comment-bulk-count");
+  if (!bar) return;
+  const n = commentSelection.size();
+  if (countEl) countEl.textContent = n ? "\u5DF2\u9009 " + n : "\u5DF2\u9009 0";
+  if (n > 0) bar.removeAttribute("hidden");
+  else bar.setAttribute("hidden", "");
+  const delBtn = bar.querySelector('[data-act="delete-selected"]');
+  if (delBtn) delBtn.disabled = n === 0;
+}
+function selectVisibleCommentThreads() {
+  commentSelection.setAll(getVisibleThreadIdsForSelection());
+  renderCommentList();
+}
+function clearCommentSelection() {
+  commentSelection.clear();
+  renderCommentList();
+}
+function deleteSelectedCommentThreads() {
+  const ids = commentSelection.ids();
+  if (!ids.length) return;
+  const res = deleteThreads(ids);
+  if (res && res.ok) {
+    commentSelection.clear();
+    syncCommentBulkBar();
+  }
+}
 function renderCommentList() {
+  try {
+    commentSelection.pruneTo((State2.annotations || []).map((t) => t && t.threadId).filter(Boolean));
+  } catch (_) {
+  }
   const list = $("#comment-list");
   const empty4 = $("#comment-empty");
   queueMicrotask(() => refreshAnnotationImageDecos());
@@ -66113,10 +66424,13 @@ function renderCommentList() {
     const threadType = threadTypeOf(thread);
     const safeThreadId = escapeHtml(thread.threadId);
     return `
-      <div class="comment-thread ${isActive2 ? "is-active" : ""} ${thread.resolved ? "is-resolved" : ""} ${warnKind === "orphaned" || thread.deleted ? "is-deleted" : ""} ${warnKind === "ambiguous" ? "is-ambiguous" : ""} ${warnKind === "collision" || warnKind === "image-missing" || thread.invalid && !thread.deleted && warnKind ? "is-anchor-bad" : ""} ${isCollapsed ? "is-collapsed" : ""} ${thread.pending ? "is-pending" : ""}${threadTypeClass(thread)}" data-thread="${safeThreadId}" data-thread-type="${threadType || ""}">
+      <div class="comment-thread ${isActive2 ? "is-active" : ""} ${commentSelection.has(thread.threadId) ? "is-selected" : ""} ${thread.resolved ? "is-resolved" : ""} ${warnKind === "orphaned" || thread.deleted ? "is-deleted" : ""} ${warnKind === "ambiguous" ? "is-ambiguous" : ""} ${warnKind === "collision" || warnKind === "image-missing" || thread.invalid && !thread.deleted && warnKind ? "is-anchor-bad" : ""} ${isCollapsed ? "is-collapsed" : ""} ${thread.pending ? "is-pending" : ""}${threadTypeClass(thread)}" data-thread="${safeThreadId}" data-thread-type="${threadType || ""}">
         ${warnKind === "orphaned" || thread.deleted ? '<div class="deleted-banner">\u{1F4CD} \u539F\u6587\u5DF2\u88AB\u5220\u9664 - <button class="link-btn" data-act="reattach" data-thread="' + safeThreadId + '">\u91CD\u65B0\u9009\u62E9\u6B63\u6587</button> \xB7 <button class="link-btn link-danger" data-act="delete-orphan" data-thread="' + safeThreadId + '">\u5220\u9664</button></div>' : warnKind === "ambiguous" ? '<div class="ambiguous-banner">\u26A0 \u65E0\u6CD5\u552F\u4E00\u786E\u5B9A\u539F\u6587\u4F4D\u7F6E\uFF08\u91CD\u590D\u951A\u70B9\uFF09\u2014 <button class="link-btn" data-act="reattach" data-thread="' + safeThreadId + '">\u91CD\u65B0\u9009\u62E9\u6B63\u6587</button> \xB7 <button class="link-btn link-danger" data-act="delete-orphan" data-thread="' + safeThreadId + '">\u5220\u9664</button></div>' : warnKind === "collision" || warnKind === "image-missing" || thread.invalid && !thread.deleted ? '<div class="invalid-banner">\u26A0 \u6279\u6CE8\u951A\u70B9\u5931\u6548 \u2014 <button class="link-btn" data-act="reattach" data-thread="' + safeThreadId + '">\u91CD\u65B0\u9009\u62E9\u6B63\u6587</button> \xB7 <button class="link-btn link-danger" data-act="delete-orphan" data-thread="' + safeThreadId + '">\u5220\u9664</button></div>' : ""}
         <!-- card header: number + quote + menu -->
         <div class="comment-quote" data-thread="${safeThreadId}" title="\u70B9\u51FB\u6536\u8D77/\u5C55\u5F00\u6279\u6CE8">
+          <label class="comment-select" title="\u9009\u62E9\u6279\u6CE8" onclick="event.stopPropagation()">
+            <input type="checkbox" data-act="toggle-select" data-thread="${safeThreadId}" ${commentSelection.has(thread.threadId) ? "checked" : ""} />
+          </label>
           <span class="comment-number-badge" data-number="${number}" title="\u6279\u6CE8 #${number}">${number}</span>
           <span class="comment-quote-text">${escapeHtml((thread.text || "").slice(0, 200))}${(thread.text || "").length > 200 ? "\u2026" : ""}</span>
           ${threadType === "ai" ? '<span class="comment-type-badge is-ai" title="AI">AI</span>' : threadType === "review" ? '<span class="comment-type-badge is-review" title="\u5386\u53F2\u5BA1\u9605">\u5BA1\u9605</span>' : ""}
@@ -66410,10 +66724,21 @@ function renderCommentList() {
     btn.addEventListener("click", (e) => {
       e.stopPropagation();
       if (confirm("\u786E\u5B9A\u5220\u9664\u6B64\u6279\u6CE8\uFF1F\u6B64\u64CD\u4F5C\u65E0\u6CD5\u64A4\u9500\u3002")) {
-        deleteThread(btn.dataset.thread);
+        deleteThreads([btn.dataset.thread], { confirm: false });
       }
     });
   });
+  list.querySelectorAll('[data-act="toggle-select"]').forEach((input) => {
+    input.addEventListener("click", (e) => e.stopPropagation());
+    input.addEventListener("change", (e) => {
+      e.stopPropagation();
+      commentSelection.toggle(input.dataset.thread);
+      syncCommentBulkBar();
+      const card = input.closest(".comment-thread");
+      if (card) card.classList.toggle("is-selected", input.checked);
+    });
+  });
+  syncCommentBulkBar();
   list.querySelectorAll('[data-act="copy"]').forEach((btn) => {
     btn.addEventListener("click", async (e) => {
       e.stopPropagation();
@@ -72056,60 +72381,6 @@ async function exportDocx() {
     showToast("\u5BFC\u51FA docx \u5931\u8D25: " + (e.message || "\u672A\u77E5\u9519\u8BEF"), 4e3);
   }
 }
-function injectCommentRangeMarkers(bodyXml, commentsParts) {
-  if (!commentsParts || !Array.isArray(commentsParts.commentEntries)) return bodyXml;
-  const roots = commentsParts.commentEntries.filter((e) => e && e.isRoot);
-  if (!roots.length) return bodyXml;
-  function paraPlainText(pXml) {
-    let t = "";
-    const re = /<w:t(?:\s[^>]*)?>([^<]*)<\/w:t>/g;
-    let m2;
-    while ((m2 = re.exec(pXml)) !== null) t += m2[1];
-    return t;
-  }
-  function wrapPara(pXml, commentId) {
-    const openEnd = pXml.indexOf(">");
-    if (openEnd < 0) return pXml;
-    const closeIdx = pXml.lastIndexOf("</w:p>");
-    if (closeIdx < 0) return pXml;
-    const openTag = pXml.slice(0, openEnd + 1);
-    const inner2 = pXml.slice(openEnd + 1, closeIdx);
-    const pPrMatch = inner2.match(/^(\s*<w:pPr\b[\s\S]*?<\/w:pPr>)/);
-    const pPr = pPrMatch ? pPrMatch[1] : "";
-    const rest = pPrMatch ? inner2.slice(pPrMatch[1].length) : inner2;
-    const id = String(commentId);
-    return openTag + pPr + `<w:commentRangeStart w:id="${id}"/>` + rest + `<w:commentRangeEnd w:id="${id}"/><w:r><w:rPr><w:rStyle w:val="CommentReference"/></w:rPr><w:commentReference w:id="${id}"/></w:r></w:p>`;
-  }
-  const parts = [];
-  const reP = /<w:p\b[\s\S]*?<\/w:p>/g;
-  let last = 0;
-  let m;
-  const src = String(bodyXml || "");
-  while ((m = reP.exec(src)) !== null) {
-    if (m.index > last) parts.push({ type: "raw", xml: src.slice(last, m.index) });
-    parts.push({ type: "p", xml: m[0] });
-    last = m.index + m[0].length;
-  }
-  if (last < src.length) parts.push({ type: "raw", xml: src.slice(last) });
-  const usedQuoteKeys = /* @__PURE__ */ new Set();
-  for (const entry of roots) {
-    const quote = String(entry.quoteText || "").trim();
-    for (let i = 0; i < parts.length; i++) {
-      if (parts[i].type !== "p") continue;
-      if (parts[i]._used) continue;
-      const plain = paraPlainText(parts[i].xml);
-      const hit = quote ? plain.includes(quote) : plain.length > 0;
-      if (!hit) continue;
-      const key = quote || `__p${i}`;
-      if (quote && usedQuoteKeys.has(key) && plain.indexOf(quote) === plain.lastIndexOf(quote)) {
-      }
-      parts[i] = { type: "p", xml: wrapPara(parts[i].xml, entry.commentId), _used: true };
-      if (quote) usedQuoteKeys.add(key);
-      break;
-    }
-  }
-  return parts.map((p) => p.xml).join("");
-}
 async function buildDocxBlob(html, mediaFiles, annotations = []) {
   if (typeof import_jszip2.default === "undefined") throw new Error("JSZip not loaded");
   const zip = new import_jszip2.default();
@@ -74215,6 +74486,18 @@ function setupToolbar() {
     if (e.target.closest('[data-act="toggle-comment-pane"]')) {
       toggleCommentPane();
     }
+    if (e.target.closest('[data-act="select-visible"]')) {
+      e.preventDefault();
+      selectVisibleCommentThreads();
+    }
+    if (e.target.closest('[data-act="clear-selection"]')) {
+      e.preventDefault();
+      clearCommentSelection();
+    }
+    if (e.target.closest('[data-act="delete-selected"]')) {
+      e.preventDefault();
+      deleteSelectedCommentThreads();
+    }
   });
   document.addEventListener("keydown", (e) => {
     if ((e.metaKey || e.ctrlKey) && e.key === "[") {
@@ -74257,6 +74540,11 @@ function setupToolbar() {
       if (hasOpenMenu) {
         e.preventDefault();
         closeAllCommentMenus();
+        return;
+      }
+      if (commentSelection.size() > 0) {
+        e.preventDefault();
+        clearCommentSelection();
         return;
       }
     }
@@ -75839,6 +76127,19 @@ window.__mdAnnotator = {
       window.confirm = origConfirm;
     }
   },
+  _testDeleteThreads(threadIds) {
+    return deleteThreads(threadIds || [], { confirm: false });
+  },
+  _testSelectThreads(threadIds) {
+    commentSelection.setAll(threadIds || []);
+    renderCommentList();
+    return commentSelection.ids();
+  },
+  _testClearCommentSelection() {
+    clearCommentSelection();
+  },
+  deleteThreads,
+  commentSelection,
   getAnnotations: () => State2.annotations,
   getEditorHTML: () => State2.editor.getHTML(),
   // 当前用户身份 (id 永不变, name 可改)
