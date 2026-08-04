@@ -65947,14 +65947,41 @@ async function fetchDoctorReport(opts) {
     }
     const data = await res.json();
     try {
-      const pathOk = !!(State2.externalWatchPath || State2.currentFile && State2.currentFile.path || typeof hasDiskWriteTarget === "function" && hasDiskWriteTarget());
+      let absPath = "";
+      try {
+        absPath = typeof resolveActiveMentorAbsPath === "function" && resolveActiveMentorAbsPath() || "";
+      } catch (_) {
+        absPath = "";
+      }
+      const hasHandleOnly = !absPath && typeof hasWriteHandle === "function" && hasWriteHandle();
+      const pathOk = !!(absPath && typeof isAbsMentorPath === "function" && isAbsMentorPath(absPath));
+      let pathDetail = "\u672A\u6253\u5F00\u6587\u6863\u6216\u65E0\u6CD5\u89E3\u6790\u8DEF\u5F84";
+      let pathTitle = "\u5F53\u524D\u6587\u7A3F\u65E0\u78C1\u76D8\u8DEF\u5F84\uFF08\u6D4F\u89C8\u5668\u6253\u5F00\u5E38\u89C1\uFF09";
+      let pathSev = "warn";
+      if (pathOk) {
+        pathTitle = "\u5F53\u524D\u6587\u7A3F\u6709\u7EDD\u5BF9\u78C1\u76D8\u8DEF\u5F84";
+        pathDetail = absPath;
+        pathSev = "ok";
+      } else if (hasHandleOnly) {
+        pathTitle = "\u4EC5\u6709\u6D4F\u89C8\u5668\u5199\u53E5\u67C4 \xB7 \u65E0\u7EDD\u5BF9\u8DEF\u5F84";
+        pathDetail = "\u53EF Ctrl+S \u5199\u56DE\uFF0C\u4F46 AI/Hermes \u9700\u8981\u771F\u5B9E\u8DEF\u5F84\u3002\u70B9\u300C\u7ED1\u5B9A\u78C1\u76D8\u8DEF\u5F84\u300D\u9009\u540C\u4E00\u4E2A .mentor\uFF0C\u6216\u53CC\u51FB\u6587\u4EF6 / mentor.cmd \u6253\u5F00\u3002";
+        pathSev = "warn";
+      } else if (State2.currentFile) {
+        pathTitle = "\u5F53\u524D\u6587\u7A3F\u65E0\u78C1\u76D8\u8DEF\u5F84\uFF08\u6D4F\u89C8\u5668\u6253\u5F00\u5E38\u89C1\uFF09";
+        pathDetail = "\u6D4F\u89C8\u5668\u300C\u6253\u5F00\u300D\u53EA\u6709\u6587\u4EF6\u53E5\u67C4\u3001\u6CA1\u6709\u7EDD\u5BF9\u8DEF\u5F84\u3002\u70B9\u300C\u7ED1\u5B9A\u78C1\u76D8\u8DEF\u5F84\u300D\uFF1B\u6216\u53CC\u51FB .mentor / mentor.cmd\u3002";
+        pathSev = "warn";
+      } else {
+        pathTitle = "\u672A\u6253\u5F00\u6587\u6863";
+        pathDetail = "\u5148\u6253\u5F00 .mentor \u518D\u6D4B AI \u8DEF\u5F84";
+        pathSev = "warn";
+      }
       const checks = Array.isArray(data.checks) ? data.checks.slice() : [];
       checks.push({
         id: "disk-path",
         ok: pathOk,
-        severity: pathOk ? "ok" : "warn",
-        title: pathOk ? "\u5F53\u524D\u6587\u7A3F\u6709\u78C1\u76D8\u8DEF\u5F84" : "\u5F53\u524D\u6587\u7A3F\u65E0\u78C1\u76D8\u8DEF\u5F84\uFF08\u6D4F\u89C8\u5668\u6253\u5F00\u5E38\u89C1\uFF09",
-        detail: pathOk ? String(State2.externalWatchPath || State2.currentFile && State2.currentFile.path || "handle/server path") : "\u6D4F\u89C8\u5668\u300C\u6253\u5F00\u300D\u53EA\u6709\u6587\u4EF6\u53E5\u67C4\u3001\u6CA1\u6709\u7EDD\u5BF9\u8DEF\u5F84\u3002\u70B9\u4E0B\u65B9\u300C\u7ED1\u5B9A\u78C1\u76D8\u8DEF\u5F84\u300D\u9009\u540C\u4E00\u4E2A .mentor\uFF1B\u6216\u53CC\u51FB\u6587\u4EF6/\u7528 mentor.cmd \u6253\u5F00\u3002",
+        severity: pathSev,
+        title: pathTitle,
+        detail: pathDetail,
         fix: pathOk ? null : "bind-path"
       });
       data.checks = checks;

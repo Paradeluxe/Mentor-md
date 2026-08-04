@@ -6579,16 +6579,43 @@ async function fetchDoctorReport(opts) {
     }
     const data = await res.json();
     try {
-      const pathOk = !!(State.externalWatchPath || (State.currentFile && State.currentFile.path) || (typeof hasDiskWriteTarget === "function" && hasDiskWriteTarget()));
+      // AI needs absolute path — write handle alone is NOT enough.
+      let absPath = "";
+      try {
+        absPath = (typeof resolveActiveMentorAbsPath === "function" && resolveActiveMentorAbsPath()) || "";
+      } catch (_) { absPath = ""; }
+      const hasHandleOnly =
+        !absPath && typeof hasWriteHandle === "function" && hasWriteHandle();
+      const pathOk = !!(absPath && typeof isAbsMentorPath === "function" && isAbsMentorPath(absPath));
+      let pathDetail = "未打开文档或无法解析路径";
+      let pathTitle = "当前文稿无磁盘路径（浏览器打开常见）";
+      let pathSev = "warn";
+      if (pathOk) {
+        pathTitle = "当前文稿有绝对磁盘路径";
+        pathDetail = absPath;
+        pathSev = "ok";
+      } else if (hasHandleOnly) {
+        pathTitle = "仅有浏览器写句柄 · 无绝对路径";
+        pathDetail =
+          "可 Ctrl+S 写回，但 AI/Hermes 需要真实路径。点「绑定磁盘路径」选同一个 .mentor，或双击文件 / mentor.cmd 打开。";
+        pathSev = "warn";
+      } else if (State.currentFile) {
+        pathTitle = "当前文稿无磁盘路径（浏览器打开常见）";
+        pathDetail =
+          "浏览器「打开」只有文件句柄、没有绝对路径。点「绑定磁盘路径」；或双击 .mentor / mentor.cmd。";
+        pathSev = "warn";
+      } else {
+        pathTitle = "未打开文档";
+        pathDetail = "先打开 .mentor 再测 AI 路径";
+        pathSev = "warn";
+      }
       const checks = Array.isArray(data.checks) ? data.checks.slice() : [];
       checks.push({
         id: "disk-path",
         ok: pathOk,
-        severity: pathOk ? "ok" : "warn",
-        title: pathOk ? "当前文稿有磁盘路径" : "当前文稿无磁盘路径（浏览器打开常见）",
-        detail: pathOk
-          ? String(State.externalWatchPath || (State.currentFile && State.currentFile.path) || "handle/server path")
-          : "浏览器「打开」只有文件句柄、没有绝对路径。点下方「绑定磁盘路径」选同一个 .mentor；或双击文件/用 mentor.cmd 打开。",
+        severity: pathSev,
+        title: pathTitle,
+        detail: pathDetail,
         fix: pathOk ? null : "bind-path",
       });
       data.checks = checks;
