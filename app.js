@@ -10123,6 +10123,48 @@ function loadMarkdownIntoEditor(name, content, annotationsData = null, options =
         State.annotations.push(thread);
         continue;
       }
+      // Prefer embedded HTML marks; if missing, recover via mdRange (no quote fuzzy).
+      const mdSourceHtml = typeof content === "string" ? content : "";
+      const vHtml = validateThreadMdRange(ann, mdSourceHtml);
+      if (vHtml.ok) {
+        const pm = pmRangeFromMdRange(doc5, mdSourceHtml, ann.mdRange, " ");
+        if (pm && typeof pm.from === "number" && pm.from < pm.to) {
+          const thread = {
+            ...ann,
+            authorColor: annotationAuthorColor(ann),
+            range: { from: pm.from, to: pm.to },
+            ranges: [{ from: pm.from, to: pm.to }],
+            mdRange: { from: ann.mdRange.from, to: ann.mdRange.to },
+            invalid: false,
+            deleted: false,
+            fuzzy: false,
+            invalidReason: void 0
+          };
+          try { normalizeThreadQuoteToLive(thread, doc5, pm.from, pm.to); } catch (_) {}
+          if (thread.anchor && typeof thread.anchor === "object") {
+            thread.anchor = {
+              ...thread.anchor,
+              status: "attached",
+              confidence: 1,
+              position: { from: pm.from, to: pm.to, startAssoc: 1, endAssoc: -1 },
+              quote: {
+                exact: thread.text || ann.text || "",
+                prefix: thread.prefix || ann.prefix || "",
+                suffix: thread.suffix || ann.suffix || ""
+              }
+            };
+          }
+          try {
+            const tr = State.editor.state.tr;
+            tr.addMark(pm.from, pm.to, markType.create(annotationMarkAttrs(thread)));
+            tr.setMeta("addToHistory", false);
+            tr.setMeta("__activeMarkSync", true);
+            State.editor.view.dispatch(tr);
+          } catch (_) {}
+          State.annotations.push(thread);
+          continue;
+        }
+      }
       if (intentionallyUnattached) {
         State.annotations.push({
           ...ann,
@@ -10131,12 +10173,12 @@ function loadMarkdownIntoEditor(name, content, annotationsData = null, options =
           ranges: [],
           invalid: true,
           fuzzy: savedStatus === "ambiguous" || !!ann.fuzzy,
-          deleted: false,
+          deleted: !!ann.deleted || savedStatus === "orphaned",
           invalidReason: ann.invalidReason || savedStatus
         });
         continue;
       }
-      // HTML verified but mark missing: do NOT text-search.
+      // HTML verified but mark + mdRange missing: orphan (no quote search).
       const thr = {
         ...ann,
         authorColor: annotationAuthorColor(ann),
@@ -10145,7 +10187,7 @@ function loadMarkdownIntoEditor(name, content, annotationsData = null, options =
         invalid: true,
         fuzzy: false,
         deleted: false,
-        invalidReason: "structural-mark-missing"
+        invalidReason: vHtml.ok ? "mdRange-pm-unmapped" : (vHtml.reason || "structural-mark-missing")
       };
       thr.anchor = ann.anchor && typeof ann.anchor === "object"
         ? { ...ann.anchor, status: "orphaned", confidence: 0, updatedAt: nowISO() }
@@ -10229,13 +10271,17 @@ function loadMarkdownIntoEditor(name, content, annotationsData = null, options =
         continue;
       }
 
-      if (intentionallyOrphan) {
+      // Canonical path: mdRange required. Stale deleted/orphaned flags must not
+      // skip a still-valid mdRange (AI/session writebacks used to poison the demo).
+      const mr = ann.mdRange;
+      const v = validateThreadMdRange(ann, mdSource);
+      if (intentionallyOrphan && !v.ok) {
         State.annotations.push({
           ...ann,
           authorColor: annotationAuthorColor(ann),
           range: null,
           invalid: true,
-          deleted: !!ann.deleted,
+          deleted: !!ann.deleted || savedStatus === "orphaned" || savedStatus === "text-deleted",
           fuzzy: false,
           invalidReason: ann.invalidReason || savedStatus || "orphaned"
         });
@@ -10243,9 +10289,6 @@ function loadMarkdownIntoEditor(name, content, annotationsData = null, options =
         continue;
       }
 
-      // Canonical path: mdRange required
-      const mr = ann.mdRange;
-      const v = validateThreadMdRange(ann, mdSource);
       if (!v.ok) {
         State.annotations.push({
           ...ann,

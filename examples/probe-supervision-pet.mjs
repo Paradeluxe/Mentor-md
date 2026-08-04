@@ -64,7 +64,8 @@ async function snap(page, label) {
     const s = window.__mdAnnotator?.getSupervisionState?.() || null;
     const marks = [];
     try {
-      const view = window.__mdAnnotator?.editor?.view;
+      const view = window.__mdAnnotator?.State?.editor?.view
+        || window.__mdAnnotator?.editor?.view;
       const doc = view?.state?.doc;
       const markType = view?.state?.schema?.marks?.annotation;
       if (doc && markType) {
@@ -87,10 +88,13 @@ async function snap(page, label) {
       petLabel: pet?.textContent?.trim()?.slice(0, 80) || '',
       petCount: document.querySelectorAll('.supervision-pet').length,
       state: s,
-      externalPath: window.__mdAnnotator?.getExternalWatchPath?.()
+      externalPath: window.__mdAnnotator?.resolveActiveMentorAbsPath?.()
+        || window.__mdAnnotator?.getExternalWatchPath?.()
+        || window.__mdAnnotator?.State?.externalWatchPath
         || window.__mdAnnotator?.externalWatchPath
         || null,
-      externalTokenSet: !!(window.__mdAnnotator?.getExternalWatchToken?.()
+      externalTokenSet: !!(window.__mdAnnotator?.State?.externalWatchToken
+        || window.__mdAnnotator?.getExternalWatchToken?.()
         || window.__mdAnnotator?.externalWatchToken),
       markCount: marks.length,
       markSample: marks.slice(0, 6),
@@ -139,8 +143,12 @@ async function main() {
   page.on('pageerror', (e) => console.log('pageerror', e.message));
 
   await page.goto(url, { waitUntil: 'networkidle', timeout: 30000 });
-  // wait for editor + annotations
-  await page.waitForFunction(() => !!window.__mdAnnotator?.editor, null, { timeout: 15000 });
+  // wait for editor + annotations (editor lives on State, not top-level)
+  await page.waitForFunction(
+    () => !!(window.__mdAnnotator?.State?.editor || window.__mdAnnotator?.editor),
+    null,
+    { timeout: 20000 }
+  );
   await page.waitForTimeout(1500);
   const a0 = await snap(page, 'after pending-open load (no sidecar)');
 
