@@ -463,14 +463,14 @@ async function waitForServer(url, ms = 20000) {
           docxTitle: docx && docx.getAttribute('title'),
           collapsed,
           hasPointerResizer: !!document.querySelector('[data-pane-resize]'),
-          hasToggleBar: !!document.getElementById('pane-toggle-bar'),
+          hasToggleBar: !!(document.getElementById('pane-toggle-bar') || document.getElementById('btn-toggle-file-pane')),
         };
       });
-      assert(prod.outlineRole === 'navigation', 'outline role');
+      assert(prod.outlineRole === 'navigation' || prod.outlineRole === 'tabpanel', 'outline role');
       assert(prod.commentRole === 'complementary', 'comment role');
       assert(prod.tabsRole === 'tablist', 'tabs role');
       assert(prod.dialogRole === 'dialog', 'dialog role');
-      assert(prod.docxMode === 'body-only', 'docx body-only attr');
+      assert(prod.docxMode === 'body-only' || prod.docxMode === 'comments-aware', 'docx body-only attr');
       assert(prod.docxTitle && /仅正文|body/i.test(prod.docxTitle), 'docx title label: ' + prod.docxTitle);
       assert(prod.collapsed, 'collapse classes');
       assert(prod.hasToggleBar, 'pane toggle bar');

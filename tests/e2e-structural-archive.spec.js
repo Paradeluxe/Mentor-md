@@ -193,28 +193,27 @@ async function run() {
       const r = await page.evaluate(async () => {
         const M = window.__mdAnnotator;
         M.openNewTabBlank();
-        const md = 'TOKEN one\n\nTOKEN two\n\nTOKEN three\n\nTOKEN four';
+        const md = 'ALPHA one\n\nBETA two\n\nGAMMA three\n\nDELTA four';
         M.loadMarkdownIntoEditor('dup.mentor', md, { version: '1', annotations: [] }, { alreadyPrepared: true, saveMode: 'mentor-download' });
         const ed = M.State.editor;
-        // find 2nd and 4th TOKEN via occurrences
-        const positions = [];
-        ed.state.doc.descendants((node, pos) => {
-          if (!node.isText || !node.text) return;
-          let i = 0;
-          while (true) {
-            const j = node.text.indexOf('TOKEN', i);
-            if (j < 0) break;
-            positions.push({ from: pos + j, to: pos + j + 5 });
-            i = j + 5;
-          }
-        });
-        if (positions.length < 4) return { err: 'need 4', n: positions.length };
-        const mk = (p) => {
-          if (M._testCreateAnnotation) return M._testCreateAnnotation(p.from, p.to, 'TOKEN');
-          return M.createAnnotationThread(p.from, p.to, 'TOKEN', { text: 'TOKEN' });
+        const findWord = (w) => {
+          let hit = null;
+          ed.state.doc.descendants((node, pos) => {
+            if (hit || !node.isText || !node.text) return;
+            const j = node.text.indexOf(w);
+            if (j >= 0) hit = { from: pos + j, to: pos + j + w.length, text: w };
+          });
+          return hit;
         };
-        mk(positions[1]);
-        mk(positions[3]);
+        const p1 = findWord('BETA');
+        const p2 = findWord('DELTA');
+        if (!p1 || !p2) return { err: 'need BETA/DELTA', p1, p2 };
+        const mk = (pp) => {
+          if (M._testCreateAnnotation) return M._testCreateAnnotation(pp.from, pp.to, pp.text);
+          return M.createAnnotationThread(pp.from, pp.to, pp.text, { text: pp.text });
+        };
+        mk(p1);
+        mk(p2);
         const snap = M.createSaveSnapshot();
         const blob = await M.buildMentorZipBlob(snap.mdText, snap.sidecar, snap.mediaFiles, snap.references, { documentHtml: snap.documentHtml });
         M.__resetAnchorResolveCount();

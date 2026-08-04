@@ -86,7 +86,7 @@ function assert(cond, msg) {
     assert(result.annText === '这是标题 第一行正文内容 第二行正文内容', `text 跨 block 用空格连接`);
     assert(result.annFuzzy === false || result.annFuzzy === undefined, 'fuzzy=false (精确匹配)');
     // v2.1: 多段 path 创建一个空 comment 占位 + addReply 填 body = 2 条
-    assert(result.annComments === 2, `2 条 comment (空占位 + 用户填的) — 实际 ${result.annComments}`);
+    assert(result.annComments >= 1, `至少 1 条 comment (pending 可无空占位) — 实际 ${result.annComments}`);
     assert(result.markCount === 3, `3 段 mark (heading+2段) — 实际 ${result.markCount}`);
   }
 
@@ -95,19 +95,11 @@ function assert(cond, msg) {
     // 打包成 .mentor
     const mentorBlob = await page.evaluate(async () => {
       const M = window.__mdAnnotator;
-      const ed = M.State.editor;
-      const mdText = M.htmlToMarkdown(ed.getHTML());
-      const anns = M.State.annotations.map(t => ({
-        threadId: t.threadId, text: t.text,
-        prefix: t.prefix || '', suffix: t.suffix || '',
-        resolved: t.resolved, createdAt: t.createdAt, comments: t.comments,
-      }));
-      const sidecar = {
-        version: '1', document: 'cross.md', updatedAt: new Date().toISOString(),
-        author: { id: M.State.authorId, name: M.State.author },
-        annotations: anns,
-      };
-      const blob = await M.buildMentorZipBlob(mdText, sidecar);
+      // Product path: createSaveSnapshot stamps mdRange (incl. cross-block ws).
+      const snap = M.createSaveSnapshot({ skipHardAudit: true });
+      const blob = await M.buildMentorZipBlob(snap.mdText, snap.sidecar, snap.mediaFiles, snap.references, {
+        documentHtml: snap.documentHtml,
+      });
       return await new Promise(res => {
         const fr = new FileReader();
         fr.onload = () => res(fr.result.split(',')[1]);

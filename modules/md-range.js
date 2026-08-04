@@ -28,6 +28,32 @@ export function sliceMdRange(md, r) {
   return md.slice(r.from, r.to);
 }
 
+/** Collapse whitespace so PM space-joined cross-block text matches md newlines. */
+function normWs(s) {
+  return String(s || '').replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * Find occurrences of text in md; if exact miss, allow flexible whitespace
+ * (cross-paragraph PM text uses spaces; content.md uses \\n\\n).
+ * Returns [{from,to}, ...] in md coordinates (to = exclusive end of match).
+ */
+function findTextSpansInMd(md, text) {
+  if (!text || typeof md !== 'string') return [];
+  const exact = findOccurrences(md, text).map((h) => ({ from: h, to: h + text.length }));
+  if (exact.length) return exact;
+  const parts = String(text).split(/\s+/).filter(Boolean);
+  if (parts.length < 2) return [];
+  const esc = parts.map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+  const re = new RegExp(esc.join('\\s+'), 'g');
+  const hits = [];
+  let m;
+  while ((m = re.exec(md)) !== null) {
+    hits.push({ from: m.index, to: m.index + m[0].length });
+  }
+  return hits;
+}
+
 /** Validate thread.mdRange against content.md. Strict: slice must equal thread.text. */
 export function validateThreadMdRange(thread, md) {
   if (!thread || typeof md !== 'string') {
@@ -49,6 +75,10 @@ export function validateThreadMdRange(thread, md) {
   const plainText = mdEmphasisToPlain(text);
   if (plainSlice === text || plainSlice === plainText || slice === plainText) {
     return { ok: true, reason: 'ok-plain', slice, text };
+  }
+  // Cross-block: PM joins with spaces; md may use newlines between segments
+  if (normWs(slice) === normWs(text) || normWs(plainSlice) === normWs(plainText)) {
+    return { ok: true, reason: 'ok-ws', slice, text };
   }
   return { ok: false, reason: 'mdRange-text-mismatch', slice, text };
 }
@@ -74,22 +104,55 @@ export function stampThreadMdRange(thread, md, contextChars = 40) {
   }
   // Prefer existing valid range
   const cur = validateThreadMdRange(thread, md);
-  if (cur.ok && (cur.reason === 'ok' || cur.reason === 'ok-plain')) {
+  if (cur.ok && (cur.reason === 'ok' || cur.reason === 'ok-plain' || cur.reason === 'ok-ws')) {
     // Disk quote = md slice (canonical); UI may have held PM plain temporarily
     projectQuoteFromMdRange(thread, md, contextChars);
     return true;
   }
-  const hits = findOccurrences(md, text);
-  if (hits.length !== 1) {
-    delete thread.mdRange;
-    return false;
+  const spans = findTextSpansInMd(md, text);
+    let chosen = null;
+    if (spans.length === 1) {
+      chosen = spans[0];
+    } else if (spans.length > 1) {
+      // Disambiguate duplicate quote via stored prefix/suffix (PM context), not fuzzy score.
+      const pfx = String(
+        thread.prefix ||
+          (thread.anchor && thread.anchor.quote && thread.anchor.quote.prefix) ||
+          ''
+      );
+      const sfx = String(
+        thread.suffix ||
+          (thread.anchor && thread.anchor.quote && thread.anchor.quote.suffix) ||
+          ''
+      );
+      const pTail = pfx.slice(-Math.min(24, pfx.length));
+      const sHead = sfx.slice(0, Math.min(24, sfx.length));
+      const ok = [];
+      for (const sp of spans) {
+        const lp = md.slice(Math.max(0, sp.from - 40), sp.from);
+        const ls = md.slice(sp.to, sp.to + 40);
+        const prefOk =
+          !pTail || lp.endsWith(pTail) || mdEmphasisToPlain(lp).endsWith(mdEmphasisToPlain(pTail));
+        const sufOk =
+          !sHead || ls.startsWith(sHead) || mdEmphasisToPlain(ls).startsWith(mdEmphasisToPlain(sHead));
+        if (prefOk && sufOk) ok.push(sp);
+      }
+      if (ok.length === 1) chosen = ok[0];
+    }
+    if (!chosen) {
+      delete thread.mdRange;
+      return false;
+    }
+    thread.mdRange = { from: chosen.from, to: chosen.to };
+    // Keep PM display text (may be space-joined); md slice stays canonical via mdRange.
+    const keepText = text;
+    projectQuoteFromMdRange(thread, md, contextChars);
+    // Restore UI text if whitespace-normalized equal (cross-block)
+    if (normWs(keepText) === normWs(thread.text) && keepText !== thread.text) {
+      thread.text = keepText;
+    }
+    return true;
   }
-  const from = hits[0];
-  const to = from + text.length;
-  thread.mdRange = { from, to };
-  projectQuoteFromMdRange(thread, md, contextChars);
-  return true;
-}
 
 export function projectQuoteFromMdRange(thread, md, contextChars = 40) {
   if (!thread || !isMdRange(thread.mdRange) || typeof md !== 'string') return;
@@ -175,6 +238,30 @@ export function pmRangeFromMdRange(doc, md, mdRange, sep = ' ') {
   if (!hits.length && needle !== exact) {
     hits = findOccurrences(plain, exact);
   }
+  // Cross-block: md has newlines; PM plain joins blocks with sep (space)
+  if (!hits.length) {
+    const spans = findTextSpansInMd(plain, normWs(needle));
+    if (!spans.length) {
+      const spans2 = findTextSpansInMd(plain, normWs(exact));
+      hits = spans2.map((s) => s.from);
+    } else {
+      hits = spans.map((s) => s.from);
+    }
+  }
+  // Also try needle with all whitespace collapsed to single spaces against plain
+  if (!hits.length) {
+    const n2 = normWs(needle);
+    const p2 = normWs(plain);
+    // map n2 hit back is hard; use flexible regex on plain
+    const parts = n2.split(' ').filter(Boolean);
+    if (parts.length >= 2) {
+      const esc = parts.map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+      const re = new RegExp(esc.join('\\s+'), 'g');
+      let m;
+      hits = [];
+      while ((m = re.exec(plain)) !== null) hits.push(m.index);
+    }
+  }
   if (!hits.length) return null;
 
   let chosen = null;
@@ -186,15 +273,39 @@ export function pmRangeFromMdRange(doc, md, mdRange, sep = ' ') {
     const pTail = mdPfx.slice(-Math.min(24, mdPfx.length));
     const sHead = mdSfx.slice(0, Math.min(24, mdSfx.length));
     const ok = [];
+    const needleLen = (normWs(needle) || needle).length;
     for (const h of hits) {
       const lp = plain.slice(Math.max(0, h - 40), h);
-      const ls = plain.slice(h + needle.length, h + needle.length + 40);
+      // approximate end: flexible match length from h
+      let end = h + needle.length;
+      const rest = plain.slice(h);
+      const parts = normWs(needle).split(' ').filter(Boolean);
+      if (parts.length >= 2) {
+        const esc = parts.map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+        const m = rest.match(new RegExp('^' + esc.join('\\s+')));
+        if (m) end = h + m[0].length;
+      }
+      const ls = plain.slice(end, end + 40);
       const prefOk = !pTail || lp.endsWith(pTail);
       const sufOk = !sHead || ls.startsWith(sHead);
       if (prefOk && sufOk) ok.push(h);
     }
     if (ok.length !== 1) return null;
     chosen = ok[0];
+  }
+
+  // length of match in plain
+  let matchLen = needle.length;
+  {
+    const rest = plain.slice(chosen);
+    const parts = normWs(needle).split(' ').filter(Boolean);
+    if (parts.length >= 2) {
+      const esc = parts.map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+      const m = rest.match(new RegExp('^' + esc.join('\\s+')));
+      if (m) matchLen = m[0].length;
+    } else if (!plain.slice(chosen, chosen + matchLen).includes(needle[0])) {
+      matchLen = normWs(needle).length;
+    }
   }
 
   const posAtOffset = (offset) => {
@@ -211,7 +322,7 @@ export function pmRangeFromMdRange(doc, md, mdRange, sep = ' ') {
   };
 
   const from = posAtOffset(chosen);
-  const to = posAtOffset(chosen + needle.length);
+  const to = posAtOffset(chosen + matchLen);
   if (!(from < to)) return null;
   return { from, to, exact, plain: needle };
 }

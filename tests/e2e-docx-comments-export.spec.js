@@ -95,7 +95,8 @@ const PORT = (() => {
     assert.ok(zip.files['word/commentsExtended.xml'], 'commentsExtended present');
     assert.ok(zip.files['word/commentsIds.xml'], 'commentsIds present');
     assert.ok(zip.files['word/commentsExtensible.xml'], 'commentsExtensible present');
-    assert.ok(zip.files['word/people.xml'], 'people.xml present when author ids set');
+    // people.xml intentionally omitted (Word Desktop corruption); comments work without it
+    assert.equal(!!zip.files['word/people.xml'], false, 'people.xml intentionally omitted');
 
     const ct = readPart(zip, '[Content_Types].xml');
     assert.ok(ct.includes('wordprocessingml.comments+xml'), 'CT comments');

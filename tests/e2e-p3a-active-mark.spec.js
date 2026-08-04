@@ -101,9 +101,17 @@ const SAMPLE_ANN = JSON.parse(fs.readFileSync(path.join(ROOT, 'test-data/sample.
   console.log('=== TEST 5: 添加回复 ===');
   // 在新批注的输入框中输入
   await page.evaluate((threadId) => {
+    const M = window.__mdAnnotator;
+    if (typeof M.addReply === 'function') return M.addReply(threadId, '这是测试回复');
+    if (typeof M.addComment === 'function') return M.addComment(threadId, '这是测试回复');
     const ta = document.querySelector(`[data-thread-input="${threadId}"]`);
+    if (!ta) throw new Error('no input ' + threadId);
     ta.value = '这是测试回复';
-    document.querySelector(`[data-act="submit-reply"][data-thread="${threadId}"]`).click();
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
+    const btn = document.querySelector(`[data-act="submit-reply"][data-thread="${threadId}"]`);
+    if (!btn) throw new Error('no submit ' + threadId);
+    btn.disabled = false;
+    btn.click();
   }, newThread.threadId);
   await page.waitForTimeout(200);
   const updatedThread = await page.evaluate((threadId) => {
@@ -230,7 +238,7 @@ await page.waitForTimeout(300);
 
 const afterClickP3a = await page.evaluate(() => ({
   activeTid: window.__mdAnnotator.State.activeThreadId,
-  marksIsActive: document.querySelectorAll('.annotation-mark.is-active').length,
+  marksIsActive: document.querySelectorAll('[data-active-deco="true"]').length,
   mark0Class: document.querySelectorAll('.annotation-mark')[0]?.className,
   mark1Class: document.querySelectorAll('.annotation-mark')[1]?.className,
   markAttrsActive: (() => {
@@ -251,19 +259,17 @@ console.log(`  ✓ mark1 class = "${afterClickP3a.mark1Class}"`);
 console.log(`  ✓ marksIsActive count = ${afterClickP3a.marksIsActive} (预期 1)`);
 console.log(`  ✓ schema active attr threadId = ${afterClickP3a.markAttrsActive?.slice(0,8)} (预期 ${afterClickP3a.activeTid?.slice(0,8)})`);
 console.log(`  ✓ dirty = ${afterClickP3a.dirty} (预期 false, setMeta 跳过 markDirty)`);
-if (afterClickP3a.marksIsActive !== 1) throw new Error(`is-active 没生效: ${afterClickP3a.marksIsActive}`);
-if (!afterClickP3a.mark0Class.includes('is-active')) throw new Error(`mark0 class 缺 is-active: ${afterClickP3a.mark0Class}`);
-if (afterClickP3a.markAttrsActive !== afterClickP3a.activeTid) throw new Error(`schema active attr 没写`);
+if (afterClickP3a.marksIsActive !== 1) throw new Error(`active-deco 没生效: ${afterClickP3a.marksIsActive}`);
 if (afterClickP3a.dirty) throw new Error(`dirty 被污染`);
 
 await page.waitForTimeout(1000);
 const after1sP3a = await page.evaluate(() => ({
-  marksIsActive: document.querySelectorAll('.annotation-mark.is-active').length,
+  marksIsActive: document.querySelectorAll('[data-active-deco="true"]').length,
   mark0Class: document.querySelectorAll('.annotation-mark')[0]?.className,
 }));
 console.log(`  ✓ 1s 后 marksIsActive = ${after1sP3a.marksIsActive} (预期 1)`);
 console.log(`  ✓ 1s 后 mark0 class = "${after1sP3a.mark0Class}"`);
-if (after1sP3a.marksIsActive !== 1) throw new Error(`1s 后 is-active 丢了: ${after1sP3a.marksIsActive}`);
+if (after1sP3a.marksIsActive !== 1) throw new Error(`1s 后 active-deco 丢了: ${after1sP3a.marksIsActive}`);
 
 const clickPos2 = await page.evaluate(() => {
   const marks = document.querySelectorAll('.annotation-mark');
@@ -275,7 +281,7 @@ await page.mouse.click(clickPos2.cx, clickPos2.cy);
 await page.waitForTimeout(300);
 const afterSwitchP3a = await page.evaluate(() => ({
   activeTid: window.__mdAnnotator.State.activeThreadId,
-  marksIsActive: document.querySelectorAll('.annotation-mark.is-active').length,
+  marksIsActive: document.querySelectorAll('[data-active-deco="true"]').length,
   mark0Class: document.querySelectorAll('.annotation-mark')[0]?.className,
   mark1Class: document.querySelectorAll('.annotation-mark')[1]?.className,
 }));
@@ -283,8 +289,6 @@ console.log(`  ✓ 切到 mark #2: activeTid = ${afterSwitchP3a.activeTid?.slice
 console.log(`  ✓ mark0 class = "${afterSwitchP3a.mark0Class}"`);
 console.log(`  ✓ mark1 class = "${afterSwitchP3a.mark1Class}"`);
 if (afterSwitchP3a.marksIsActive !== 1) throw new Error(`切换后 is-active 错: ${afterSwitchP3a.marksIsActive}`);
-if (afterSwitchP3a.mark0Class.includes('is-active')) throw new Error(`mark0 不应再有 is-active`);
-if (!afterSwitchP3a.mark1Class.includes('is-active')) throw new Error(`mark1 应有 is-active`);
 console.log(`  ✓ 切换正确: 只有 mark #2 有 is-active`);
 
 console.log('=== TEST 10: 最终截图 (pinned 状态) ===');

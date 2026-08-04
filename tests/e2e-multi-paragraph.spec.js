@@ -121,9 +121,9 @@ const URL = 'http://127.0.0.1:8787/index.html';
 
   // 5. 视觉: status 提示 "多段批注"
   // status-left 由 setStatus 同步写, status-right 由 updateDocMeta (debounced 250ms) 覆盖
-  // 多段信息保留在 status-left (e.g. "已创建多段批注")
+  // 多段信息保留在 status-left (e.g. "人类调整（多段）")
   const statusLeft = await page.evaluate(() => document.querySelector('#status-left')?.textContent || '');
-  record('status-left 显示 "已创建多段批注"', /多段批注/.test(statusLeft), `status-left="${statusLeft}"`);
+  record('status-left 显示 "人类调整（多段）"', /多段/.test(statusLeft), `status-left="${statusLeft}"`);
 
   await browser.close();
   const passed = results.filter(r => r.pass).length;

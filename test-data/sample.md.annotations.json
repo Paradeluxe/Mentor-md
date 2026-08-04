@@ -22,7 +22,26 @@
           "body": "建议在 README 中说明浏览器兼容性。",
           "createdAt": "2026-06-21T10:05:00.000Z"
         }
-      ]
+      ],
+      "mdRange": {
+        "from": 170,
+        "to": 187
+      },
+      "anchor": {
+        "version": "1",
+        "status": "attached",
+        "confidence": 1,
+        "quote": {
+          "exact": "WYSIWYG 编辑（所见即所得）",
+          "prefix": "注，所有批注会显示在右侧的批注面板中。\r\n\r\n## 第二章：功能列表\r\n\r\n- ",
+          "suffix": "\r\n- 选区级批注（精确到字符范围）\r\n- 嵌套回复（threaded repl"
+        }
+      },
+      "deleted": false,
+      "invalid": false,
+      "fuzzy": false,
+      "prefix": "注，所有批注会显示在右侧的批注面板中。\r\n\r\n## 第二章：功能列表\r\n\r\n- ",
+      "suffix": "\r\n- 选区级批注（精确到字符范围）\r\n- 嵌套回复（threaded repl"
     },
     {
       "threadId": "test-thread-2",
@@ -36,7 +55,27 @@
           "body": "已实现，使用 ProseMirror mark。",
           "createdAt": "2026-06-21T10:10:00.000Z"
         }
-      ]
+      ],
+      "mdRange": {
+        "from": 191,
+        "to": 205
+      },
+      "anchor": {
+        "version": "1",
+        "status": "attached",
+        "confidence": 1,
+        "quote": {
+          "exact": "选区级批注（精确到字符范围）",
+          "prefix": "\r\n## 第二章：功能列表\r\n\r\n- WYSIWYG 编辑（所见即所得）\r\n- ",
+          "suffix": "\r\n- 嵌套回复（threaded replies）\r\n- 解决/重新打开批注\r"
+        }
+      },
+      "deleted": false,
+      "invalid": false,
+      "fuzzy": false,
+      "prefix": "\r\n## 第二章：功能列表\r\n\r\n- WYSIWYG 编辑（所见即所得）\r\n- ",
+      "suffix": "\r\n- 嵌套回复（threaded replies）\r\n- 解决/重新打开批注\r"
     }
-  ]
+  ],
+  "anchorMode": "range"
 }
