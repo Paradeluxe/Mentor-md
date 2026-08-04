@@ -40,10 +40,10 @@ set "OPEN_URL=http://127.0.0.1:%MENTOR_PORT%/index.html"
 REM --- is port listening? ---
 netstat -an | findstr ":%MENTOR_PORT%.*LISTENING" >nul 2>&1
 if %errorlevel% equ 0 (
-  REM verify it is Mentor (not psyclaw / other)
-  for /f "usebackq delims=" %%T in (`powershell -NoProfile -Command "try { $r=Invoke-WebRequest -UseBasicParsing -TimeoutSec 2 -Uri 'http://127.0.0.1:%MENTOR_PORT%/index.html'; if ($r.Content -match 'Mentor') { 'yes' } else { 'no' } } catch { 'no' }"`) do set "TITLE_CHK=%%T"
+  REM Must be real mentor-server (/session JSON), NOT plain http.server serving index.html
+  for /f "usebackq delims=" %%T in (`powershell -NoProfile -Command "try { $s=Invoke-RestMethod -Uri 'http://127.0.0.1:%MENTOR_PORT%/session' -TimeoutSec 2; if ($s.token) { 'yes' } else { 'no' } } catch { 'no' }"`) do set "SESSION_CHK=%%T"
   setlocal EnableDelayedExpansion
-  if /i "!TITLE_CHK!"=="yes" (
+  if /i "!SESSION_CHK!"=="yes" (
     REM If a file was passed, queue Word-style pending-open then open shell
     if not "%OPEN_FILE%"=="" (
       powershell -NoProfile -ExecutionPolicy Bypass -Command ^
@@ -54,8 +54,9 @@ if %errorlevel% equ 0 (
     goto :end
   )
   endlocal
-  echo [Mentor] Port %MENTOR_PORT% is in use by another app.
-  echo Close that process or change PORT file, then retry.
+  echo [Mentor] Port %MENTOR_PORT% is listening but is NOT mentor-server.py
+  echo ^(e.g. python -m http.server has no /session — AI/Hermes will fail^).
+  echo Kill that process, then re-run mentor.cmd.
   pause
   exit /b 2
 )

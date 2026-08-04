@@ -6334,7 +6334,22 @@ async function fetchHermesConnection(opts) {
     if (warm) q.set("warm", "1");
     if (wait) q.set("wait", String(wait));
     const res = await fetch(location.origin + "/hermes-connection?" + q.toString(), { cache: "no-store" });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      const hint = res.status === 404
+        ? "8787 不是 mentor-server（/hermes-connection 404）。关掉 python -m http.server，用 mentor.cmd 启动"
+        : ("HTTP " + res.status);
+      State.hermesConnection = {
+        state: "unavailable",
+        reachable: false,
+        agentReady: false,
+        error: hint,
+        skills: [],
+        mode: "warm",
+        checkedAt: Date.now(),
+      };
+      try { syncHermesConnectionUi(); } catch (_) {}
+      return State.hermesConnection;
+    }
     const data = await res.json();
     State.hermesConnection = {
       state: data.state || (data.reachable ? "ready" : "down"),
@@ -6747,24 +6762,27 @@ async function runFixMentorFromUi(opts = {}) {
   }
 
   // Gate: Hermes warm worker must be ready — no cold spawn fallback.
-  try {
-    const conn = await fetchHermesConnection({ warm: true, wait: 12 });
-    if (!conn || !conn.agentReady) {
-      const msg = "Hermes 未就绪（底栏连接芯片）。等「Hermes 已就绪」再点 AI，或重启 mentor-server。";
-      setFixMentorJobState({
-        status: "error",
-        error: "hermes-not-ready",
-        message: msg,
-      });
-      showToast(msg, 4500);
-      return { ok: false, error: "hermes-not-ready", message: msg };
+    try {
+      const conn = await fetchHermesConnection({ warm: true, wait: 12 });
+      if (!conn || !conn.agentReady) {
+        const detail = (conn && conn.error) ? String(conn.error) : "";
+        const msg = detail
+          ? ("Hermes 未就绪：" + detail)
+          : "Hermes 未就绪（底栏连接芯片）。等「Hermes 已就绪」再点 AI，或关掉假 http.server 后用 mentor.cmd 重启。";
+        setFixMentorJobState({
+          status: "error",
+          error: "hermes-not-ready",
+          message: msg,
+        });
+        showToast(msg, 5200);
+        return { ok: false, error: "hermes-not-ready", message: msg };
+      }
+    } catch (_) {
+      const msg = "无法检查 Hermes 连接";
+      setFixMentorJobState({ status: "error", error: "hermes-conn-check", message: msg });
+      showToast(msg, 4200);
+      return { ok: false, error: "hermes-conn-check", message: msg };
     }
-  } catch (_) {
-    const msg = "无法检查 Hermes 连接";
-    setFixMentorJobState({ status: "error", error: "hermes-conn-check", message: msg });
-    showToast(msg, 4200);
-    return { ok: false, error: "hermes-conn-check", message: msg };
-  }
 
   const saved = await ensureDiskSavedForFixMentor();
   if (!saved.ok) {

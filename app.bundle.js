@@ -65713,7 +65713,23 @@ async function fetchHermesConnection(opts) {
     if (warm) q.set("warm", "1");
     if (wait) q.set("wait", String(wait));
     const res = await fetch(location.origin + "/hermes-connection?" + q.toString(), { cache: "no-store" });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      const hint = res.status === 404 ? "8787 \u4E0D\u662F mentor-server\uFF08/hermes-connection 404\uFF09\u3002\u5173\u6389 python -m http.server\uFF0C\u7528 mentor.cmd \u542F\u52A8" : "HTTP " + res.status;
+      State2.hermesConnection = {
+        state: "unavailable",
+        reachable: false,
+        agentReady: false,
+        error: hint,
+        skills: [],
+        mode: "warm",
+        checkedAt: Date.now()
+      };
+      try {
+        syncHermesConnectionUi();
+      } catch (_) {
+      }
+      return State2.hermesConnection;
+    }
     const data = await res.json();
     State2.hermesConnection = {
       state: data.state || (data.reachable ? "ready" : "down"),
@@ -66114,13 +66130,14 @@ async function runFixMentorFromUi(opts = {}) {
   try {
     const conn = await fetchHermesConnection({ warm: true, wait: 12 });
     if (!conn || !conn.agentReady) {
-      const msg = "Hermes \u672A\u5C31\u7EEA\uFF08\u5E95\u680F\u8FDE\u63A5\u82AF\u7247\uFF09\u3002\u7B49\u300CHermes \u5DF2\u5C31\u7EEA\u300D\u518D\u70B9 AI\uFF0C\u6216\u91CD\u542F mentor-server\u3002";
+      const detail = conn && conn.error ? String(conn.error) : "";
+      const msg = detail ? "Hermes \u672A\u5C31\u7EEA\uFF1A" + detail : "Hermes \u672A\u5C31\u7EEA\uFF08\u5E95\u680F\u8FDE\u63A5\u82AF\u7247\uFF09\u3002\u7B49\u300CHermes \u5DF2\u5C31\u7EEA\u300D\u518D\u70B9 AI\uFF0C\u6216\u5173\u6389\u5047 http.server \u540E\u7528 mentor.cmd \u91CD\u542F\u3002";
       setFixMentorJobState({
         status: "error",
         error: "hermes-not-ready",
         message: msg
       });
-      showToast(msg, 4500);
+      showToast(msg, 5200);
       return { ok: false, error: "hermes-not-ready", message: msg };
     }
   } catch (_) {
