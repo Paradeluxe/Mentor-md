@@ -126,41 +126,50 @@ const { chromium } = require('playwright');
       t4);
 
     // T5: 再次删 mark 文字 → deleted 状态
-    const t5 = await page.evaluate(async () => {
-      const ed = window.__mdAnnotator.State.editor;
-      const ann = window.__mdAnnotator.State.annotations[0];
-      if (ann.range) {
-        ed.commands.setTextSelection({ from: ann.range.from, to: ann.range.to });
-        ed.commands.deleteSelection();
-        await new Promise(r => setTimeout(r, 200));
-        // 重新 validate
-        if (window.__mdAnnotator._validateMarksAfterEdit) {
-          window.__mdAnnotator._validateMarksAfterEdit(ed);
-        }
-      }
-      return {
-        annDeleted: ann.deleted,
-        annInvalidReason: ann.invalidReason,
-      };
-    });
-    step('T5_second_delete_again_deleted',
-      t5.annDeleted === true,
-      t5);
+        const t5 = await page.evaluate(async () => {
+          const ed = window.__mdAnnotator.State.editor;
+          const ann = window.__mdAnnotator.State.annotations[0];
+          if (ann.range) {
+            ed.commands.setTextSelection({ from: ann.range.from, to: ann.range.to });
+            ed.commands.deleteSelection();
+            await new Promise(r => setTimeout(r, 200));
+            // 重新 validate
+            if (window.__mdAnnotator._validateMarksAfterEdit) {
+              window.__mdAnnotator._validateMarksAfterEdit(ed);
+            }
+          }
+          // Must re-render so .deleted-banner + delete-orphan bind to current thread
+          if (window.__mdAnnotator.renderCommentList) window.__mdAnnotator.renderCommentList();
+          const card = document.querySelector('.comment-thread[data-thread="' + (ann && ann.threadId) + '"]');
+          return {
+            annDeleted: ann.deleted,
+            annInvalidReason: ann.invalidReason,
+            banner: card && card.querySelector('.deleted-banner')
+              ? card.querySelector('.deleted-banner').textContent.trim()
+              : '',
+          };
+        });
+        step('T5_second_delete_again_deleted',
+          t5.annDeleted === true && /原文已被删除/.test(t5.banner || ''),
+          t5);
 
-    // T6: delete-orphan 真删
-    const t6 = await page.evaluate(() => {
-      window.confirm = () => true;
-      const before = window.__mdAnnotator.State.annotations.length;
-      const btn = document.querySelector('[data-act="delete-orphan"]');
-      btn.click();
-      return {
-        before,
-        after: window.__mdAnnotator.State.annotations.length,
-      };
-    });
-    step('T6_delete_orphan_removes_ann',
-      t6.before === 1 && t6.after === 0,
-      t6);
+        // T6: delete-orphan 真删
+        const t6 = await page.evaluate(() => {
+          window.confirm = () => true;
+          const before = window.__mdAnnotator.State.annotations.length;
+          const btn = document.querySelector('.comment-thread[data-thread="reattach-test"] [data-act="delete-orphan"]')
+            || document.querySelector('[data-act="delete-orphan"]');
+          if (!btn) return { before, after: before, error: 'no-delete-orphan-btn' };
+          btn.click();
+          return {
+            before,
+            after: window.__mdAnnotator.State.annotations.length,
+            tid: btn.dataset.thread || '',
+          };
+        });
+        step('T6_delete_orphan_removes_ann',
+          t6.before === 1 && t6.after === 0,
+          t6);
 
     // T7: Esc 取消 reattach
     const t7 = await page.evaluate(async () => {
