@@ -124,7 +124,10 @@ export function projectQuoteFromMdRange(thread, md, contextChars = 40) {
  */
 export function stampSidecarMdRanges(sidecar, md, opts = {}) {
   const contextChars = opts.contextChars != null ? opts.contextChars : 40;
-  const anns = sidecar && Array.isArray(sidecar.annotations) ? sidecar.annotations : [];
+  // Accept full sidecar {annotations:[...]} OR a bare annotations array (save helpers).
+  const anns = Array.isArray(sidecar)
+    ? sidecar
+    : (sidecar && Array.isArray(sidecar.annotations) ? sidecar.annotations : []);
   let stamped = 0;
   let failed = 0;
   const failedIds = [];

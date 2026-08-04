@@ -57210,7 +57210,7 @@ ${fields.join(",\n")}
   }
   function stampSidecarMdRanges(sidecar, md2, opts = {}) {
     const contextChars = opts.contextChars != null ? opts.contextChars : 40;
-    const anns = sidecar && Array.isArray(sidecar.annotations) ? sidecar.annotations : [];
+    const anns = Array.isArray(sidecar) ? sidecar : sidecar && Array.isArray(sidecar.annotations) ? sidecar.annotations : [];
     let stamped = 0;
     let failed = 0;
     const failedIds = [];
@@ -61369,11 +61369,7 @@ ${BIBLIOGRAPHY_MARKER}
       $("#dirty-indicator").classList.add("is-dirty");
       $("#current-file-name").textContent = State2.currentFile.name;
       try {
-        const t = State2.tabs.find((x) => x && x.id === State2.activeTabId);
-        if (t) {
-          t.dirty = true;
-          t.name = State2.currentFile.name;
-        }
+        snapshotActiveTab();
         renderDocTabs();
       } catch {
       }
@@ -62300,6 +62296,33 @@ ${BIBLIOGRAPHY_MARKER}
     return o;
   }
   function buildAnnotationsSidecar() {
+    try {
+      const ed = State2.editor;
+      if (ed) {
+        let mdText = "";
+        try {
+          if (typeof getMarkdown === "function") mdText = getMarkdown() || "";
+        } catch (_) {
+        }
+        if (!mdText) {
+          try {
+            mdText = htmlToMarkdownMedia(ed.getHTML()) || "";
+          } catch (_) {
+          }
+        }
+        if (!mdText) {
+          try {
+            mdText = htmlToMarkdown(ed.getHTML()) || "";
+          } catch (_) {
+          }
+        }
+        if (mdText) {
+          const pack = { annotations: State2.annotations || [] };
+          stampSidecarMdRanges(pack, mdText, {});
+        }
+      }
+    } catch (_) {
+    }
     return State2.annotations.filter((x) => x && typeof x === "object" && x.threadId).map(serializeAnnotationThread).filter(Boolean);
   }
   function collectLiveAnnotationAudit() {
@@ -64878,6 +64901,10 @@ ${BIBLIOGRAPHY_MARKER}
       options.type ? `\u5199\u5185\u5BB9\u540E\u63D0\u4EA4 \xB7 ${threadId.slice(0, 8)}` : `\u7EBF\u7A0B ${threadId.slice(0, 8)}`
     );
     emitAI("threadChange", { threadId, change: "create", thread });
+    try {
+      markDirty();
+    } catch (_) {
+    }
     return thread;
   }
   function handleCreateMultiCellAnnotation(cellSel, opts = {}) {
@@ -65459,18 +65486,25 @@ ${BIBLIOGRAPHY_MARKER}
   function annotationWarningState(thread) {
     if (!thread || typeof thread !== "object") return null;
     if (thread.threadId && annotationHasLiveMark(thread.threadId)) {
-      if (thread.deleted || thread.invalid || thread.fuzzy || thread.anchor && thread.anchor.status === "orphaned") {
-        thread.deleted = false;
-        thread.invalid = false;
-        thread.fuzzy = false;
-        thread.invalidReason = void 0;
-        if (thread.anchor && typeof thread.anchor === "object") {
-          thread.anchor = { ...thread.anchor, status: "attached", confidence: 1 };
+      const st = thread.anchor && thread.anchor.status;
+      const reason0 = thread.invalidReason || "";
+      const hardExplicit = !!(thread.deleted || st === "orphaned" || st === "text-deleted" || st === "deleted" || reason0 === "orphaned" || reason0 === "text-deleted");
+      if (!hardExplicit) {
+        if (thread.invalid || thread.fuzzy || thread.anchor && thread.anchor.status === "mark-missing") {
+          thread.deleted = false;
+          thread.invalid = false;
+          thread.fuzzy = false;
+          thread.invalidReason = void 0;
+          if (thread.anchor && typeof thread.anchor === "object") {
+            thread.anchor = { ...thread.anchor, status: "attached", confidence: 1 };
+          }
         }
+        return null;
       }
+    }
+    if (threadAnchorOk(thread) && !(thread.deleted || thread.anchor && (thread.anchor.status === "orphaned" || thread.anchor.status === "text-deleted"))) {
       return null;
     }
-    if (threadAnchorOk(thread)) return null;
     const status = thread.anchor && thread.anchor.status;
     const reason = thread.invalidReason || "";
     if (status === "ambiguous" || reason === "ambiguous") return { kind: "ambiguous" };
@@ -68707,8 +68741,15 @@ ${BIB_PLACEHOLDER}
     }
     return snap;
   }
-  function restoreTab(tab) {
+  function restoreTab(tab, options = {}) {
     if (!tab || !State2.editor) return false;
+    if (!options.force && tab.id && tab.id === State2.activeTabId) {
+      try {
+        snapshotActiveTab();
+      } catch (_) {
+      }
+      return true;
+    }
     stopAutosaveTimer();
     try {
       closeLiveSync();

@@ -1862,11 +1862,9 @@ function markDirty() {
     $("#dirty-indicator").classList.add("is-dirty");
     $("#current-file-name").textContent = State.currentFile.name;
     try {
-      const t = State.tabs.find((x) => x && x.id === State.activeTabId);
-      if (t) {
-        t.dirty = true;
-        t.name = State.currentFile.name;
-      }
+      // Keep tab snapshot (html + annotations) fresh so delayed restore/persist
+      // cannot clobber live edits with an empty openNewTabBlank snapshot.
+      snapshotActiveTab();
       renderDocTabs();
     } catch {
     }
@@ -2831,6 +2829,26 @@ function serializeAnnotationThread(t) {
   return o;
 }
 function buildAnnotationsSidecar() {
+  // Range mode: stamp mdRange onto live threads before serialize so packages reopen.
+  try {
+    const ed = State.editor;
+    if (ed) {
+      let mdText = "";
+      try {
+        if (typeof getMarkdown === "function") mdText = getMarkdown() || "";
+      } catch (_) {}
+      if (!mdText) {
+        try { mdText = htmlToMarkdownMedia(ed.getHTML()) || ""; } catch (_) {}
+      }
+      if (!mdText) {
+        try { mdText = htmlToMarkdown(ed.getHTML()) || ""; } catch (_) {}
+      }
+      if (mdText) {
+        const pack = { annotations: State.annotations || [] };
+        stampSidecarMdRanges(pack, mdText, {});
+      }
+    }
+  } catch (_) {}
   return State.annotations.filter((x) => x && typeof x === "object" && x.threadId).map(serializeAnnotationThread).filter(Boolean);
 }
 function collectLiveAnnotationAudit() {
@@ -5467,6 +5485,7 @@ function createAnnotationThread(from2, to, text2, opts = null) {
     options.type ? `\u5199\u5185\u5BB9\u540E\u63D0\u4EA4 \xB7 ${threadId.slice(0, 8)}` : `\u7EBF\u7A0B ${threadId.slice(0, 8)}`
   );
   emitAI("threadChange", { threadId, change: "create", thread });
+  try { markDirty(); } catch (_) {}
   return thread;
 }
 function handleCreateMultiCellAnnotation(cellSel, opts = {}) {
@@ -6061,20 +6080,36 @@ function threadAnchorOk(thread) {
  */
 function annotationWarningState(thread) {
   if (!thread || typeof thread !== "object") return null;
-  // Live mark ⇒ OK; clear lagging flags
+  // Live mark ⇒ OK for lagging soft flags only.
+  // Keep explicit orphaned/deleted/text-deleted (hard banners) — do not auto-heal those.
   if (thread.threadId && annotationHasLiveMark(thread.threadId)) {
-    if (thread.deleted || thread.invalid || thread.fuzzy || (thread.anchor && thread.anchor.status === "orphaned")) {
-      thread.deleted = false;
-      thread.invalid = false;
-      thread.fuzzy = false;
-      thread.invalidReason = void 0;
-      if (thread.anchor && typeof thread.anchor === "object") {
-        thread.anchor = { ...thread.anchor, status: "attached", confidence: 1 };
+    const st = thread.anchor && thread.anchor.status;
+    const reason0 = thread.invalidReason || "";
+    const hardExplicit = !!(
+      thread.deleted ||
+      st === "orphaned" ||
+      st === "text-deleted" ||
+      st === "deleted" ||
+      reason0 === "orphaned" ||
+      reason0 === "text-deleted"
+    );
+    if (!hardExplicit) {
+      if (thread.invalid || thread.fuzzy || (thread.anchor && thread.anchor.status === "mark-missing")) {
+        thread.deleted = false;
+        thread.invalid = false;
+        thread.fuzzy = false;
+        thread.invalidReason = void 0;
+        if (thread.anchor && typeof thread.anchor === "object") {
+          thread.anchor = { ...thread.anchor, status: "attached", confidence: 1 };
+        }
       }
+      return null;
     }
+    // hard explicit with lingering mark: still surface banner (mark may be stale)
+  }
+  if (threadAnchorOk(thread) && !(thread.deleted || (thread.anchor && (thread.anchor.status === "orphaned" || thread.anchor.status === "text-deleted")))) {
     return null;
   }
-  if (threadAnchorOk(thread)) return null;
 
   const status = thread.anchor && thread.anchor.status;
   const reason = thread.invalidReason || "";
@@ -9379,8 +9414,14 @@ function snapshotActiveTab() {
   }
   return snap;
 }
-function restoreTab(tab) {
+function restoreTab(tab, options = {}) {
   if (!tab || !State.editor) return false;
+  // Never clobber the live editor with a stale tab snapshot of the already-active tab.
+  // Hard reload callers must pass { force: true }.
+  if (!options.force && tab.id && tab.id === State.activeTabId) {
+    try { snapshotActiveTab(); } catch (_) {}
+    return true;
+  }
   stopAutosaveTimer();
   try {
     closeLiveSync();

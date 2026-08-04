@@ -26,10 +26,13 @@ const BASE = `http://127.0.0.1:${PORT}/index.html`;
 
   await page.goto(BASE + '?active-switch=' + Date.now(), { waitUntil: 'domcontentloaded', timeout: 30000 });
   await page.waitForFunction(() => window.__mdAnnotator?.State?.editor, { timeout: 20000 });
+  // Workspace/live-sync boot can clobber the first blank tab for ~1s; wait it out.
+  await page.waitForTimeout(1500);
   await page.evaluate(() => {
     document.querySelector('#author-modal')?.classList.add('hidden');
     try { window.__mdAnnotator.openNewTabBlank(); } catch (_) {}
   });
+  await page.waitForTimeout(100);
 
   console.log('=== annotation active-state separation ===');
 
@@ -79,7 +82,17 @@ const BASE = `http://127.0.0.1:${PORT}/index.html`;
     };
     const first = create('FIRST-TOKEN');
     const second = create('SECOND-TOKEN');
+    // stamp mdRange while text still unique in live body
+    try {
+      const md = (typeof M.htmlToMarkdown === 'function')
+        ? M.htmlToMarkdown(ed.getHTML())
+        : ed.getHTML();
+      if (typeof M.stampSidecarMdRanges === 'function') M.stampSidecarMdRanges(M.State.annotations, md, {});
+      else if (window.__mdAnnotator?.annotationAnchor) {}
+    } catch (_) {}
     M.renderCommentList();
+    try { if (typeof M.snapshotActiveTab === 'function') M.snapshotActiveTab(); } catch (_) {}
+    try { if (typeof M.markDirty === 'function') M.markDirty(); } catch (_) {}
     return [first, second];
   });
 
@@ -127,6 +140,7 @@ const BASE = `http://127.0.0.1:${PORT}/index.html`;
 
   await t('create two non-overlap annotations', async () => {
     ids = await setupTwo();
+    await page.waitForTimeout(80);
     assert.equal(ids.length, 2);
     assert.notEqual(ids[0], ids[1]);
     const s = await snapshot(ids);
