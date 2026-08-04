@@ -657,6 +657,61 @@ def write_mentor_package_to_path(path, raw_bytes):
         return None, 'write-failed:%s' % (str(exc)[:180],)
 
 
+
+def pick_mentor_path_dialog(initial_name=''):
+    """Native OS file picker on the Mentor host (single-machine). Returns abs path or None."""
+    title = '选择要关联的 .mentor 文件（须与当前打开的是同一个）'
+    init = str(initial_name or '').strip()
+    # 1) tkinter
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+        root = tk.Tk()
+        root.withdraw()
+        try:
+            root.attributes('-topmost', True)
+        except Exception:
+            pass
+        kwargs = {
+            'title': title,
+            'filetypes': [('Mentor package', '*.mentor'), ('All files', '*.*')],
+        }
+        if init and init.lower().endswith('.mentor'):
+            kwargs['initialfile'] = os.path.basename(init)
+        path = filedialog.askopenfilename(**kwargs)
+        try:
+            root.destroy()
+        except Exception:
+            pass
+        if path and os.path.isfile(path) and path.lower().endswith('.mentor'):
+            return os.path.abspath(path)
+    except Exception as e:
+        print('tkinter pick failed:', e)
+    # 2) PowerShell WinForms (Windows)
+    if sys.platform == 'win32':
+        try:
+            ps = (
+                "Add-Type -AssemblyName System.Windows.Forms; "
+                "$f=New-Object System.Windows.Forms.OpenFileDialog; "
+                "$f.Filter='Mentor (*.mentor)|*.mentor|All (*.*)|*.*'; "
+                "$f.Title='" + title.replace("'", "''") + "'; "
+                + (("$f.FileName='" + os.path.basename(init).replace("'", "''") + "'; ") if init else "")
+                + "if($f.ShowDialog() -eq 'OK'){ $f.FileName }"
+            )
+            r = subprocess.run(
+                ['powershell', '-NoProfile', '-STA', '-Command', ps],
+                capture_output=True, text=True, timeout=300,
+                creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0) if False else 0,
+            )
+            path = (r.stdout or '').strip().splitlines()
+            path = path[-1].strip() if path else ''
+            if path and os.path.isfile(path) and path.lower().endswith('.mentor'):
+                return os.path.abspath(path)
+        except Exception as e:
+            print('powershell pick failed:', e)
+    return None
+
+
 def resolve_mentor_path_by_name(name):
     """Resolve basename -> absolute path via supervision index / allow list."""
     if not name:
@@ -1256,6 +1311,7 @@ class MentorHandler(http.server.SimpleHTTPRequestHandler):
             '/resolve-mentor-path',
             '/write-mentor',
             '/doctor/repair',
+            '/pick-mentor',
         ):
             self.send_error(404, 'Not found')
             return
@@ -1280,6 +1336,33 @@ class MentorHandler(http.server.SimpleHTTPRequestHandler):
             result = run_doctor_repair(action, wait=wait)
             code = 200 if result.get('ok') else 400
             self._send_json(code, result)
+            return
+
+        if route == '/pick-mentor':
+            try:
+                body = json.loads(raw.decode('utf-8') or '{}') if raw else {}
+            except Exception:
+                body = {}
+            token = str(body.get('token') or (qs.get('token') or [''])[0] or '')
+            if not token or not secrets.compare_digest(token, SESSION_TOKEN):
+                self._send_json(403, {'ok': False, 'error': 'bad token'})
+                return
+            hint = str(body.get('name') or body.get('hint') or '')
+            # filedialog must run off the request thread carefully; do inline (STA via powershell)
+            path = pick_mentor_path_dialog(initial_name=hint)
+            if not path:
+                self._send_json(200, {'ok': False, 'error': 'cancelled', 'message': '未选择文件'})
+                return
+            allowed = allow_open_path(path)
+            if not allowed:
+                self._send_json(400, {'ok': False, 'error': 'invalid', 'message': '无效 .mentor 路径'})
+                return
+            register_supervision_path(allowed)
+            self._send_json(200, {
+                'ok': True,
+                'path': allowed,
+                'name': os.path.basename(allowed),
+            })
             return
 
         if route == '/write-mentor':
