@@ -65593,20 +65593,42 @@ function resolveActiveMentorAbsPath() {
   }
   return "";
 }
+function __testSetMentorDiskPath(path2) {
+  const p = String(path2 || "").trim();
+  if (!p) {
+    State2.externalWatchPath = "";
+    State2.diskPathHint = State2.currentFile && State2.currentFile.name || "";
+    if (State2.currentFile) State2.currentFile.path = "";
+    return { ok: true, path: "" };
+  }
+  if (!isAbsMentorPath(p)) return { ok: false, error: "not-abs" };
+  State2.externalWatchPath = p;
+  State2.diskPathHint = p;
+  if (State2.currentFile) State2.currentFile.path = p;
+  return { ok: true, path: p };
+}
 async function pickAndBindMentorPath(opts) {
   opts = opts || {};
-  const token = State2.externalWatchToken || "" || await ensureLocalSessionToken();
+  let token = await ensureLocalSessionToken({ force: true });
   if (!token) {
     return { ok: false, error: "no-token", message: "\u65E0 mentor-server token\uFF08\u8BF7\u7528 mentor.cmd \u6253\u5F00\u9875\u9762\uFF09" };
   }
   const hint = opts.name || mentorBasenameHint() || State2.currentFile && State2.currentFile.name || "";
-  let res;
-  try {
-    res = await fetch(location.origin + "/pick-mentor", {
+  const directPath = String(opts.path || "").trim();
+  async function postPick(tok) {
+    return fetch(location.origin + "/pick-mentor", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ token, name: hint })
+      body: JSON.stringify({ token: tok, name: hint, path: directPath || void 0 })
     });
+  }
+  let res;
+  try {
+    res = await postPick(token);
+    if (res.status === 403) {
+      token = await ensureLocalSessionToken({ force: true });
+      if (token) res = await postPick(token);
+    }
   } catch (e) {
     return { ok: false, error: "network", message: "\u65E0\u6CD5\u8FDE\u63A5 mentor-server: " + (e && e.message || e) };
   }
@@ -65776,18 +65798,31 @@ async function fetchHermesConnection(opts) {
   const warm = !!opts.warm;
   const wait = opts.wait || 0;
   try {
-    let token = State2.externalWatchToken || "";
-    if (!token && typeof ensureLocalSessionToken === "function") {
+    let token = "";
+    if (typeof ensureLocalSessionToken === "function") {
       try {
         token = await ensureLocalSessionToken();
       } catch (_) {
+        token = State2.externalWatchToken || "";
       }
+    } else {
+      token = State2.externalWatchToken || "";
     }
     const q = new URLSearchParams();
     if (token) q.set("token", token);
     if (warm) q.set("warm", "1");
     if (wait) q.set("wait", String(wait));
-    const res = await fetch(location.origin + "/hermes-connection?" + q.toString(), { cache: "no-store" });
+    let res = await fetch(location.origin + "/hermes-connection?" + q.toString(), { cache: "no-store" });
+    if (res.status === 403 && typeof ensureLocalSessionToken === "function") {
+      try {
+        token = await ensureLocalSessionToken({ force: true });
+        if (token) {
+          q.set("token", token);
+          res = await fetch(location.origin + "/hermes-connection?" + q.toString(), { cache: "no-store" });
+        }
+      } catch (_) {
+      }
+    }
     if (!res.ok) {
       const hint = res.status === 404 ? "8787 \u4E0D\u662F mentor-server\uFF08/hermes-connection 404\uFF09\u3002\u5173\u6389 python -m http.server\uFF0C\u7528 mentor.cmd \u542F\u52A8" : "HTTP " + res.status;
       State2.hermesConnection = {
@@ -65923,13 +65958,14 @@ function renderDoctorReport(report) {
 }
 async function fetchDoctorReport(opts) {
   opts = opts || {};
-  let token = State2.externalWatchToken || "";
-  if (!token && typeof ensureLocalSessionToken === "function") {
+  let token = "";
+  if (typeof ensureLocalSessionToken === "function") {
     try {
-      token = await ensureLocalSessionToken();
+      token = await ensureLocalSessionToken({ force: true });
     } catch (_) {
+      token = State2.externalWatchToken || "";
     }
-  }
+  } else token = State2.externalWatchToken || "";
   const q = new URLSearchParams();
   if (token) q.set("token", token);
   if (opts.warm) q.set("warm", "1");
@@ -65994,13 +66030,14 @@ async function fetchDoctorReport(opts) {
   }
 }
 async function runDoctorRepair(action) {
-  let token = State2.externalWatchToken || "";
-  if (!token && typeof ensureLocalSessionToken === "function") {
+  let token = "";
+  if (typeof ensureLocalSessionToken === "function") {
     try {
-      token = await ensureLocalSessionToken();
+      token = await ensureLocalSessionToken({ force: true });
     } catch (_) {
+      token = State2.externalWatchToken || "";
     }
-  }
+  } else token = State2.externalWatchToken || "";
   const res = await fetch(location.origin + "/doctor/repair", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -70868,8 +70905,9 @@ function applySupervisionPayload(raw, { force = false } = {}) {
 function clearSupervisionLocal() {
   applySupervisionPayload({ active: false }, { force: true });
 }
-async function ensureLocalSessionToken() {
-  if (State2.externalWatchToken) return State2.externalWatchToken;
+async function ensureLocalSessionToken(opts) {
+  const force = !!(opts && opts.force);
+  if (!force && State2.externalWatchToken) return State2.externalWatchToken;
   try {
     const host = location.hostname;
     if (host !== "127.0.0.1" && host !== "localhost") return "";
@@ -70882,7 +70920,8 @@ async function ensureLocalSessionToken() {
     }
   } catch (_) {
   }
-  return "";
+  if (force) State2.externalWatchToken = "";
+  return State2.externalWatchToken || "";
 }
 async function fetchSupervisionStatus(pathOrOpts, tokenArg) {
   let path2 = "";
@@ -76318,6 +76357,11 @@ window.__mdAnnotator = {
   openDoctorPanel,
   closeDoctorPanel,
   pickAndBindMentorPath,
+  __testSetMentorDiskPath,
+  ensureDiskSavedForFixMentor,
+  resolveActiveMentorAbsPath,
+  resolveMentorPathByName,
+  mentorBasenameHint,
   fetchDoctorReport,
   runDoctorRepair,
   writeToHandle,

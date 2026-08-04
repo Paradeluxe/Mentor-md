@@ -1348,8 +1348,13 @@ class MentorHandler(http.server.SimpleHTTPRequestHandler):
                 self._send_json(403, {'ok': False, 'error': 'bad token'})
                 return
             hint = str(body.get('name') or body.get('hint') or '')
-            # filedialog must run off the request thread carefully; do inline (STA via powershell)
-            path = pick_mentor_path_dialog(initial_name=hint)
+            direct = str(body.get('path') or '').strip()
+            if direct:
+                # Automation / known-path bind — no OS dialog
+                path = os.path.abspath(direct) if os.path.isfile(direct) else None
+            else:
+                # filedialog on Mentor host (single-machine)
+                path = pick_mentor_path_dialog(initial_name=hint)
             if not path:
                 self._send_json(200, {'ok': False, 'error': 'cancelled', 'message': '未选择文件'})
                 return

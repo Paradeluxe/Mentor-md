@@ -6221,9 +6221,26 @@ function resolveActiveMentorAbsPath() {
  * Browser open has File/Handle but no absolute path (Chromium security).
  * Hermes AI needs a real disk path — ask host OS picker via mentor-server.
  */
+
+/** Test-only: set/clear disk path state for AI preflight tests. */
+function __testSetMentorDiskPath(path) {
+  const p = String(path || "").trim();
+  if (!p) {
+    State.externalWatchPath = "";
+    State.diskPathHint = (State.currentFile && State.currentFile.name) || "";
+    if (State.currentFile) State.currentFile.path = "";
+    return { ok: true, path: "" };
+  }
+  if (!isAbsMentorPath(p)) return { ok: false, error: "not-abs" };
+  State.externalWatchPath = p;
+  State.diskPathHint = p;
+  if (State.currentFile) State.currentFile.path = p;
+  return { ok: true, path: p };
+}
+
 async function pickAndBindMentorPath(opts) {
   opts = opts || {};
-  const token = (State.externalWatchToken || "") || (await ensureLocalSessionToken());
+  let token = await ensureLocalSessionToken({ force: true });
   if (!token) {
     return { ok: false, error: "no-token", message: "无 mentor-server token（请用 mentor.cmd 打开页面）" };
   }
@@ -6232,13 +6249,21 @@ async function pickAndBindMentorPath(opts) {
     mentorBasenameHint() ||
     (State.currentFile && State.currentFile.name) ||
     "";
-  let res;
-  try {
-    res = await fetch(location.origin + "/pick-mentor", {
+  const directPath = String(opts.path || "").trim();
+  async function postPick(tok) {
+    return fetch(location.origin + "/pick-mentor", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ token, name: hint }),
+      body: JSON.stringify({ token: tok, name: hint, path: directPath || undefined }),
     });
+  }
+  let res;
+  try {
+    res = await postPick(token);
+    if (res.status === 403) {
+      token = await ensureLocalSessionToken({ force: true });
+      if (token) res = await postPick(token);
+    }
   } catch (e) {
     return { ok: false, error: "network", message: "无法连接 mentor-server: " + (e && e.message || e) };
   }
@@ -6400,15 +6425,26 @@ async function fetchHermesConnection(opts) {
   const warm = !!opts.warm;
   const wait = opts.wait || 0;
   try {
-    let token = State.externalWatchToken || "";
-    if (!token && typeof ensureLocalSessionToken === "function") {
-      try { token = await ensureLocalSessionToken(); } catch (_) {}
+    let token = "";
+    if (typeof ensureLocalSessionToken === "function") {
+      try { token = await ensureLocalSessionToken(); } catch (_) { token = State.externalWatchToken || ""; }
+    } else {
+      token = State.externalWatchToken || "";
     }
     const q = new URLSearchParams();
     if (token) q.set("token", token);
     if (warm) q.set("warm", "1");
     if (wait) q.set("wait", String(wait));
-    const res = await fetch(location.origin + "/hermes-connection?" + q.toString(), { cache: "no-store" });
+    let res = await fetch(location.origin + "/hermes-connection?" + q.toString(), { cache: "no-store" });
+    if (res.status === 403 && typeof ensureLocalSessionToken === "function") {
+      try {
+        token = await ensureLocalSessionToken({ force: true });
+        if (token) {
+          q.set("token", token);
+          res = await fetch(location.origin + "/hermes-connection?" + q.toString(), { cache: "no-store" });
+        }
+      } catch (_) {}
+    }
     if (!res.ok) {
       const hint = res.status === 404
         ? "8787 不是 mentor-server（/hermes-connection 404）。关掉 python -m http.server，用 mentor.cmd 启动"
@@ -6559,10 +6595,10 @@ function renderDoctorReport(report) {
 
 async function fetchDoctorReport(opts) {
   opts = opts || {};
-  let token = State.externalWatchToken || "";
-  if (!token && typeof ensureLocalSessionToken === "function") {
-    try { token = await ensureLocalSessionToken(); } catch (_) {}
-  }
+  let token = "";
+  if (typeof ensureLocalSessionToken === "function") {
+    try { token = await ensureLocalSessionToken({ force: true }); } catch (_) { token = State.externalWatchToken || ""; }
+  } else token = State.externalWatchToken || "";
   const q = new URLSearchParams();
   if (token) q.set("token", token);
   if (opts.warm) q.set("warm", "1");
@@ -6628,10 +6664,10 @@ async function fetchDoctorReport(opts) {
 }
 
 async function runDoctorRepair(action) {
-  let token = State.externalWatchToken || "";
-  if (!token && typeof ensureLocalSessionToken === "function") {
-    try { token = await ensureLocalSessionToken(); } catch (_) {}
-  }
+  let token = "";
+  if (typeof ensureLocalSessionToken === "function") {
+    try { token = await ensureLocalSessionToken({ force: true }); } catch (_) { token = State.externalWatchToken || ""; }
+  } else token = State.externalWatchToken || "";
   const res = await fetch(location.origin + "/doctor/repair", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -11630,8 +11666,9 @@ function clearSupervisionLocal() {
   applySupervisionPayload({ active: false }, { force: true });
 }
 
-async function ensureLocalSessionToken() {
-  if (State.externalWatchToken) return State.externalWatchToken;
+async function ensureLocalSessionToken(opts) {
+  const force = !!(opts && opts.force);
+  if (!force && State.externalWatchToken) return State.externalWatchToken;
   try {
     const host = location.hostname;
     if (host !== "127.0.0.1" && host !== "localhost") return "";
@@ -11643,7 +11680,8 @@ async function ensureLocalSessionToken() {
       return State.externalWatchToken;
     }
   } catch (_) {}
-  return "";
+  if (force) State.externalWatchToken = "";
+  return State.externalWatchToken || "";
 }
 
 async function fetchSupervisionStatus(pathOrOpts, tokenArg) {
@@ -17093,6 +17131,11 @@ window.__mdAnnotator = {
   openDoctorPanel,
   closeDoctorPanel,
   pickAndBindMentorPath,
+  __testSetMentorDiskPath,
+  ensureDiskSavedForFixMentor,
+  resolveActiveMentorAbsPath,
+  resolveMentorPathByName,
+  mentorBasenameHint,
   fetchDoctorReport,
   runDoctorRepair,
   writeToHandle,
