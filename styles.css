@@ -3214,7 +3214,11 @@ body.refs-pane-collapsed #expand-refs-pane-btn {
 
 /* v3: 解决按钮样式移到了 form-actions 内的 .comment-resolve-btn 规则块 (docx 风格 outline 次要按钮) */
 
-/* ⋯ 弹窗菜单 — elevated popover */
+/* ⋯ 弹窗菜单 — fixed 由 JS 锚定；打开时抬高整卡防后序卡片盖住 */
+.comment-thread.is-menu-open {
+  z-index: 80;
+  /* 仍保留 isolation，fixed 菜单已跳出堆叠上下文 */
+}
 .comment-menu {
   position: absolute;
   top: 40px;
@@ -3232,6 +3236,12 @@ body.refs-pane-collapsed #expand-refs-pane-btn {
   flex-direction: column;
   gap: 1px;
   font-size: 13px;
+}
+/* JS sets position:fixed + coordinates when open */
+.comment-menu[data-anchored="1"] {
+  position: fixed;
+  right: auto;
+  z-index: 400;
 }
 .comment-menu.hidden { display: none !important; }
 .comment-menu button {

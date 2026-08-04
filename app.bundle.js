@@ -66772,11 +66772,12 @@ function renderCommentList() {
       const menu = list.querySelector(`[data-menu-for="${tid}"]`);
       if (!menu) return;
       const isOpen = !menu.classList.contains("hidden");
-      list.querySelectorAll(".comment-menu:not(.hidden)").forEach((m) => {
-        if (m !== menu) m.classList.add("hidden");
-      });
-      if (isOpen) menu.classList.add("hidden");
-      else menu.classList.remove("hidden");
+      closeAllCommentMenus();
+      if (isOpen) return;
+      menu.classList.remove("hidden");
+      const card = btn.closest(".comment-thread");
+      if (card) card.classList.add("is-menu-open");
+      positionCommentMenu(menu, btn);
     });
   });
   list.querySelectorAll(".comment-thread").forEach((el) => {
@@ -66812,14 +66813,75 @@ function renderCommentList() {
   });
   requestAnimationFrame(() => scrollCommentMessagesToBottom(list));
 }
+function positionCommentMenu(menu, anchorBtn) {
+  if (!menu || !anchorBtn) return;
+  menu.style.position = "fixed";
+  menu.style.zIndex = "400";
+  menu.style.top = "0px";
+  menu.style.left = "0px";
+  menu.style.right = "auto";
+  menu.style.visibility = "hidden";
+  menu.classList.remove("hidden");
+  const mr = menu.getBoundingClientRect();
+  const br = anchorBtn.getBoundingClientRect();
+  const pad2 = 6;
+  let top = br.bottom + 4;
+  let left = br.right - mr.width;
+  if (left < pad2) left = pad2;
+  if (left + mr.width > window.innerWidth - pad2) {
+    left = Math.max(pad2, window.innerWidth - mr.width - pad2);
+  }
+  if (top + mr.height > window.innerHeight - pad2) {
+    top = Math.max(pad2, br.top - mr.height - 4);
+  }
+  menu.style.top = Math.round(top) + "px";
+  menu.style.left = Math.round(left) + "px";
+  menu.style.visibility = "";
+  menu.dataset.anchored = "1";
+}
 function closeAllCommentMenus() {
-  document.querySelectorAll(".comment-menu:not(.hidden)").forEach((m) => m.classList.add("hidden"));
+  document.querySelectorAll(".comment-menu:not(.hidden)").forEach((m) => {
+    m.classList.add("hidden");
+    m.style.position = "";
+    m.style.top = "";
+    m.style.left = "";
+    m.style.right = "";
+    m.style.zIndex = "";
+    m.style.visibility = "";
+    delete m.dataset.anchored;
+  });
+  document.querySelectorAll(".comment-thread.is-menu-open").forEach((el) => {
+    el.classList.remove("is-menu-open");
+  });
+}
+function repositionOpenCommentMenus() {
+  document.querySelectorAll('.comment-menu:not(.hidden)[data-anchored="1"]').forEach((menu) => {
+    const tid = menu.getAttribute("data-menu-for");
+    if (!tid) return;
+    let btn = null;
+    document.querySelectorAll('[data-act="toggle-menu"]').forEach((el) => {
+      if (!btn && el.dataset.thread === tid) btn = el;
+    });
+    if (!btn) {
+      menu.classList.add("hidden");
+      return;
+    }
+    positionCommentMenu(menu, btn);
+  });
 }
 document.addEventListener("mousedown", (e) => {
   if (!e.target.closest(".comment-menu") && !e.target.closest('[data-act="toggle-menu"]')) {
     closeAllCommentMenus();
   }
 });
+if (!window.__mentorCommentMenuScrollBound) {
+  window.__mentorCommentMenuScrollBound = true;
+  window.addEventListener("resize", () => repositionOpenCommentMenus(), { passive: true });
+  document.addEventListener("scroll", (e) => {
+    if (!document.querySelector(".comment-menu:not(.hidden)")) return;
+    repositionOpenCommentMenus();
+  }, true);
+}
 function toggleManualCollapse(tid) {
   const thread = State2.annotations.find((t) => t && typeof t === "object" && t.threadId === tid);
   if (thread?.resolved) {
