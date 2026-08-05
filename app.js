@@ -3098,11 +3098,23 @@ function setAutoSaveEnabled(on, { silent = false } = {}) {
     if (next) {
       const disk = isAutoSaveDiskActive();
       setStatus(
-        disk ? "自动保存已开启" : "自动保存已开启 · 待授权写盘",
-        disk ? "停手后自动写回磁盘，无需按保存" : "点一次授权选文件后即可自动写盘"
+        disk ? "自动保存已开启" : "自动保存已开启",
+        disk ? "停手后自动写回磁盘" : "打开后将静默关联磁盘路径；关联前仅草稿"
       );
       if (disk) {
         try { showToast("自动保存已开：修改后自动写盘", 2000); } catch (_) {}
+      } else {
+        // Try silent path bind so user never sees 授权
+        try {
+          void silentBindDiskPathAfterOpen().then((p) => {
+            if (p && hasDiskWriteTarget()) {
+              try { setStatus("自动保存已开启", "已关联磁盘 · 停手后写回"); } catch (_) {}
+              try {
+                if (State.currentFile && State.currentFile.dirty) autosaveNow();
+              } catch (_) {}
+            }
+          });
+        } catch (_) {}
       }
     } else {
       setStatus("自动保存已关闭", "仅手动保存写回文件 · 草稿仍会自动保存");
@@ -3130,6 +3142,18 @@ async function ensureAutoSaveDiskTargetFromGesture() {
     try { showToast("自动保存已开：修改后自动写盘", 2000); } catch (_) {}
     return { ok: true, already: true };
   }
+  // Prefer silent server path (Everything) over browser 授权 dialog
+  try {
+    const p = await silentBindDiskPathAfterOpen();
+    if (p && hasDiskWriteTarget()) {
+      try { syncToolbarActionState(); } catch (_) {}
+      if (State.currentFile && State.currentFile.dirty) {
+        try { await autosaveNow(); } catch (_) {}
+      }
+      try { showToast("自动保存已开：已关联磁盘", 2000); } catch (_) {}
+      return { ok: true, path: p, source: "silent-path" };
+    }
+  } catch (_) {}
   const up = await enableWriteBackForCurrent({
     thenSave: !!(State.currentFile && State.currentFile.dirty),
     preferSavePicker: true,
@@ -3824,18 +3848,24 @@ async function writeCurrentViaServer(absPath, { reason = "manual", showProgress 
 }
 
 /**
- * Unified disk write: FSA handle first, else mentor-server path.
+ * Unified disk write: granted FSA → server abs path → (manual only) FSA prompt.
+ * Never prompt for 授权 on autosave; silent path bind covers browser open.
  */
 async function writeCurrentToDisk(opts = {}) {
   const reason = opts.reason || "manual";
   const showProgress = !!opts.showProgress;
+  const forceOverwriteExternal = !!opts.forceOverwriteExternal;
+
+  // 1) FSA only when already granted (no permission popup)
   if (hasWriteHandle()) {
-    return writeCurrentToHandle({
-      reason,
-      showProgress,
-      forceOverwriteExternal: !!opts.forceOverwriteExternal,
-    });
+    try {
+      if (await hasGrantedWrite(State.currentFile.handle)) {
+        return writeCurrentToHandle({ reason, showProgress, forceOverwriteExternal });
+      }
+    } catch (_) {}
   }
+
+  // 2) Server path (pending-open / Everything silent bind)
   let path = "";
   try { path = resolveActiveMentorAbsPath(); } catch (_) { path = ""; }
   if (!path && State.externalWatchPath) path = String(State.externalWatchPath || "");
@@ -3845,10 +3875,16 @@ async function writeCurrentToDisk(opts = {}) {
   if (path) {
     return writeCurrentViaServer(path, { reason, showProgress });
   }
+
+  // 3) Manual save only: may request FSA write permission
+  if (hasWriteHandle() && reason === "manual") {
+    return writeCurrentToHandle({ reason, showProgress, forceOverwriteExternal });
+  }
+
   return {
     ok: false,
     error: "no-disk-target",
-    message: "没有可写回的磁盘目标（无文件句柄且无绝对路径）",
+    message: "尚未关联磁盘路径（打开后会自动定位；或双击 .mentor 打开）",
   };
 }
 
@@ -6345,7 +6381,7 @@ async function pickAndBindMentorPath(opts) {
   try {
     if (typeof startExternalWatchForCurrentDocument === "function") startExternalWatchForCurrentDocument();
   } catch (_) {}
-  showToast("已绑定磁盘路径 · 可 AI / 自动保存", 2800);
+  showToast("已关联磁盘", 1800);
   try { setStatus("已关联磁盘路径", path); } catch (_) {}
   return { ok: true, path };
 }
@@ -6363,11 +6399,50 @@ async function resolveMentorPathByName(name) {
     if (data && data.ok && isAbsMentorPath(data.path)) {
       State.externalWatchPath = data.path;
       State.diskPathHint = data.path;
-      if (State.currentFile && !State.currentFile.path) State.currentFile.path = data.path;
+      if (State.currentFile) State.currentFile.path = data.path;
       return data.path;
     }
   } catch (_) {}
   return "";
+}
+
+/**
+ * After open: silently bind abs path (index / Everything via server).
+ * No picker, no FSA prompt. Enables AI + server AutoSave without "授权".
+ */
+async function silentBindDiskPathAfterOpen(fileName) {
+  try {
+    if (resolveActiveMentorAbsPath()) {
+      try { startSupervisionPolling(); } catch (_) {}
+      try {
+        if (typeof startExternalWatchForCurrentDocument === "function") startExternalWatchForCurrentDocument();
+      } catch (_) {}
+      return resolveActiveMentorAbsPath();
+    }
+    const name = fileName || mentorBasenameHint() || (State.currentFile && State.currentFile.name) || "";
+    if (!name || !/\.mentor$/i.test(name)) return "";
+    const path = await resolveMentorPathByName(name);
+    if (!path) return "";
+    try {
+      const token = (State.externalWatchToken || "") || (await ensureLocalSessionToken());
+      if (token) {
+        await fetch(location.origin + "/supervision/register", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ token, path }),
+        });
+      }
+    } catch (_) {}
+    try { startSupervisionPolling(); } catch (_) {}
+    try {
+      if (typeof startExternalWatchForCurrentDocument === "function") startExternalWatchForCurrentDocument();
+    } catch (_) {}
+    try { syncToolbarActionState(); } catch (_) {}
+    try { setStatus("已打开", path); } catch (_) {}
+    return path;
+  } catch (_) {
+    return "";
+  }
 }
 
 async function applyFixMentorResultFromPath(absPath) {
@@ -7104,12 +7179,16 @@ async function ensureDiskSavedForFixMentor() {
     try { path = await resolveMentorPathByName(mentorBasenameHint()); } catch (_) {}
   }
   if (!path || !isAbsMentorPath(path)) {
+    // One more silent attempt (Everything may index late)
+    try { path = await silentBindDiskPathAfterOpen(mentorBasenameHint()); } catch (_) { path = ""; }
+  }
+  if (!path || !isAbsMentorPath(path)) {
     setFixMentorJobState({
       status: "saving",
-      message: "浏览器打开看不到绝对路径，请在弹出的系统对话框中选择同一个 .mentor…",
+      message: "正在定位磁盘文件…",
       error: "",
     });
-    showToast("请在系统对话框中选择当前这个 .mentor（绑定磁盘路径）", 4500);
+    // Last resort: host OS pick (no browser FSA lecture)
     const picked = await pickAndBindMentorPath({ name: mentorBasenameHint() });
     if (picked && picked.ok && isAbsMentorPath(picked.path)) {
       path = picked.path;
@@ -7119,7 +7198,7 @@ async function ensureDiskSavedForFixMentor() {
         error: "no-disk-path",
         message:
           (picked && picked.message) ||
-          "没有磁盘路径。浏览器「打开文件」只有句柄、没有绝对路径；AI 需要真实路径。请在弹窗中选同一文件，或用 mentor.cmd / 双击 .mentor 打开。",
+          "找不到这个 .mentor 的磁盘位置。请用资源管理器双击打开，或确认 Everything 已索引该文件。",
       };
     }
   }
@@ -11431,7 +11510,16 @@ async function openFromMentorHandle(fileHandle, options = {}) {
   const preferDraft = !!(options && options.preferDraft);
   const forceDisk = !!(options && options.forceDisk);
   const documentIdOpt = options && options.documentId || null;
-  await ensureWritePermission(fileHandle);
+  // Open = read only. Do NOT request write permission here (user hates open-time 授权).
+  // Write uses FSA only if already granted; else mentor-server path after silent bind.
+  try {
+    if (fileHandle && typeof fileHandle.queryPermission === "function") {
+      const rp = await fileHandle.queryPermission({ mode: "readwrite" });
+      if (rp !== "granted" && typeof fileHandle.queryPermission === "function") {
+        try { await fileHandle.queryPermission({ mode: "read" }); } catch (_) {}
+      }
+    }
+  } catch (_) {}
   const file = await fileHandle.getFile();
   const { mdText, annotations, references, mediaFiles, archive } = await readMentorZip(file);
   console.log("[openFromMentorHandle] mediaFiles=", Object.keys(mediaFiles || {}).length);
@@ -11452,14 +11540,8 @@ async function openFromMentorHandle(fileHandle, options = {}) {
     archiveVerification: archive && archive.verification || null
   });
   if (!State.diskPathHint) State.diskPathHint = file.name;
-  // Best-effort: recover absolute path by basename (prior pending-open / register)
-  try {
-    void resolveMentorPathByName(file.name).then((p) => {
-      if (p) {
-        try { startSupervisionPolling(); } catch (_) {}
-      }
-    });
-  } catch (_) {}
+  // Silent path bind (Everything / index) — no picker
+  try { void silentBindDiskPathAfterOpen(file.name); } catch (_) {}
   try { startSupervisionPolling(); } catch (_) {}
   const mediaCount = Object.keys(mediaFiles || {}).length;
   const blobUrlCount = (mdText.match(/!\[[^\]]*\]\(blob:[^)]+\)/g) || []).length;
@@ -12961,6 +13043,8 @@ async function openFromMentorFile(file, options = {}) {
       State.diskPathHint = p;
     }
   } catch (_) {}
+  // Browser File has no path — silent Everything/index bind by basename
+  try { void silentBindDiskPathAfterOpen(displayName); } catch (_) {}
   try { startSupervisionPolling(); } catch (_) {}
   const mediaCount = Object.keys(mediaFiles || {}).length;
   const blobUrlCount = (mdText.match(/!\[[^\]]*\]\(blob:[^)]+\)/g) || []).length;

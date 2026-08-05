@@ -506,12 +506,106 @@ def get_fix_mentor_job(job_id):
         return FIX_MENTOR_JOBS.get(job_id)
 
 
+def _everything_es_bin():
+    """Locate Everything CLI (es.exe) for silent basename → path."""
+    env = (os.environ.get('MENTOR_EVERYTHING_ES') or '').strip()
+    if env and os.path.isfile(env):
+        return env
+    candidates = [
+        r'C:\Program Files\Everything\es.exe',
+        r'C:\Program Files (x86)\Everything\es.exe',
+    ]
+    for c in candidates:
+        if os.path.isfile(c):
+            return c
+    try:
+        import shutil
+        w = shutil.which('es') or shutil.which('es.exe')
+        if w and os.path.isfile(w):
+            return w
+    except Exception:
+        pass
+    return None
+
+
+def _score_mentor_hit(abspath, basename_low):
+    """Prefer real .mentor under user/project roots; drop .lnk shortcuts."""
+    p = os.path.normpath(abspath)
+    if not p or not os.path.isfile(p):
+        return -1
+    base = os.path.basename(p).lower()
+    if base != basename_low:
+        return -1
+    if base.endswith('.lnk') or p.lower().endswith('.lnk'):
+        return -1
+    if not base.endswith('.mentor'):
+        return -1
+    score = 10
+    low = p.lower()
+    # prefer workspace / paper / user docs
+    prefer = (
+        'hermes_playground', 'paper-writing', r'\documents\\', r'\desktop\\',
+        r'\users\\user\\', 'mentor\\tests', 'mentor\\examples',
+    )
+    for frag in prefer:
+        if frag in low:
+            score += 5
+    # de-prefer temp / recent shortcuts dirs
+    bad = (r'\temp\\', r'\tmp\\', r'\appdata\\local\\temp', r'\recent\\')
+    for frag in bad:
+        if frag in low:
+            score -= 8
+    try:
+        score += min(5, int(os.path.getmtime(p) % 10))  # mild recency tie-break
+    except Exception:
+        pass
+    return score
+
+
+def _search_everything_mentor(basename):
+    """Return best unique-ish path via Everything, or None if ambiguous/none."""
+    es = _everything_es_bin()
+    if not es:
+        return None
+    base = os.path.basename(str(basename or '')).strip()
+    if not base.lower().endswith('.mentor'):
+        return None
+    try:
+        # -n limit; bare name search; filter ourselves
+        proc = subprocess.run(
+            [es, '-n', '20', base],
+            capture_output=True, text=True, timeout=4,
+            encoding='utf-8', errors='replace',
+        )
+        lines = [ln.strip() for ln in (proc.stdout or '').splitlines() if ln.strip()]
+    except Exception:
+        return None
+    low = base.lower()
+    scored = []
+    for ln in lines:
+        s = _score_mentor_hit(ln, low)
+        if s >= 0:
+            scored.append((s, os.path.normpath(ln)))
+    if not scored:
+        return None
+    scored.sort(key=lambda x: (-x[0], -os.path.getmtime(x[1]) if os.path.isfile(x[1]) else 0))
+    best_score, best = scored[0]
+    # Ambiguous: second hit almost as good and different path
+    if len(scored) > 1:
+        s2, p2 = scored[1]
+        if p2.lower() != best.lower() and s2 >= best_score - 2 and best_score < 15:
+            # still allow if best clearly under prefer roots
+            if best_score < 15:
+                return None
+    return best
+
+
 def resolve_mentor_path_by_name(name):
-    """Best-effort resolve basename to an allowed/open path."""
+    """Best-effort resolve basename → abs path (index, allow-list, Everything)."""
     name = (name or '').strip()
     if not name:
         return None
-    low = name.lower()
+    low = os.path.basename(name).lower()
     # supervision index
     try:
         p = SUPERVISION_BY_NAME.get(low)
@@ -527,6 +621,28 @@ def resolve_mentor_path_by_name(name):
     uniq = list(dict.fromkeys(hits))
     if len(uniq) == 1:
         return uniq[0]
+    if len(uniq) > 1:
+        # pick best scored among allow-list
+        best = None
+        best_s = -1
+        for p in uniq:
+            s = _score_mentor_hit(p, low)
+            if s > best_s:
+                best_s, best = s, p
+        if best:
+            return best
+    # Everything silent search (unique / high-confidence)
+    found = _search_everything_mentor(low)
+    if found:
+        try:
+            register_supervision_path(found)
+        except Exception:
+            pass
+        try:
+            ALLOWED_OPEN_PATHS.add(os.path.normpath(found))
+        except Exception:
+            pass
+        return found
     return None
 
 

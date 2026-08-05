@@ -62656,12 +62656,28 @@ function setAutoSaveEnabled(on, { silent = false } = {}) {
     if (next2) {
       const disk = isAutoSaveDiskActive();
       setStatus(
-        disk ? "\u81EA\u52A8\u4FDD\u5B58\u5DF2\u5F00\u542F" : "\u81EA\u52A8\u4FDD\u5B58\u5DF2\u5F00\u542F \xB7 \u5F85\u6388\u6743\u5199\u76D8",
-        disk ? "\u505C\u624B\u540E\u81EA\u52A8\u5199\u56DE\u78C1\u76D8\uFF0C\u65E0\u9700\u6309\u4FDD\u5B58" : "\u70B9\u4E00\u6B21\u6388\u6743\u9009\u6587\u4EF6\u540E\u5373\u53EF\u81EA\u52A8\u5199\u76D8"
+        disk ? "\u81EA\u52A8\u4FDD\u5B58\u5DF2\u5F00\u542F" : "\u81EA\u52A8\u4FDD\u5B58\u5DF2\u5F00\u542F",
+        disk ? "\u505C\u624B\u540E\u81EA\u52A8\u5199\u56DE\u78C1\u76D8" : "\u6253\u5F00\u540E\u5C06\u9759\u9ED8\u5173\u8054\u78C1\u76D8\u8DEF\u5F84\uFF1B\u5173\u8054\u524D\u4EC5\u8349\u7A3F"
       );
       if (disk) {
         try {
           showToast("\u81EA\u52A8\u4FDD\u5B58\u5DF2\u5F00\uFF1A\u4FEE\u6539\u540E\u81EA\u52A8\u5199\u76D8", 2e3);
+        } catch (_) {
+        }
+      } else {
+        try {
+          void silentBindDiskPathAfterOpen().then((p) => {
+            if (p && hasDiskWriteTarget()) {
+              try {
+                setStatus("\u81EA\u52A8\u4FDD\u5B58\u5DF2\u5F00\u542F", "\u5DF2\u5173\u8054\u78C1\u76D8 \xB7 \u505C\u624B\u540E\u5199\u56DE");
+              } catch (_) {
+              }
+              try {
+                if (State2.currentFile && State2.currentFile.dirty) autosaveNow();
+              } catch (_) {
+              }
+            }
+          });
         } catch (_) {
         }
       }
@@ -62698,6 +62714,27 @@ async function ensureAutoSaveDiskTargetFromGesture() {
     } catch (_) {
     }
     return { ok: true, already: true };
+  }
+  try {
+    const p = await silentBindDiskPathAfterOpen();
+    if (p && hasDiskWriteTarget()) {
+      try {
+        syncToolbarActionState();
+      } catch (_) {
+      }
+      if (State2.currentFile && State2.currentFile.dirty) {
+        try {
+          await autosaveNow();
+        } catch (_) {
+        }
+      }
+      try {
+        showToast("\u81EA\u52A8\u4FDD\u5B58\u5DF2\u5F00\uFF1A\u5DF2\u5173\u8054\u78C1\u76D8", 2e3);
+      } catch (_) {
+      }
+      return { ok: true, path: p, source: "silent-path" };
+    }
+  } catch (_) {
   }
   const up = await enableWriteBackForCurrent({
     thenSave: !!(State2.currentFile && State2.currentFile.dirty),
@@ -63388,12 +63425,14 @@ async function writeCurrentViaServer(absPath, { reason = "manual", showProgress 
 async function writeCurrentToDisk(opts = {}) {
   const reason = opts.reason || "manual";
   const showProgress = !!opts.showProgress;
+  const forceOverwriteExternal = !!opts.forceOverwriteExternal;
   if (hasWriteHandle()) {
-    return writeCurrentToHandle({
-      reason,
-      showProgress,
-      forceOverwriteExternal: !!opts.forceOverwriteExternal
-    });
+    try {
+      if (await hasGrantedWrite(State2.currentFile.handle)) {
+        return writeCurrentToHandle({ reason, showProgress, forceOverwriteExternal });
+      }
+    } catch (_) {
+    }
   }
   let path2 = "";
   try {
@@ -63411,10 +63450,13 @@ async function writeCurrentToDisk(opts = {}) {
   if (path2) {
     return writeCurrentViaServer(path2, { reason, showProgress });
   }
+  if (hasWriteHandle() && reason === "manual") {
+    return writeCurrentToHandle({ reason, showProgress, forceOverwriteExternal });
+  }
   return {
     ok: false,
     error: "no-disk-target",
-    message: "\u6CA1\u6709\u53EF\u5199\u56DE\u7684\u78C1\u76D8\u76EE\u6807\uFF08\u65E0\u6587\u4EF6\u53E5\u67C4\u4E14\u65E0\u7EDD\u5BF9\u8DEF\u5F84\uFF09"
+    message: "\u5C1A\u672A\u5173\u8054\u78C1\u76D8\u8DEF\u5F84\uFF08\u6253\u5F00\u540E\u4F1A\u81EA\u52A8\u5B9A\u4F4D\uFF1B\u6216\u53CC\u51FB .mentor \u6253\u5F00\uFF09"
   };
 }
 function startAutosaveTimer() {
@@ -65803,7 +65845,7 @@ async function pickAndBindMentorPath(opts) {
     if (typeof startExternalWatchForCurrentDocument === "function") startExternalWatchForCurrentDocument();
   } catch (_) {
   }
-  showToast("\u5DF2\u7ED1\u5B9A\u78C1\u76D8\u8DEF\u5F84 \xB7 \u53EF AI / \u81EA\u52A8\u4FDD\u5B58", 2800);
+  showToast("\u5DF2\u5173\u8054\u78C1\u76D8", 1800);
   try {
     setStatus("\u5DF2\u5173\u8054\u78C1\u76D8\u8DEF\u5F84", path2);
   } catch (_) {
@@ -65823,12 +65865,61 @@ async function resolveMentorPathByName(name) {
     if (data && data.ok && isAbsMentorPath(data.path)) {
       State2.externalWatchPath = data.path;
       State2.diskPathHint = data.path;
-      if (State2.currentFile && !State2.currentFile.path) State2.currentFile.path = data.path;
+      if (State2.currentFile) State2.currentFile.path = data.path;
       return data.path;
     }
   } catch (_) {
   }
   return "";
+}
+async function silentBindDiskPathAfterOpen(fileName) {
+  try {
+    if (resolveActiveMentorAbsPath()) {
+      try {
+        startSupervisionPolling();
+      } catch (_) {
+      }
+      try {
+        if (typeof startExternalWatchForCurrentDocument === "function") startExternalWatchForCurrentDocument();
+      } catch (_) {
+      }
+      return resolveActiveMentorAbsPath();
+    }
+    const name = fileName || mentorBasenameHint() || State2.currentFile && State2.currentFile.name || "";
+    if (!name || !/\.mentor$/i.test(name)) return "";
+    const path2 = await resolveMentorPathByName(name);
+    if (!path2) return "";
+    try {
+      const token = State2.externalWatchToken || "" || await ensureLocalSessionToken();
+      if (token) {
+        await fetch(location.origin + "/supervision/register", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ token, path: path2 })
+        });
+      }
+    } catch (_) {
+    }
+    try {
+      startSupervisionPolling();
+    } catch (_) {
+    }
+    try {
+      if (typeof startExternalWatchForCurrentDocument === "function") startExternalWatchForCurrentDocument();
+    } catch (_) {
+    }
+    try {
+      syncToolbarActionState();
+    } catch (_) {
+    }
+    try {
+      setStatus("\u5DF2\u6253\u5F00", path2);
+    } catch (_) {
+    }
+    return path2;
+  } catch (_) {
+    return "";
+  }
 }
 async function applyFixMentorResultFromPath(absPath) {
   if (!absPath) return { ok: false, error: "no-path" };
@@ -66552,12 +66643,18 @@ async function ensureDiskSavedForFixMentor() {
     }
   }
   if (!path2 || !isAbsMentorPath(path2)) {
+    try {
+      path2 = await silentBindDiskPathAfterOpen(mentorBasenameHint());
+    } catch (_) {
+      path2 = "";
+    }
+  }
+  if (!path2 || !isAbsMentorPath(path2)) {
     setFixMentorJobState({
       status: "saving",
-      message: "\u6D4F\u89C8\u5668\u6253\u5F00\u770B\u4E0D\u5230\u7EDD\u5BF9\u8DEF\u5F84\uFF0C\u8BF7\u5728\u5F39\u51FA\u7684\u7CFB\u7EDF\u5BF9\u8BDD\u6846\u4E2D\u9009\u62E9\u540C\u4E00\u4E2A .mentor\u2026",
+      message: "\u6B63\u5728\u5B9A\u4F4D\u78C1\u76D8\u6587\u4EF6\u2026",
       error: ""
     });
-    showToast("\u8BF7\u5728\u7CFB\u7EDF\u5BF9\u8BDD\u6846\u4E2D\u9009\u62E9\u5F53\u524D\u8FD9\u4E2A .mentor\uFF08\u7ED1\u5B9A\u78C1\u76D8\u8DEF\u5F84\uFF09", 4500);
     const picked = await pickAndBindMentorPath({ name: mentorBasenameHint() });
     if (picked && picked.ok && isAbsMentorPath(picked.path)) {
       path2 = picked.path;
@@ -66565,7 +66662,7 @@ async function ensureDiskSavedForFixMentor() {
       return {
         ok: false,
         error: "no-disk-path",
-        message: picked && picked.message || "\u6CA1\u6709\u78C1\u76D8\u8DEF\u5F84\u3002\u6D4F\u89C8\u5668\u300C\u6253\u5F00\u6587\u4EF6\u300D\u53EA\u6709\u53E5\u67C4\u3001\u6CA1\u6709\u7EDD\u5BF9\u8DEF\u5F84\uFF1BAI \u9700\u8981\u771F\u5B9E\u8DEF\u5F84\u3002\u8BF7\u5728\u5F39\u7A97\u4E2D\u9009\u540C\u4E00\u6587\u4EF6\uFF0C\u6216\u7528 mentor.cmd / \u53CC\u51FB .mentor \u6253\u5F00\u3002"
+        message: picked && picked.message || "\u627E\u4E0D\u5230\u8FD9\u4E2A .mentor \u7684\u78C1\u76D8\u4F4D\u7F6E\u3002\u8BF7\u7528\u8D44\u6E90\u7BA1\u7406\u5668\u53CC\u51FB\u6253\u5F00\uFF0C\u6216\u786E\u8BA4 Everything \u5DF2\u7D22\u5F15\u8BE5\u6587\u4EF6\u3002"
       };
     }
   }
@@ -70765,7 +70862,18 @@ async function openFromMentorHandle(fileHandle, options = {}) {
   const preferDraft = !!(options && options.preferDraft);
   const forceDisk = !!(options && options.forceDisk);
   const documentIdOpt = options && options.documentId || null;
-  await ensureWritePermission(fileHandle);
+  try {
+    if (fileHandle && typeof fileHandle.queryPermission === "function") {
+      const rp = await fileHandle.queryPermission({ mode: "readwrite" });
+      if (rp !== "granted" && typeof fileHandle.queryPermission === "function") {
+        try {
+          await fileHandle.queryPermission({ mode: "read" });
+        } catch (_) {
+        }
+      }
+    }
+  } catch (_) {
+  }
   const file = await fileHandle.getFile();
   const { mdText, annotations, references, mediaFiles, archive } = await readMentorZip(file);
   console.log("[openFromMentorHandle] mediaFiles=", Object.keys(mediaFiles || {}).length);
@@ -70787,14 +70895,7 @@ async function openFromMentorHandle(fileHandle, options = {}) {
   });
   if (!State2.diskPathHint) State2.diskPathHint = file.name;
   try {
-    void resolveMentorPathByName(file.name).then((p) => {
-      if (p) {
-        try {
-          startSupervisionPolling();
-        } catch (_) {
-        }
-      }
-    });
+    void silentBindDiskPathAfterOpen(file.name);
   } catch (_) {
   }
   try {
@@ -72260,6 +72361,10 @@ async function openFromMentorFile(file, options = {}) {
       State2.currentFile.path = p;
       State2.diskPathHint = p;
     }
+  } catch (_) {
+  }
+  try {
+    void silentBindDiskPathAfterOpen(displayName);
   } catch (_) {
   }
   try {
