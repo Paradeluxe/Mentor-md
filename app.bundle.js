@@ -60379,8 +60379,8 @@ var State2 = {
   // Runtime-only external path watch (pending-open / server path; never left in URL).
   externalWatchPath: "",
   externalWatchToken: "",
-  // In-app Hermes /fix-mentor trigger (mentor-server spawn)
-  hermesConnection: { state: "unknown", reachable: false, agentReady: false },
+  // In-app Pi / fix-mentor trigger (mentor-server Pi RPC)
+  aiConnection: { state: "unknown", reachable: false, agentReady: false },
   fixMentorJob: {
     id: "",
     status: "idle",
@@ -65886,35 +65886,35 @@ async function applyFixMentorResultFromPath(absPath) {
     return { ok: false, error: e && e.message ? e.message : String(e) };
   }
 }
-function hermesConnLabel(state, health) {
+function aiConnLabel(state, health) {
   const s = String(state || health && health.state || "unknown");
-  if (!health || health.reachable === false || s === "down" || s === "unavailable") return "Hermes \u672A\u8FDE\u63A5";
-  if (s === "loading" || s === "starting") return "Hermes \u9884\u70ED\u4E2D\u2026";
-  if (s === "ready") return "Hermes \u5DF2\u5C31\u7EEA";
-  if (s === "busy") return "Hermes \u5FD9\u788C";
-  if (s === "error") return "Hermes \u9519\u8BEF";
-  if (health.agentReady) return "Hermes \u5DF2\u5C31\u7EEA";
-  return "Hermes " + s;
+  if (!health || health.reachable === false || s === "down" || s === "unavailable") return "Pi \u672A\u8FDE\u63A5";
+  if (s === "loading" || s === "starting") return "Pi \u68C0\u6D4B\u4E2D\u2026";
+  if (s === "ready") return "Pi \u5DF2\u5C31\u7EEA";
+  if (s === "busy") return "Pi \u5FD9\u788C";
+  if (s === "error") return "Pi \u9519\u8BEF";
+  if (health.agentReady) return "Pi \u5DF2\u5C31\u7EEA";
+  return "Pi " + s;
 }
-function syncHermesConnectionUi() {
-  const h = State2.hermesConnection || {};
-  const chip = document.getElementById("hermes-conn-status");
-  const text3 = document.getElementById("hermes-conn-status-text");
+function syncAiConnectionUi() {
+  const h = State2.aiConnection || {};
+  const chip = document.getElementById("ai-conn-status");
+  const text3 = document.getElementById("ai-conn-status-text");
   if (!chip) return;
   const state = h.state || (h.reachable ? "unknown" : "down");
   chip.classList.remove("hidden");
   chip.dataset.state = state;
   chip.dataset.ready = h.agentReady ? "1" : "0";
   chip.title = [
-    hermesConnLabel(state, h),
+    aiConnLabel(state, h),
     "\u70B9\u51FB\u6253\u5F00 Doctor",
     h.skills && h.skills.length ? "skills: " + h.skills.join(",") : "",
     h.error || "",
     h.mode ? "mode=" + h.mode : ""
   ].filter(Boolean).join(" \xB7 ");
-  if (text3) text3.textContent = hermesConnLabel(state, h);
+  if (text3) text3.textContent = aiConnLabel(state, h);
 }
-async function fetchHermesConnection(opts) {
+async function fetchAiConnection(opts) {
   opts = opts || {};
   const warm = !!opts.warm;
   const wait = opts.wait || 0;
@@ -65933,20 +65933,20 @@ async function fetchHermesConnection(opts) {
     if (token) q.set("token", token);
     if (warm) q.set("warm", "1");
     if (wait) q.set("wait", String(wait));
-    let res = await fetch(location.origin + "/hermes-connection?" + q.toString(), { cache: "no-store" });
+    let res = await fetch(location.origin + "/ai-connection?" + q.toString(), { cache: "no-store" });
     if (res.status === 403 && typeof ensureLocalSessionToken === "function") {
       try {
         token = await ensureLocalSessionToken({ force: true });
         if (token) {
           q.set("token", token);
-          res = await fetch(location.origin + "/hermes-connection?" + q.toString(), { cache: "no-store" });
+          res = await fetch(location.origin + "/ai-connection?" + q.toString(), { cache: "no-store" });
         }
       } catch (_) {
       }
     }
     if (!res.ok) {
-      const hint = res.status === 404 ? "8787 \u4E0D\u662F mentor-server\uFF08/hermes-connection 404\uFF09\u3002\u5173\u6389 python -m http.server\uFF0C\u7528 mentor.cmd \u542F\u52A8" : "HTTP " + res.status;
-      State2.hermesConnection = {
+      const hint = res.status === 404 ? "8787 \u4E0D\u662F mentor-server\uFF08/ai-connection 404\uFF09\u3002\u5173\u6389 python -m http.server\uFF0C\u7528 mentor.cmd \u542F\u52A8" : "HTTP " + res.status;
+      State2.aiConnection = {
         state: "unavailable",
         reachable: false,
         agentReady: false,
@@ -65956,13 +65956,13 @@ async function fetchHermesConnection(opts) {
         checkedAt: Date.now()
       };
       try {
-        syncHermesConnectionUi();
+        syncAiConnectionUi();
       } catch (_) {
       }
-      return State2.hermesConnection;
+      return State2.aiConnection;
     }
     const data = await res.json();
-    State2.hermesConnection = {
+    State2.aiConnection = {
       state: data.state || (data.reachable ? "ready" : "down"),
       reachable: !!data.reachable,
       agentReady: !!data.agentReady,
@@ -65974,12 +65974,12 @@ async function fetchHermesConnection(opts) {
       checkedAt: Date.now()
     };
     try {
-      syncHermesConnectionUi();
+      syncAiConnectionUi();
     } catch (_) {
     }
-    return State2.hermesConnection;
+    return State2.aiConnection;
   } catch (e) {
-    State2.hermesConnection = {
+    State2.aiConnection = {
       state: "down",
       reachable: false,
       agentReady: false,
@@ -65987,17 +65987,17 @@ async function fetchHermesConnection(opts) {
       checkedAt: Date.now()
     };
     try {
-      syncHermesConnectionUi();
+      syncAiConnectionUi();
     } catch (_) {
     }
-    return State2.hermesConnection;
+    return State2.aiConnection;
   }
 }
-function startHermesConnectionPolling() {
-  if (State2._hermesConnTimer) return;
-  void fetchHermesConnection({ warm: true });
-  State2._hermesConnTimer = setInterval(function() {
-    void fetchHermesConnection({ warm: false });
+function startAiConnectionPolling() {
+  if (State2._aiConnTimer) return;
+  void fetchAiConnection({ warm: true });
+  State2._aiConnTimer = setInterval(function() {
+    void fetchAiConnection({ warm: false });
   }, 4e3);
 }
 function doctorKillServerCmd() {
@@ -66013,23 +66013,23 @@ function doctorKillServerCmd() {
     'Start-Process "http://127.0.0.1:' + port + '/index.html"'
   ].join("\n");
 }
-function buildOfflineDoctorReport(sessionStatus, hermesStatus) {
+function buildOfflineDoctorReport(sessionStatus, aiStatus) {
   const checks = [];
-  const notServer = sessionStatus === 404 || hermesStatus === 404;
+  const notServer = sessionStatus === 404 || aiStatus === 404;
   checks.push({
     id: "mentor-server",
     ok: !notServer && sessionStatus === 200,
     severity: notServer || sessionStatus !== 200 ? "error" : "ok",
     title: notServer ? "8787 \u4E0D\u662F mentor-server" : sessionStatus === 200 ? "mentor-server \u5728\u7EBF" : "session HTTP " + sessionStatus,
-    detail: notServer ? "\u5E38\u89C1\u539F\u56E0\uFF1Apython -m http.server \u5360\u7AEF\u53E3\u3002\u9759\u6001\u9875\u80FD\u5F00\uFF0C\u4F46 /session /hermes-connection /doctor \u5168 404\uFF0CAI \u5FC5\u6302\u3002" : "GET /session",
+    detail: notServer ? "\u5E38\u89C1\u539F\u56E0\uFF1Apython -m http.server \u5360\u7AEF\u53E3\u3002\u9759\u6001\u9875\u80FD\u5F00\uFF0C\u4F46 /session /ai-connection /doctor \u5168 404\uFF0CAI \u5FC5\u6302\u3002" : "GET /session",
     fix: notServer ? "restart-mentor-server" : null
   });
   checks.push({
     id: "warm-worker",
     ok: false,
     severity: "error",
-    title: "\u65E0\u6CD5\u68C0\u6D4B Hermes worker",
-    detail: notServer ? "\u5148\u6062\u590D\u771F\u5B9E mentor-server\uFF0C\u518D\u70B9\u300C\u542F\u52A8 / \u9884\u70ED Hermes\u300D" : "/hermes-connection HTTP " + hermesStatus,
+    title: "\u65E0\u6CD5\u68C0\u6D4B Pi AI",
+    detail: notServer ? "\u5148\u6062\u590D\u771F\u5B9E mentor-server\uFF0C\u518D\u70B9\u300C\u68C0\u6D4B / \u9884\u70ED Pi\u300D" : "/ai-connection HTTP " + aiStatus,
     fix: notServer ? "restart-mentor-server" : "warm-worker"
   });
   return {
@@ -66052,7 +66052,7 @@ function renderDoctorReport(report) {
   const nErr = (report && report.checks || []).filter((c) => c.severity === "error").length;
   const nWarn = (report && report.checks || []).filter((c) => c.severity === "warn").length;
   if (overall === "ok") overallEl.textContent = "\u5168\u90E8\u901A\u8FC7 \xB7 \u53EF\u4EE5\u70B9 AI \u5904\u7406";
-  else if (overall === "warn") overallEl.textContent = "\u6709\u8B66\u544A\uFF08" + nWarn + "\uFF09\xB7 \u5EFA\u8BAE\u9884\u70ED Hermes";
+  else if (overall === "warn") overallEl.textContent = "\u6709\u8B66\u544A\uFF08" + nWarn + "\uFF09\xB7 \u5EFA\u8BAE\u68C0\u6D4B Pi";
   else if (overall === "error") overallEl.textContent = "\u53D1\u73B0\u95EE\u9898\uFF08" + nErr + "\uFF09\xB7 \u89C1\u4E0B\u65B9\u6761\u76EE\u4E0E\u4E00\u952E\u4FEE\u590D";
   else overallEl.textContent = "\u68C0\u6D4B\u4E2D\u2026";
   const badge = { ok: "OK", warn: "WARN", error: "ERR" };
@@ -66121,7 +66121,7 @@ async function fetchDoctorReport(opts) {
         pathSev = "ok";
       } else if (hasHandleOnly) {
         pathTitle = "\u4EC5\u6709\u6D4F\u89C8\u5668\u5199\u53E5\u67C4 \xB7 \u65E0\u7EDD\u5BF9\u8DEF\u5F84";
-        pathDetail = "\u53EF Ctrl+S \u5199\u56DE\uFF0C\u4F46 AI/Hermes \u9700\u8981\u771F\u5B9E\u8DEF\u5F84\u3002\u70B9\u300C\u7ED1\u5B9A\u78C1\u76D8\u8DEF\u5F84\u300D\u9009\u540C\u4E00\u4E2A .mentor\uFF0C\u6216\u53CC\u51FB\u6587\u4EF6 / mentor.cmd \u6253\u5F00\u3002";
+        pathDetail = "\u53EF Ctrl+S \u5199\u56DE\uFF0C\u4F46 AI/Pi \u9700\u8981\u771F\u5B9E\u8DEF\u5F84\u3002\u70B9\u300C\u7ED1\u5B9A\u78C1\u76D8\u8DEF\u5F84\u300D\u9009\u540C\u4E00\u4E2A .mentor\uFF0C\u6216\u53CC\u51FB\u6587\u4EF6 / mentor.cmd \u6253\u5F00\u3002";
         pathSev = "warn";
       } else if (State2.currentFile) {
         pathTitle = "\u5F53\u524D\u6587\u7A3F\u65E0\u78C1\u76D8\u8DEF\u5F84\uFF08\u6D4F\u89C8\u5668\u6253\u5F00\u5E38\u89C1\uFF09";
@@ -66178,7 +66178,7 @@ async function runDoctorRepair(action) {
   const report = data.report || await fetchDoctorReport({ warm: true, wait: 5 });
   renderDoctorReport(report);
   try {
-    await fetchHermesConnection({ warm: false });
+    await fetchAiConnection({ warm: false });
   } catch (_) {
   }
   return report;
@@ -66223,7 +66223,7 @@ function fixMentorStatusLabel(st) {
     case "saving":
       return "\u4FDD\u5B58\u4E2D\u2026";
     case "starting":
-      return "\u542F\u52A8 Hermes\u2026";
+      return "\u542F\u52A8 Pi\u2026";
     case "running":
       return "AI \u5904\u7406\u4E2D\u2026";
     case "done":
@@ -66276,7 +66276,7 @@ function syncFixMentorJobUi() {
     } else if (job.status === "done") {
       btn.removeAttribute("aria-busy");
       btn.textContent = "AI \u5904\u7406";
-      btn.title = "\u4FDD\u5B58\u5E76\u8BA9 Hermes \u5904\u7406\u5F85\u529E (@AI / AI \u5361)";
+      btn.title = "\u4FDD\u5B58\u5E76\u8BA9 AI Reviewer\uFF08Pi\uFF09\u5904\u7406\u5F85\u529E (@AI / AI \u5361)";
     } else if (job.status === "error") {
       btn.removeAttribute("aria-busy");
       btn.textContent = "\u91CD\u8BD5 AI";
@@ -66284,7 +66284,7 @@ function syncFixMentorJobUi() {
     } else {
       btn.removeAttribute("aria-busy");
       btn.textContent = "AI \u5904\u7406";
-      btn.title = "\u4FDD\u5B58\u5E76\u8BA9 Hermes \u5904\u7406\u5F85\u529E (@AI / AI \u5361)";
+      btn.title = "\u4FDD\u5B58\u5E76\u8BA9 AI Reviewer\uFF08Pi\uFF09\u5904\u7406\u5F85\u529E (@AI / AI \u5361)";
     }
   });
   const name = (job.path || "").split(/[\\/]/).pop() || (job.sourceName || "") || "";
@@ -66355,7 +66355,7 @@ function syncFixMentorJobUi() {
         if (job.status === "error") {
           logEl.textContent = detail || job.error || logPreview || "";
         } else {
-          logEl.textContent = logPreview || detail || "\u7B49\u5F85 Hermes \u8F93\u51FA\u2026";
+          logEl.textContent = logPreview || detail || "\u7B49\u5F85 Pi \u8F93\u51FA\u2026";
         }
       }
       if (job.status === "done") {
@@ -66604,23 +66604,23 @@ async function runFixMentorFromUi(opts = {}) {
     }
   }
   try {
-    const conn = await fetchHermesConnection({ warm: true, wait: 12 });
+    const conn = await fetchAiConnection({ warm: true, wait: 12 });
     if (!conn || !conn.agentReady) {
       const detail = conn && conn.error ? String(conn.error) : "";
-      const msg = detail ? "Hermes \u672A\u5C31\u7EEA\uFF1A" + detail : "Hermes \u672A\u5C31\u7EEA\uFF08\u5E95\u680F\u8FDE\u63A5\u82AF\u7247\uFF09\u3002\u7B49\u300CHermes \u5DF2\u5C31\u7EEA\u300D\u518D\u70B9 AI\uFF0C\u6216\u5173\u6389\u5047 http.server \u540E\u7528 mentor.cmd \u91CD\u542F\u3002";
+      const msg = detail ? "Pi \u672A\u5C31\u7EEA\uFF1A" + detail : "Pi \u672A\u5C31\u7EEA\uFF08\u5E95\u680F\u8FDE\u63A5\u82AF\u7247\uFF09\u3002\u7B49\u300CPi \u5DF2\u5C31\u7EEA\u300D\u518D\u70B9 AI\uFF0C\u6216\u5173\u6389\u5047 http.server \u540E\u7528 mentor.cmd \u91CD\u542F\u3002";
       setFixMentorJobState({
         status: "error",
-        error: "hermes-not-ready",
+        error: "pi-not-ready",
         message: msg
       });
       showToast(msg, 5200);
-      return { ok: false, error: "hermes-not-ready", message: msg };
+      return { ok: false, error: "pi-not-ready", message: msg };
     }
   } catch (_) {
-    const msg = "\u65E0\u6CD5\u68C0\u67E5 Hermes \u8FDE\u63A5";
-    setFixMentorJobState({ status: "error", error: "hermes-conn-check", message: msg });
+    const msg = "\u65E0\u6CD5\u68C0\u67E5 Pi \u8FDE\u63A5";
+    setFixMentorJobState({ status: "error", error: "ai-conn-check", message: msg });
     showToast(msg, 4200);
-    return { ok: false, error: "hermes-conn-check", message: msg };
+    return { ok: false, error: "ai-conn-check", message: msg };
   }
   const saved = await ensureDiskSavedForFixMentor();
   if (!saved.ok) {
@@ -66647,7 +66647,7 @@ async function runFixMentorFromUi(opts = {}) {
     path: saved.path,
     threadId,
     scope,
-    message: "\u63D0\u4EA4\u5230 warm Hermes\u2026",
+    message: "\u63D0\u4EA4\u5230 Pi\u2026",
     error: "",
     exitCode: null,
     startedAt: Date.now(),
@@ -66718,13 +66718,13 @@ async function runFixMentorFromUi(opts = {}) {
     path: data.path || saved.path,
     threadId: data.threadId || threadId,
     scope: data.scope || scope,
-    message: data.message || "Hermes \u5DF2\u542F\u52A8",
+    message: data.message || "Pi \u5DF2\u542F\u52A8",
     error: "",
     startedAt: Date.now()
   });
   State2.fixMentorJob.startedAtClient = Date.now();
   startFixMentorJobPolling();
-  showToast("AI \u4EFB\u52A1\u5DF2\u63D0\u4EA4 \xB7 warm Hermes", 2400);
+  showToast("AI \u4EFB\u52A1\u5DF2\u63D0\u4EA4 \xB7 Pi", 2400);
   return { ok: true, job: data };
 }
 function invokeAiForThread(threadId) {
@@ -66981,7 +66981,7 @@ function renderCommentList() {
               <textarea data-thread-input="${safeThreadId}" rows="1" placeholder="${escapeHtml(markerPlaceholder(threadType, !!first3.body))}" autocomplete="off"></textarea>
               <div class="form-actions">
                 <button type="button" class="comment-invoke-ai-btn" data-act="invoke-ai" data-thread="${safeThreadId}" title="\u5728\u56DE\u590D\u4E2D\u63D2\u5165 @AI\uFF08\u663E\u5F0F\u5524\u8D77 AI\uFF09" aria-label="\u63D2\u5165 @AI">@AI</button>
-                <button type="button" class="comment-run-ai-btn" data-act="run-fix-mentor" data-thread="${safeThreadId}" title="\u4FDD\u5B58\u5E76\u8BA9 Hermes \u5904\u7406\u5F85\u529E (@AI / AI \u5361)" aria-label="AI \u5904\u7406">AI \u5904\u7406</button>
+                <button type="button" class="comment-run-ai-btn" data-act="run-fix-mentor" data-thread="${safeThreadId}" title="\u4FDD\u5B58\u5E76\u8BA9 AI Reviewer\uFF08Pi\uFF09\u5904\u7406\u5F85\u529E (@AI / AI \u5361)" aria-label="AI \u5904\u7406">AI \u5904\u7406</button>
                 <button class="comment-resolve-btn ${thread.resolved ? "is-resolved" : ""}" data-act="resolve" data-thread="${safeThreadId}" title="${thread.resolved ? "\u91CD\u65B0\u6253\u5F00\u6B64\u6279\u6CE8" : "\u6807\u8BB0\u4E3A\u5DF2\u89E3\u51B3"}" aria-label="${thread.resolved ? "\u91CD\u65B0\u6253\u5F00" : "\u6807\u8BB0\u4E3A\u5DF2\u89E3\u51B3"}">${thread.resolved ? "\u91CD\u5F00" : "\u89E3\u51B3"}</button>
                 <button data-act="submit-reply" data-thread="${safeThreadId}" class="primary" disabled title="\u8F93\u5165\u540E\u53EF\u56DE\u590D (Ctrl+Enter)">\u56DE\u590D</button>
               </div>
@@ -75113,10 +75113,10 @@ function setupToolbar() {
     }
     if (e.target.closest('[data-act="doctor-warm"]')) {
       e.preventDefault();
-      showToast("\u6B63\u5728\u9884\u70ED Hermes\u2026", 1800);
+      showToast("\u6B63\u5728\u68C0\u6D4B Pi\u2026", 1800);
       void runDoctorRepair("warm-worker").then((r) => {
         const ok = r && r.overall === "ok";
-        showToast(ok ? "Hermes \u5DF2\u5C31\u7EEA" : "\u9884\u70ED\u7ED3\u675F \xB7 \u89C1 Doctor \u7ED3\u679C", 2800);
+        showToast(ok ? "Pi \u5DF2\u5C31\u7EEA" : "\u9884\u70ED\u7ED3\u675F \xB7 \u89C1 Doctor \u7ED3\u679C", 2800);
       }).catch((err) => showToast(String(err && err.message || err), 3500));
       return;
     }
@@ -75864,7 +75864,7 @@ async function boot() {
     await tryReconnect();
   }
   try {
-    startHermesConnectionPolling();
+    startAiConnectionPolling();
   } catch (_) {
   }
   try {
@@ -76525,8 +76525,8 @@ window.__mdAnnotator = {
   writeCurrentToDisk,
   writeCurrentViaServer,
   hasDiskWriteTarget,
-  fetchHermesConnection,
-  startHermesConnectionPolling,
+  fetchAiConnection,
+  startAiConnectionPolling,
   openDoctorPanel,
   closeDoctorPanel,
   pickAndBindMentorPath,

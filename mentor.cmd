@@ -55,7 +55,7 @@ if %errorlevel% equ 0 (
   )
   endlocal
   echo [Mentor] Port %MENTOR_PORT% is listening but is NOT mentor-server.py
-  echo ^(e.g. python -m http.server has no /session — AI/Hermes will fail^).
+  echo ^(e.g. python -m http.server has no /session — AI/Pi will fail^).
   echo Kill that process, then re-run mentor.cmd.
   pause
   exit /b 2

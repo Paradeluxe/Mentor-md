@@ -48,6 +48,14 @@
 
 需要 **Python 3** + Chrome/Edge。详见 `README-用户.md`。
 
+### 应用内 AI（Pi）
+
+「AI 处理」走 **嵌入式 Pi** + 仓内 skill `ai-skill/fix-mentor/`（作者 **AI Reviewer**），**不再使用 Hermes warm worker**。
+
+- 启动：`mentor.cmd` / `python mentor-server.py`（必须有 `/session`、`/ai-connection`）
+- 依赖：PATH 上有 `pi`；模型在 `~/.pi/agent/settings.json`
+- 说明：`docs/AI_PI.md`
+
 ---
 
 ## 快速开始
