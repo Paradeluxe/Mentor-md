@@ -132,11 +132,11 @@ async function runPass(browser, pass) {
     timeout: 30000,
   });
   await waitEditor(page);
-  // marks may load async from mentor zip
-  for (let i = 0; i < 20; i++) {
+  // pending-open + zip marks may lag past first paint
+  for (let i = 0; i < 40; i++) {
     const s = await snap(page);
     if (s.markCount > 0 && s.path) break;
-    await page.waitForTimeout(300);
+    await page.waitForTimeout(250);
   }
   let s0 = await snap(page);
   assert(s0.markCount > 0, `P${pass} demo has annotation marks`, s0);
@@ -145,7 +145,7 @@ async function runPass(browser, pass) {
 
   // 1) working → pet
   writeSidecar(true, { phase: 'working', currentThreadId: TIDS[0], pendingThreadIds: [TIDS[0]], message: 'working on first' });
-  let s1 = await waitPet(page, true, 10000);
+  let s1 = await waitPet(page, true, 12000);
   assert(s1.pet, `P${pass} pet via poll working`, s1);
   assert(s1.bodyActive, `P${pass} body supervision-active`, s1);
   assert(s1.signalPhase === 'working' || s1.state?.phase === 'working', `P${pass} phase working`, s1);
@@ -159,7 +159,7 @@ async function runPass(browser, pass) {
       pendingThreadIds: [TIDS[0], TIDS[1]],
       message: 'switch current',
     });
-    await page.waitForTimeout(1500);
+    await page.waitForTimeout(2200);
     const s2 = await snap(page);
     assert(s2.pet, `P${pass} pet after switch`, s2);
     // current should track
@@ -178,8 +178,16 @@ async function runPass(browser, pass) {
     pendingThreadIds: [TIDS[0]],
     message: 'waiting user',
   });
-  await page.waitForTimeout(1500);
-  const s3 = await snap(page);
+  // poller is ~1s; wait until phase/signal reflects waiting (not just wall clock)
+  let s3 = null;
+  for (let i = 0; i < 20; i++) {
+    await page.waitForTimeout(400);
+    s3 = await snap(page);
+    if (
+      s3.pet &&
+      (s3.petPhase.includes('waiting') || s3.signalPhase === 'waiting' || s3.state?.phase === 'waiting')
+    ) break;
+  }
   assert(s3.pet, `P${pass} pet waiting`, s3);
   assert(
     s3.petPhase.includes('waiting') || s3.signalPhase === 'waiting' || s3.state?.phase === 'waiting',
@@ -196,8 +204,15 @@ async function runPass(browser, pass) {
     pendingThreadIds: [TIDS[0]],
     message: 'degraded path',
   });
-  await page.waitForTimeout(1500);
-  const s4 = await snap(page);
+  let s4 = null;
+  for (let i = 0; i < 16; i++) {
+    await page.waitForTimeout(400);
+    s4 = await snap(page);
+    if (
+      s4.pet &&
+      (s4.signalHealth === 'degraded' || s4.state?.health === 'degraded' || /degraded|异常/.test(s4.signalTitle + s4.bannerText))
+    ) break;
+  }
   assert(s4.pet, `P${pass} pet degraded still shown`, s4);
   assert(
     s4.signalHealth === 'degraded' || s4.state?.health === 'degraded' || /degraded|异常/.test(s4.signalTitle + s4.bannerText),

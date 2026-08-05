@@ -132,7 +132,19 @@ function assert(cond, msg) {
     await page.evaluate(async (arr) => {
       const M = window.__mdAnnotator;
       const u8 = new Uint8Array(arr);
-      await M.openFromMentorFile(new File([u8], 'media-pack.mentor', { type: 'application/zip' }), { quiet: true });
+      // Unique name so silent path bind cannot hijack another file on disk
+      const name = 'media-pack-e2e-' + Date.now() + '.mentor';
+      await M.openFromMentorFile(new File([u8], name, { type: 'application/zip' }), { quiet: true });
+      // Force no-disk-target path: download dialog (this case is about dirty clear, not server write)
+      try {
+        if (typeof M.clearExternalWatchSource === 'function') M.clearExternalWatchSource();
+        else {
+          M.State.externalWatchPath = '';
+          M.State.externalWatchToken = '';
+        }
+      } catch (_) {}
+      if (M.State.currentFile) M.State.currentFile.path = '';
+      M.State.diskPathHint = name;
       M.State.editor.commands.insertContent(' SAVE');
     }, built);
     // Allow live-sync elect / setLiveRole race window that previously dirtied mid-save
@@ -153,14 +165,14 @@ function assert(cond, msg) {
         await page.locator('#save-dialog-primary').click();
       })(),
     ]);
-    assert(/media-pack\.mentor$/i.test(dl.suggestedFilename()), `name ${dl.suggestedFilename()}`);
-    await page.waitForTimeout(300);
-    const after = await page.evaluate(() => ({
-      dirty: !!window.__mdAnnotator.State.currentFile.dirty,
-      indicator: document.querySelector('#dirty-indicator')?.classList.contains('is-dirty'),
-      toast: document.querySelector('#toast')?.textContent || '',
-    }));
-    assert(after.dirty === false, `media-pack dirty cleared (toast=${after.toast})`);
+    assert(/media-pack-e2e-.*\.mentor$/i.test(dl.suggestedFilename()), `name ${dl.suggestedFilename()}`);
+        await page.waitForTimeout(300);
+        const after = await page.evaluate(() => ({
+          dirty: !!window.__mdAnnotator.State.currentFile.dirty,
+          indicator: document.querySelector('#dirty-indicator')?.classList.contains('is-dirty'),
+          toast: document.querySelector('#toast')?.textContent || '',
+        }));
+        assert(after.dirty === false, `media-pack dirty cleared (toast=${after.toast})`);
     assert(after.indicator === false, 'media-pack indicator off');
   }
 

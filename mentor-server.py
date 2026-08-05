@@ -42,6 +42,7 @@ SUPERVISION_INDEX_FILE = os.path.join(HTML_DIR, '.supervision-index.json')
 # In-process fix-mentor jobs (Pi RPC). Local-only; not durable across restarts.
 FIX_MENTOR_JOBS = {}
 FIX_MENTOR_LOCK = threading.Lock()
+PENDING_OPEN_LOCK = threading.Lock()
 FIX_MENTOR_LOG_MAX = 120
 FIX_MENTOR_JOB_TTL_SEC = 3600
 
@@ -159,8 +160,9 @@ def set_pending_open(path):
         'setAt': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
     }
     try:
-        with open(PENDING_OPEN_FILE, 'w', encoding='utf-8') as f:
-            json.dump(payload, f, ensure_ascii=False, indent=2)
+        with PENDING_OPEN_LOCK:
+            with open(PENDING_OPEN_FILE, 'w', encoding='utf-8') as f:
+                json.dump(payload, f, ensure_ascii=False, indent=2)
     except Exception as e:
         print('warn: cannot write pending-open:', e)
         return None
@@ -169,17 +171,18 @@ def set_pending_open(path):
 
 def take_pending_open():
     """Consume one pending open (or None)."""
-    if not os.path.isfile(PENDING_OPEN_FILE):
-        return None
-    try:
-        with open(PENDING_OPEN_FILE, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-    except Exception:
-        data = None
-    try:
-        os.remove(PENDING_OPEN_FILE)
-    except Exception:
-        pass
+    with PENDING_OPEN_LOCK:
+        if not os.path.isfile(PENDING_OPEN_FILE):
+            return None
+        try:
+            with open(PENDING_OPEN_FILE, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+        except Exception:
+            data = None
+        try:
+            os.remove(PENDING_OPEN_FILE)
+        except Exception:
+            pass
     if not isinstance(data, dict):
         return None
     path = data.get('path') or ''
@@ -600,8 +603,12 @@ def _search_everything_mentor(basename):
     return best
 
 
-def resolve_mentor_path_by_name(name):
-    """Best-effort resolve basename → abs path (index, allow-list, Everything)."""
+def resolve_mentor_path_by_name(name, allow_everything=False):
+    """Resolve basename → abs path.
+
+    Default: index + allow-list only (safe for open/autosave).
+    allow_everything=True: Everything search as last resort (AI path only).
+    """
     name = (name or '').strip()
     if not name:
         return None
@@ -622,7 +629,6 @@ def resolve_mentor_path_by_name(name):
     if len(uniq) == 1:
         return uniq[0]
     if len(uniq) > 1:
-        # pick best scored among allow-list
         best = None
         best_s = -1
         for p in uniq:
@@ -631,7 +637,9 @@ def resolve_mentor_path_by_name(name):
                 best_s, best = s, p
         if best:
             return best
-    # Everything silent search (unique / high-confidence)
+    if not allow_everything:
+        return None
+    # Everything silent search (unique / high-confidence) — AI only
     found = _search_everything_mentor(low)
     if found:
         try:
@@ -1106,7 +1114,8 @@ class MentorHandler(http.server.SimpleHTTPRequestHandler):
 
         if route == '/resolve-mentor-path':
             name = str(body.get('name') or path or '')
-            resolved = resolve_mentor_path_by_name(name)
+            allow_everything = bool(body.get('everything') or body.get('allowEverything') or body.get('allow_everything'))
+            resolved = resolve_mentor_path_by_name(name, allow_everything=allow_everything)
             if not resolved:
                 self._send_json(404, {
                     'ok': False,
@@ -1165,7 +1174,7 @@ class MentorHandler(http.server.SimpleHTTPRequestHandler):
                 })
                 return
             if not path and name:
-                resolved = resolve_mentor_path_by_name(name)
+                resolved = resolve_mentor_path_by_name(name, allow_everything=True)
                 if resolved:
                     path = resolved
             if not path:
@@ -1273,6 +1282,32 @@ class MentorHandler(http.server.SimpleHTTPRequestHandler):
                 'path': item['path'],
                 'name': item['name'],
                 'setAt': item.get('setAt') or '',
+            })
+            return
+
+        if self.path.startswith('/resolve-mentor-path'):
+            if not request_is_local(self):
+                self.send_error(403, 'Local only')
+                return
+            parsed = urllib.parse.urlparse(self.path)
+            params = urllib.parse.parse_qs(parsed.query)
+            if not token_ok(self, params):
+                self._send_json(403, {'ok': False, 'error': 'bad-token'})
+                return
+            name = (params.get('name') or params.get('fileName') or [''])[0]
+            allow_everything = str((params.get('everything') or ['0'])[0]).lower() in ('1', 'true', 'yes')
+            resolved = resolve_mentor_path_by_name(name, allow_everything=allow_everything)
+            if not resolved:
+                self._send_json(404, {
+                    'ok': False,
+                    'error': 'not-found',
+                    'message': '无法按文件名解析: %s' % os.path.basename(name or ''),
+                })
+                return
+            self._send_json(200, {
+                'ok': True,
+                'path': resolved,
+                'name': os.path.basename(resolved),
             })
             return
 
@@ -1419,11 +1454,16 @@ class MentorHandler(http.server.SimpleHTTPRequestHandler):
 
 
 
+class ThreadingMentorServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
+    """Concurrent requests — Pi warm / doctor must not block pending-open or save."""
+    daemon_threads = True
+    allow_reuse_address = True
+
+
 def start_server(port, open_url=None):
     os.chdir(HTML_DIR)
     write_session_token()
-    socketserver.TCPServer.allow_reuse_address = True
-    with socketserver.TCPServer(('127.0.0.1', port), MentorHandler) as httpd:
+    with ThreadingMentorServer(('127.0.0.1', port), MentorHandler) as httpd:
         print(f'Mentor server: http://127.0.0.1:{port}/index.html')
         time.sleep(0.3)
         try:
@@ -1512,8 +1552,7 @@ def main():
         write_session_token()
         if open_path:
             set_pending_open(open_path)
-        socketserver.TCPServer.allow_reuse_address = True
-        with socketserver.TCPServer(('127.0.0.1', port), MentorHandler) as httpd:
+        with ThreadingMentorServer(('127.0.0.1', port), MentorHandler) as httpd:
             print(f'Mentor server (no-browser): http://127.0.0.1:{port}/index.html')
             try:
                 threading.Thread(target=lambda: ai_connection_public(warm=True), name='ai-pi-boot', daemon=True).start()

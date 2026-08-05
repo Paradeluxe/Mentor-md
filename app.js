@@ -6387,13 +6387,15 @@ async function pickAndBindMentorPath(opts) {
   return { ok: true, path };
 }
 
-async function resolveMentorPathByName(name) {
+async function resolveMentorPathByName(name, opts = {}) {
   const base = String(name || mentorBasenameHint() || "").trim();
   if (!base) return "";
   const token = (State.externalWatchToken || "") || (await ensureLocalSessionToken());
   if (!token) return "";
+  const everything = !!(opts && opts.everything);
   try {
     const q = new URLSearchParams({ token, name: base });
+    if (everything) q.set("everything", "1");
     const res = await fetch(location.origin + "/resolve-mentor-path?" + q.toString(), { cache: "no-store" });
     if (!res.ok) return "";
     const data = await res.json();
@@ -7158,14 +7160,14 @@ async function ensureDiskSavedForFixMentor() {
   }
 
   // Absolute path only — no stage / no silent temp copy.
-  // Browser open = Handle without abs path; Pi still needs a real disk path.
   let path = "";
   try { path = resolveActiveMentorAbsPath(); } catch (_) { path = ""; }
   if (!path) {
     setFixMentorJobState({ status: "saving", message: "正在解析文件路径…", error: "" });
-    try { path = await resolveMentorPathByName(mentorBasenameHint()); } catch (_) { path = ""; }
+    try { path = await resolveMentorPathByName(mentorBasenameHint(), { everything: true }); } catch (_) { path = ""; }
   }
-  // Flush handle write so on-disk bytes match editor before AI / path bind.
+
+  // Flush FSA handle write if we still lack a path but have a handle.
   if ((!path || !isAbsMentorPath(path)) && typeof hasWriteHandle === "function" && hasWriteHandle()) {
     setFixMentorJobState({ status: "saving", message: "正在保存…", error: "" });
     try {
@@ -7180,19 +7182,15 @@ async function ensureDiskSavedForFixMentor() {
     } catch (e) {
       return { ok: false, error: "save-failed", message: "写回失败: " + (e && e.message || e) };
     }
-    try { path = await resolveMentorPathByName(mentorBasenameHint()); } catch (_) {}
+    try { path = await resolveMentorPathByName(mentorBasenameHint(), { everything: true }); } catch (_) { path = ""; }
   }
-  if (!path || !isAbsMentorPath(path)) {
-    // One more silent attempt (Everything may index late)
-    try { path = await silentBindDiskPathAfterOpen(mentorBasenameHint()); } catch (_) { path = ""; }
-  }
+
   if (!path || !isAbsMentorPath(path)) {
     setFixMentorJobState({
       status: "saving",
       message: "正在定位磁盘文件…",
       error: "",
     });
-    // Last resort: host OS pick (no browser FSA lecture)
     const picked = await pickAndBindMentorPath({ name: mentorBasenameHint() });
     if (picked && picked.ok && isAbsMentorPath(picked.path)) {
       path = picked.path;
@@ -11925,9 +11923,6 @@ function supervisionDocumentId(path) {
 
 async function bindSupervisionToActiveDocument() {
   const poller = getSupervisionPoller();
-  try { poller.stop(); } catch (_) {}
-  try { clearSupervisionLocal(); } catch (_) {}
-  const token = (State.externalWatchToken || "") || (await ensureLocalSessionToken());
   const path = State.externalWatchPath || (State.currentFile && State.currentFile.path) || "";
   const name =
     (State.currentFile && State.currentFile.name) ||
@@ -11939,11 +11934,22 @@ async function bindSupervisionToActiveDocument() {
       return i >= 0 ? s.slice(i + 1) : s;
     })()) ||
     "";
-  const documentId = supervisionDocumentId(path || name);
-  if ((!path && !name) || !token || !documentId) return false;
   // Auto-poll only for deep-link path or .mentor packages — plain .md opens stay local.
+  // Important: do NOT clear local/manual supervision before this gate (race wiped statusbar tests
+  // and any applySupervisionPayload while session token was still fetching).
   const isMentor = /\.mentor$/i.test(String(name || "")) || /\.mentor$/i.test(String(path || ""));
-  if (!path && !isMentor) return false;
+  if (!path && !isMentor) {
+    try { poller.stop(); } catch (_) {}
+    return false;
+  }
+  const token = (State.externalWatchToken || "") || (await ensureLocalSessionToken());
+  const documentId = supervisionDocumentId(path || name);
+  if ((!path && !name) || !token || !documentId) {
+    try { poller.stop(); } catch (_) {}
+    return false;
+  }
+  try { poller.stop(); } catch (_) {}
+  try { clearSupervisionLocal(); } catch (_) {}
   await poller.start({ path, name, token, documentId });
   return true;
 }
@@ -17314,6 +17320,9 @@ window.__mdAnnotator = {
   writeCurrentViaServer,
   hasDiskWriteTarget,
   fetchAiConnection,
+  // Compat aliases (pre-Pi rename)
+  fetchHermesConnection: fetchAiConnection,
+  startHermesConnectionPolling: startAiConnectionPolling,
   startAiConnectionPolling,
   openDoctorPanel,
   closeDoctorPanel,
@@ -17322,6 +17331,7 @@ window.__mdAnnotator = {
   ensureDiskSavedForFixMentor,
   resolveActiveMentorAbsPath,
   resolveMentorPathByName,
+  clearExternalWatchSource,
   mentorBasenameHint,
   fetchDoctorReport,
   runDoctorRepair,

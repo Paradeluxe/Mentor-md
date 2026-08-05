@@ -65854,13 +65854,15 @@ async function pickAndBindMentorPath(opts) {
   }
   return { ok: true, path: path2 };
 }
-async function resolveMentorPathByName(name) {
+async function resolveMentorPathByName(name, opts = {}) {
   const base2 = String(name || mentorBasenameHint() || "").trim();
   if (!base2) return "";
   const token = State2.externalWatchToken || "" || await ensureLocalSessionToken();
   if (!token) return "";
+  const everything = !!(opts && opts.everything);
   try {
     const q = new URLSearchParams({ token, name: base2 });
+    if (everything) q.set("everything", "1");
     const res = await fetch(location.origin + "/resolve-mentor-path?" + q.toString(), { cache: "no-store" });
     if (!res.ok) return "";
     const data = await res.json();
@@ -66622,7 +66624,7 @@ async function ensureDiskSavedForFixMentor() {
   if (!path2) {
     setFixMentorJobState({ status: "saving", message: "\u6B63\u5728\u89E3\u6790\u6587\u4EF6\u8DEF\u5F84\u2026", error: "" });
     try {
-      path2 = await resolveMentorPathByName(mentorBasenameHint());
+      path2 = await resolveMentorPathByName(mentorBasenameHint(), { everything: true });
     } catch (_) {
       path2 = "";
     }
@@ -66642,13 +66644,7 @@ async function ensureDiskSavedForFixMentor() {
       return { ok: false, error: "save-failed", message: "\u5199\u56DE\u5931\u8D25: " + (e && e.message || e) };
     }
     try {
-      path2 = await resolveMentorPathByName(mentorBasenameHint());
-    } catch (_) {
-    }
-  }
-  if (!path2 || !isAbsMentorPath(path2)) {
-    try {
-      path2 = await silentBindDiskPathAfterOpen(mentorBasenameHint());
+      path2 = await resolveMentorPathByName(mentorBasenameHint(), { everything: true });
     } catch (_) {
       path2 = "";
     }
@@ -71263,15 +71259,6 @@ function supervisionDocumentId(path2) {
 }
 async function bindSupervisionToActiveDocument() {
   const poller = getSupervisionPoller();
-  try {
-    poller.stop();
-  } catch (_) {
-  }
-  try {
-    clearSupervisionLocal();
-  } catch (_) {
-  }
-  const token = State2.externalWatchToken || "" || await ensureLocalSessionToken();
   const path2 = State2.externalWatchPath || State2.currentFile && State2.currentFile.path || "";
   const name = State2.currentFile && State2.currentFile.name || State2.diskPathHint && (() => {
     const s = String(State2.diskPathHint);
@@ -71280,10 +71267,31 @@ async function bindSupervisionToActiveDocument() {
     const i = ia > ib ? ia : ib;
     return i >= 0 ? s.slice(i + 1) : s;
   })() || "";
-  const documentId = supervisionDocumentId(path2 || name);
-  if (!path2 && !name || !token || !documentId) return false;
   const isMentor = /\.mentor$/i.test(String(name || "")) || /\.mentor$/i.test(String(path2 || ""));
-  if (!path2 && !isMentor) return false;
+  if (!path2 && !isMentor) {
+    try {
+      poller.stop();
+    } catch (_) {
+    }
+    return false;
+  }
+  const token = State2.externalWatchToken || "" || await ensureLocalSessionToken();
+  const documentId = supervisionDocumentId(path2 || name);
+  if (!path2 && !name || !token || !documentId) {
+    try {
+      poller.stop();
+    } catch (_) {
+    }
+    return false;
+  }
+  try {
+    poller.stop();
+  } catch (_) {
+  }
+  try {
+    clearSupervisionLocal();
+  } catch (_) {
+  }
   await poller.start({ path: path2, name, token, documentId });
   return true;
 }
@@ -76654,6 +76662,9 @@ window.__mdAnnotator = {
   writeCurrentViaServer,
   hasDiskWriteTarget,
   fetchAiConnection,
+  // Compat aliases (pre-Pi rename)
+  fetchHermesConnection: fetchAiConnection,
+  startHermesConnectionPolling: startAiConnectionPolling,
   startAiConnectionPolling,
   openDoctorPanel,
   closeDoctorPanel,
@@ -76662,6 +76673,7 @@ window.__mdAnnotator = {
   ensureDiskSavedForFixMentor,
   resolveActiveMentorAbsPath,
   resolveMentorPathByName,
+  clearExternalWatchSource,
   mentorBasenameHint,
   fetchDoctorReport,
   runDoctorRepair,

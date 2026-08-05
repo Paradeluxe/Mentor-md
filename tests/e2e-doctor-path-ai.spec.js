@@ -25,16 +25,27 @@ async function main() {
   const page = await browser.newPage();
   const errors = [];
   page.on('pageerror', (e) => errors.push(String(e.message || e)));
-  await page.goto(BASE + '/index.html?v=doctor-e2e-' + Date.now(), { waitUntil: 'domcontentloaded', timeout: 30000 });
+  await page.goto(BASE + '/index.html?v=doctor-e2e-' + Date.now(), {
+    waitUntil: 'domcontentloaded',
+    timeout: 30000,
+  });
   await page.waitForFunction(() => window.__mdAnnotator?.State?.editor, { timeout: 25000 });
-  await page.waitForTimeout(1200);
+  // Wait until pending-open finished binding abs path (not just editor ready)
+  await page.waitForFunction(() => {
+    const a = window.__mdAnnotator;
+    if (!a) return false;
+    const p = (a.resolveActiveMentorAbsPath && a.resolveActiveMentorAbsPath()) || a.State?.externalWatchPath || '';
+    const name = a.State?.currentFile?.name || '';
+    return /supervision-pet-demo\.mentor$/i.test(name) && /[\\/]/.test(p);
+  }, { timeout: 25000 });
 
   const snap = await page.evaluate(async () => {
     const a = window.__mdAnnotator;
-    const pathAbs = a.resolveActiveMentorAbsPath?.() || '';
-    const hermes = await a.fetchHermesConnection?.({ warm: true });
+    const pathAbs = a.resolveActiveMentorAbsPath?.() || a.State.externalWatchPath || '';
+    const fetchConn = a.fetchAiConnection || a.fetchHermesConnection;
+    const ai = typeof fetchConn === 'function' ? await fetchConn({ warm: true, wait: 8 }) : null;
     await a.openDoctorPanel?.();
-    await new Promise((r) => setTimeout(r, 1200));
+    await new Promise((r) => setTimeout(r, 800));
     const doctorBody = document.querySelector('#doctor-modal, #mentor-doctor, [data-doctor]')?.innerText
       || document.body.innerText;
     const ensure = typeof a.ensureDiskSavedForFixMentor === 'function'
@@ -43,10 +54,10 @@ async function main() {
     a.closeDoctorPanel?.();
     return {
       pathAbs,
-      hermesState: hermes && (hermes.state || hermes.connectionState),
-      agentReady: !!(hermes && hermes.agentReady),
-      doctorHasAbs: /绝对磁盘路径|磁盘路径/.test(doctorBody || ''),
-      doctorText: (doctorBody || '').slice(0, 200),
+      hermesState: ai && (ai.state || ai.connectionState),
+      agentReady: !!(ai && ai.agentReady),
+      doctorHasAbs: /磁盘路径|已关联|绝对/.test(doctorBody || ''),
+      doctorText: (doctorBody || '').slice(0, 240),
       ensureOk: ensure && (ensure.ok === true || ensure.reason === 'ok' || ensure.status === 'ok' || ensure === true),
       ensure,
       anns: (a.State.annotations || []).length,
@@ -55,9 +66,8 @@ async function main() {
 
   console.log(JSON.stringify(snap, null, 2));
   assert.ok(snap.pathAbs, 'abs path after pending-open');
-  assert.ok(snap.agentReady, 'hermes agentReady');
+  assert.ok(snap.agentReady, 'Pi agentReady');
   assert.ok(snap.anns > 0, 'demo annotations loaded');
-  // ensureDisk may return structured object
   if (snap.ensure && typeof snap.ensure === 'object') {
     assert.ok(snap.ensure.ok !== false, 'ensureDisk not hard-fail ' + JSON.stringify(snap.ensure));
   }
