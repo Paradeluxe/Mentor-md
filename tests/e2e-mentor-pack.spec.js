@@ -39,20 +39,28 @@ function assert(cond, msg) {
   await page.evaluate(() => window.__mdAnnotator.setAuthor('mentor-test'));
   console.log('  ✓ 页面就绪');
 
-  // ---- JSZip 是否能 import ----
-  console.log('\n=== STEP 2: 验证 JSZip 已在 page 上下文中可用 ===');
+  // ---- JSZip / mentor zip via product API (bundled; bare import('jszip') fails in page) ----
+  console.log('\n=== STEP 2: 验证 buildMentorZipBlob (JSZip 产品路径) ===');
   const jszipOk = await page.evaluate(async () => {
     try {
-      const JSZip = (await import('jszip')).default;
-      const z = new JSZip();
-      z.file('a.txt', 'hi');
-      const blob = await z.generateAsync({ type: 'blob' });
-      return blob.size > 0;
+      const M = window.__mdAnnotator;
+      if (typeof M.buildMentorZipBlob !== 'function') return { err: 'no buildMentorZipBlob' };
+      if (typeof M.readMentorZip !== 'function') return { err: 'no readMentorZip' };
+      const blob = await M.buildMentorZipBlob(
+        '# pack-probe\n\nhello mentor pack\n',
+        { version: '1', document: 'probe.mentor', annotations: [] },
+        {}
+      );
+      if (!blob || !(blob.size > 0)) return { err: 'empty-blob', size: blob && blob.size };
+      const file = new File([blob], 'probe.mentor', { type: 'application/zip' });
+      const extracted = await M.readMentorZip(file);
+      const ok = !!(extracted && extracted.mdText && extracted.mdText.includes('pack-probe'));
+      return ok ? true : { err: 'roundtrip-miss', md: ((extracted && extracted.mdText) || '').slice(0, 80) };
     } catch (e) {
-      return { err: e.message };
+      return { err: e && e.message ? e.message : String(e) };
     }
   });
-  assert(jszipOk === true, `JSZip import + 生成空包 OK (size>0), got=${JSON.stringify(jszipOk)}`);
+  assert(jszipOk === true, `JSZip product path OK (size>0), got=${JSON.stringify(jszipOk)}`);
 
   // ---- 通过 __mdAnnotator 加载 fixture ----
   console.log('\n=== STEP 3: 加载 sample.md + sample 批注 ===');
@@ -204,20 +212,25 @@ function assert(cond, msg) {
 
   // ---- 错误处理: 缺 content.md ----
   console.log('\n=== STEP 9: 缺 content.md 抛错 ===');
-  let errCaught = null;
-  await page.evaluate(async () => {
-    const JSZip = (await import('jszip')).default;
-    const z = new JSZip();
+  // Build broken zip in Node (jszip is a dep); do not bare-import in page
+  const JSZipNode = require('jszip');
+  const brokenB64 = await (async () => {
+    const z = new JSZipNode();
     z.file('other.txt', 'no md here');
-    const blob = await z.generateAsync({ type: 'blob' });
-    const file = new File([blob], 'broken.mentor', { type: 'application/zip' });
+    return await z.generateAsync({ type: 'base64' });
+  })();
+  const errCaught = await page.evaluate(async (b64) => {
+    const bin = atob(b64);
+    const arr = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+    const file = new File([arr], 'broken.mentor', { type: 'application/zip' });
     try {
       await window.__mdAnnotator.readMentorZip(file);
       return { ok: true };
     } catch (e) {
-      return { ok: false, msg: e.message };
+      return { ok: false, msg: e && e.message ? e.message : String(e) };
     }
-  }).then(r => { errCaught = r; });
+  }, brokenB64);
   assert(errCaught && errCaught.ok === false, `缺 content.md 抛错: ${errCaught && errCaught.msg}`);
 
   // ---- 页面无未捕获错误 ----
