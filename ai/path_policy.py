@@ -51,6 +51,55 @@ def resolve_skill_dir(hint: Optional[str] = None) -> Path:
     )
 
 
+def _env_flag_disabled(name: str) -> bool:
+    v = (os.environ.get(name) or "").strip().lower()
+    return v in ("0", "false", "no", "off", "disable", "disabled")
+
+
+def resolve_browser_skill_dir(hint: Optional[str] = None) -> Optional[Path]:
+    """Optional browser-skill (bsk) package for Mentor Pi embed.
+
+    Default ON when package is found. Disable with MENTOR_ENABLE_BROWSER_SKILL=0.
+    Override path: MENTOR_BROWSER_SKILL_DIR or MENTOR_BROWSER_SKILL.
+    """
+    if _env_flag_disabled("MENTOR_ENABLE_BROWSER_SKILL"):
+        return None
+
+    candidates: list[Path] = []
+    if hint:
+        candidates.append(Path(hint).expanduser())
+    for key in ("MENTOR_BROWSER_SKILL_DIR", "MENTOR_BROWSER_SKILL"):
+        env = (os.environ.get(key) or "").strip().strip('"')
+        if env:
+            candidates.append(Path(env).expanduser())
+
+    local_app = os.environ.get("LOCALAPPDATA") or ""
+    hermes_home = (os.environ.get("HERMES_HOME") or "").strip()
+    home = Path.home()
+    if local_app:
+        candidates.append(Path(local_app) / "hermes" / "skills" / "browser-skill")
+    if hermes_home:
+        candidates.append(Path(hermes_home).expanduser() / "skills" / "browser-skill")
+    candidates.append(home / ".pi" / "agent" / "skills" / "browser-skill")
+    candidates.append(home / "AppData" / "Local" / "hermes" / "skills" / "browser-skill")
+    # In-repo optional vendored copy (if present)
+    candidates.append(_MENTOR_ROOT / "ai-skill" / "browser-skill")
+
+    seen = set()
+    for raw in candidates:
+        try:
+            p = Path(raw).resolve()
+        except Exception:
+            continue
+        key = str(p).lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        if _has_skill_md(p):
+            return p
+    return None
+
+
 def assert_under_project(project: PathLike, target: PathLike) -> Path:
     root = Path(project).resolve()
     t = Path(target).resolve()

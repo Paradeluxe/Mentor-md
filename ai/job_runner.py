@@ -7,7 +7,7 @@ from collections import deque
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from .path_policy import AiPathError, resolve_skill_dir
+from .path_policy import AiPathError, resolve_browser_skill_dir, resolve_skill_dir
 from .pi_detect import detect_pi
 from .session_manager import AiSessionManager, AiUnavailable, get_manager
 from .sse_map import iter_sse_payloads
@@ -25,6 +25,7 @@ def build_fix_mentor_prompt(
         skill = str(resolve_skill_dir())
     except Exception:
         skill = os.environ.get("MENTOR_SKILL_DIR") or ""
+    browser = resolve_browser_skill_dir()
     lines = [
         "Run fix-mentor on this Mentor package.",
         f"Absolute path: {path}",
@@ -42,6 +43,16 @@ def build_fix_mentor_prompt(
         "Use bash/python tools. Prefer:",
         f'  python -c "import sys,os; sys.path.insert(0, os.environ[\'MENTOR_SKILL_DIR\']+\'/scripts\'); ..."',
     ]
+    if browser is not None:
+        lines.extend(
+            [
+                "",
+                f"Optional browser-skill is loaded ({browser}).",
+                "Only if a pending @AI needs live web evidence: use bsk "
+                "(session start → commands with --session → session stop). "
+                "Do not open the browser for pure annotation/edit tasks.",
+            ]
+        )
     if thread_id and scope == "thread":
         lines.append(f"Only process threadId={thread_id}; skip other pending.")
     elif thread_id:
@@ -117,6 +128,7 @@ def ai_connection_health(*, warm: bool = False) -> Dict[str, Any]:
         skill_dir = str(resolve_skill_dir())
     except Exception as e:
         skill_err = str(e)
+    browser_dir = resolve_browser_skill_dir()
     mgr = get_manager()
     st = mgr.status()
     agent_ready = bool(det.available and skill_dir and not skill_err)
@@ -126,6 +138,13 @@ def ai_connection_health(*, warm: bool = False) -> Dict[str, Any]:
     if warm and agent_ready:
         # warm only validates detect+skill; session is lazy until first job
         pass
+    skills = list(st.get("skills") or [])
+    if skill_dir and "fix-mentor" not in skills:
+        skills = ["fix-mentor"] + skills
+    if browser_dir is not None and "browser-skill" not in skills:
+        skills.append("browser-skill")
+    if not skill_dir:
+        skills = []
     return {
         "ok": True,
         "service": "mentor-ai-pi",
@@ -140,7 +159,8 @@ def ai_connection_health(*, warm: bool = False) -> Dict[str, Any]:
             "error": det.error,
         },
         "skillDir": skill_dir or "",
-        "skills": ["fix-mentor"] if skill_dir else [],
+        "browserSkillDir": str(browser_dir) if browser_dir else "",
+        "skills": skills,
         "busy": bool(st.get("busy")),
         "hasSession": bool(st.get("has_session")),
         "activeMentor": st.get("active_mentor"),

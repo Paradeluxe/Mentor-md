@@ -1,7 +1,7 @@
 """AiSessionManager unit tests."""
 from pathlib import Path
 
-from ai.session_manager import AiSessionManager, MENTOR_AI_REVIEWER_IDENTITY
+from ai.session_manager import AiSessionManager, MENTOR_AI_REVIEWER_IDENTITY, MENTOR_BROWSER_SKILL_IDENTITY
 
 
 class FakeClient:
@@ -18,7 +18,8 @@ class FakeClient:
         return {"ok": True}
 
 
-def test_build_argv_includes_rpc_skill_extension_identity(tmp_path):
+def test_build_argv_includes_rpc_skill_extension_identity(tmp_path, monkeypatch):
+    monkeypatch.setenv("MENTOR_ENABLE_BROWSER_SKILL", "0")
     skill = tmp_path / "skill"
     ext = skill / "extensions" / "mentor-sandbox.ts"
     ext.parent.mkdir(parents=True)
@@ -33,16 +34,45 @@ def test_build_argv_includes_rpc_skill_extension_identity(tmp_path):
         skill=skill,
         ext=ext,
         pi_path="pi",
+        extra_skills=[],
     )
     assert "--mode" in argv and "rpc" in argv
     assert "--skill" in argv and str(skill) in argv
+    assert argv.count("--skill") == 1
     assert "--extension" in argv and str(ext) in argv
     assert "--append-system-prompt" in argv
     assert any("AI Reviewer" in a or "Mentor" in a for a in argv)
     assert MENTOR_AI_REVIEWER_IDENTITY in argv
 
 
-def test_ensure_for_mentor_reuses_session(tmp_path):
+def test_build_argv_includes_browser_skill(tmp_path):
+    skill = tmp_path / "skill"
+    ext = skill / "extensions" / "mentor-sandbox.ts"
+    ext.parent.mkdir(parents=True)
+    ext.write_text("//x", encoding="utf-8")
+    (skill / "SKILL.md").write_text("---\nname: fix-mentor\n---\n", encoding="utf-8")
+    browser = tmp_path / "browser-skill"
+    browser.mkdir()
+    (browser / "SKILL.md").write_text("---\nname: browser-skill\n---\n", encoding="utf-8")
+    mgr = AiSessionManager(skill_dir=skill)
+    argv = mgr.build_argv(
+        project=tmp_path,
+        skill=skill,
+        ext=ext,
+        pi_path="pi",
+        extra_skills=[browser],
+    )
+    assert argv.count("--skill") == 2
+    assert str(skill) in argv
+    assert str(browser) in argv
+    prompt = argv[argv.index("--append-system-prompt") + 1]
+    assert "browser-skill" in prompt
+    assert "bsk" in prompt
+    assert MENTOR_BROWSER_SKILL_IDENTITY.strip() in prompt
+
+
+def test_ensure_for_mentor_reuses_session(tmp_path, monkeypatch):
+    monkeypatch.setenv("MENTOR_ENABLE_BROWSER_SKILL", "0")
     skill = tmp_path / "skill"
     ext = skill / "extensions" / "mentor-sandbox.ts"
     ext.parent.mkdir(parents=True)

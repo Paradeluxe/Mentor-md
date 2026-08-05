@@ -6,7 +6,7 @@ import threading
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
-from .path_policy import AiPathError, resolve_skill_dir
+from .path_policy import AiPathError, resolve_browser_skill_dir, resolve_skill_dir
 from .pi_detect import detect_pi
 from .pi_rpc import PiRpcClient
 
@@ -15,7 +15,7 @@ PathLike = Union[str, Path]
 # Injected via --append-system-prompt so Pi default tool guidelines stay intact.
 MENTOR_AI_REVIEWER_IDENTITY = (
     "You are AI Reviewer — the annotation agent for Mentor (.mentor packages).\n"
-    "- Product: Mentor. Skill: fix-mentor. Author name in replies: AI Reviewer.\n"
+    "- Product: Mentor. Primary skill: fix-mentor. Author name in replies: AI Reviewer.\n"
     "- Never claim to be Claude, ChatGPT, Gemini, GPT, Hermes, The Machine, or any other brand.\n"
     "- When asked which model you are: report the actual provider and model id for this "
     "Pi session if known; if unknown, say it is configured in Pi settings "
@@ -24,6 +24,13 @@ MENTOR_AI_REVIEWER_IDENTITY = (
     "→ write_mentor(block_on_unhealthy=True) → short factual replies.\n"
     "- Prefer python scripts/mentor_io.py and bash; do not invent TipTap document.html.\n"
     "- Be concise. Match the user's language."
+)
+
+MENTOR_BROWSER_SKILL_IDENTITY = (
+    "\n- Optional skill: browser-skill (bsk CLI). Use ONLY when @AI needs live web "
+    "(Scholar, docs, publisher pages). Workflow: bsk session start → --session id on "
+    "every command → bsk session stop when done (even on error). Prefer snapshot over "
+    "screenshot/html. Do not use bsk for routine mentor_io annotation work."
 )
 
 
@@ -85,8 +92,39 @@ class AiSessionManager:
                 return cand.resolve()
         raise AiUnavailable("extension_missing", "mentor-sandbox extension not found")
 
-    def build_argv(self, project: Path, skill: Path, ext: Path, pi_path: str) -> List[str]:
-        return [
+    def _resolve_extra_skills(self, primary: Path) -> List[Path]:
+        """Additional --skill dirs (browser-skill). Never duplicates primary."""
+        out: List[Path] = []
+        browser = resolve_browser_skill_dir()
+        if browser is None:
+            return out
+        try:
+            bp = browser.resolve()
+            if bp != primary.resolve() and (bp / "SKILL.md").is_file():
+                out.append(bp)
+        except Exception:
+            pass
+        return out
+
+    def build_identity_prompt(self, extra_skills: Optional[List[Path]] = None) -> str:
+        text = MENTOR_AI_REVIEWER_IDENTITY
+        for sk in extra_skills or []:
+            name = sk.name.lower()
+            if "browser" in name:
+                text = text + MENTOR_BROWSER_SKILL_IDENTITY
+                break
+        return text
+
+    def build_argv(
+        self,
+        project: Path,
+        skill: Path,
+        ext: Path,
+        pi_path: str,
+        extra_skills: Optional[List[Path]] = None,
+    ) -> List[str]:
+        extras = list(extra_skills) if extra_skills is not None else self._resolve_extra_skills(skill)
+        argv: List[str] = [
             pi_path,
             "--mode",
             "rpc",
@@ -95,11 +133,18 @@ class AiSessionManager:
             str(ext),
             "--skill",
             str(skill),
-            "--session-dir",
-            str(project.resolve()),
-            "--append-system-prompt",
-            MENTOR_AI_REVIEWER_IDENTITY,
         ]
+        for extra in extras:
+            argv.extend(["--skill", str(extra)])
+        argv.extend(
+            [
+                "--session-dir",
+                str(project.resolve()),
+                "--append-system-prompt",
+                self.build_identity_prompt(extras),
+            ]
+        )
+        return argv
 
     def ensure_for_mentor(self, mentor_path: PathLike) -> Dict[str, Any]:
         mp = Path(mentor_path).expanduser().resolve()
@@ -152,10 +197,13 @@ class AiSessionManager:
                 self._last_error = str(e)
                 raise
             ext = self._resolve_extension(skill)
-            argv = self.build_argv(project, skill, ext, det.path)
+            extras = self._resolve_extra_skills(skill)
+            argv = self.build_argv(project, skill, ext, det.path, extra_skills=extras)
             env = os.environ.copy()
             env["MENTOR_SKILL_DIR"] = str(skill)
             env["PYTHONUTF8"] = "1"
+            if extras:
+                env["MENTOR_EXTRA_SKILLS"] = os.pathsep.join(str(p) for p in extras)
 
             try:
                 if self._client_factory is not None:
@@ -176,6 +224,7 @@ class AiSessionManager:
                 "project_path": str(project),
                 "mentor_path": str(mentor_path) if mentor_path else None,
                 "skill_dir": str(skill),
+                "extra_skills": [str(p) for p in extras],
                 "extension": str(ext),
                 "pi_path": det.path,
                 "pi_version": det.version,
@@ -192,10 +241,18 @@ class AiSessionManager:
         det = detect_pi()
         skill_err = None
         skill_path = None
+        extra_skills: List[str] = []
         try:
-            skill_path = str(self._resolve_skill())
+            primary = self._resolve_skill()
+            skill_path = str(primary)
+            extra_skills = [str(p) for p in self._resolve_extra_skills(primary)]
         except Exception as e:
             skill_err = str(e)
+        skill_names = ["fix-mentor"] if skill_path else []
+        for p in extra_skills:
+            name = Path(p).name
+            if name and name not in skill_names:
+                skill_names.append(name)
         with self._lock:
             return {
                 "pi": {
@@ -206,6 +263,8 @@ class AiSessionManager:
                 },
                 "skill_dir": skill_path,
                 "skill_error": skill_err,
+                "extra_skills": extra_skills,
+                "skills": skill_names,
                 "active_mentor": str(self._mentor_path) if self._mentor_path else None,
                 "active_project": str(self._project) if self._project else None,
                 "busy": self._busy,
