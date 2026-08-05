@@ -276,9 +276,9 @@
           <span id="supervision-signal" class="supervision-signal" data-phase="off" data-health="ok" title="监管未开启" aria-hidden="true"></span>
           <span id="supervision-banner-text"></span>
         </div>
-                <div id="hermes-conn-status" class="hermes-conn-status" role="status" aria-live="polite" data-state="unknown" data-ready="0" title="Hermes 连接 · 点击打开 Doctor" data-act="open-doctor">
-          <span class="hermes-conn-dot" aria-hidden="true"></span>
-          <span id="hermes-conn-status-text" class="hermes-conn-status-text">Hermes …</span>
+                <div id="ai-conn-status" class="ai-conn-status" role="status" aria-live="polite" data-state="unknown" data-ready="0" title="Pi AI 连接 · 点击打开 Doctor" data-act="open-doctor">
+          <span class="ai-conn-dot" aria-hidden="true"></span>
+          <span id="ai-conn-status-text" class="ai-conn-status-text">Pi …</span>
         </div>
         <div id="fix-mentor-status" class="fix-mentor-status hidden" role="status" aria-live="polite" data-status="idle" title="AI 批注处理">
           <span class="fix-mentor-status-dot" aria-hidden="true"></span>
@@ -313,12 +313,12 @@
       <h3 id="doctor-modal-title">Mentor Doctor</h3>
       <button type="button" class="doctor-close" data-act="close-doctor" aria-label="关闭">×</button>
     </div>
-    <p class="doctor-lead" id="doctor-lead">诊断 Mentor 服务、Hermes warm worker 与 AI 前置条件。可一键预热/重启 worker。</p>
+    <p class="doctor-lead" id="doctor-lead">诊断 Mentor 服务、Pi coding-agent 与 fix-mentor skill。可一键检测/重启 Pi 会话。</p>
     <div id="doctor-overall" class="doctor-overall" data-overall="unknown">检测中…</div>
     <ul id="doctor-checks" class="doctor-checks" aria-live="polite"></ul>
     <div class="doctor-actions">
       <button type="button" class="modal-btn-secondary" data-act="doctor-refresh">重新检测</button>
-      <button type="button" class="modal-btn-primary" data-act="doctor-warm">启动 / 预热 Hermes</button>
+      <button type="button" class="modal-btn-primary" data-act="doctor-warm">检测 / 预热 Pi</button>
       <button type="button" class="modal-btn-secondary" data-act="doctor-restart-worker">重启 worker</button>
       <button type="button" class="modal-btn-secondary" data-act="doctor-bind-path">绑定磁盘路径</button>
     </div>
@@ -494,7 +494,7 @@
       </div>
   <div class="settings-section">
     <label class="settings-label">诊断</label>
-    <p class="settings-hint">Mentor Doctor：检测假 http.server、Hermes 未就绪、worker 挂掉等问题，并可在应用内预热/重启。</p>
+    <p class="settings-hint">Mentor Doctor：检测假 http.server、Pi 未就绪、skill 缺失等问题，并可在应用内检测/重启会话。</p>
     <div class="settings-options">
       <button type="button" class="settings-opt" data-act="open-doctor">打开 Doctor</button>
     </div>

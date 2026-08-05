@@ -740,8 +740,8 @@ var State = {
   // Runtime-only external path watch (pending-open / server path; never left in URL).
   externalWatchPath: "",
   externalWatchToken: "",
-  // In-app Hermes /fix-mentor trigger (mentor-server spawn)
-  hermesConnection: { state: "unknown", reachable: false, agentReady: false },
+  // In-app Pi / fix-mentor trigger (mentor-server Pi RPC)
+  aiConnection: { state: "unknown", reachable: false, agentReady: false },
   fixMentorJob: {
     id: "",
     status: "idle", // idle|saving|starting|running|done|error
@@ -6254,7 +6254,7 @@ function resolveActiveMentorAbsPath() {
 
 /**
  * Browser open has File/Handle but no absolute path (Chromium security).
- * Hermes AI needs a real disk path — ask host OS picker via mentor-server.
+ * Pi AI needs a real disk path — ask host OS picker via mentor-server.
  */
 
 /** Test-only: set/clear disk path state for AI preflight tests. */
@@ -6424,38 +6424,38 @@ async function applyFixMentorResultFromPath(absPath) {
 }
 
 
-/* ===== Hermes connection (warm worker) — separate from /fm job run ===== */
-function hermesConnLabel(state, health) {
+/* ===== Pi AI connection — separate from /fm job run ===== */
+function aiConnLabel(state, health) {
   const s = String(state || (health && health.state) || "unknown");
-  if (!health || health.reachable === false || s === "down" || s === "unavailable") return "Hermes 未连接";
-  if (s === "loading" || s === "starting") return "Hermes 预热中…";
-  if (s === "ready") return "Hermes 已就绪";
-  if (s === "busy") return "Hermes 忙碌";
-  if (s === "error") return "Hermes 错误";
-  if (health.agentReady) return "Hermes 已就绪";
-  return "Hermes " + s;
+  if (!health || health.reachable === false || s === "down" || s === "unavailable") return "Pi 未连接";
+  if (s === "loading" || s === "starting") return "Pi 检测中…";
+  if (s === "ready") return "Pi 已就绪";
+  if (s === "busy") return "Pi 忙碌";
+  if (s === "error") return "Pi 错误";
+  if (health.agentReady) return "Pi 已就绪";
+  return "Pi " + s;
 }
 
-function syncHermesConnectionUi() {
-  const h = State.hermesConnection || {};
-  const chip = document.getElementById("hermes-conn-status");
-  const text = document.getElementById("hermes-conn-status-text");
+function syncAiConnectionUi() {
+  const h = State.aiConnection || {};
+  const chip = document.getElementById("ai-conn-status");
+  const text = document.getElementById("ai-conn-status-text");
   if (!chip) return;
   const state = h.state || (h.reachable ? "unknown" : "down");
   chip.classList.remove("hidden");
   chip.dataset.state = state;
   chip.dataset.ready = h.agentReady ? "1" : "0";
   chip.title = [
-    hermesConnLabel(state, h),
+    aiConnLabel(state, h),
     "点击打开 Doctor",
     h.skills && h.skills.length ? ("skills: " + h.skills.join(",")) : "",
     h.error || "",
     h.mode ? ("mode=" + h.mode) : "",
   ].filter(Boolean).join(" · ");
-  if (text) text.textContent = hermesConnLabel(state, h);
+  if (text) text.textContent = aiConnLabel(state, h);
 }
 
-async function fetchHermesConnection(opts) {
+async function fetchAiConnection(opts) {
   opts = opts || {};
   const warm = !!opts.warm;
   const wait = opts.wait || 0;
@@ -6470,21 +6470,21 @@ async function fetchHermesConnection(opts) {
     if (token) q.set("token", token);
     if (warm) q.set("warm", "1");
     if (wait) q.set("wait", String(wait));
-    let res = await fetch(location.origin + "/hermes-connection?" + q.toString(), { cache: "no-store" });
+    let res = await fetch(location.origin + "/ai-connection?" + q.toString(), { cache: "no-store" });
     if (res.status === 403 && typeof ensureLocalSessionToken === "function") {
       try {
         token = await ensureLocalSessionToken({ force: true });
         if (token) {
           q.set("token", token);
-          res = await fetch(location.origin + "/hermes-connection?" + q.toString(), { cache: "no-store" });
+          res = await fetch(location.origin + "/ai-connection?" + q.toString(), { cache: "no-store" });
         }
       } catch (_) {}
     }
     if (!res.ok) {
       const hint = res.status === 404
-        ? "8787 不是 mentor-server（/hermes-connection 404）。关掉 python -m http.server，用 mentor.cmd 启动"
+        ? "8787 不是 mentor-server（/ai-connection 404）。关掉 python -m http.server，用 mentor.cmd 启动"
         : ("HTTP " + res.status);
-      State.hermesConnection = {
+      State.aiConnection = {
         state: "unavailable",
         reachable: false,
         agentReady: false,
@@ -6493,11 +6493,11 @@ async function fetchHermesConnection(opts) {
         mode: "warm",
         checkedAt: Date.now(),
       };
-      try { syncHermesConnectionUi(); } catch (_) {}
-      return State.hermesConnection;
+      try { syncAiConnectionUi(); } catch (_) {}
+      return State.aiConnection;
     }
     const data = await res.json();
-    State.hermesConnection = {
+    State.aiConnection = {
       state: data.state || (data.reachable ? "ready" : "down"),
       reachable: !!data.reachable,
       agentReady: !!data.agentReady,
@@ -6508,26 +6508,26 @@ async function fetchHermesConnection(opts) {
       busy: !!data.busy,
       checkedAt: Date.now(),
     };
-    try { syncHermesConnectionUi(); } catch (_) {}
-    return State.hermesConnection;
+    try { syncAiConnectionUi(); } catch (_) {}
+    return State.aiConnection;
   } catch (e) {
-    State.hermesConnection = {
+    State.aiConnection = {
       state: "down",
       reachable: false,
       agentReady: false,
       error: String(e && e.message || e),
       checkedAt: Date.now(),
     };
-    try { syncHermesConnectionUi(); } catch (_) {}
-    return State.hermesConnection;
+    try { syncAiConnectionUi(); } catch (_) {}
+    return State.aiConnection;
   }
 }
 
-function startHermesConnectionPolling() {
-  if (State._hermesConnTimer) return;
-  void fetchHermesConnection({ warm: true });
-  State._hermesConnTimer = setInterval(function () {
-    void fetchHermesConnection({ warm: false });
+function startAiConnectionPolling() {
+  if (State._aiConnTimer) return;
+  void fetchAiConnection({ warm: true });
+  State._aiConnTimer = setInterval(function () {
+    void fetchAiConnection({ warm: false });
   }, 4000);
 }
 
@@ -6547,9 +6547,9 @@ function doctorKillServerCmd() {
   ].join("\n");
 }
 
-function buildOfflineDoctorReport(sessionStatus, hermesStatus) {
+function buildOfflineDoctorReport(sessionStatus, aiStatus) {
   const checks = [];
-  const notServer = sessionStatus === 404 || hermesStatus === 404;
+  const notServer = sessionStatus === 404 || aiStatus === 404;
   checks.push({
     id: "mentor-server",
     ok: !notServer && sessionStatus === 200,
@@ -6560,7 +6560,7 @@ function buildOfflineDoctorReport(sessionStatus, hermesStatus) {
         ? "mentor-server 在线"
         : ("session HTTP " + sessionStatus),
     detail: notServer
-      ? "常见原因：python -m http.server 占端口。静态页能开，但 /session /hermes-connection /doctor 全 404，AI 必挂。"
+      ? "常见原因：python -m http.server 占端口。静态页能开，但 /session /ai-connection /doctor 全 404，AI 必挂。"
       : "GET /session",
     fix: notServer ? "restart-mentor-server" : null,
   });
@@ -6568,10 +6568,10 @@ function buildOfflineDoctorReport(sessionStatus, hermesStatus) {
     id: "warm-worker",
     ok: false,
     severity: "error",
-    title: "无法检测 Hermes worker",
+    title: "无法检测 Pi AI",
     detail: notServer
-      ? "先恢复真实 mentor-server，再点「启动 / 预热 Hermes」"
-      : ("/hermes-connection HTTP " + hermesStatus),
+      ? "先恢复真实 mentor-server，再点「检测 / 预热 Pi」"
+      : ("/ai-connection HTTP " + aiStatus),
     fix: notServer ? "restart-mentor-server" : "warm-worker",
   });
   return {
@@ -6595,7 +6595,7 @@ function renderDoctorReport(report) {
   const nErr = ((report && report.checks) || []).filter((c) => c.severity === "error").length;
   const nWarn = ((report && report.checks) || []).filter((c) => c.severity === "warn").length;
   if (overall === "ok") overallEl.textContent = "全部通过 · 可以点 AI 处理";
-  else if (overall === "warn") overallEl.textContent = "有警告（" + nWarn + "）· 建议预热 Hermes";
+  else if (overall === "warn") overallEl.textContent = "有警告（" + nWarn + "）· 建议检测 Pi";
   else if (overall === "error") overallEl.textContent = "发现问题（" + nErr + "）· 见下方条目与一键修复";
   else overallEl.textContent = "检测中…";
 
@@ -6668,7 +6668,7 @@ async function fetchDoctorReport(opts) {
       } else if (hasHandleOnly) {
         pathTitle = "仅有浏览器写句柄 · 无绝对路径";
         pathDetail =
-          "可 Ctrl+S 写回，但 AI/Hermes 需要真实路径。点「绑定磁盘路径」选同一个 .mentor，或双击文件 / mentor.cmd 打开。";
+          "可 Ctrl+S 写回，但 AI/Pi 需要真实路径。点「绑定磁盘路径」选同一个 .mentor，或双击文件 / mentor.cmd 打开。";
         pathSev = "warn";
       } else if (State.currentFile) {
         pathTitle = "当前文稿无磁盘路径（浏览器打开常见）";
@@ -6721,7 +6721,7 @@ async function runDoctorRepair(action) {
   const data = await res.json();
   const report = data.report || (await fetchDoctorReport({ warm: true, wait: 5 }));
   renderDoctorReport(report);
-  try { await fetchHermesConnection({ warm: false }); } catch (_) {}
+  try { await fetchAiConnection({ warm: false }); } catch (_) {}
   return report;
 }
 
@@ -6768,7 +6768,7 @@ function isFixMentorJobActive(status) {
 function fixMentorStatusLabel(st) {
   switch (st) {
     case "saving": return "保存中…";
-    case "starting": return "启动 Hermes…";
+    case "starting": return "启动 Pi…";
     case "running": return "AI 处理中…";
     case "done": return "AI 处理完成";
     case "error": return "AI 处理失败";
@@ -6823,7 +6823,7 @@ function syncFixMentorJobUi() {
     } else if (job.status === "done") {
       btn.removeAttribute("aria-busy");
       btn.textContent = "AI 处理";
-      btn.title = "保存并让 Hermes 处理待办 (@AI / AI 卡)";
+      btn.title = "保存并让 AI Reviewer（Pi）处理待办 (@AI / AI 卡)";
     } else if (job.status === "error") {
       btn.removeAttribute("aria-busy");
       btn.textContent = "重试 AI";
@@ -6831,7 +6831,7 @@ function syncFixMentorJobUi() {
     } else {
       btn.removeAttribute("aria-busy");
       btn.textContent = "AI 处理";
-      btn.title = "保存并让 Hermes 处理待办 (@AI / AI 卡)";
+      btn.title = "保存并让 AI Reviewer（Pi）处理待办 (@AI / AI 卡)";
     }
   });
 
@@ -6916,7 +6916,7 @@ function syncFixMentorJobUi() {
         if (job.status === "error") {
           logEl.textContent = detail || job.error || logPreview || "";
         } else {
-          logEl.textContent = logPreview || detail || "等待 Hermes 输出…";
+          logEl.textContent = logPreview || detail || "等待 Pi 输出…";
         }
       }
       if (job.status === "done") {
@@ -7047,7 +7047,7 @@ function startFixMentorJobPolling() {
   State.fixMentorJob.pollTimer = setInterval(() => {
     void pollFixMentorJobOnce();
   }, 800);
-  // Local elapsed tick so the clock moves even when Hermes is quiet
+  // Local elapsed tick so the clock moves even when Pi is quiet
   State.fixMentorJob.tickTimer = setInterval(() => {
     const j = State.fixMentorJob || {};
     if (!isFixMentorJobActive(j.status)) return;
@@ -7079,7 +7079,7 @@ async function ensureDiskSavedForFixMentor() {
   }
 
   // Absolute path only — no stage / no silent temp copy.
-  // Browser open = Handle without abs path; Hermes still needs a real disk path.
+  // Browser open = Handle without abs path; Pi still needs a real disk path.
   let path = "";
   try { path = resolveActiveMentorAbsPath(); } catch (_) { path = ""; }
   if (!path) {
@@ -7140,7 +7140,7 @@ async function ensureDiskSavedForFixMentor() {
 }
 
 /**
- * Card / pane: save current .mentor then spawn Hermes fix-mentor via mentor-server.
+ * Card / pane: save current .mentor then spawn Pi fix-mentor via mentor-server.
  * @param {object} [opts]
  * @param {string} [opts.threadId]
  * @param {'all'|'thread'} [opts.scope]
@@ -7168,27 +7168,27 @@ async function runFixMentorFromUi(opts = {}) {
     } catch (_) {}
   }
 
-  // Gate: Hermes warm worker must be ready — no cold spawn fallback.
+  // Gate: Pi must be ready — no Hermes/cold fallback.
     try {
-      const conn = await fetchHermesConnection({ warm: true, wait: 12 });
+      const conn = await fetchAiConnection({ warm: true, wait: 12 });
       if (!conn || !conn.agentReady) {
         const detail = (conn && conn.error) ? String(conn.error) : "";
         const msg = detail
-          ? ("Hermes 未就绪：" + detail)
-          : "Hermes 未就绪（底栏连接芯片）。等「Hermes 已就绪」再点 AI，或关掉假 http.server 后用 mentor.cmd 重启。";
+          ? ("Pi 未就绪：" + detail)
+          : "Pi 未就绪（底栏连接芯片）。等「Pi 已就绪」再点 AI，或关掉假 http.server 后用 mentor.cmd 重启。";
         setFixMentorJobState({
           status: "error",
-          error: "hermes-not-ready",
+          error: "pi-not-ready",
           message: msg,
         });
         showToast(msg, 5200);
-        return { ok: false, error: "hermes-not-ready", message: msg };
+        return { ok: false, error: "pi-not-ready", message: msg };
       }
     } catch (_) {
-      const msg = "无法检查 Hermes 连接";
-      setFixMentorJobState({ status: "error", error: "hermes-conn-check", message: msg });
+      const msg = "无法检查 Pi 连接";
+      setFixMentorJobState({ status: "error", error: "ai-conn-check", message: msg });
       showToast(msg, 4200);
-      return { ok: false, error: "hermes-conn-check", message: msg };
+      return { ok: false, error: "ai-conn-check", message: msg };
     }
 
   const saved = await ensureDiskSavedForFixMentor();
@@ -7218,7 +7218,7 @@ async function runFixMentorFromUi(opts = {}) {
     path: saved.path,
     threadId,
     scope,
-    message: "提交到 warm Hermes…",
+    message: "提交到 Pi…",
     error: "",
     exitCode: null,
     startedAt: Date.now(),
@@ -7288,13 +7288,13 @@ async function runFixMentorFromUi(opts = {}) {
     path: data.path || saved.path,
     threadId: data.threadId || threadId,
     scope: data.scope || scope,
-    message: data.message || "Hermes 已启动",
+    message: data.message || "Pi 已启动",
     error: "",
     startedAt: Date.now(),
   });
   State.fixMentorJob.startedAtClient = Date.now();
   startFixMentorJobPolling();
-  showToast("AI 任务已提交 · warm Hermes", 2400);
+  showToast("AI 任务已提交 · Pi", 2400);
   return { ok: true, job: data };
 }
 
@@ -7554,7 +7554,7 @@ function renderCommentList() {
               <textarea data-thread-input="${safeThreadId}" rows="1" placeholder="${escapeHtml(markerPlaceholder(threadType, !!first3.body))}" autocomplete="off"></textarea>
               <div class="form-actions">
                 <button type="button" class="comment-invoke-ai-btn" data-act="invoke-ai" data-thread="${safeThreadId}" title="在回复中插入 @AI（显式唤起 AI）" aria-label="插入 @AI">@AI</button>
-                <button type="button" class="comment-run-ai-btn" data-act="run-fix-mentor" data-thread="${safeThreadId}" title="保存并让 Hermes 处理待办 (@AI / AI 卡)" aria-label="AI 处理">AI 处理</button>
+                <button type="button" class="comment-run-ai-btn" data-act="run-fix-mentor" data-thread="${safeThreadId}" title="保存并让 AI Reviewer（Pi）处理待办 (@AI / AI 卡)" aria-label="AI 处理">AI 处理</button>
                 <button class="comment-resolve-btn ${thread.resolved ? "is-resolved" : ""}" data-act="resolve" data-thread="${safeThreadId}" title="${thread.resolved ? "重新打开此批注" : "标记为已解决"}" aria-label="${thread.resolved ? "重新打开" : "标记为已解决"}">${thread.resolved ? "重开" : "解决"}</button>
                 <button data-act="submit-reply" data-thread="${safeThreadId}" class="primary" disabled title="输入后可回复 (Ctrl+Enter)">回复</button>
               </div>
@@ -15769,10 +15769,10 @@ $("#btn-save").addEventListener("click", () => runToolbarAction("save", saveCurr
     }
     if (e.target.closest('[data-act="doctor-warm"]')) {
       e.preventDefault();
-      showToast("正在预热 Hermes…", 1800);
+      showToast("正在检测 Pi…", 1800);
       void runDoctorRepair("warm-worker").then((r) => {
         const ok = r && r.overall === "ok";
-        showToast(ok ? "Hermes 已就绪" : "预热结束 · 见 Doctor 结果", 2800);
+        showToast(ok ? "Pi 已就绪" : "预热结束 · 见 Doctor 结果", 2800);
       }).catch((err) => showToast(String(err && err.message || err), 3500));
       return;
     }
@@ -16567,7 +16567,7 @@ async function boot() {
   if (!launchOpened) {
     await tryReconnect();
   }
-  try { startHermesConnectionPolling(); } catch (_) {}
+  try { startAiConnectionPolling(); } catch (_) {}
   try {
     initUpdateUi();
   } catch (e) {
@@ -17210,8 +17210,8 @@ window.__mdAnnotator = {
   writeCurrentToDisk,
   writeCurrentViaServer,
   hasDiskWriteTarget,
-  fetchHermesConnection,
-  startHermesConnectionPolling,
+  fetchAiConnection,
+  startAiConnectionPolling,
   openDoctorPanel,
   closeDoctorPanel,
   pickAndBindMentorPath,
