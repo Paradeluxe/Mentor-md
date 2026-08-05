@@ -3750,6 +3750,26 @@ async function writeCurrentViaServer(absPath, { reason = "manual", showProgress 
   if (State.readOnlyMode || (typeof canWriteLiveDocument === "function" && !canWriteLiveDocument())) {
     return { ok: false, skipped: true, error: "live-follower" };
   }
+  // Share single-flight with FSA writes so concurrent autosave cannot race tmp replace.
+  if (_saveInFlight) {
+    _saveQueued = true;
+    return { ok: false, skipped: true, error: "busy" };
+  }
+  _saveInFlight = true;
+  try {
+    return await _writeCurrentViaServerBody(path, { reason, showProgress });
+  } finally {
+    _saveInFlight = false;
+    if (_saveQueued) {
+      _saveQueued = false;
+      if (State.currentFile && State.currentFile.dirty) {
+        try { scheduleAutosaveDebounce(); } catch (_) {}
+      }
+    }
+  }
+}
+
+async function _writeCurrentViaServerBody(path, { reason = "manual", showProgress = false } = {}) {
   const token = (State.externalWatchToken || "") || (await ensureLocalSessionToken());
   if (!token) return { ok: false, error: "no-token", message: "无 mentor-server token" };
 
@@ -3787,6 +3807,8 @@ async function writeCurrentViaServer(absPath, { reason = "manual", showProgress 
     });
   } catch (_) {}
 
+  // Path only in query (URLSearchParams encodes Windows backslashes).
+  // Do NOT put raw Windows paths in headers — fetch throws "Failed to fetch".
   const q = new URLSearchParams({ token, path });
   let res;
   try {
@@ -3795,7 +3817,6 @@ async function writeCurrentViaServer(absPath, { reason = "manual", showProgress 
       headers: {
         "Content-Type": "application/zip",
         "X-Mentor-Token": token,
-        "X-Mentor-Path": path,
       },
       body: payload,
     });

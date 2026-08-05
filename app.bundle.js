@@ -63315,6 +63315,27 @@ async function writeCurrentViaServer(absPath, { reason = "manual", showProgress 
   if (State2.readOnlyMode || typeof canWriteLiveDocument === "function" && !canWriteLiveDocument()) {
     return { ok: false, skipped: true, error: "live-follower" };
   }
+  if (_saveInFlight) {
+    _saveQueued = true;
+    return { ok: false, skipped: true, error: "busy" };
+  }
+  _saveInFlight = true;
+  try {
+    return await _writeCurrentViaServerBody(path2, { reason, showProgress });
+  } finally {
+    _saveInFlight = false;
+    if (_saveQueued) {
+      _saveQueued = false;
+      if (State2.currentFile && State2.currentFile.dirty) {
+        try {
+          scheduleAutosaveDebounce();
+        } catch (_) {
+        }
+      }
+    }
+  }
+}
+async function _writeCurrentViaServerBody(path2, { reason = "manual", showProgress = false } = {}) {
   const token = State2.externalWatchToken || "" || await ensureLocalSessionToken();
   if (!token) return { ok: false, error: "no-token", message: "\u65E0 mentor-server token" };
   let snapshot;
@@ -63356,8 +63377,7 @@ async function writeCurrentViaServer(absPath, { reason = "manual", showProgress 
       method: "POST",
       headers: {
         "Content-Type": "application/zip",
-        "X-Mentor-Token": token,
-        "X-Mentor-Path": path2
+        "X-Mentor-Token": token
       },
       body: payload
     });

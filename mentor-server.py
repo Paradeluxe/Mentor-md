@@ -95,6 +95,96 @@ def allow_open_path(path):
     return abspath
 
 
+def _path_in_allow_list(abspath):
+    """Case-normalized membership for ALLOWED_OPEN_PATHS (Windows-safe)."""
+    if not abspath:
+        return None
+    target = os.path.abspath(abspath)
+    tkey = os.path.normcase(target)
+    if target in ALLOWED_OPEN_PATHS:
+        return target
+    for p in list(ALLOWED_OPEN_PATHS):
+        try:
+            if os.path.normcase(os.path.abspath(p)) == tkey:
+                return os.path.abspath(p)
+        except Exception:
+            continue
+    return None
+
+
+def write_mentor_package_to_path(path, raw_bytes):
+    """Atomically write .mentor bytes to an allow-listed absolute path.
+
+    open-first policy: path must already be in ALLOWED_OPEN_PATHS
+    (pending-open / allow-open / /open / supervision register).
+    """
+    if not path:
+        return None, 'missing-path'
+    if not raw_bytes:
+        return None, 'empty-package'
+    abspath = os.path.abspath(str(path).strip().strip('"'))
+    if not abspath.lower().endswith('.mentor'):
+        return None, 'not-mentor'
+    resolved = _path_in_allow_list(abspath)
+    if not resolved:
+        return None, 'not-allowed'
+    abspath = resolved
+    parent = os.path.dirname(abspath)
+    if parent and not os.path.isdir(parent):
+        return None, 'parent-missing'
+    tmp = abspath + '.mentor-write-tmp'
+    try:
+        with open(tmp, 'wb') as f:
+            f.write(raw_bytes)
+            f.flush()
+            try:
+                os.fsync(f.fileno())
+            except Exception:
+                pass
+        last_err = None
+        for _ in range(8):
+            try:
+                os.replace(tmp, abspath)
+                last_err = None
+                break
+            except Exception as exc:
+                last_err = exc
+                time.sleep(0.05)
+        if last_err is not None:
+            try:
+                if os.path.isfile(tmp):
+                    os.remove(tmp)
+            except Exception:
+                pass
+            return None, 'write-failed:%s' % (str(last_err)[:180],)
+        ALLOWED_OPEN_PATHS.add(abspath)
+        try:
+            register_supervision_path(abspath)
+        except Exception:
+            pass
+        mtime_ns = 0
+        size = 0
+        try:
+            stt = os.stat(abspath)
+            mtime_ns = int(getattr(stt, 'st_mtime_ns', int(stt.st_mtime * 1e9)))
+            size = int(stt.st_size)
+        except Exception:
+            pass
+        return {
+            'path': abspath,
+            'name': os.path.basename(abspath),
+            'mtimeNs': mtime_ns,
+            'size': size,
+        }, None
+    except Exception as exc:
+        try:
+            if os.path.isfile(tmp):
+                os.remove(tmp)
+        except Exception:
+            pass
+        return None, 'write-failed:%s' % (str(exc)[:180],)
+
+
 def load_supervision_index():
     try:
         if not os.path.isfile(SUPERVISION_INDEX_FILE):
@@ -1051,45 +1141,58 @@ class MentorHandler(http.server.SimpleHTTPRequestHandler):
             return
 
         if route == '/write-mentor':
-            token = (qs.get('token') or [''])[0] or (self.headers.get('X-Mentor-Token') or '')
-            path_w = (qs.get('path') or [''])[0] or (self.headers.get('X-Mentor-Path') or '')
-            if not token or not secrets.compare_digest(token, SESSION_TOKEN):
-                # try JSON body token
+            try:
+                token = (qs.get('token') or [''])[0] or (self.headers.get('X-Mentor-Token') or '')
+                path_w = (qs.get('path') or [''])[0] or (self.headers.get('X-Mentor-Path') or '')
+                # Header may arrive percent-encoded (client-safe Windows paths)
                 try:
-                    body0 = json.loads(raw.decode('utf-8') or '{}') if raw and ctype == 'application/json' else {}
+                    path_w = urllib.parse.unquote(path_w) if path_w else path_w
                 except Exception:
-                    body0 = {}
-                token = str(body0.get('token') or token or '')
-                path_w = path_w or str(body0.get('path') or '')
-            if not token or not secrets.compare_digest(token, SESSION_TOKEN):
-                self._send_json(403, {'ok': False, 'error': 'bad token'})
-                return
-            if ctype == 'application/json':
-                self._send_json(400, {
-                    'ok': False,
-                    'error': 'use-binary',
-                    'message': 'write-mentor 请用 application/zip 二进制 body + ?path=',
-                })
-                return
-            # open-first: path must already be allow-listed (allow-open / pending / /open)
-            info, err = write_mentor_package_to_path(path_w, raw)
-            if err:
-                code = 403 if err == 'not-allowed' else 400 if err in (
-                    'missing-path', 'empty-package', 'not-mentor', 'parent-missing',
-                ) else 500
-                self._send_json(code, {
-                    'ok': False,
-                    'error': err,
-                    'message': {
-                        'not-allowed': '路径未授权（先打开/注册该 .mentor）',
-                        'missing-path': '缺少 path',
-                        'empty-package': '内容为空',
-                        'not-mentor': '仅支持 .mentor',
-                        'parent-missing': '目录不存在',
-                    }.get(err, err),
-                })
-                return
-            self._send_json(200, {'ok': True, **info})
+                    pass
+                if not token or not secrets.compare_digest(token, SESSION_TOKEN):
+                    try:
+                        body0 = json.loads(raw.decode('utf-8') or '{}') if raw and ctype == 'application/json' else {}
+                    except Exception:
+                        body0 = {}
+                    token = str(body0.get('token') or token or '')
+                    path_w = path_w or str(body0.get('path') or '')
+                if not token or not secrets.compare_digest(token, SESSION_TOKEN):
+                    self._send_json(403, {'ok': False, 'error': 'bad token'})
+                    return
+                if ctype == 'application/json':
+                    self._send_json(400, {
+                        'ok': False,
+                        'error': 'use-binary',
+                        'message': 'write-mentor 请用 application/zip 二进制 body + ?path=',
+                    })
+                    return
+                info, err = write_mentor_package_to_path(path_w, raw)
+                if err:
+                    code = 403 if err == 'not-allowed' else 400 if err in (
+                        'missing-path', 'empty-package', 'not-mentor', 'parent-missing',
+                    ) else 500
+                    self._send_json(code, {
+                        'ok': False,
+                        'error': err,
+                        'message': {
+                            'not-allowed': '路径未授权（先打开/注册该 .mentor）',
+                            'missing-path': '缺少 path',
+                            'empty-package': '内容为空',
+                            'not-mentor': '仅支持 .mentor',
+                            'parent-missing': '目录不存在',
+                        }.get(err, err),
+                    })
+                    return
+                self._send_json(200, {'ok': True, **info})
+            except Exception as exc:
+                try:
+                    self._send_json(500, {
+                        'ok': False,
+                        'error': 'write-exception',
+                        'message': str(exc)[:200],
+                    })
+                except Exception:
+                    pass
             return
 
         if route == '/run-fix-mentor' and ctype in ('application/zip', 'application/octet-stream'):

@@ -51,6 +51,7 @@ const PY = [
   'tests/mentor-server-supervision.spec.py',
   'tests/mentor-server-revision.spec.py',
   'tests/mentor-server-fix-mentor-job.spec.py',
+  'tests/test_write_mentor_package.py',
 ];
 
 const E2E_CORE = [
@@ -64,6 +65,8 @@ const E2E_CORE = [
   'tests/e2e-body-resolved-jump.spec.js',
   'tests/e2e-card-jump-center.spec.js',
   'tests/e2e-autosave-toggle.spec.js',
+  'tests/e2e-autosave-disk-real.spec.js',
+  'tests/v143-autosave-simple.spec.js',
   'tests/e2e-save-clears-dirty.spec.js',
   'tests/e2e-toolbar-contract.spec.js',
   'tests/e2e-mentor-ux-optimization.spec.js',
