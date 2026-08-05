@@ -34,24 +34,73 @@ function normWs(s) {
 }
 
 /**
+ * TipTap/turndown often emits CommonMark escapes (p\_adj, UNIQUE\_X).
+ * PM thread.text is plain. Build a regex that accepts optional \\ before punct.
+ */
+function escapeForOptionalMdEscapes(text) {
+  // RegExp source: each CommonMark-special may be preceded by optional backslash.
+  // PM plain "a_b" must match md "a\_b". No fragile /.../ character classes.
+  let out = "";
+  const specials = "\\`*_{}[]()#+-.!|";
+  const reMeta = "\\^$*+?.()|{}[]";
+  const s = String(text || "");
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    // Escape ch if it is a RegExp metacharacter
+    let lit = reMeta.includes(ch) ? ("\\" + ch) : ch;
+    if (specials.includes(ch)) {
+      // optional backslash then char: RegExp source "\\?" + lit
+      out += "\\\\?" + lit;
+    } else {
+      out += lit;
+    }
+  }
+  return out;
+}
+
+/**
  * Find occurrences of text in md; if exact miss, allow flexible whitespace
- * (cross-paragraph PM text uses spaces; content.md uses \\n\\n).
+ * (cross-paragraph PM text uses spaces; content.md uses \\n\\n) and optional
+ * CommonMark escapes so PM plain "a_b" matches md "a\\_b".
  * Returns [{from,to}, ...] in md coordinates (to = exclusive end of match).
  */
 function findTextSpansInMd(md, text) {
   if (!text || typeof md !== 'string') return [];
   const exact = findOccurrences(md, text).map((h) => ({ from: h, to: h + text.length }));
   if (exact.length) return exact;
+  // Optional backslash escapes (underscore etc.) — unique-ish PM quotes after turndown
+  const hits = [];
+  try {
+    const reEsc = new RegExp(escapeForOptionalMdEscapes(text), 'g');
+    let m;
+    while ((m = reEsc.exec(md)) !== null) {
+      hits.push({ from: m.index, to: m.index + m[0].length });
+      if (m[0].length === 0) reEsc.lastIndex++;
+    }
+  } catch (_) {}
+  if (hits.length) return dedupeSpans(hits);
   const parts = String(text).split(/\s+/).filter(Boolean);
   if (parts.length < 2) return [];
-  const esc = parts.map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+  const esc = parts.map((p) => escapeForOptionalMdEscapes(p));
   const re = new RegExp(esc.join('\\s+'), 'g');
-  const hits = [];
   let m;
   while ((m = re.exec(md)) !== null) {
     hits.push({ from: m.index, to: m.index + m[0].length });
   }
-  return hits;
+  return dedupeSpans(hits);
+}
+
+function dedupeSpans(spans) {
+  const seen = new Set();
+  const out = [];
+  for (const sp of spans || []) {
+    if (!sp) continue;
+    const k = sp.from + ':' + sp.to;
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push(sp);
+  }
+  return out;
 }
 
 /** Validate thread.mdRange against content.md. Strict: slice must equal thread.text. */
@@ -94,6 +143,25 @@ function isImageOnlyThread(th) {
  * Stamp mdRange from an exact unique occurrence of thread.text in md.
  * No multi-candidate scoring. Non-unique or missing => clear mdRange + return false.
  */
+
+/** After projecting quote from md slice, restore PM-plain UI text when equivalent. */
+function restorePlainUiText(thread, keepText) {
+  if (!thread || keepText == null) return;
+  const keep = String(keepText);
+  const now = String(thread.text || '');
+  if (keep === now) return;
+  const plainKeep = mdEmphasisToPlain(keep);
+  const plainNow = mdEmphasisToPlain(now);
+  if (
+    normWs(keep) === normWs(now) ||
+    plainKeep === plainNow ||
+    plainKeep === now ||
+    keep === plainNow
+  ) {
+    thread.text = keep;
+  }
+}
+
 export function stampThreadMdRange(thread, md, contextChars = 40) {
   if (!thread || typeof md !== 'string') return false;
   if (isImageOnlyThread(thread)) return true;
@@ -105,8 +173,10 @@ export function stampThreadMdRange(thread, md, contextChars = 40) {
   // Prefer existing valid range
   const cur = validateThreadMdRange(thread, md);
   if (cur.ok && (cur.reason === 'ok' || cur.reason === 'ok-plain' || cur.reason === 'ok-ws')) {
-    // Disk quote = md slice (canonical); UI may have held PM plain temporarily
+    // Disk quote = md slice (canonical); keep PM-plain UI text to avoid text-mismatch audit
+    const keepText = text;
     projectQuoteFromMdRange(thread, md, contextChars);
+    restorePlainUiText(thread, keepText);
     return true;
   }
   const spans = findTextSpansInMd(md, text);
@@ -144,13 +214,11 @@ export function stampThreadMdRange(thread, md, contextChars = 40) {
       return false;
     }
     thread.mdRange = { from: chosen.from, to: chosen.to };
-    // Keep PM display text (may be space-joined); md slice stays canonical via mdRange.
+    // Keep PM display text (may be space-joined / unescaped); md slice stays
+    // canonical via mdRange + anchor.quote.exact.
     const keepText = text;
     projectQuoteFromMdRange(thread, md, contextChars);
-    // Restore UI text if whitespace-normalized equal (cross-block)
-    if (normWs(keepText) === normWs(thread.text) && keepText !== thread.text) {
-      thread.text = keepText;
-    }
+    restorePlainUiText(thread, keepText);
     return true;
   }
 
@@ -183,10 +251,17 @@ export function projectQuoteFromMdRange(thread, md, contextChars = 40) {
 
 /**
  * Stamp every text thread. Sets sidecar.anchorMode = 'range' and contentMdSha256 if provided.
+ *
+ * opts.poisonOnFail (default true for package/open fail-closed):
+ *   When false (live draft/save prep), do NOT mark attached UI threads orphaned
+ *   on stamp miss — only clear mdRange. markDirty→IDB draft used to poison brand-new
+ *   annotations whose PM text still needed CommonMark escapes in content.md.
+ *
  * @returns {{ stamped:number, failed:number, failedIds:string[] }}
  */
 export function stampSidecarMdRanges(sidecar, md, opts = {}) {
   const contextChars = opts.contextChars != null ? opts.contextChars : 40;
+  const poisonOnFail = opts.poisonOnFail !== false;
   // Accept full sidecar {annotations:[...]} OR a bare annotations array (save helpers).
   const anns = Array.isArray(sidecar)
     ? sidecar
@@ -204,17 +279,21 @@ export function stampSidecarMdRanges(sidecar, md, opts = {}) {
     else {
       failed += 1;
       if (th.threadId) failedIds.push(String(th.threadId));
-      // range mode: fail closed
-      th.invalid = true;
-      th.deleted = false;
-      th.fuzzy = false;
-      th.invalidReason = th.invalidReason || 'missing-mdRange';
-      if (th.anchor && typeof th.anchor === 'object') {
-        th.anchor = { ...th.anchor, status: 'orphaned', confidence: 0 };
+      delete th.mdRange;
+      // Live threads with a PM mark must stay savable; package open still fail-closed
+      // via validateThreadMdRange when poisonOnFail is true (default).
+      if (poisonOnFail) {
+        th.invalid = true;
+        th.deleted = false;
+        th.fuzzy = false;
+        th.invalidReason = th.invalidReason || 'missing-mdRange';
+        if (th.anchor && typeof th.anchor === 'object') {
+          th.anchor = { ...th.anchor, status: 'orphaned', confidence: 0 };
+        }
       }
     }
   }
-  if (sidecar && typeof sidecar === 'object') {
+  if (sidecar && typeof sidecar === 'object' && !Array.isArray(sidecar)) {
     sidecar.anchorMode = ANCHOR_MODE_RANGE;
     if (opts.contentMdSha256) sidecar.contentMdSha256 = opts.contentMdSha256;
     sidecar.updatedAt = sidecar.updatedAt || new Date().toISOString();

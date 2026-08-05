@@ -67,6 +67,7 @@ const E2E_CORE = [
   'tests/e2e-autosave-toggle.spec.js',
   'tests/e2e-autosave-disk-real.spec.js',
   'tests/e2e-file-ops-disk-real.spec.js',
+  'tests/e2e-ann-reply-save-orders.spec.js',
   'tests/e2e-mentor-pack.spec.js',
   'tests/e2e-external-mentor-refresh.spec.js',
   'tests/v143-open-save-lifecycle.spec.js',

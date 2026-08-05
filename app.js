@@ -2845,7 +2845,7 @@ function buildAnnotationsSidecar() {
       }
       if (mdText) {
         const pack = { annotations: State.annotations || [] };
-        stampSidecarMdRanges(pack, mdText, {});
+        stampSidecarMdRanges(pack, mdText, { poisonOnFail: false });
       }
     }
   } catch (_) {}
@@ -2952,7 +2952,8 @@ function createSaveSnapshot(options = {}) {
   // Range mode: stamp mdRange from content.md BEFORE archive (no quote-only sidecar)
   try {
     const stamp = stampSidecarMdRanges(sidecar, mdText, {
-      contentMdSha256: contentMdRevision(mdText)
+      contentMdSha256: contentMdRevision(mdText),
+      poisonOnFail: false
     });
     if (stamp.failed) {
       console.warn("[md-range] stamp failed for", stamp.failed, "threads", stamp.failedIds);
@@ -5531,6 +5532,23 @@ function createAnnotationThread(from2, to, text2, opts = null) {
   }
   if (!skipMark && from2 < to) {
     applyAnnotationMark(threadId, from2, to);
+  }
+  // Stamp content.md range before markDirty→IDB draft so new threads keep mdRange
+  // (PM plain vs turndown escapes handled in stampThreadMdRange).
+  try {
+    let mdText = "";
+    try {
+      if (typeof getMarkdown === "function") mdText = getMarkdown() || "";
+    } catch (_) {}
+    if (!mdText) {
+      try { mdText = htmlToMarkdownMedia(State.editor.getHTML()) || ""; } catch (_) {}
+    }
+    if (!mdText) {
+      try { mdText = htmlToMarkdown(State.editor.getHTML()) || ""; } catch (_) {}
+    }
+    if (mdText) stampThreadMdRange(thread, mdText);
+  } catch (eStampNew) {
+    console.warn("[md-range] stamp new thread", eStampNew);
   }
   refreshAnnotationImageDecos();
   activateAnnotationThread(threadId, { ensureCard: false });
@@ -17153,6 +17171,7 @@ window.__mdAnnotator = {
   syncAnnotationMarkModeAttrs,
   isAiCard,
   editComment,
+  toggleResolved,
   addReply,
   humanCommentIsWork,
   threadNeedsAiReply,

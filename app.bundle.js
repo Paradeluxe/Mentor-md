@@ -57132,20 +57132,58 @@ function isMdRange(r) {
 function normWs(s) {
   return String(s || "").replace(/\s+/g, " ").trim();
 }
+function escapeForOptionalMdEscapes(text3) {
+  let out = "";
+  const specials = "\\`*_{}[]()#+-.!|";
+  const reMeta = "\\^$*+?.()|{}[]";
+  const s = String(text3 || "");
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    let lit = reMeta.includes(ch) ? "\\" + ch : ch;
+    if (specials.includes(ch)) {
+      out += "\\\\?" + lit;
+    } else {
+      out += lit;
+    }
+  }
+  return out;
+}
 function findTextSpansInMd(md2, text3) {
   if (!text3 || typeof md2 !== "string") return [];
   const exact = findOccurrences(md2, text3).map((h) => ({ from: h, to: h + text3.length }));
   if (exact.length) return exact;
+  const hits = [];
+  try {
+    const reEsc = new RegExp(escapeForOptionalMdEscapes(text3), "g");
+    let m2;
+    while ((m2 = reEsc.exec(md2)) !== null) {
+      hits.push({ from: m2.index, to: m2.index + m2[0].length });
+      if (m2[0].length === 0) reEsc.lastIndex++;
+    }
+  } catch (_) {
+  }
+  if (hits.length) return dedupeSpans(hits);
   const parts = String(text3).split(/\s+/).filter(Boolean);
   if (parts.length < 2) return [];
-  const esc = parts.map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  const esc = parts.map((p) => escapeForOptionalMdEscapes(p));
   const re = new RegExp(esc.join("\\s+"), "g");
-  const hits = [];
   let m;
   while ((m = re.exec(md2)) !== null) {
     hits.push({ from: m.index, to: m.index + m[0].length });
   }
-  return hits;
+  return dedupeSpans(hits);
+}
+function dedupeSpans(spans) {
+  const seen = /* @__PURE__ */ new Set();
+  const out = [];
+  for (const sp of spans || []) {
+    if (!sp) continue;
+    const k = sp.from + ":" + sp.to;
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push(sp);
+  }
+  return out;
 }
 function validateThreadMdRange(thread, md2) {
   if (!thread || typeof md2 !== "string") {
@@ -57178,6 +57216,17 @@ function isImageOnlyThread(th) {
   if (/^\[图片\]$/i.test(t) || /^\[image\]$/i.test(t)) return true;
   return Array.isArray(th.imageAnchors) && th.imageAnchors.length > 0 && (!th.ranges || !th.ranges.length);
 }
+function restorePlainUiText(thread, keepText) {
+  if (!thread || keepText == null) return;
+  const keep = String(keepText);
+  const now = String(thread.text || "");
+  if (keep === now) return;
+  const plainKeep = mdEmphasisToPlain(keep);
+  const plainNow = mdEmphasisToPlain(now);
+  if (normWs(keep) === normWs(now) || plainKeep === plainNow || plainKeep === now || keep === plainNow) {
+    thread.text = keep;
+  }
+}
 function stampThreadMdRange(thread, md2, contextChars = 40) {
   if (!thread || typeof md2 !== "string") return false;
   if (isImageOnlyThread(thread)) return true;
@@ -57188,7 +57237,9 @@ function stampThreadMdRange(thread, md2, contextChars = 40) {
   }
   const cur = validateThreadMdRange(thread, md2);
   if (cur.ok && (cur.reason === "ok" || cur.reason === "ok-plain" || cur.reason === "ok-ws")) {
+    const keepText2 = text3;
     projectQuoteFromMdRange(thread, md2, contextChars);
+    restorePlainUiText(thread, keepText2);
     return true;
   }
   const spans = findTextSpansInMd(md2, text3);
@@ -57221,9 +57272,7 @@ function stampThreadMdRange(thread, md2, contextChars = 40) {
   thread.mdRange = { from: chosen.from, to: chosen.to };
   const keepText = text3;
   projectQuoteFromMdRange(thread, md2, contextChars);
-  if (normWs(keepText) === normWs(thread.text) && keepText !== thread.text) {
-    thread.text = keepText;
-  }
+  restorePlainUiText(thread, keepText);
   return true;
 }
 function projectQuoteFromMdRange(thread, md2, contextChars = 40) {
@@ -57254,6 +57303,7 @@ function projectQuoteFromMdRange(thread, md2, contextChars = 40) {
 }
 function stampSidecarMdRanges(sidecar, md2, opts = {}) {
   const contextChars = opts.contextChars != null ? opts.contextChars : 40;
+  const poisonOnFail = opts.poisonOnFail !== false;
   const anns = Array.isArray(sidecar) ? sidecar : sidecar && Array.isArray(sidecar.annotations) ? sidecar.annotations : [];
   let stamped = 0;
   let failed = 0;
@@ -57268,16 +57318,19 @@ function stampSidecarMdRanges(sidecar, md2, opts = {}) {
     else {
       failed += 1;
       if (th.threadId) failedIds.push(String(th.threadId));
-      th.invalid = true;
-      th.deleted = false;
-      th.fuzzy = false;
-      th.invalidReason = th.invalidReason || "missing-mdRange";
-      if (th.anchor && typeof th.anchor === "object") {
-        th.anchor = { ...th.anchor, status: "orphaned", confidence: 0 };
+      delete th.mdRange;
+      if (poisonOnFail) {
+        th.invalid = true;
+        th.deleted = false;
+        th.fuzzy = false;
+        th.invalidReason = th.invalidReason || "missing-mdRange";
+        if (th.anchor && typeof th.anchor === "object") {
+          th.anchor = { ...th.anchor, status: "orphaned", confidence: 0 };
+        }
       }
     }
   }
-  if (sidecar && typeof sidecar === "object") {
+  if (sidecar && typeof sidecar === "object" && !Array.isArray(sidecar)) {
     sidecar.anchorMode = ANCHOR_MODE_RANGE;
     if (opts.contentMdSha256) sidecar.contentMdSha256 = opts.contentMdSha256;
     sidecar.updatedAt = sidecar.updatedAt || (/* @__PURE__ */ new Date()).toISOString();
@@ -62399,7 +62452,7 @@ function buildAnnotationsSidecar() {
       }
       if (mdText) {
         const pack = { annotations: State2.annotations || [] };
-        stampSidecarMdRanges(pack, mdText, {});
+        stampSidecarMdRanges(pack, mdText, { poisonOnFail: false });
       }
     }
   } catch (_) {
@@ -62501,7 +62554,8 @@ function createSaveSnapshot(options = {}) {
   };
   try {
     const stamp = stampSidecarMdRanges(sidecar, mdText, {
-      contentMdSha256: contentMdRevision(mdText)
+      contentMdSha256: contentMdRevision(mdText),
+      poisonOnFail: false
     });
     if (stamp.failed) {
       console.warn("[md-range] stamp failed for", stamp.failed, "threads", stamp.failedIds);
@@ -65038,6 +65092,28 @@ function createAnnotationThread(from2, to, text22, opts = null) {
   }
   if (!skipMark && from2 < to) {
     applyAnnotationMark(threadId, from2, to);
+  }
+  try {
+    let mdText = "";
+    try {
+      if (typeof getMarkdown === "function") mdText = getMarkdown() || "";
+    } catch (_) {
+    }
+    if (!mdText) {
+      try {
+        mdText = htmlToMarkdownMedia(State2.editor.getHTML()) || "";
+      } catch (_) {
+      }
+    }
+    if (!mdText) {
+      try {
+        mdText = htmlToMarkdown(State2.editor.getHTML()) || "";
+      } catch (_) {
+      }
+    }
+    if (mdText) stampThreadMdRange(thread, mdText);
+  } catch (eStampNew) {
+    console.warn("[md-range] stamp new thread", eStampNew);
   }
   refreshAnnotationImageDecos();
   activateAnnotationThread(threadId, { ensureCard: false });
@@ -76496,6 +76572,7 @@ window.__mdAnnotator = {
   syncAnnotationMarkModeAttrs,
   isAiCard,
   editComment,
+  toggleResolved,
   addReply,
   humanCommentIsWork,
   threadNeedsAiReply,

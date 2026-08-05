@@ -93,3 +93,25 @@ function ok(m) { console.log('ok', m); }
 }
 
 console.log('PASS unit-md-range');
+
+{
+  // PM plain quote must stamp against turndown CommonMark escapes
+  const md = 'head UNIQUEPHRASE\_FOR\_NEW\_ANN\_ZZZ tail';
+  const th = { threadId: 'esc1', text: 'UNIQUEPHRASE_FOR_NEW_ANN_ZZZ', anchor: { status: 'attached' } };
+  assert.strictEqual(stampThreadMdRange(th, md), true);
+  assert.ok(th.mdRange);
+  assert.strictEqual(th.anchor.status, 'attached');
+  // UI text stays plain
+  assert.strictEqual(th.text, 'UNIQUEPHRASE_FOR_NEW_ANN_ZZZ');
+  ok('PM plain vs escaped underscore');
+}
+
+{
+  // Live stamp miss must not poison when poisonOnFail:false
+  const sc = { annotations: [{ threadId: 'live1', text: 'no-such-quote-zzz', anchor: { status: 'attached', confidence: 1 } }] };
+  const r = stampSidecarMdRanges(sc, 'hello world', { poisonOnFail: false });
+  assert.strictEqual(r.failed, 1);
+  assert.strictEqual(sc.annotations[0].anchor.status, 'attached');
+  assert.ok(!sc.annotations[0].invalid);
+  ok('poisonOnFail false keeps attached');
+}
