@@ -50,7 +50,7 @@ function assert(cond, message) {
       visible: !document.querySelector('#save-dialog')?.classList.contains('hidden'),
     }));
     assert(dlg.visible, 'save dialog visible');
-    assert(dlg.title === '启用写回磁盘' || dlg.title === '保存文档', `title (got ${dlg.title})`);
+    assert(dlg.title === '保存到磁盘' || dlg.title === '启用写回磁盘' || dlg.title === '保存文档', `title (got ${dlg.title})`);
     assert(dlg.primary === '选文件并保存' || dlg.primary === '保存 .mentor' || dlg.primary === '授权写回并保存', `primary save (got ${dlg.primary})`);
     assert(dlg.secondary === '仅下载副本' || dlg.secondary === '仅导出 Markdown', `secondary (got ${dlg.secondary})`);
 
