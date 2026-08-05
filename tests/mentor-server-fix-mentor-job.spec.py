@@ -52,8 +52,9 @@ def http_json(url: str, data=None, method=None, timeout: float = 3.0):
 def main():
     mod = load_server()
     assert hasattr(mod, "start_fix_mentor_job")
-    assert hasattr(mod, "resolve_hermes_bin")
+    assert hasattr(mod, "resolve_pi_bin")
     assert hasattr(mod, "public_fix_mentor_job")
+    assert hasattr(mod, "ai_connection_public")
 
     # Pure helper: override command
     os.environ["MENTOR_FIX_MENTOR_CMD"] = json.dumps([sys.executable, "-c", "print('hello-fix'); import sys; sys.exit(0)"])

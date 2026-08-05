@@ -39,18 +39,11 @@ PENDING_OPEN_FILE = os.path.join(HTML_DIR, '.mentor-pending-open.json')
 # basename(lower) -> absolute .mentor path for name-based supervision poll
 SUPERVISION_BY_NAME = {}
 SUPERVISION_INDEX_FILE = os.path.join(HTML_DIR, '.supervision-index.json')
-# In-process fix-mentor jobs (Hermes spawn). Local-only; not durable across restarts.
+# In-process fix-mentor jobs (Pi RPC). Local-only; not durable across restarts.
 FIX_MENTOR_JOBS = {}
 FIX_MENTOR_LOCK = threading.Lock()
 FIX_MENTOR_LOG_MAX = 120
 FIX_MENTOR_JOB_TTL_SEC = 3600
-HERMES_WORKER_PORT = int(os.environ.get('MENTOR_HERMES_WORKER_PORT') or '8788')
-HERMES_WORKER_HOST = '127.0.0.1'
-HERMES_WORKER_URL = f'http://{HERMES_WORKER_HOST}:{HERMES_WORKER_PORT}'
-HERMES_WORKER_SCRIPT = os.path.join(HTML_DIR, 'scripts', 'hermes_fix_mentor_worker.py')
-_HERMES_WORKER_PROC = None
-_HERMES_WORKER_LOCK = threading.Lock()
-_HERMES_WORKER_LAST_HEALTH = {'state': 'unknown', 'checkedAt': 0}
 
 
 def default_port():
@@ -348,37 +341,33 @@ def _utc_now():
     return time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
 
 
-def resolve_hermes_bin():
-    """Locate hermes executable for local fix-mentor spawn."""
-    for key in ('MENTOR_HERMES_BIN', 'HERMES_BIN'):
-        env = (os.environ.get(key) or '').strip().strip('"')
-        if env and os.path.isfile(env):
-            return env
-    which = shutil.which('hermes')
-    if which and os.path.isfile(which):
-        return which
-    home = os.path.expanduser('~')
-    hermes_home = (os.environ.get('HERMES_HOME') or '').strip().strip('"')
-    candidates = [
-        os.path.join(home, 'AppData', 'Local', 'hermes', 'hermes-agent', 'venv', 'Scripts', 'hermes.exe'),
-        os.path.join(home, 'AppData', 'Local', 'hermes', 'hermes-agent', 'venv', 'Scripts', 'hermes'),
-        os.path.join(home, 'AppData', 'Local', 'hermes', 'hermes-agent', 'venv', 'bin', 'hermes'),
-        os.path.join(home, '.local', 'bin', 'hermes'),
-        os.path.join(home, '.hermes', 'bin', 'hermes'),
-    ]
-    if hermes_home:
-        candidates.extend([
-            os.path.join(hermes_home, 'hermes-agent', 'venv', 'Scripts', 'hermes.exe'),
-            os.path.join(hermes_home, 'hermes-agent', 'venv', 'Scripts', 'hermes'),
-            os.path.join(hermes_home, 'hermes-agent', 'venv', 'bin', 'hermes'),
-            os.path.join(hermes_home, 'bin', 'hermes.exe'),
-            os.path.join(hermes_home, 'bin', 'hermes'),
-        ])
-    for c in candidates:
-        if c and os.path.isfile(c):
-            return c
-    return None
+def _import_ai():
+    """Lazy import Mentor ai package (same repo root as this file)."""
+    if HTML_DIR not in sys.path:
+        sys.path.insert(0, HTML_DIR)
+    from ai.job_runner import (  # type: ignore
+        ai_connection_health,
+        build_fix_mentor_prompt,
+        restart_pi_session,
+        run_pi_fix_mentor_job,
+    )
+    from ai.session_manager import get_manager  # type: ignore
+    return {
+        'ai_connection_health': ai_connection_health,
+        'build_fix_mentor_prompt': build_fix_mentor_prompt,
+        'restart_pi_session': restart_pi_session,
+        'run_pi_fix_mentor_job': run_pi_fix_mentor_job,
+        'get_manager': get_manager,
+    }
 
+
+def resolve_pi_bin():
+    """Locate pi binary (for doctor / diagnostics)."""
+    ai = _import_ai()
+    # detect via job_runner path
+    from ai.pi_detect import detect_pi  # type: ignore
+    r = detect_pi()
+    return r.path if r.available else None
 
 
 def _job_log_list(job):
@@ -392,7 +381,7 @@ def _job_log_list(job):
 
 
 def derive_fix_mentor_progress(job):
-    """Human-facing progress from status + Hermes stdout heuristics."""
+    """Human-facing progress from status + Pi event log heuristics."""
     status = job.get('status') or 'idle'
     logs = _job_log_list(job)
     last_log = ''
@@ -407,82 +396,51 @@ def derive_fix_mentor_progress(job):
     elapsed = max(0, int(now - started))
 
     blob = '\n'.join(logs[-30:]).lower()
-    phase = 'idle'
-    phase_label = ''
-    # ordered soft steps 0..5
-    step = 0
+    phase = job.get('phase') or 'idle'
+    phase_label = job.get('phaseLabel') or ''
+    step = int(job.get('step') or 0)
     if status == 'saving' or status == 'queued':
         phase, phase_label, step = 'saving', '保存文档', 0
     elif status == 'starting':
-        phase, phase_label, step = 'starting', '启动 Hermes', 1
+        phase, phase_label, step = 'starting', '启动 Pi', 1
     elif status in ('running',):
-        phase, phase_label, step = 'running', 'AI 运行中', 2
-        if any(k in blob for k in ('loading skill', 'skill:', 'fix-mentor', 'adopt')):
-            phase, phase_label, step = 'skill', '加载 skill', 2
+        if not phase or phase in ('idle', 'starting'):
+            phase, phase_label, step = 'running', 'AI 运行中', 2
+        if any(k in blob for k in ('skill', 'fix-mentor', 'mentor_io')):
+            if step <= 2:
+                phase, phase_label, step = 'skill', '加载 skill', 2
         if any(k in blob for k in ('read_mentor', 'reading', '打开', 'unpack', 'zip')):
             phase, phase_label, step = 'read', '读取文稿', 3
         if any(k in blob for k in ('supervision', 'working_on', 'sidecar', '监管')):
             phase, phase_label, step = 'supervise', '监管改写中', 4
         if any(k in blob for k in ('write_mentor', 'writing', '写回', 'save', '已写')):
             phase, phase_label, step = 'write', '写回文稿', 5
-        if any(k in blob for k in ('tool:', 'calling', 'function_call', 'web_search', 'search')):
+        if any(k in blob for k in ('pi-tool', 'tool', 'bash', 'function_call')):
             if step < 4:
                 phase, phase_label, step = 'tools', '调用工具', 3
-        if any(k in blob for k in ('thinking', 'reasoning', 'plan')):
-            if step < 3:
-                phase, phase_label, step = 'think', '推理中', 2
     elif status == 'done':
         phase, phase_label, step = 'done', '完成', 6
     elif status in ('error', 'cancelled'):
         phase, phase_label, step = 'error', '失败', step or 2
 
-    # Soft percent: step base + elapsed creep (cap 95 until done)
-    base = {0: 5, 1: 12, 2: 25, 3: 40, 4: 62, 5: 82, 6: 100}.get(step, 15)
-    creep = min(18, elapsed // 8)  # +1% per 8s up to +18
+    # Soft percent
     if status == 'done':
         pct = 100
     elif status in ('error', 'cancelled'):
-        pct = min(99, base + creep)
+        pct = min(99, max(int(job.get('progress') or 0), step * 12))
     else:
-        pct = min(95, base + creep)
-
-    stale = False
-    if status == 'running' and elapsed >= 25:
-        # no new log for a while?
-        # logTail has no timestamps; use message heartbeat via empty last
-        if not last_log and elapsed >= 40:
-            stale = True
-        elif last_log and elapsed >= 90:
-            # long run without phase advance past read
-            if step <= 2:
-                stale = True
-
-    heartbeat = ''
-    if status in ('starting', 'running', 'saving', 'queued'):
-        m, s = divmod(elapsed, 60)
-        heartbeat = f'{m}:{s:02d}'
-        if stale:
-            heartbeat += ' · 仍在跑（输出较少属正常）'
-
-    msg = job.get('message') or ''
-    if phase_label and status in ('starting', 'running'):
-        msg = f'{phase_label}' + (f' · {last_log[:80]}' if last_log else '')
-    elif status == 'done':
-        msg = job.get('message') or 'AI 处理完成'
-    elif status in ('error', 'cancelled'):
-        msg = job.get('message') or job.get('error') or '失败'
+        base = {0: 5, 1: 12, 2: 25, 3: 45, 4: 62, 5: 82, 6: 100}.get(step, 20)
+        creep = min(15, elapsed // 8)
+        pct = min(95, max(int(job.get('progress') or 0), base + creep))
 
     return {
         'phase': phase,
-        'phaseLabel': phase_label or phase,
+        'phaseLabel': phase_label,
         'step': step,
         'progress': pct,
         'elapsedSec': elapsed,
-        'elapsedLabel': heartbeat or (f'{elapsed // 60}:{elapsed % 60:02d}' if elapsed else '0:00'),
-        'lastLog': last_log,
-        'stale': stale,
-        'message': msg,
-        'logTail': logs[-12:],
+        'elapsedLabel': f'{elapsed // 60}:{elapsed % 60:02d}',
+        'lastLog': last_log or job.get('lastLog') or '',
     }
 
 
@@ -490,45 +448,32 @@ def public_fix_mentor_job(job):
     if not job:
         return None
     prog = derive_fix_mentor_progress(job)
-    # Warm poller may already fill richer fields
-    if job.get('progress') not in (None, ''):
-        try: prog['progress'] = int(job.get('progress'))
-        except Exception: pass
-    if job.get('phaseLabel'): prog['phaseLabel'] = job.get('phaseLabel')
-    if job.get('phase'): prog['phase'] = job.get('phase')
-    if job.get('lastLog'): prog['lastLog'] = job.get('lastLog')
-    if job.get('elapsedLabel'): prog['elapsedLabel'] = job.get('elapsedLabel')
-    if job.get('elapsedSec') is not None:
-        try: prog['elapsedSec'] = int(job.get('elapsedSec'))
-        except Exception: pass
-    if job.get('message'): prog['message'] = job.get('message')
+    logs = _job_log_list(job)
     return {
         'ok': True,
         'id': job.get('id') or '',
         'status': job.get('status') or 'error',
         'path': job.get('path') or '',
-        'name': os.path.basename(job.get('path') or '') if job.get('path') else '',
         'threadId': job.get('threadId') or '',
         'scope': job.get('scope') or 'all',
-        'pid': job.get('pid'),
-        'startedAt': job.get('startedAt') or '',
-        'finishedAt': job.get('finishedAt') or '',
-        'exitCode': job.get('exitCode'),
+        'message': job.get('message') or '',
         'error': job.get('error') or '',
-        'message': prog.get('message') or job.get('message') or '',
-        'logTail': prog.get('logTail') or _job_log_list(job)[-12:],
-        'commandPreview': job.get('commandPreview') or '',
-        'staged': bool(job.get('staged')),
-        'sourceName': job.get('sourceName') or '',
+        'exitCode': job.get('exitCode'),
+        'finalText': (job.get('finalText') or '')[:4000],
+        'logTail': logs[-40:],
+        'lastLog': prog.get('lastLog') or '',
         'phase': prog.get('phase') or '',
         'phaseLabel': prog.get('phaseLabel') or '',
         'step': prog.get('step') or 0,
         'progress': prog.get('progress') or 0,
         'elapsedSec': prog.get('elapsedSec') or 0,
         'elapsedLabel': prog.get('elapsedLabel') or '',
-        'lastLog': prog.get('lastLog') or '',
-        'stale': bool(prog.get('stale')),
-        'via': job.get('via') or 'warm-worker',
+        'startedAt': job.get('startedAt') or '',
+        'finishedAt': job.get('finishedAt') or '',
+        'via': job.get('via') or 'pi',
+        'stale': bool(job.get('stale')),
+        'commandPreview': job.get('commandPreview') or '',
+        'sourceName': job.get('sourceName') or '',
     }
 
 
@@ -536,495 +481,86 @@ def prune_fix_mentor_jobs():
     now = time.time()
     with FIX_MENTOR_LOCK:
         dead = []
-        for jid, job in FIX_MENTOR_JOBS.items():
-            st = job.get('status')
-            if st in ('done', 'error', 'cancelled'):
-                fin = float(job.get('finishedAtEpoch') or 0)
-                if fin and (now - fin) > FIX_MENTOR_JOB_TTL_SEC:
-                    dead.append(jid)
+        for jid, job in list(FIX_MENTOR_JOBS.items()):
+            fin = float(job.get('finishedAtEpoch') or 0)
+            if fin and (now - fin) > FIX_MENTOR_JOB_TTL_SEC:
+                dead.append(jid)
         for jid in dead:
             FIX_MENTOR_JOBS.pop(jid, None)
-        # Cap finished history
-        finished = [
-            (jid, j) for jid, j in FIX_MENTOR_JOBS.items()
-            if j.get('status') in ('done', 'error', 'cancelled')
-        ]
-        if len(finished) > 30:
-            finished.sort(key=lambda x: float(x[1].get('finishedAtEpoch') or 0))
-            for jid, _ in finished[:-30]:
-                FIX_MENTOR_JOBS.pop(jid, None)
 
 
 def find_active_fix_mentor_job(path=None):
-    abspath = os.path.abspath(path) if path else None
     with FIX_MENTOR_LOCK:
         for job in FIX_MENTOR_JOBS.values():
-            if job.get('status') not in ('queued', 'starting', 'running'):
-                continue
-            if abspath and os.path.abspath(job.get('path') or '') != abspath:
-                continue
-            return job
+            st = job.get('status')
+            if st in ('starting', 'running', 'queued', 'saving'):
+                if path is None:
+                    return job
+                if os.path.abspath(job.get('path') or '') == os.path.abspath(path):
+                    return job
     return None
 
 
 def get_fix_mentor_job(job_id):
-    if not job_id:
-        return None
     with FIX_MENTOR_LOCK:
         return FIX_MENTOR_JOBS.get(job_id)
 
 
-
-
-def write_mentor_package_to_path(path, raw_bytes):
-    """Atomically write .mentor bytes to an allowed absolute path."""
-    if not path:
-        return None, 'missing-path'
-    if not raw_bytes:
-        return None, 'empty-package'
-    abspath = os.path.abspath(path)
-    if not abspath.lower().endswith('.mentor'):
-        return None, 'not-mentor'
-    # Must already be allow-listed (opened / pending / registered) OR exist under ALLOWED
-    allowed = abspath in ALLOWED_OPEN_PATHS
-    if not allowed:
-        # unique basename in allow list → reject ambiguous
-        base = os.path.basename(abspath).lower()
-        for p in list(ALLOWED_OPEN_PATHS):
-            if os.path.abspath(p).lower() == abspath.lower():
-                allowed = True
-                abspath = os.path.abspath(p)
-                break
-    if not allowed and os.path.isfile(abspath):
-        # Existing file that was never registered: still refuse (open-first policy)
-        return None, 'not-allowed'
-    if not allowed:
-        return None, 'not-allowed'
-    parent = os.path.dirname(abspath)
-    if parent and not os.path.isdir(parent):
-        return None, 'parent-missing'
-    tmp = abspath + '.mentor-write-tmp'
-    try:
-        with open(tmp, 'wb') as f:
-            f.write(raw_bytes)
-            f.flush()
-            try:
-                os.fsync(f.fileno())
-            except Exception:
-                pass
-        # Windows-friendly replace with short retry
-        last_err = None
-        for _ in range(8):
-            try:
-                os.replace(tmp, abspath)
-                last_err = None
-                break
-            except Exception as exc:
-                last_err = exc
-                time.sleep(0.05)
-        if last_err is not None:
-            try:
-                if os.path.isfile(tmp):
-                    os.remove(tmp)
-            except Exception:
-                pass
-            return None, 'write-failed:%s' % (str(last_err)[:180],)
-        ALLOWED_OPEN_PATHS.add(abspath)
-        try:
-            register_supervision_path(abspath)
-        except Exception:
-            pass
-        mtime_ns = 0
-        size = 0
-        try:
-            stt = os.stat(abspath)
-            mtime_ns = int(getattr(stt, 'st_mtime_ns', int(stt.st_mtime * 1e9)))
-            size = int(stt.st_size)
-        except Exception:
-            pass
-        return {
-            'path': abspath,
-            'name': os.path.basename(abspath),
-            'mtimeNs': mtime_ns,
-            'size': size,
-        }, None
-    except Exception as exc:
-        try:
-            if os.path.isfile(tmp):
-                os.remove(tmp)
-        except Exception:
-            pass
-        return None, 'write-failed:%s' % (str(exc)[:180],)
-
-
-
-def pick_mentor_path_dialog(initial_name=''):
-    """Native OS file picker on the Mentor host (single-machine). Returns abs path or None."""
-    title = '选择要关联的 .mentor 文件（须与当前打开的是同一个）'
-    init = str(initial_name or '').strip()
-    # 1) tkinter
-    try:
-        import tkinter as tk
-        from tkinter import filedialog
-        root = tk.Tk()
-        root.withdraw()
-        try:
-            root.attributes('-topmost', True)
-        except Exception:
-            pass
-        kwargs = {
-            'title': title,
-            'filetypes': [('Mentor package', '*.mentor'), ('All files', '*.*')],
-        }
-        if init and init.lower().endswith('.mentor'):
-            kwargs['initialfile'] = os.path.basename(init)
-        path = filedialog.askopenfilename(**kwargs)
-        try:
-            root.destroy()
-        except Exception:
-            pass
-        if path and os.path.isfile(path) and path.lower().endswith('.mentor'):
-            return os.path.abspath(path)
-    except Exception as e:
-        print('tkinter pick failed:', e)
-    # 2) PowerShell WinForms (Windows)
-    if sys.platform == 'win32':
-        try:
-            ps = (
-                "Add-Type -AssemblyName System.Windows.Forms; "
-                "$f=New-Object System.Windows.Forms.OpenFileDialog; "
-                "$f.Filter='Mentor (*.mentor)|*.mentor|All (*.*)|*.*'; "
-                "$f.Title='" + title.replace("'", "''") + "'; "
-                + (("$f.FileName='" + os.path.basename(init).replace("'", "''") + "'; ") if init else "")
-                + "if($f.ShowDialog() -eq 'OK'){ $f.FileName }"
-            )
-            r = subprocess.run(
-                ['powershell', '-NoProfile', '-STA', '-Command', ps],
-                capture_output=True, text=True, timeout=300,
-                creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0) if False else 0,
-            )
-            path = (r.stdout or '').strip().splitlines()
-            path = path[-1].strip() if path else ''
-            if path and os.path.isfile(path) and path.lower().endswith('.mentor'):
-                return os.path.abspath(path)
-        except Exception as e:
-            print('powershell pick failed:', e)
-    return None
-
-
 def resolve_mentor_path_by_name(name):
-    """Resolve basename -> absolute path via supervision index / allow list."""
+    """Best-effort resolve basename to an allowed/open path."""
+    name = (name or '').strip()
     if not name:
         return None
-    base = os.path.basename(str(name)).strip()
-    if not base.lower().endswith('.mentor'):
-        return None
-    hit = resolve_supervision_by_name(base)
-    if hit and os.path.isfile(hit):
-        return os.path.abspath(hit)
-    key = base.lower()
-    matches = []
+    low = name.lower()
+    # supervision index
+    try:
+        p = SUPERVISION_BY_NAME.get(low)
+        if p and os.path.isfile(p):
+            return p
+    except Exception:
+        pass
+    # allowed open set
+    hits = []
     for p in list(ALLOWED_OPEN_PATHS):
-        try:
-            if os.path.basename(p).lower() == key and os.path.isfile(p):
-                matches.append(os.path.abspath(p))
-        except Exception:
-            continue
-    uniq = []
-    seen = set()
-    for m in matches:
-        if m not in seen:
-            seen.add(m)
-            uniq.append(m)
+        if os.path.basename(p).lower() == low and os.path.isfile(p):
+            hits.append(p)
+    uniq = list(dict.fromkeys(hits))
     if len(uniq) == 1:
         return uniq[0]
     return None
 
 
 def _build_fix_mentor_command(abspath, thread_id='', scope='all'):
-    """Return (cmd, shell:bool, preview:str). cmd is list or str."""
+    """Custom override only (MENTOR_FIX_MENTOR_CMD). No Hermes default."""
     override = (os.environ.get('MENTOR_FIX_MENTOR_CMD') or '').strip()
-    if override:
-        # JSON array preferred; else format string with {path}/{threadId}
-        if override.startswith('['):
-            try:
-                arr = json.loads(override)
-                if isinstance(arr, list) and arr:
-                    cmd = [str(x).replace('{path}', abspath).replace('{threadId}', thread_id or '') for x in arr]
-                    return cmd, False, ' '.join(cmd)
-            except Exception:
-                pass
-        cmd = override.replace('{path}', abspath).replace('{threadId}', thread_id or '')
-        return cmd, True, cmd
-
-    hermes = resolve_hermes_bin()
-    if not hermes:
+    if not override:
         return None, False, ''
-
-    prompt = f'/fix-mentor {abspath}'
-    if thread_id and scope == 'thread':
-        prompt += f'\n只处理 threadId={thread_id}，其它 pending 跳过。'
-    elif thread_id:
-        prompt += f'\n优先处理 threadId={thread_id}，然后处理其余 unanswered @AI。'
-
-    cmd = [hermes, '-s', 'fix-mentor', 'chat', '-q', prompt, '-Q']
-    preview = f'{hermes} -s fix-mentor chat -q "/fix-mentor {os.path.basename(abspath)}" -Q'
-    return cmd, False, preview
-
-
+    if override.startswith('['):
+        try:
+            arr = json.loads(override)
+            if isinstance(arr, list) and arr:
+                cmd = [str(x).replace('{path}', abspath).replace('{threadId}', thread_id or '') for x in arr]
+                return cmd, False, ' '.join(cmd)
+        except Exception:
+            pass
+    cmd = override.replace('{path}', abspath).replace('{threadId}', thread_id or '')
+    return cmd, True, cmd
 
 
-def resolve_hermes_python():
-    """Python that can import hermes run_agent (prefer hermes venv)."""
-    hermes = resolve_hermes_bin()
-    if hermes:
-        # .../venv/Scripts/hermes.exe -> .../venv/Scripts/python.exe
-        d = os.path.dirname(os.path.abspath(hermes))
-        for name in ('python.exe', 'python'):
-            p = os.path.join(d, name)
-            if os.path.isfile(p):
-                return p
-        # Scripts -> venv root
-        root = os.path.dirname(d)
-        for name in ('python.exe', 'python', os.path.join('bin', 'python')):
-            p = os.path.join(root, name)
-            if os.path.isfile(p):
-                return p
-    which = shutil.which('python') or shutil.which('python3')
-    return which
-
-
-def hermes_worker_health(timeout=1.2):
-    """Poll warm worker /health. Updates cache."""
-    import urllib.request
-    url = HERMES_WORKER_URL.rstrip('/') + '/health'
-    try:
-        req = urllib.request.Request(url, method='GET')
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            raw = resp.read().decode('utf-8', errors='replace')
-            data = json.loads(raw)
-            data['checkedAt'] = time.time()
-            data['reachable'] = True
-            _HERMES_WORKER_LAST_HEALTH.clear()
-            _HERMES_WORKER_LAST_HEALTH.update(data)
-            return data
-    except Exception as exc:
-        data = {
-            'ok': False,
-            'reachable': False,
-            'state': 'down',
-            'error': str(exc)[:200],
-            'checkedAt': time.time(),
-            'agentReady': False,
-        }
-        _HERMES_WORKER_LAST_HEALTH.clear()
-        _HERMES_WORKER_LAST_HEALTH.update(data)
-        return data
-
-
-def ensure_hermes_worker(timeout_ready=0):
-    """Start warm worker if down. timeout_ready>0 waits until agentReady."""
-    global _HERMES_WORKER_PROC
-    with _HERMES_WORKER_LOCK:
-        h = hermes_worker_health(timeout=0.6)
-        if h.get('reachable'):
-            if timeout_ready and not h.get('agentReady'):
-                pass  # fall through to wait
-            else:
-                return h
-        # dead process handle cleanup
-        if _HERMES_WORKER_PROC is not None:
-            try:
-                if _HERMES_WORKER_PROC.poll() is not None:
-                    _HERMES_WORKER_PROC = None
-            except Exception:
-                _HERMES_WORKER_PROC = None
-        if _HERMES_WORKER_PROC is None:
-            py = resolve_hermes_python()
-            script = HERMES_WORKER_SCRIPT
-            if not py or not os.path.isfile(script):
-                return {
-                    'ok': False,
-                    'reachable': False,
-                    'state': 'unavailable',
-                    'error': 'no-python-or-script',
-                    'agentReady': False,
-                }
-            env = os.environ.copy()
-            env['MENTOR_HERMES_WORKER_PORT'] = str(HERMES_WORKER_PORT)
-            env.setdefault('HERMES_YOLO_MODE', '1')
-            env.setdefault('HERMES_ACCEPT_HOOKS', '1')
-            env.setdefault('PYTHONUTF8', '1')
-            kwargs = {
-                'cwd': HTML_DIR,
-                'env': env,
-                'stdout': subprocess.DEVNULL,
-                'stderr': subprocess.DEVNULL,
-                'stdin': subprocess.DEVNULL,
-            }
-            if sys.platform == 'win32':
-                kwargs['creationflags'] = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
-            try:
-                _HERMES_WORKER_PROC = subprocess.Popen([py, script], **kwargs)
-            except Exception as exc:
-                return {
-                    'ok': False,
-                    'reachable': False,
-                    'state': 'spawn-failed',
-                    'error': str(exc)[:200],
-                    'agentReady': False,
-                }
-    # wait loop outside lock
-    deadline = time.time() + max(0, float(timeout_ready or 0))
-    h = hermes_worker_health(timeout=0.8)
-    while time.time() < deadline:
-        if h.get('reachable') and (not timeout_ready or h.get('agentReady') or h.get('state') == 'error'):
-            break
-        time.sleep(0.35)
-        h = hermes_worker_health(timeout=0.8)
-    if h.get('reachable') and _HERMES_WORKER_PROC is not None:
-        h = dict(h)
-        h['workerPid'] = _HERMES_WORKER_PROC.pid
+def ai_connection_public(warm=False, wait=0):
+    ai = _import_ai()
+    h = ai['ai_connection_health'](warm=bool(warm))
+    if wait and not h.get('agentReady'):
+        # re-check after brief settle (skill/path only)
+        deadline = time.time() + float(wait)
+        while time.time() < deadline and not h.get('agentReady'):
+            time.sleep(0.2)
+            h = ai['ai_connection_health'](warm=True)
     return h
 
 
-def warm_worker_start_job(path, thread_id='', scope='all', staged=False, source_name=''):
-    """Dispatch /fm to warm worker. Returns (job_dict_like, err|None)."""
-    import urllib.request
-    abspath = os.path.abspath(path)
-    h = ensure_hermes_worker(timeout_ready=0)
-    if not h.get('reachable'):
-        # try start + short wait
-        h = ensure_hermes_worker(timeout_ready=8)
-    if not h.get('reachable'):
-        return None, 'worker-down'
-
-    prompt = f'/fix-mentor {abspath}'
-    if thread_id and scope == 'thread':
-        prompt += f'\n只处理 threadId={thread_id}，其它 pending 跳过。'
-    elif thread_id:
-        prompt += f'\n优先处理 threadId={thread_id}，然后处理其余 unanswered @AI。'
-
-    job_id = secrets.token_hex(8)
-    payload = json.dumps({
-        'id': job_id,
-        'path': abspath,
-        'prompt': prompt,
-        'threadId': thread_id or '',
-    }).encode('utf-8')
-    req = urllib.request.Request(
-        HERMES_WORKER_URL.rstrip('/') + '/run',
-        data=payload,
-        headers={'Content-Type': 'application/json'},
-        method='POST',
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            data = json.loads(resp.read().decode('utf-8', errors='replace'))
-    except Exception as exc:
-        # 409 busy
-        try:
-            import urllib.error
-            if isinstance(exc, urllib.error.HTTPError):
-                body = exc.read().decode('utf-8', errors='replace')
-                try:
-                    j = json.loads(body)
-                except Exception:
-                    j = {'error': body[:200]}
-                if exc.code == 409:
-                    return j, 'busy'
-                return None, j.get('error') or f'http-{exc.code}'
-        except Exception:
-            pass
-        return None, f'worker-run-failed:{str(exc)[:120]}'
-
-    # Mirror into FIX_MENTOR_JOBS for existing GET /fix-mentor-job clients
-    now = _utc_now()
-    job = {
-        'id': data.get('id') or job_id,
-        'status': data.get('status') or 'starting',
-        'path': abspath,
-        'threadId': thread_id or '',
-        'scope': scope if scope in ('all', 'thread') else 'all',
-        'staged': bool(staged),
-        'sourceName': str(source_name or os.path.basename(abspath) or ''),
-        'pid': None,
-        'startedAt': data.get('startedAt') or now,
-        'startedAtEpoch': time.time(),
-        'finishedAt': '',
-        'finishedAtEpoch': 0,
-        'exitCode': None,
-        'error': data.get('error') or '',
-        'message': data.get('message') or 'warm Hermes 运行中',
-        'logTail': deque(maxlen=FIX_MENTOR_LOG_MAX),
-        'commandPreview': f'warm-worker /run {os.path.basename(abspath)}',
-        'proc': None,
-        'via': 'warm-worker',
-        'workerJobId': data.get('id') or job_id,
-    }
-    for line in (data.get('logTail') or []):
-        job['logTail'].append(str(line)[-500:])
-    with FIX_MENTOR_LOCK:
-        FIX_MENTOR_JOBS[job['id']] = job
-
-    def poller():
-        import urllib.request as ur
-        jid = job['id']
-        wjid = job.get('workerJobId') or jid
-        try:
-            while True:
-                time.sleep(0.7)
-                try:
-                    q = ur.Request(HERMES_WORKER_URL.rstrip('/') + '/job?id=' + wjid, method='GET')
-                    with ur.urlopen(q, timeout=3) as resp:
-                        d = json.loads(resp.read().decode('utf-8', errors='replace'))
-                except Exception as e:
-                    job['logTail'].append(f'[worker-poll] {e}')
-                    continue
-                stt = d.get('status') or ''
-                job['status'] = 'running' if stt in ('starting', 'running', 'queued') else stt
-                if stt == 'starting':
-                    job['status'] = 'starting'
-                job['message'] = d.get('message') or job.get('message') or ''
-                job['error'] = d.get('error') or ''
-                job['exitCode'] = d.get('exitCode')
-                job['phase'] = d.get('phase') or ''
-                job['phaseLabel'] = d.get('phaseLabel') or ''
-                job['step'] = d.get('step') or 0
-                job['progress'] = d.get('progress') or 0
-                job['elapsedSec'] = d.get('elapsedSec') or 0
-                job['elapsedLabel'] = d.get('elapsedLabel') or ''
-                job['lastLog'] = d.get('lastLog') or ''
-                job['stale'] = bool(d.get('stale'))
-                job['finalText'] = d.get('finalText') or job.get('finalText') or ''
-                logs = d.get('logTail') or []
-                if logs:
-                    job['logTail'].clear()
-                    for line in logs[-FIX_MENTOR_LOG_MAX:]:
-                        job['logTail'].append(str(line)[-500:])
-                if stt in ('done', 'error', 'cancelled'):
-                    job['finishedAt'] = d.get('finishedAt') or _utc_now()
-                    job['finishedAtEpoch'] = time.time()
-                    if stt == 'done':
-                        job['status'] = 'done'
-                        job['message'] = d.get('message') or 'AI 处理完成（warm）'
-                    else:
-                        job['status'] = 'error'
-                        job['message'] = d.get('message') or d.get('error') or '失败'
-                    break
-        except Exception as exc:
-            job['status'] = 'error'
-            job['error'] = 'worker-poll-failed'
-            job['message'] = str(exc)[:300]
-            job['finishedAt'] = _utc_now()
-            job['finishedAtEpoch'] = time.time()
-
-    threading.Thread(target=poller, name=f'warm-poll-{job["id"]}', daemon=True).start()
-    return job, None
-
-
 def start_fix_mentor_job(path, thread_id='', scope='all', staged=False, source_name=''):
-    """Run fix-mentor via warm Hermes worker ONLY. No cold CLI spawn fallback."""
+    """Run fix-mentor via embedded Pi RPC ONLY. No Hermes / cold CLI fallback."""
     prune_fix_mentor_jobs()
     if not path:
         return None, 'missing-path'
@@ -1034,7 +570,6 @@ def start_fix_mentor_job(path, thread_id='', scope='all', staged=False, source_n
     if not os.path.isfile(abspath):
         return None, 'not-found'
     if staged:
-        # Explicitly rejected: AI must run on the user's real disk path.
         return None, 'staged-not-allowed'
 
     active = find_active_fix_mentor_job()
@@ -1045,12 +580,12 @@ def start_fix_mentor_job(path, thread_id='', scope='all', staged=False, source_n
     scope = scope if scope in ('all', 'thread') else 'all'
     thread_id = str(thread_id or '').strip()
 
-    # Optional explicit custom command (env) — only if set; still no hermes chat -q cold path.
+    # Optional explicit custom command (tests)
     override = (os.environ.get('MENTOR_FIX_MENTOR_CMD') or '').strip()
     if override:
         cmd, shell, preview = _build_fix_mentor_command(abspath, thread_id, scope)
         if cmd is None:
-            return None, 'hermes-not-found'
+            return None, 'custom-cmd-invalid'
         job_id = secrets.token_hex(8)
         now = _utc_now()
         job = {
@@ -1101,7 +636,7 @@ def start_fix_mentor_job(path, thread_id='', scope='all', staged=False, source_n
                 try:
                     assert proc.stdout is not None
                     for line in proc.stdout:
-                        line = (line or '').rstrip('\r\n')
+                        line = (line or '').rstrip('\\r\\n')
                         if line:
                             job['logTail'].append(line[-500:])
                 except Exception as read_err:
@@ -1127,60 +662,80 @@ def start_fix_mentor_job(path, thread_id='', scope='all', staged=False, source_n
         threading.Thread(target=runner_custom, name=f'fix-mentor-custom-{job_id}', daemon=True).start()
         return job, None
 
-    # Default: warm worker only. Fail loud — never silent cold hermes chat -q.
-    wjob, werr = warm_worker_start_job(
-        abspath, thread_id=thread_id, scope=scope, staged=False, source_name=source_name,
-    )
-    if wjob is not None:
-        return wjob, None
-    if werr == 'busy':
-        active2 = find_active_fix_mentor_job()
-        if active2:
-            return active2, 'busy'
-        return None, 'busy'
-    if werr in ('worker-down', 'worker-run-failed') or (werr and str(werr).startswith('worker-')):
-        return None, werr if werr else 'worker-down'
-    return None, werr or 'worker-down'
+    # Default: embedded Pi
+    ai = _import_ai()
+    health = ai['ai_connection_health'](warm=True)
+    if not health.get('agentReady'):
+        err = 'pi_not_found' if not (health.get('pi') or {}).get('available') else 'skill_missing'
+        if health.get('error'):
+            # more specific
+            e = str(health.get('error'))
+            if 'pi' in e.lower():
+                err = 'pi_not_found'
+            elif 'skill' in e.lower():
+                err = 'skill_missing'
+        return None, err
 
+    job_id = secrets.token_hex(8)
+    prompt = ai['build_fix_mentor_prompt'](abspath, thread_id, scope)
+    now = _utc_now()
+    job = {
+        'id': job_id,
+        'status': 'starting',
+        'path': abspath,
+        'threadId': thread_id,
+        'scope': scope,
+        'staged': False,
+        'sourceName': str(source_name or os.path.basename(abspath) or ''),
+        'pid': None,
+        'startedAt': now,
+        'startedAtEpoch': time.time(),
+        'finishedAt': '',
+        'finishedAtEpoch': 0,
+        'exitCode': None,
+        'error': '',
+        'message': '排队进入 Pi…',
+        'logTail': deque(maxlen=FIX_MENTOR_LOG_MAX),
+        'commandPreview': f'pi-rpc fix-mentor {os.path.basename(abspath)}',
+        'proc': None,
+        'via': 'pi',
+        'prompt': prompt,
+        'phase': 'starting',
+        'phaseLabel': '启动 Pi',
+        'step': 1,
+        'progress': 12,
+    }
+    with FIX_MENTOR_LOCK:
+        FIX_MENTOR_JOBS[job_id] = job
 
-
-
-def restart_hermes_worker(timeout_ready=25):
-    """Terminate warm worker process (if owned) then ensure fresh spawn."""
-    global _HERMES_WORKER_PROC
-    with _HERMES_WORKER_LOCK:
-        proc = _HERMES_WORKER_PROC
-        _HERMES_WORKER_PROC = None
-    if proc is not None:
+    def runner_pi():
         try:
-            if proc.poll() is None:
-                proc.terminate()
-                try:
-                    proc.wait(timeout=3)
-                except Exception:
-                    try:
-                        proc.kill()
-                    except Exception:
-                        pass
-        except Exception:
-            pass
-    return ensure_hermes_worker(timeout_ready=timeout_ready)
+            ai['run_pi_fix_mentor_job'](job)
+        except Exception as exc:
+            job['status'] = 'error'
+            job['error'] = 'run-failed'
+            job['message'] = str(exc)[:300]
+            job['exitCode'] = 1
+            job['finishedAt'] = _utc_now()
+            job['finishedAtEpoch'] = time.time()
+            job['logTail'].append(f'[pi-error] {exc}')
+
+    threading.Thread(target=runner_pi, name=f'fix-mentor-pi-{job_id}', daemon=True).start()
+    return job, None
+
+
+def restart_ai_session(timeout_ready=25):
+    ai = _import_ai()
+    return ai['restart_pi_session']()
 
 
 def build_doctor_report(warm=False, wait=0):
-    """Structured health report for in-app Doctor UI."""
-    hermes_bin = resolve_hermes_bin() or ''
-    hermes_py = resolve_hermes_python() or ''
-    worker_script = HERMES_WORKER_SCRIPT
-    script_ok = bool(worker_script and os.path.isfile(worker_script))
-    if warm:
-        h = ensure_hermes_worker(timeout_ready=float(wait or 0))
-    else:
-        h = hermes_worker_health(timeout=0.8)
-        if not h.get('reachable'):
-            h = ensure_hermes_worker(timeout_ready=0)
-            h = hermes_worker_health(timeout=0.8) or h
-    h = dict(h or {})
+    """Structured health report for in-app Doctor UI (Pi + skill)."""
+    h = ai_connection_public(warm=warm or True, wait=wait if warm else 0)
+    pi = h.get('pi') or {}
+    pi_ok = bool(pi.get('available'))
+    skill_ok = bool(h.get('skillDir'))
+    ready = bool(h.get('agentReady'))
     checks = []
     checks.append({
         'id': 'mentor-server',
@@ -1191,40 +746,32 @@ def build_doctor_report(warm=False, wait=0):
         'fix': None,
     })
     checks.append({
-        'id': 'hermes-bin',
-        'ok': bool(hermes_bin),
-        'severity': 'ok' if hermes_bin else 'error',
-        'title': 'Hermes CLI' if hermes_bin else '找不到 hermes.exe',
-        'detail': hermes_bin or '设置 MENTOR_HERMES_BIN 或安装 Hermes Agent',
+        'id': 'pi-bin',
+        'ok': pi_ok,
+        'severity': 'ok' if pi_ok else 'error',
+        'title': 'Pi CLI' if pi_ok else '找不到 pi',
+        'detail': (pi.get('path') or '') + (f' · v{pi.get("version")}' if pi.get('version') else '')
+        if pi_ok else '安装 Pi coding-agent 并确保 pi 在 PATH',
         'fix': None,
     })
     checks.append({
-        'id': 'worker-script',
-        'ok': script_ok,
-        'severity': 'ok' if script_ok else 'error',
-        'title': 'warm worker 脚本',
-        'detail': worker_script if script_ok else ('missing: ' + str(worker_script)),
+        'id': 'fix-mentor-skill',
+        'ok': skill_ok,
+        'severity': 'ok' if skill_ok else 'error',
+        'title': 'fix-mentor skill' if skill_ok else '找不到 fix-mentor skill',
+        'detail': h.get('skillDir') or '期望 Mentor/ai-skill/fix-mentor 或 MENTOR_SKILL_ROOT',
         'fix': None,
     })
-    checks.append({
-        'id': 'hermes-python',
-        'ok': bool(hermes_py),
-        'severity': 'ok' if hermes_py else 'error',
-        'title': 'Hermes venv Python' if hermes_py else '找不到 Hermes Python',
-        'detail': hermes_py or 'hermes.exe 旁 venv 不完整',
-        'fix': None,
-    })
-    ready = bool(h.get('agentReady'))
-    reachable = bool(h.get('reachable'))
     if ready:
-        sev, title, fix = 'ok', 'Hermes warm worker 已就绪', None
-    elif reachable:
-        sev, title, fix = 'warn', 'Worker 已连接但 agent 未就绪', 'warm-worker'
+        sev, title, fix = 'ok', 'Pi AI 已就绪', None
+    elif pi_ok and not skill_ok:
+        sev, title, fix = 'error', 'Pi 可用但 skill 缺失', None
+    elif not pi_ok:
+        sev, title, fix = 'error', 'Pi 未就绪', 'warm-worker'
     else:
-        sev, title, fix = 'error', 'Hermes warm worker 未运行', 'warm-worker'
+        sev, title, fix = 'warn', 'Pi 检测异常', 'warm-worker'
     detail_parts = [
         'state=' + str(h.get('state') or '?'),
-        'port=' + str(HERMES_WORKER_PORT),
         'agentReady=' + str(ready),
     ]
     if h.get('error'):
@@ -1232,7 +779,7 @@ def build_doctor_report(warm=False, wait=0):
     if h.get('skills'):
         detail_parts.append('skills=' + ','.join(h.get('skills') or []))
     checks.append({
-        'id': 'warm-worker',
+        'id': 'ai-connection',
         'ok': ready,
         'severity': sev,
         'title': title,
@@ -1248,39 +795,48 @@ def build_doctor_report(warm=False, wait=0):
         'ok': True,
         'overall': overall,
         'service': 'mentor-doctor',
-        'workerPort': HERMES_WORKER_PORT,
-        'hermesBin': hermes_bin,
-        'hermesPython': hermes_py,
-        'worker': {
+        'workerPort': None,
+        'piPath': pi.get('path') or '',
+        'piVersion': pi.get('version') or '',
+        'skillDir': h.get('skillDir') or '',
+        'ai': {
             'state': h.get('state'),
-            'reachable': reachable,
+            'reachable': True,
             'agentReady': ready,
             'error': h.get('error') or '',
             'skills': h.get('skills') or [],
-            'pid': h.get('pid') or h.get('workerPid'),
-            'uptimeSec': h.get('uptimeSec'),
+            'pi': pi,
+        },
+        # backward field names some UI may still read once during migrate
+        'worker': {
+            'state': h.get('state'),
+            'reachable': True,
+            'agentReady': ready,
+            'error': h.get('error') or '',
+            'skills': h.get('skills') or [],
         },
         'checks': checks,
         'actions': [
-            {'id': 'warm-worker', 'label': '启动 / 预热 Hermes worker'},
-            {'id': 'restart-worker', 'label': '重启 Hermes worker'},
+            {'id': 'warm-worker', 'label': '检测 / 预热 Pi'},
+            {'id': 'restart-worker', 'label': '重启 Pi 会话'},
             {'id': 'refresh', 'label': '重新检测'},
         ],
         'hints': [
-            '点底栏 Hermes 芯片可随时打开 Doctor',
-            '若 8787 被 python -m http.server 占用，本 API 会 404——关掉占用进程后运行 mentor.cmd',
+            '点底栏 Pi 芯片可随时打开 Doctor',
+            '若 8787 被 python -m http.server 占用，/session 与 /ai-connection 会 404——关掉占用进程后运行 mentor.cmd',
+            '模型在 ~/.pi/agent/settings.json 配置',
         ],
     }
 
 
 def run_doctor_repair(action, wait=25):
     action = str(action or '').strip().lower()
-    if action in ('warm-worker', 'warm', 'ensure-worker'):
-        h = ensure_hermes_worker(timeout_ready=float(wait or 25))
-        return {'ok': True, 'action': 'warm-worker', 'worker': h, 'report': build_doctor_report(warm=False)}
-    if action in ('restart-worker', 'restart'):
-        h = restart_hermes_worker(timeout_ready=float(wait or 25))
-        return {'ok': True, 'action': 'restart-worker', 'worker': h, 'report': build_doctor_report(warm=False)}
+    if action in ('warm-worker', 'warm', 'ensure-worker', 'warm-pi', 'ensure-pi'):
+        h = ai_connection_public(warm=True, wait=float(wait or 0))
+        return {'ok': True, 'action': 'warm-pi', 'ai': h, 'worker': h, 'report': build_doctor_report(warm=False)}
+    if action in ('restart-worker', 'restart', 'restart-pi'):
+        h = restart_ai_session(timeout_ready=float(wait or 25))
+        return {'ok': True, 'action': 'restart-pi', 'ai': h, 'worker': h, 'report': build_doctor_report(warm=False)}
     return {'ok': False, 'error': 'unknown-action', 'message': '未知修复动作: ' + action}
 
 
@@ -1506,18 +1062,25 @@ class MentorHandler(http.server.SimpleHTTPRequestHandler):
             job, err = start_fix_mentor_job(
                 path, thread_id=thread_id, scope=scope, staged=False, source_name=name or '',
             )
-            if err == 'hermes-not-found':
+            if err in ('pi_not_found', 'pi-not-found'):
                 self._send_json(503, {
                     'ok': False,
-                    'error': 'hermes-not-found',
-                    'message': '找不到 hermes（自定义 MENTOR_FIX_MENTOR_CMD 时）。',
+                    'error': 'pi_not_found',
+                    'message': '找不到 pi（Pi coding-agent）。安装后确保 pi 在 PATH，或看底栏 Doctor。',
                 })
                 return
-            if err in ('worker-down', 'worker-run-failed') or (err and str(err).startswith('worker-')):
+            if err in ('skill_missing', 'skill-missing', 'extension_missing'):
                 self._send_json(503, {
                     'ok': False,
                     'error': err,
-                    'message': 'Hermes warm worker 不可用（%s）。看底栏 Hermes 芯片，或重启 mentor-server。' % err,
+                    'message': 'fix-mentor skill 不可用（%s）。期望 Mentor/ai-skill/fix-mentor。' % err,
+                })
+                return
+            if err in ('worker-down', 'worker-run-failed', 'spawn_failed') or (err and str(err).startswith('worker-')):
+                self._send_json(503, {
+                    'ok': False,
+                    'error': err,
+                    'message': 'Pi AI 不可用（%s）。看底栏 Pi 芯片，或重启 mentor-server。' % err,
                 })
                 return
             if err == 'staged-not-allowed':
@@ -1663,27 +1226,28 @@ class MentorHandler(http.server.SimpleHTTPRequestHandler):
             self._send_json(200, payload)
             return
 
-        if self.path.startswith('/hermes-connection') or self.path.startswith('/hermes-status'):
+        if self.path.startswith('/ai-connection') or self.path.startswith('/ai-status'):
             if not request_is_local(self):
                 self.send_error(403, 'Local only')
                 return
-            qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query or '')
             token = (qs.get('token') or [''])[0]
+            # token optional for connection probe (local only); if provided must match
             if token and not secrets.compare_digest(token, SESSION_TOKEN):
                 self._send_json(403, {'ok': False, 'error': 'bad token'})
                 return
             warm = (qs.get('warm') or ['0'])[0] in ('1', 'true', 'yes')
             wait = float((qs.get('wait') or ['0'])[0] or 0)
-            if warm:
-                h = ensure_hermes_worker(timeout_ready=wait)
-            else:
-                h = hermes_worker_health(timeout=0.8)
-                if not h.get('reachable'):
-                    h = ensure_hermes_worker(timeout_ready=0)
-            h = dict(h or {})
-            h['ok'] = True
-            h['mode'] = 'warm'
-            h['hermesBin'] = resolve_hermes_bin() or ''
+            try:
+                h = ai_connection_public(warm=warm, wait=wait)
+            except Exception as exc:
+                h = {
+                    'ok': False,
+                    'reachable': False,
+                    'state': 'error',
+                    'agentReady': False,
+                    'error': str(exc)[:200],
+                }
             self._send_json(200, h)
             return
 
@@ -1705,16 +1269,32 @@ class MentorHandler(http.server.SimpleHTTPRequestHandler):
             if not request_is_local(self):
                 self.send_error(403, 'Local only')
                 return
+            try:
+                ai_h = ai_connection_public(warm=False)
+            except Exception as _ai_exc:
+                ai_h = {
+                    'agentReady': False,
+                    'state': 'error',
+                    'reachable': False,
+                    'error': str(_ai_exc)[:200],
+                    'pi': {},
+                    'skillDir': '',
+                }
+            pi_info = ai_h.get('pi') or {}
             self._send_json(200, {
                 'ok': True,
                 'token': SESSION_TOKEN,
-                'hermes': bool(resolve_hermes_bin()),
-                'hermesPath': resolve_hermes_bin() or '',
-                'hermesWorker': {
-                    'port': HERMES_WORKER_PORT,
-                    'state': _HERMES_WORKER_LAST_HEALTH.get('state'),
-                    'agentReady': bool(_HERMES_WORKER_LAST_HEALTH.get('agentReady')),
-                    'reachable': bool(_HERMES_WORKER_LAST_HEALTH.get('reachable')),
+                'aiReady': bool(ai_h.get('agentReady')),
+                'piPath': pi_info.get('path') or '',
+                'piVersion': pi_info.get('version') or '',
+                'skillDir': ai_h.get('skillDir') or '',
+                'ai': {
+                    'state': ai_h.get('state'),
+                    'agentReady': bool(ai_h.get('agentReady')),
+                    'reachable': bool(ai_h.get('reachable', True)),
+                    'error': ai_h.get('error') or '',
+                    'skills': ai_h.get('skills') or [],
+                    'pi': pi_info,
                 },
             })
             return
@@ -1736,8 +1316,8 @@ def start_server(port, open_url=None):
             print('webbrowser.open failed:', e)
         try:
             threading.Thread(
-                target=lambda: ensure_hermes_worker(timeout_ready=0),
-                name='hermes-worker-boot',
+                target=lambda: ai_connection_public(warm=True),
+                name='ai-pi-boot',
                 daemon=True,
             ).start()
         except Exception:
@@ -1820,7 +1400,7 @@ def main():
         with socketserver.TCPServer(('127.0.0.1', port), MentorHandler) as httpd:
             print(f'Mentor server (no-browser): http://127.0.0.1:{port}/index.html')
             try:
-                threading.Thread(target=lambda: ensure_hermes_worker(timeout_ready=0), name='hermes-worker-boot', daemon=True).start()
+                threading.Thread(target=lambda: ai_connection_public(warm=True), name='ai-pi-boot', daemon=True).start()
             except Exception:
                 pass
             httpd.serve_forever()
