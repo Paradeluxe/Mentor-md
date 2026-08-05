@@ -4,10 +4,10 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Mentor — 像 docx 一样批注 Markdown</title>
-<meta name="build" content="v1.48.0 cache-bust v=264" />
+<meta name="build" content="v1.48.0 cache-bust v=265" />
 <!-- v1.43.37 offline: local fonts + KaTeX (no CDN) -->
 <link rel="stylesheet" href="vendor/fonts/local-fonts.css?v=263" />
-<link rel="stylesheet" href="styles.css?v=264" />
+<link rel="stylesheet" href="styles.css?v=265" />
 <link rel="stylesheet" href="vendor/katex/katex.min.css?v=263" />
 <!-- 字体：系统无衬线 + 等宽（侧栏时间戳、文件名） -->
 <style>
@@ -409,7 +409,7 @@
 
 <!-- v1.43.37 offline: bundled app (esbuild) + local icons; no esm.sh -->
 <script src="icons.js?v=262"></script>
-<script type="module" src="app.bundle.js?v=264"></script>
+<script type="module" src="app.bundle.js?v=265"></script>
 <!-- 帮助 popover (浮在 body 顶层, 位置由 JS 动态计算) -->
 <div id="help-popover" class="help-popover hidden" role="dialog" aria-modal="false" aria-labelledby="help-popover-title">
   <div class="help-popover-arrow"></div>
@@ -465,7 +465,7 @@
       </div>
       <div class="settings-section">
         <label class="settings-label">自动保存延迟 (停手后)</label>
-        <p class="settings-hint">顶栏「自动保存」开启且文件已授权写回时：延迟后写回磁盘并清除脏标记（类 Office AutoSave）。关闭时仅保存本地草稿（崩溃恢复），不写正式文件。更短 = 更安全但更频繁写盘。</p>
+        <p class="settings-hint">顶栏「自动保存」开启且已关联磁盘时：停手后写回并清脏标记。未关联时仅草稿。更短 = 更勤写盘。</p>
         <div class="settings-options" id="settings-autosave-debounce">
           <button data-ms="1000" class="settings-opt">1s</button>
           <button data-ms="3000" class="settings-opt">3s</button>

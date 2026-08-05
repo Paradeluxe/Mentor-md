@@ -39,11 +39,11 @@ export function buildSaveDialogModel(input = {}) {
       };
     case 'permission-denied':
       return {
-        title: '没有写权限',
+        title: '无法写回',
         message: canAuthorize
-          ? '浏览器拒绝写回。可重新授权写回原文件，或下载 .mentor 副本。'
-          : '浏览器拒绝写回原文件。可另存 .mentor 副本，或重新打开文件并授权。',
-        primaryLabel: canAuthorize ? '重新授权写回' : '另存 .mentor',
+          ? '选一下文件位置即可继续保存，或下载副本。'
+          : '可另存 .mentor 副本。',
+        primaryLabel: canAuthorize ? '选文件保存' : '另存 .mentor',
         secondaryLabel: canAuthorize ? '仅下载副本' : '',
         cancelLabel: '取消',
         severity: 'warning',
@@ -53,32 +53,28 @@ export function buildSaveDialogModel(input = {}) {
     default:
       if (canAuthorize) {
         return {
-          title: '启用写回磁盘',
-          message: '选一次保存位置（或选中原 .mentor）即可写盘；之后自动保存会直接写回，无需再按保存。',
-          primaryLabel: '授权写回并保存',
+          title: '保存到磁盘',
+          message: '选一次文件位置即可。之后自动保存会直接写回。',
+          primaryLabel: '选文件并保存',
           secondaryLabel: '仅下载副本',
           cancelLabel: '取消',
           severity: 'normal',
           details: [
             { label: '文件', value: mentorLikeName(fileName) },
-            { label: '去向', value: '本机磁盘（一次授权）' },
             { label: '包含', value: `正文 · 批注 ${ann} · 文献 ${refs} · 图片 ${media}` },
-            { label: '之后', value: '自动保存开着就会写盘' },
           ],
         };
       }
       return {
         title: '保存文档',
-        message: '当前浏览器不能直接写回原文件。建议保存为 .mentor，以保留正文、批注、图片和文献库。',
+        message: '将下载 .mentor（含正文、批注、图片、文献）。',
         primaryLabel: '保存 .mentor',
         secondaryLabel: '仅导出 Markdown',
         cancelLabel: '取消',
         severity: 'normal',
         details: [
           { label: '文件', value: mentorLikeName(fileName) },
-          { label: '去向', value: '下载到本机' },
           { label: '包含', value: `正文 · 批注 ${ann} · 文献 ${refs} · 图片 ${media}` },
-          { label: '不含', value: '不会写回原路径' },
         ],
       };
   }

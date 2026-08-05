@@ -28,13 +28,13 @@ const { pathToFileURL } = require('url');
     media: 2,
     canAuthorize: true,
   });
-  assert.strictEqual(noHandleAuth.title, '启用写回磁盘');
-  assert.strictEqual(noHandleAuth.primaryLabel, '授权写回并保存');
+  assert.strictEqual(noHandleAuth.title, '保存到磁盘');
+  assert.strictEqual(noHandleAuth.primaryLabel, '选文件并保存');
   assert.strictEqual(noHandleAuth.secondaryLabel, '仅下载副本');
   assert.ok(noHandleAuth.details.some((d) => d.label === '包含' && d.value.includes('批注 3')));
 
   const permAuth = buildSaveDialogModel({ kind: 'permission-denied', fileName: 'a.mentor', canAuthorize: true });
-  assert.strictEqual(permAuth.primaryLabel, '重新授权写回');
+  assert.strictEqual(permAuth.primaryLabel, '选文件保存');
   assert.strictEqual(permAuth.secondaryLabel, '仅下载副本');
 
   assert.strictEqual(

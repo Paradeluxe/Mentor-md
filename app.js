@@ -3162,8 +3162,8 @@ async function ensureAutoSaveDiskTargetFromGesture() {
   if (up && up.ok) {
     setAutoSaveEnabled(true, { silent: true });
     try {
-      setStatus("自动保存已开启", "已授权 · 停手后自动写盘");
-      showToast("已授权写盘 · 自动保存已开", 2600);
+      setStatus("自动保存已开启", "停手后自动写盘");
+      showToast("自动保存已开", 1800);
     } catch (_) {}
     if (!(up.saveResult && up.saveResult.ok) && State.currentFile && State.currentFile.dirty) {
       try { await autosaveNow(); } catch (_) {}
@@ -3171,10 +3171,10 @@ async function ensureAutoSaveDiskTargetFromGesture() {
     return up;
   }
   if (up && up.cancelled) {
-    try { showToast("未授权写盘 · 自动保存暂仅草稿", 2800); } catch (_) {}
+    try { showToast("自动保存暂仅草稿", 2000); } catch (_) {}
     return up;
   }
-  try { showToast("无法授权写盘: " + ((up && (up.error || up.message)) || "unknown"), 3200); } catch (_) {}
+  try { showToast("无法写盘: " + ((up && (up.error || up.message)) || "unknown"), 2800); } catch (_) {}
   return up || { ok: false };
 }
 /** Preference ON and current doc can be written in place. */
@@ -3954,7 +3954,8 @@ async function autosaveNow() {
         try {
           if (!autosaveNow._needAuthNoted) {
             autosaveNow._needAuthNoted = true;
-            setStatus("自动保存 · 待授权", "点「自动保存」或 Ctrl+S 选文件后即可写盘");
+            setStatus("自动保存 · 草稿", "正在定位磁盘文件…");
+            try { void silentBindDiskPathAfterOpen().then((p) => { if (p) autosaveNow(); }); } catch (_) {}
           }
         } catch (_) {}
       } else if (wr && wr.error) {
@@ -6313,7 +6314,7 @@ async function pickAndBindMentorPath(opts) {
   opts = opts || {};
   let token = await ensureLocalSessionToken({ force: true });
   if (!token) {
-    return { ok: false, error: "no-token", message: "无 mentor-server token（请用 mentor.cmd 打开页面）" };
+    return { ok: false, error: "no-token", message: "无 session（请用 mentor-server 打开）" };
   }
   const hint =
     opts.name ||
@@ -6342,7 +6343,7 @@ async function pickAndBindMentorPath(opts) {
     return {
       ok: false,
       error: "not-mentor-server",
-      message: "当前 8787 不是 mentor-server。关掉 http.server，用 mentor.cmd 启动后再试。",
+      message: "当前不是 mentor-server，请重启 mentor.cmd。",
     };
   }
   let data = {};
@@ -6557,7 +6558,7 @@ async function fetchAiConnection(opts) {
     }
     if (!res.ok) {
       const hint = res.status === 404
-        ? "8787 不是 mentor-server（/ai-connection 404）。关掉 python -m http.server，用 mentor.cmd 启动"
+        ? "8787 不是 mentor-server，请重启 mentor.cmd"
         : ("HTTP " + res.status);
       State.aiConnection = {
         state: "unavailable",
@@ -6655,7 +6656,7 @@ function buildOfflineDoctorReport(sessionStatus, aiStatus) {
     offline: true,
     checks,
     fixCmd: doctorKillServerCmd(),
-    hints: ["复制下方命令到 PowerShell 运行，或关闭假 server 后双击 mentor.cmd"],
+    hints: ["重启 mentor.cmd 后再检测"],
   };
 }
 
@@ -6733,26 +6734,29 @@ async function fetchDoctorReport(opts) {
       const hasHandleOnly =
         !absPath && typeof hasWriteHandle === "function" && hasWriteHandle();
       const pathOk = !!(absPath && typeof isAbsMentorPath === "function" && isAbsMentorPath(absPath));
-      let pathDetail = "未打开文档或无法解析路径";
-      let pathTitle = "当前文稿无磁盘路径（浏览器打开常见）";
+      let pathDetail = "未打开文档";
+      let pathTitle = "无磁盘路径";
       let pathSev = "warn";
       if (pathOk) {
-        pathTitle = "当前文稿有绝对磁盘路径";
+        pathTitle = "磁盘路径已关联";
         pathDetail = absPath;
         pathSev = "ok";
-      } else if (hasHandleOnly) {
-        pathTitle = "仅有浏览器写句柄 · 无绝对路径";
-        pathDetail =
-          "可 Ctrl+S 写回，但 AI/Pi 需要真实路径。点「绑定磁盘路径」选同一个 .mentor，或双击文件 / mentor.cmd 打开。";
-        pathSev = "warn";
       } else if (State.currentFile) {
-        pathTitle = "当前文稿无磁盘路径（浏览器打开常见）";
-        pathDetail =
-          "浏览器「打开」只有文件句柄、没有绝对路径。点「绑定磁盘路径」；或双击 .mentor / mentor.cmd。";
+        // Try silent bind once while Doctor runs
+        try {
+          if (typeof silentBindDiskPathAfterOpen === "function") {
+            /* fire-and-forget; next Doctor refresh will see path */
+            void silentBindDiskPathAfterOpen();
+          }
+        } catch (_) {}
+        pathTitle = "正在自动定位磁盘路径";
+        pathDetail = hasHandleOnly
+          ? "打开后会静默关联；若仍无路径可点「关联磁盘」。"
+          : "打开后会静默关联（Everything）。";
         pathSev = "warn";
       } else {
         pathTitle = "未打开文档";
-        pathDetail = "先打开 .mentor 再测 AI 路径";
+        pathDetail = "先打开 .mentor";
         pathSev = "warn";
       }
       const checks = Array.isArray(data.checks) ? data.checks.slice() : [];
@@ -7163,7 +7167,7 @@ async function ensureDiskSavedForFixMentor() {
   }
   // Flush handle write so on-disk bytes match editor before AI / path bind.
   if ((!path || !isAbsMentorPath(path)) && typeof hasWriteHandle === "function" && hasWriteHandle()) {
-    setFixMentorJobState({ status: "saving", message: "正在写回浏览器已授权文件…", error: "" });
+    setFixMentorJobState({ status: "saving", message: "正在保存…", error: "" });
     try {
       const wr = await writeCurrentToHandle({ reason: "manual", showProgress: true });
       if (wr && !wr.ok && !wr.skipped) {
@@ -7254,7 +7258,7 @@ async function runFixMentorFromUi(opts = {}) {
         const detail = (conn && conn.error) ? String(conn.error) : "";
         const msg = detail
           ? ("Pi 未就绪：" + detail)
-          : "Pi 未就绪（底栏连接芯片）。等「Pi 已就绪」再点 AI，或关掉假 http.server 后用 mentor.cmd 重启。";
+          : "Pi 未就绪。等底栏「Pi 已就绪」后再试。";
         setFixMentorJobState({
           status: "error",
           error: "pi-not-ready",
@@ -7277,7 +7281,7 @@ async function runFixMentorFromUi(opts = {}) {
     return saved;
   }
   if (!saved.path) {
-    const msg = "没有磁盘路径，已禁止暂存回落。请经 mentor-server 打开真实 .mentor。";
+    const msg = "没有磁盘路径，无法启动 AI。";
     setFixMentorJobState({ status: "error", error: "no-disk-path", message: msg });
     showToast(msg, 4500);
     return { ok: false, error: "no-disk-path", message: msg };
@@ -7285,7 +7289,7 @@ async function runFixMentorFromUi(opts = {}) {
 
   const token = (State.externalWatchToken || "") || (await ensureLocalSessionToken());
   if (!token) {
-    const msg = "无法获取 mentor-server session token（请确认通过 http://127.0.0.1:8787 打开）";
+    const msg = "无法连接 mentor-server（请用 8787 打开）";
     setFixMentorJobState({ status: "error", error: "no-token", message: msg, path: saved.path || "" });
     showToast(msg, 4200);
     return { ok: false, error: "no-token", message: msg };
@@ -7303,7 +7307,7 @@ async function runFixMentorFromUi(opts = {}) {
     startedAt: Date.now(),
     writeBackPath: saved.writeBackPath || saved.path,
   });
-  showToast("提交 AI 任务…", 1600);
+  showToast("提交中…", 1200);
 
   try {
     await fetch(location.origin + "/supervision/register", {
@@ -7373,7 +7377,7 @@ async function runFixMentorFromUi(opts = {}) {
   });
   State.fixMentorJob.startedAtClient = Date.now();
   startFixMentorJobPolling();
-  showToast("AI 任务已提交 · Pi", 2400);
+  showToast("AI 已提交", 1600);
   return { ok: true, job: data };
 }
 
@@ -11442,7 +11446,7 @@ async function enableWriteBackForCurrent(opts = {}) {
       const got = String(handle.name || "").toLowerCase();
       if (want && got && want !== got) {
         try {
-          showToast(`已授权 ${handle.name}（原名 ${State.currentFile.name}）· 之后自动写此文件`, 3600);
+          showToast(`将写回 ${handle.name}`, 1800);
         } catch (_) {}
       }
     }
@@ -11452,11 +11456,11 @@ async function enableWriteBackForCurrent(opts = {}) {
     if (thenSave) {
       const result = await writeCurrentToDisk({ reason: "manual", showProgress: isMentorPackMode() });
       if (result && result.ok) {
-        try { showToast("已写回磁盘 · 自动保存将继续写盘", 2600); } catch (_) {}
+        try { showToast("已保存", 1600); } catch (_) {}
       }
       return { ...att, saveResult: result };
     }
-    try { showToast("已授权写盘 · 自动保存开启后会写回", 2400); } catch (_) {}
+    try { showToast("已可写盘", 1600); } catch (_) {}
     return att;
   } catch (e) {
     if (e && e.name === "AbortError") return { ok: false, cancelled: true };
@@ -11466,7 +11470,7 @@ async function enableWriteBackForCurrent(opts = {}) {
 
 async function openFromHandle(fileHandle, sidecarHandle = null, options = {}) {
   const quiet = !!(options && options.quiet);
-  await ensureWritePermission(fileHandle);
+  // read-only open; write permission deferred to save
   const file = await fileHandle.getFile();
   const content = await file.text();
   let annotations = null;
@@ -13430,7 +13434,7 @@ async function runManualSave() {
               return await writeCurrentToDisk({ reason: "manual", showProgress: isMentorPackMode() });
             }
             if (up.cancelled) return { ok: false, cancelled: true };
-            showToast("授权未完成，可另存副本", 2800);
+            showToast("未完成，可另存副本", 2200);
             return { ok: false, error: up.error || "permission-denied" };
           }
           const snap = createSaveSnapshot();
@@ -13488,7 +13492,21 @@ async function runManualSave() {
       }
     }
 
-    // No FSA handle + no server path: authorize once (Chrome/Edge) or download.
+    // Last chance: silent path bind then server write (no 授权 lecture).
+    try {
+      const p = await silentBindDiskPathAfterOpen(mentorBasenameHint());
+      if (p) {
+        const wr = await writeCurrentToDisk({ reason: "manual", showProgress: isMentorPackMode() });
+        if (wr && wr.ok) {
+          setStatus("已保存", p);
+          showToast("已保存", 1600);
+          try { snapshotActiveTab(); } catch {}
+          return wr;
+        }
+      }
+    } catch (_) {}
+
+    // No FSA handle + no server path: pick file once or download.
         let snapshot;
         try {
           snapshot = createSaveSnapshot();
@@ -13529,7 +13547,7 @@ async function runManualSave() {
           if (up.saveResult.ok) {
             const copy = buildSaveResultCopy({ kind: "write-current", fileName: State.currentFile.name });
             setStatus(copy.status, copy.detail);
-            showToast("已写回磁盘 ✓ · 自动保存可继续写盘", 2800);
+            showToast("已保存", 1800);
             try { snapshotActiveTab(); } catch {}
             // Keep AutoSave ON after first authorize (user intent: always write disk).
             try { setAutoSaveEnabled(true, { silent: true }); } catch (_) {}
@@ -13537,7 +13555,7 @@ async function runManualSave() {
           return up.saveResult;
         }
         if (up.cancelled) return { ok: false, cancelled: true };
-        showToast("未完成授权，已改为下载副本", 2800);
+        showToast("已改为下载副本", 2200);
       }
       try {
         await AnnotationStore.put(snapshot.name, snapshot.sidecar);
@@ -16937,8 +16955,9 @@ async function _openMentorAbsolutePath(openPath, token) {
               }
             } catch (_) {}
           } else {
-            showToast("已打开 " + baseName + " · 点「自动保存」或 Ctrl+S 授权一次即可写盘", 3600);
-            try { setStatus("已打开", baseName + " · 点自动保存/保存授权写盘"); } catch (_) {}
+            showToast("已打开 " + baseName, 1800);
+            try { setStatus("已打开", baseName); } catch (_) {}
+            try { void silentBindDiskPathAfterOpen(baseName); } catch (_) {}
           }
         } else {
           console.warn("[launch-open] openFromMentorFile 不可用或 editor 未就绪");

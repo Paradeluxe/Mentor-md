@@ -57788,9 +57788,9 @@ function buildSaveDialogModel(input = {}) {
       };
     case "permission-denied":
       return {
-        title: "\u6CA1\u6709\u5199\u6743\u9650",
-        message: canAuthorize ? "\u6D4F\u89C8\u5668\u62D2\u7EDD\u5199\u56DE\u3002\u53EF\u91CD\u65B0\u6388\u6743\u5199\u56DE\u539F\u6587\u4EF6\uFF0C\u6216\u4E0B\u8F7D .mentor \u526F\u672C\u3002" : "\u6D4F\u89C8\u5668\u62D2\u7EDD\u5199\u56DE\u539F\u6587\u4EF6\u3002\u53EF\u53E6\u5B58 .mentor \u526F\u672C\uFF0C\u6216\u91CD\u65B0\u6253\u5F00\u6587\u4EF6\u5E76\u6388\u6743\u3002",
-        primaryLabel: canAuthorize ? "\u91CD\u65B0\u6388\u6743\u5199\u56DE" : "\u53E6\u5B58 .mentor",
+        title: "\u65E0\u6CD5\u5199\u56DE",
+        message: canAuthorize ? "\u9009\u4E00\u4E0B\u6587\u4EF6\u4F4D\u7F6E\u5373\u53EF\u7EE7\u7EED\u4FDD\u5B58\uFF0C\u6216\u4E0B\u8F7D\u526F\u672C\u3002" : "\u53EF\u53E6\u5B58 .mentor \u526F\u672C\u3002",
+        primaryLabel: canAuthorize ? "\u9009\u6587\u4EF6\u4FDD\u5B58" : "\u53E6\u5B58 .mentor",
         secondaryLabel: canAuthorize ? "\u4EC5\u4E0B\u8F7D\u526F\u672C" : "",
         cancelLabel: "\u53D6\u6D88",
         severity: "warning",
@@ -57800,32 +57800,28 @@ function buildSaveDialogModel(input = {}) {
     default:
       if (canAuthorize) {
         return {
-          title: "\u542F\u7528\u5199\u56DE\u78C1\u76D8",
-          message: "\u9009\u4E00\u6B21\u4FDD\u5B58\u4F4D\u7F6E\uFF08\u6216\u9009\u4E2D\u539F .mentor\uFF09\u5373\u53EF\u5199\u76D8\uFF1B\u4E4B\u540E\u81EA\u52A8\u4FDD\u5B58\u4F1A\u76F4\u63A5\u5199\u56DE\uFF0C\u65E0\u9700\u518D\u6309\u4FDD\u5B58\u3002",
-          primaryLabel: "\u6388\u6743\u5199\u56DE\u5E76\u4FDD\u5B58",
+          title: "\u4FDD\u5B58\u5230\u78C1\u76D8",
+          message: "\u9009\u4E00\u6B21\u6587\u4EF6\u4F4D\u7F6E\u5373\u53EF\u3002\u4E4B\u540E\u81EA\u52A8\u4FDD\u5B58\u4F1A\u76F4\u63A5\u5199\u56DE\u3002",
+          primaryLabel: "\u9009\u6587\u4EF6\u5E76\u4FDD\u5B58",
           secondaryLabel: "\u4EC5\u4E0B\u8F7D\u526F\u672C",
           cancelLabel: "\u53D6\u6D88",
           severity: "normal",
           details: [
             { label: "\u6587\u4EF6", value: mentorLikeName(fileName) },
-            { label: "\u53BB\u5411", value: "\u672C\u673A\u78C1\u76D8\uFF08\u4E00\u6B21\u6388\u6743\uFF09" },
-            { label: "\u5305\u542B", value: `\u6B63\u6587 \xB7 \u6279\u6CE8 ${ann} \xB7 \u6587\u732E ${refs} \xB7 \u56FE\u7247 ${media}` },
-            { label: "\u4E4B\u540E", value: "\u81EA\u52A8\u4FDD\u5B58\u5F00\u7740\u5C31\u4F1A\u5199\u76D8" }
+            { label: "\u5305\u542B", value: `\u6B63\u6587 \xB7 \u6279\u6CE8 ${ann} \xB7 \u6587\u732E ${refs} \xB7 \u56FE\u7247 ${media}` }
           ]
         };
       }
       return {
         title: "\u4FDD\u5B58\u6587\u6863",
-        message: "\u5F53\u524D\u6D4F\u89C8\u5668\u4E0D\u80FD\u76F4\u63A5\u5199\u56DE\u539F\u6587\u4EF6\u3002\u5EFA\u8BAE\u4FDD\u5B58\u4E3A .mentor\uFF0C\u4EE5\u4FDD\u7559\u6B63\u6587\u3001\u6279\u6CE8\u3001\u56FE\u7247\u548C\u6587\u732E\u5E93\u3002",
+        message: "\u5C06\u4E0B\u8F7D .mentor\uFF08\u542B\u6B63\u6587\u3001\u6279\u6CE8\u3001\u56FE\u7247\u3001\u6587\u732E\uFF09\u3002",
         primaryLabel: "\u4FDD\u5B58 .mentor",
         secondaryLabel: "\u4EC5\u5BFC\u51FA Markdown",
         cancelLabel: "\u53D6\u6D88",
         severity: "normal",
         details: [
           { label: "\u6587\u4EF6", value: mentorLikeName(fileName) },
-          { label: "\u53BB\u5411", value: "\u4E0B\u8F7D\u5230\u672C\u673A" },
-          { label: "\u5305\u542B", value: `\u6B63\u6587 \xB7 \u6279\u6CE8 ${ann} \xB7 \u6587\u732E ${refs} \xB7 \u56FE\u7247 ${media}` },
-          { label: "\u4E0D\u542B", value: "\u4E0D\u4F1A\u5199\u56DE\u539F\u8DEF\u5F84" }
+          { label: "\u5305\u542B", value: `\u6B63\u6587 \xB7 \u6279\u6CE8 ${ann} \xB7 \u6587\u732E ${refs} \xB7 \u56FE\u7247 ${media}` }
         ]
       };
   }
@@ -62747,8 +62743,8 @@ async function ensureAutoSaveDiskTargetFromGesture() {
   if (up && up.ok) {
     setAutoSaveEnabled(true, { silent: true });
     try {
-      setStatus("\u81EA\u52A8\u4FDD\u5B58\u5DF2\u5F00\u542F", "\u5DF2\u6388\u6743 \xB7 \u505C\u624B\u540E\u81EA\u52A8\u5199\u76D8");
-      showToast("\u5DF2\u6388\u6743\u5199\u76D8 \xB7 \u81EA\u52A8\u4FDD\u5B58\u5DF2\u5F00", 2600);
+      setStatus("\u81EA\u52A8\u4FDD\u5B58\u5DF2\u5F00\u542F", "\u505C\u624B\u540E\u81EA\u52A8\u5199\u76D8");
+      showToast("\u81EA\u52A8\u4FDD\u5B58\u5DF2\u5F00", 1800);
     } catch (_) {
     }
     if (!(up.saveResult && up.saveResult.ok) && State2.currentFile && State2.currentFile.dirty) {
@@ -62761,13 +62757,13 @@ async function ensureAutoSaveDiskTargetFromGesture() {
   }
   if (up && up.cancelled) {
     try {
-      showToast("\u672A\u6388\u6743\u5199\u76D8 \xB7 \u81EA\u52A8\u4FDD\u5B58\u6682\u4EC5\u8349\u7A3F", 2800);
+      showToast("\u81EA\u52A8\u4FDD\u5B58\u6682\u4EC5\u8349\u7A3F", 2e3);
     } catch (_) {
     }
     return up;
   }
   try {
-    showToast("\u65E0\u6CD5\u6388\u6743\u5199\u76D8: " + (up && (up.error || up.message) || "unknown"), 3200);
+    showToast("\u65E0\u6CD5\u5199\u76D8: " + (up && (up.error || up.message) || "unknown"), 2800);
   } catch (_) {
   }
   return up || { ok: false };
@@ -63521,7 +63517,13 @@ async function autosaveNow() {
         try {
           if (!autosaveNow._needAuthNoted) {
             autosaveNow._needAuthNoted = true;
-            setStatus("\u81EA\u52A8\u4FDD\u5B58 \xB7 \u5F85\u6388\u6743", "\u70B9\u300C\u81EA\u52A8\u4FDD\u5B58\u300D\u6216 Ctrl+S \u9009\u6587\u4EF6\u540E\u5373\u53EF\u5199\u76D8");
+            setStatus("\u81EA\u52A8\u4FDD\u5B58 \xB7 \u8349\u7A3F", "\u6B63\u5728\u5B9A\u4F4D\u78C1\u76D8\u6587\u4EF6\u2026");
+            try {
+              void silentBindDiskPathAfterOpen().then((p) => {
+                if (p) autosaveNow();
+              });
+            } catch (_) {
+            }
           }
         } catch (_) {
         }
@@ -65774,7 +65776,7 @@ async function pickAndBindMentorPath(opts) {
   opts = opts || {};
   let token = await ensureLocalSessionToken({ force: true });
   if (!token) {
-    return { ok: false, error: "no-token", message: "\u65E0 mentor-server token\uFF08\u8BF7\u7528 mentor.cmd \u6253\u5F00\u9875\u9762\uFF09" };
+    return { ok: false, error: "no-token", message: "\u65E0 session\uFF08\u8BF7\u7528 mentor-server \u6253\u5F00\uFF09" };
   }
   const hint = opts.name || mentorBasenameHint() || State2.currentFile && State2.currentFile.name || "";
   const directPath = String(opts.path || "").trim();
@@ -65799,7 +65801,7 @@ async function pickAndBindMentorPath(opts) {
     return {
       ok: false,
       error: "not-mentor-server",
-      message: "\u5F53\u524D 8787 \u4E0D\u662F mentor-server\u3002\u5173\u6389 http.server\uFF0C\u7528 mentor.cmd \u542F\u52A8\u540E\u518D\u8BD5\u3002"
+      message: "\u5F53\u524D\u4E0D\u662F mentor-server\uFF0C\u8BF7\u91CD\u542F mentor.cmd\u3002"
     };
   }
   let data = {};
@@ -66036,7 +66038,7 @@ async function fetchAiConnection(opts) {
       }
     }
     if (!res.ok) {
-      const hint = res.status === 404 ? "8787 \u4E0D\u662F mentor-server\uFF08/ai-connection 404\uFF09\u3002\u5173\u6389 python -m http.server\uFF0C\u7528 mentor.cmd \u542F\u52A8" : "HTTP " + res.status;
+      const hint = res.status === 404 ? "8787 \u4E0D\u662F mentor-server\uFF0C\u8BF7\u91CD\u542F mentor.cmd" : "HTTP " + res.status;
       State2.aiConnection = {
         state: "unavailable",
         reachable: false,
@@ -66129,7 +66131,7 @@ function buildOfflineDoctorReport(sessionStatus, aiStatus) {
     offline: true,
     checks,
     fixCmd: doctorKillServerCmd(),
-    hints: ["\u590D\u5236\u4E0B\u65B9\u547D\u4EE4\u5230 PowerShell \u8FD0\u884C\uFF0C\u6216\u5173\u95ED\u5047 server \u540E\u53CC\u51FB mentor.cmd"]
+    hints: ["\u91CD\u542F mentor.cmd \u540E\u518D\u68C0\u6D4B"]
   };
 }
 function renderDoctorReport(report) {
@@ -66203,24 +66205,26 @@ async function fetchDoctorReport(opts) {
       }
       const hasHandleOnly = !absPath && typeof hasWriteHandle === "function" && hasWriteHandle();
       const pathOk = !!(absPath && typeof isAbsMentorPath === "function" && isAbsMentorPath(absPath));
-      let pathDetail = "\u672A\u6253\u5F00\u6587\u6863\u6216\u65E0\u6CD5\u89E3\u6790\u8DEF\u5F84";
-      let pathTitle = "\u5F53\u524D\u6587\u7A3F\u65E0\u78C1\u76D8\u8DEF\u5F84\uFF08\u6D4F\u89C8\u5668\u6253\u5F00\u5E38\u89C1\uFF09";
+      let pathDetail = "\u672A\u6253\u5F00\u6587\u6863";
+      let pathTitle = "\u65E0\u78C1\u76D8\u8DEF\u5F84";
       let pathSev = "warn";
       if (pathOk) {
-        pathTitle = "\u5F53\u524D\u6587\u7A3F\u6709\u7EDD\u5BF9\u78C1\u76D8\u8DEF\u5F84";
+        pathTitle = "\u78C1\u76D8\u8DEF\u5F84\u5DF2\u5173\u8054";
         pathDetail = absPath;
         pathSev = "ok";
-      } else if (hasHandleOnly) {
-        pathTitle = "\u4EC5\u6709\u6D4F\u89C8\u5668\u5199\u53E5\u67C4 \xB7 \u65E0\u7EDD\u5BF9\u8DEF\u5F84";
-        pathDetail = "\u53EF Ctrl+S \u5199\u56DE\uFF0C\u4F46 AI/Pi \u9700\u8981\u771F\u5B9E\u8DEF\u5F84\u3002\u70B9\u300C\u7ED1\u5B9A\u78C1\u76D8\u8DEF\u5F84\u300D\u9009\u540C\u4E00\u4E2A .mentor\uFF0C\u6216\u53CC\u51FB\u6587\u4EF6 / mentor.cmd \u6253\u5F00\u3002";
-        pathSev = "warn";
       } else if (State2.currentFile) {
-        pathTitle = "\u5F53\u524D\u6587\u7A3F\u65E0\u78C1\u76D8\u8DEF\u5F84\uFF08\u6D4F\u89C8\u5668\u6253\u5F00\u5E38\u89C1\uFF09";
-        pathDetail = "\u6D4F\u89C8\u5668\u300C\u6253\u5F00\u300D\u53EA\u6709\u6587\u4EF6\u53E5\u67C4\u3001\u6CA1\u6709\u7EDD\u5BF9\u8DEF\u5F84\u3002\u70B9\u300C\u7ED1\u5B9A\u78C1\u76D8\u8DEF\u5F84\u300D\uFF1B\u6216\u53CC\u51FB .mentor / mentor.cmd\u3002";
+        try {
+          if (typeof silentBindDiskPathAfterOpen === "function") {
+            void silentBindDiskPathAfterOpen();
+          }
+        } catch (_) {
+        }
+        pathTitle = "\u6B63\u5728\u81EA\u52A8\u5B9A\u4F4D\u78C1\u76D8\u8DEF\u5F84";
+        pathDetail = hasHandleOnly ? "\u6253\u5F00\u540E\u4F1A\u9759\u9ED8\u5173\u8054\uFF1B\u82E5\u4ECD\u65E0\u8DEF\u5F84\u53EF\u70B9\u300C\u5173\u8054\u78C1\u76D8\u300D\u3002" : "\u6253\u5F00\u540E\u4F1A\u9759\u9ED8\u5173\u8054\uFF08Everything\uFF09\u3002";
         pathSev = "warn";
       } else {
         pathTitle = "\u672A\u6253\u5F00\u6587\u6863";
-        pathDetail = "\u5148\u6253\u5F00 .mentor \u518D\u6D4B AI \u8DEF\u5F84";
+        pathDetail = "\u5148\u6253\u5F00 .mentor";
         pathSev = "warn";
       }
       const checks = Array.isArray(data.checks) ? data.checks.slice() : [];
@@ -66624,7 +66628,7 @@ async function ensureDiskSavedForFixMentor() {
     }
   }
   if ((!path2 || !isAbsMentorPath(path2)) && typeof hasWriteHandle === "function" && hasWriteHandle()) {
-    setFixMentorJobState({ status: "saving", message: "\u6B63\u5728\u5199\u56DE\u6D4F\u89C8\u5668\u5DF2\u6388\u6743\u6587\u4EF6\u2026", error: "" });
+    setFixMentorJobState({ status: "saving", message: "\u6B63\u5728\u4FDD\u5B58\u2026", error: "" });
     try {
       const wr = await writeCurrentToHandle({ reason: "manual", showProgress: true });
       if (wr && !wr.ok && !wr.skipped) {
@@ -66704,7 +66708,7 @@ async function runFixMentorFromUi(opts = {}) {
     const conn = await fetchAiConnection({ warm: true, wait: 12 });
     if (!conn || !conn.agentReady) {
       const detail = conn && conn.error ? String(conn.error) : "";
-      const msg = detail ? "Pi \u672A\u5C31\u7EEA\uFF1A" + detail : "Pi \u672A\u5C31\u7EEA\uFF08\u5E95\u680F\u8FDE\u63A5\u82AF\u7247\uFF09\u3002\u7B49\u300CPi \u5DF2\u5C31\u7EEA\u300D\u518D\u70B9 AI\uFF0C\u6216\u5173\u6389\u5047 http.server \u540E\u7528 mentor.cmd \u91CD\u542F\u3002";
+      const msg = detail ? "Pi \u672A\u5C31\u7EEA\uFF1A" + detail : "Pi \u672A\u5C31\u7EEA\u3002\u7B49\u5E95\u680F\u300CPi \u5DF2\u5C31\u7EEA\u300D\u540E\u518D\u8BD5\u3002";
       setFixMentorJobState({
         status: "error",
         error: "pi-not-ready",
@@ -66726,14 +66730,14 @@ async function runFixMentorFromUi(opts = {}) {
     return saved;
   }
   if (!saved.path) {
-    const msg = "\u6CA1\u6709\u78C1\u76D8\u8DEF\u5F84\uFF0C\u5DF2\u7981\u6B62\u6682\u5B58\u56DE\u843D\u3002\u8BF7\u7ECF mentor-server \u6253\u5F00\u771F\u5B9E .mentor\u3002";
+    const msg = "\u6CA1\u6709\u78C1\u76D8\u8DEF\u5F84\uFF0C\u65E0\u6CD5\u542F\u52A8 AI\u3002";
     setFixMentorJobState({ status: "error", error: "no-disk-path", message: msg });
     showToast(msg, 4500);
     return { ok: false, error: "no-disk-path", message: msg };
   }
   const token = State2.externalWatchToken || "" || await ensureLocalSessionToken();
   if (!token) {
-    const msg = "\u65E0\u6CD5\u83B7\u53D6 mentor-server session token\uFF08\u8BF7\u786E\u8BA4\u901A\u8FC7 http://127.0.0.1:8787 \u6253\u5F00\uFF09";
+    const msg = "\u65E0\u6CD5\u8FDE\u63A5 mentor-server\uFF08\u8BF7\u7528 8787 \u6253\u5F00\uFF09";
     setFixMentorJobState({ status: "error", error: "no-token", message: msg, path: saved.path || "" });
     showToast(msg, 4200);
     return { ok: false, error: "no-token", message: msg };
@@ -66750,7 +66754,7 @@ async function runFixMentorFromUi(opts = {}) {
     startedAt: Date.now(),
     writeBackPath: saved.writeBackPath || saved.path
   });
-  showToast("\u63D0\u4EA4 AI \u4EFB\u52A1\u2026", 1600);
+  showToast("\u63D0\u4EA4\u4E2D\u2026", 1200);
   try {
     await fetch(location.origin + "/supervision/register", {
       method: "POST",
@@ -66821,7 +66825,7 @@ async function runFixMentorFromUi(opts = {}) {
   });
   State2.fixMentorJob.startedAtClient = Date.now();
   startFixMentorJobPolling();
-  showToast("AI \u4EFB\u52A1\u5DF2\u63D0\u4EA4 \xB7 Pi", 2400);
+  showToast("AI \u5DF2\u63D0\u4EA4", 1600);
   return { ok: true, job: data };
 }
 function invokeAiForThread(threadId) {
@@ -70789,7 +70793,7 @@ async function enableWriteBackForCurrent(opts = {}) {
       const got = String(handle.name || "").toLowerCase();
       if (want && got && want !== got) {
         try {
-          showToast(`\u5DF2\u6388\u6743 ${handle.name}\uFF08\u539F\u540D ${State2.currentFile.name}\uFF09\xB7 \u4E4B\u540E\u81EA\u52A8\u5199\u6B64\u6587\u4EF6`, 3600);
+          showToast(`\u5C06\u5199\u56DE ${handle.name}`, 1800);
         } catch (_) {
         }
       }
@@ -70800,14 +70804,14 @@ async function enableWriteBackForCurrent(opts = {}) {
       const result = await writeCurrentToDisk({ reason: "manual", showProgress: isMentorPackMode() });
       if (result && result.ok) {
         try {
-          showToast("\u5DF2\u5199\u56DE\u78C1\u76D8 \xB7 \u81EA\u52A8\u4FDD\u5B58\u5C06\u7EE7\u7EED\u5199\u76D8", 2600);
+          showToast("\u5DF2\u4FDD\u5B58", 1600);
         } catch (_) {
         }
       }
       return { ...att, saveResult: result };
     }
     try {
-      showToast("\u5DF2\u6388\u6743\u5199\u76D8 \xB7 \u81EA\u52A8\u4FDD\u5B58\u5F00\u542F\u540E\u4F1A\u5199\u56DE", 2400);
+      showToast("\u5DF2\u53EF\u5199\u76D8", 1600);
     } catch (_) {
     }
     return att;
@@ -70818,7 +70822,6 @@ async function enableWriteBackForCurrent(opts = {}) {
 }
 async function openFromHandle(fileHandle, sidecarHandle = null, options = {}) {
   const quiet = !!(options && options.quiet);
-  await ensureWritePermission(fileHandle);
   const file = await fileHandle.getFile();
   const content = await file.text();
   let annotations = null;
@@ -72765,7 +72768,7 @@ async function runManualSave() {
               return await writeCurrentToDisk({ reason: "manual", showProgress: isMentorPackMode() });
             }
             if (up.cancelled) return { ok: false, cancelled: true };
-            showToast("\u6388\u6743\u672A\u5B8C\u6210\uFF0C\u53EF\u53E6\u5B58\u526F\u672C", 2800);
+            showToast("\u672A\u5B8C\u6210\uFF0C\u53EF\u53E6\u5B58\u526F\u672C", 2200);
             return { ok: false, error: up.error || "permission-denied" };
           }
           const snap = createSaveSnapshot();
@@ -72822,6 +72825,22 @@ async function runManualSave() {
         }
       }
     }
+    try {
+      const p = await silentBindDiskPathAfterOpen(mentorBasenameHint());
+      if (p) {
+        const wr = await writeCurrentToDisk({ reason: "manual", showProgress: isMentorPackMode() });
+        if (wr && wr.ok) {
+          setStatus("\u5DF2\u4FDD\u5B58", p);
+          showToast("\u5DF2\u4FDD\u5B58", 1600);
+          try {
+            snapshotActiveTab();
+          } catch {
+          }
+          return wr;
+        }
+      }
+    } catch (_) {
+    }
     let snapshot;
     try {
       snapshot = createSaveSnapshot();
@@ -72861,7 +72880,7 @@ async function runManualSave() {
           if (up.saveResult.ok) {
             const copy2 = buildSaveResultCopy({ kind: "write-current", fileName: State2.currentFile.name });
             setStatus(copy2.status, copy2.detail);
-            showToast("\u5DF2\u5199\u56DE\u78C1\u76D8 \u2713 \xB7 \u81EA\u52A8\u4FDD\u5B58\u53EF\u7EE7\u7EED\u5199\u76D8", 2800);
+            showToast("\u5DF2\u4FDD\u5B58", 1800);
             try {
               snapshotActiveTab();
             } catch {
@@ -72874,7 +72893,7 @@ async function runManualSave() {
           return up.saveResult;
         }
         if (up.cancelled) return { ok: false, cancelled: true };
-        showToast("\u672A\u5B8C\u6210\u6388\u6743\uFF0C\u5DF2\u6539\u4E3A\u4E0B\u8F7D\u526F\u672C", 2800);
+        showToast("\u5DF2\u6539\u4E3A\u4E0B\u8F7D\u526F\u672C", 2200);
       }
       try {
         await AnnotationStore.put(snapshot.name, snapshot.sidecar);
@@ -76278,9 +76297,13 @@ async function _openMentorAbsolutePath(openPath, token) {
             } catch (_) {
             }
           } else {
-            showToast("\u5DF2\u6253\u5F00 " + baseName + " \xB7 \u70B9\u300C\u81EA\u52A8\u4FDD\u5B58\u300D\u6216 Ctrl+S \u6388\u6743\u4E00\u6B21\u5373\u53EF\u5199\u76D8", 3600);
+            showToast("\u5DF2\u6253\u5F00 " + baseName, 1800);
             try {
-              setStatus("\u5DF2\u6253\u5F00", baseName + " \xB7 \u70B9\u81EA\u52A8\u4FDD\u5B58/\u4FDD\u5B58\u6388\u6743\u5199\u76D8");
+              setStatus("\u5DF2\u6253\u5F00", baseName);
+            } catch (_) {
+            }
+            try {
+              void silentBindDiskPathAfterOpen(baseName);
             } catch (_) {
             }
           }
