@@ -4,10 +4,10 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Mentor — 像 docx 一样批注 Markdown</title>
-<meta name="build" content="v1.48.0 cache-bust v=278" />
+<meta name="build" content="v1.48.0 cache-bust v=279" />
 <!-- v1.43.37 offline: local fonts + KaTeX (no CDN) -->
 <link rel="stylesheet" href="vendor/fonts/local-fonts.css?v=277" />
-<link rel="stylesheet" href="styles.css?v=278" />
+<link rel="stylesheet" href="styles.css?v=279" />
 <link rel="stylesheet" href="vendor/katex/katex.min.css?v=277" />
 <!-- 字体：系统无衬线 + 等宽（侧栏时间戳、文件名） -->
 <style>
@@ -187,15 +187,18 @@
                         <button type="button" class="comment-bulk-btn danger" data-act="delete-selected">删除</button>
                       </div>
                       <div id="fix-mentor-job-banner" class="fix-mentor-job-banner" hidden data-status="idle" role="status" aria-live="polite">
-            <div class="fm-prog-top">
-              <span class="fm-prog-title" id="fm-prog-title">AI 处理</span>
-              <span class="fm-prog-elapsed" id="fm-prog-elapsed"></span>
-              <span class="fm-prog-pct" id="fm-prog-pct"></span>
-            </div>
-            <div class="fm-prog-bar" aria-hidden="true"><div class="fm-prog-fill" id="fm-prog-fill"></div></div>
-            <div class="fm-prog-phase" id="fm-prog-phase"></div>
-            <div class="fm-prog-log" id="fm-prog-log"></div>
-          </div>
+                        <div class="fm-prog-top">
+                          <span class="fm-prog-dot" aria-hidden="true"></span>
+                          <span class="fm-prog-title" id="fm-prog-title">AI 处理</span>
+                          <span class="fm-prog-meta">
+                            <span class="fm-prog-elapsed" id="fm-prog-elapsed"></span>
+                            <span class="fm-prog-pct" id="fm-prog-pct"></span>
+                          </span>
+                        </div>
+                        <div class="fm-prog-bar" aria-hidden="true"><div class="fm-prog-fill" id="fm-prog-fill"></div></div>
+                        <div class="fm-prog-phase" id="fm-prog-phase"></div>
+                        <div class="fm-prog-log" id="fm-prog-log"></div>
+                      </div>
           <div id="comment-list"></div>
       <!-- v1.43 / v1.43.20: 空态引导 — cold/doc/filter 由 syncCommentEmptyPresentation 分型 -->
                   <div id="comment-empty" class="empty-hint" data-empty-mode="cold">
@@ -415,7 +418,7 @@
 
 <!-- v1.43.37 offline: bundled app (esbuild) + local icons; no esm.sh -->
 <script src="icons.js?v=277"></script>
-<script type="module" src="app.bundle.js?v=278"></script>
+<script type="module" src="app.bundle.js?v=279"></script>
 <!-- 帮助 popover (浮在 body 顶层, 位置由 JS 动态计算) -->
 <div id="help-popover" class="help-popover hidden" role="dialog" aria-modal="false" aria-labelledby="help-popover-title">
   <div class="help-popover-arrow"></div>
