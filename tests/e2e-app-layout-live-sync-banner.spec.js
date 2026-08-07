@@ -4,6 +4,9 @@
  * toolbar + live-sync-banner + doc-tabs + main + statusbar = 5 children.
  * When the banner left display:none, 1fr landed on #doc-tabs → huge blank.
  *
+ * 2026-08-07 single-document page: #doc-tabs is hidden (height 0) — that is OK.
+ * Banner lives inside #statusbar (chip), not as an #app flex sibling.
+ *
  * Run: node tests/e2e-app-layout-live-sync-banner.spec.js
  */
 const { chromium } = require("playwright");
@@ -66,18 +69,28 @@ async function waitEditor(page) {
 
   assert.strictEqual(metrics.appDisplay, "flex", "app should be flex column");
   assert.strictEqual(metrics.appFlexDir, "column");
-  assert.ok(metrics.bannerH > 10 && metrics.bannerH < 80, "banner compact, not 1fr");
-  assert.ok(metrics.tabsH > 10 && metrics.tabsH < 48, "tabs stay ~28px, not 1fr blank");
+  assert.ok(metrics.bannerH > 10 && metrics.bannerH < 40, "banner compact chip inside statusbar");
+  assert.ok(metrics.statusH > 20 && metrics.statusH <= 36, "statusbar single-row height");
+  // Single-doc page: tabs may be height 0 (hidden). Must never absorb 1fr blank.
+  assert.ok(
+    metrics.tabsH < 48,
+    `tabs compact or hidden (tabs=${metrics.tabsH})`
+  );
+  assert.ok(
+    metrics.tabsH < metrics.appH * 0.15,
+    `tabs must not absorb 1fr blank (tabs=${metrics.tabsH} app=${metrics.appH})`
+  );
   // Main must own most of the viewport when banner is open
   assert.ok(
     metrics.mainH > metrics.appH * 0.55,
     `main should own majority of app height (got main=${metrics.mainH} app=${metrics.appH})`
   );
-  // Tabs must NOT be near full viewport (the old bug)
-  assert.ok(
-    metrics.tabsH < metrics.appH * 0.15,
-    `tabs must not absorb 1fr blank (tabs=${metrics.tabsH} app=${metrics.appH})`
-  );
+  // Banner parent must be statusbar (not #app sibling)
+  const parentId = await page.evaluate(() => {
+    const el = document.getElementById("live-sync-banner");
+    return el && el.closest("#statusbar") ? "statusbar" : (el && el.parentElement && el.parentElement.id) || "";
+  });
+  assert.strictEqual(parentId, "statusbar", "live-sync stays inside #statusbar");
 
   // Banner hidden again: main still fills
   await page.evaluate(() => {
@@ -88,10 +101,12 @@ async function waitEditor(page) {
     const app = document.getElementById("app").getBoundingClientRect().height;
     const main = document.getElementById("main").getBoundingClientRect().height;
     const tabs = document.getElementById("doc-tabs").getBoundingClientRect().height;
-    return { app, main, tabs };
+    const status = document.getElementById("statusbar").getBoundingClientRect().height;
+    return { app, main, tabs, status };
   });
   assert.ok(after.main > after.app * 0.6, "main fills when banner hidden");
   assert.ok(after.tabs < 48, "tabs compact when banner hidden");
+  assert.ok(after.status <= 36, "statusbar stays single-row when banner hidden");
 
   console.log("OK e2e-app-layout-live-sync-banner");
   await browser.close();

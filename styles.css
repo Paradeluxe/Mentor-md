@@ -3937,68 +3937,133 @@ body.refs-pane-collapsed #expand-refs-pane-btn {
   outline-color: var(--danger);
 }
 
-/* ============ Status bar ============ */
+/* ============ Status bar (zones + chips) ============ */
 #statusbar {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  gap: 10px;
-  padding: 4px 12px;
-  min-height: 26px;
+  gap: 8px;
+  padding: 3px 12px;
+  min-height: 28px;
+  max-height: 32px;
   background: var(--chrome);
   border-top: 1px solid var(--border-warm);
   font-size: 11px;
   color: var(--text-3);
   letter-spacing: 0.01px;
+  box-sizing: border-box;
 }
-#statusbar #status-left {
-  /* Hidden from layout: status text (e.g. "已重连 <file>" / "就绪") is no longer shown.
-     Element kept so the 58 existing setStatus(left, ...) call sites keep working.
-     The left-side slot is now owned by #live-sync-banner. */
-  display: none !important;
+#statusbar .status-zone {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
 }
-#statusbar #status-right {
+#statusbar .status-zone-left {
+  flex: 0 1 auto;
+  flex-wrap: nowrap;
+}
+#statusbar .status-zone-center {
+  flex: 1 1 auto;
+  justify-content: center;
+  min-width: 0;
+}
+#statusbar .status-zone-right {
+  flex: 0 1 auto;
+  margin-left: auto;
+  justify-content: flex-end;
+  gap: 8px;
+}
+#statusbar #status-right,
+#statusbar .status-meta {
   flex: 0 1 auto;
   min-width: 0;
+  max-width: min(46vw, 520px);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   text-align: right;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
 }
 #statusbar #export-progress {
   flex-shrink: 0;
 }
 
-/* Live-sync: now owns the LEFT slot in #statusbar (replaces hidden #status-left) */
+/* Shared chip geometry */
+#statusbar .status-chip,
+#statusbar .supervision-banner,
 #statusbar .live-sync-banner {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   flex: 0 1 auto;
   min-width: 0;
-  min-height: 0;
-  padding: 0 4px;
+  max-width: min(36vw, 320px);
+  height: 22px;
+  padding: 0 8px 0 7px;
   margin: 0;
-  background: transparent;
-  border: none;
-  color: var(--text-2);
+  border-radius: 999px;
+  border: 1px solid var(--border-warm-medium, rgba(38, 37, 30, 0.14));
+  background: color-mix(in srgb, var(--panel) 88%, var(--panel-2));
   font-size: 11px;
-  line-height: 1.3;
+  font-weight: 550;
+  line-height: 1;
+  color: var(--text-2);
+  box-sizing: border-box;
   justify-content: flex-start;
 }
-#statusbar .live-sync-banner.hidden { display: none !important; }
-#statusbar .live-sync-banner #live-sync-text {
-  flex: 0 1 auto;
-  min-width: 0;
+#statusbar .status-chip-dot,
+#statusbar .ai-conn-dot,
+#statusbar .fix-mentor-status-dot,
+#statusbar .live-sync-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+}
+#statusbar .ai-conn-status-text,
+#statusbar .fix-mentor-status-text,
+#statusbar #live-sync-text,
+#statusbar #supervision-banner-text {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  min-width: 0;
+}
+#statusbar .live-sync-banner.hidden,
+#statusbar .supervision-banner.hidden,
+#statusbar .fix-mentor-status.hidden,
+#statusbar .ai-conn-status.hidden {
+  display: none !important;
 }
 #statusbar .live-sync-banner button[data-act="live-sync-takeover"] {
-  height: 20px;
-  padding: 0 8px;
+  height: 18px;
+  padding: 0 7px;
   font-size: 11px;
+  flex-shrink: 0;
 }
+
+/* Ephemeral center message (setStatus left) */
+#statusbar .status-ephemeral,
+#statusbar #status-left {
+  display: inline-block;
+  min-width: 0;
+  max-width: min(40vw, 360px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-2);
+  font-size: 11px;
+  opacity: 0.92;
+  transition: opacity 160ms ease;
+}
+#statusbar #status-left.is-empty,
+#statusbar #status-left:empty {
+  opacity: 0;
+}
+#statusbar #status-left[data-tone="ok"] { color: var(--success-solid, var(--success)); }
+#statusbar #status-left[data-tone="warn"] { color: var(--warning-solid, var(--warning)); }
+#statusbar #status-left[data-tone="err"] { color: var(--danger-solid, var(--danger)); }
 
 /* Legacy class hooks (banner may still be queried by id) */
 .live-sync-banner {
@@ -4333,6 +4398,21 @@ body.refs-pane-collapsed #expand-refs-pane-btn {
 
 /* === Cross-page live sync status (styles live under #statusbar) === */
 
+/* === multi-doc tabs REMOVED (single-document page) === */
+.doc-tabs,
+#doc-tabs {
+  display: none !important;
+  height: 0 !important;
+  min-height: 0 !important;
+  max-height: 0 !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  border: none !important;
+  overflow: hidden !important;
+  pointer-events: none !important;
+  visibility: hidden !important;
+}
+/* legacy multi-doc tab styles retained below but unreachable while bar hidden */
 /* === v1.43.33 multi-doc tabs — Chrome/Linear 紧凑条 + active 底线 === */
 .doc-tabs {
   display: flex;
@@ -5206,30 +5286,14 @@ body.refs-pane-collapsed #expand-refs-pane-btn {
 
 /* ===== AI fix-mentor status chip (statusbar primary indicator) ===== */
 #statusbar .fix-mentor-status {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  flex: 0 1 auto;
-  min-width: 0;
-  max-width: min(420px, 42vw);
-  padding: 2px 10px 2px 8px;
-  margin-right: 8px;
-  border-radius: 999px;
-  font-size: 12px;
-  line-height: 1.3;
-  font-weight: 550;
-  border: 1px solid color-mix(in srgb, var(--ai, #0aa) 45%, transparent);
-  background: color-mix(in srgb, var(--ai, #0aa) 14%, var(--panel, var(--bg-elevated, #1e1e1e)));
-  color: color-mix(in srgb, var(--ai, #5eead4) 80%, #fff);
+  border-color: color-mix(in srgb, var(--ai) 45%, transparent);
+  background: color-mix(in srgb, var(--ai) 12%, var(--panel));
+  color: color-mix(in srgb, var(--ai) 85%, var(--text));
+  max-width: min(42vw, 360px);
 }
-#statusbar .fix-mentor-status.hidden { display: none !important; }
 #statusbar .fix-mentor-status-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  flex: 0 0 auto;
-  background: color-mix(in srgb, var(--ai, #2dd4bf) 90%, #fff);
-  box-shadow: 0 0 0 0 color-mix(in srgb, var(--ai, #2dd4bf) 55%, transparent);
+  background: color-mix(in srgb, var(--ai) 90%, #fff);
+  box-shadow: 0 0 0 0 color-mix(in srgb, var(--ai) 55%, transparent);
 }
 #statusbar .fix-mentor-status[data-status="saving"] .fix-mentor-status-dot,
 #statusbar .fix-mentor-status[data-status="starting"] .fix-mentor-status-dot,
@@ -5237,61 +5301,41 @@ body.refs-pane-collapsed #expand-refs-pane-btn {
   animation: fix-mentor-status-pulse 1.1s ease-out infinite;
 }
 #statusbar .fix-mentor-status[data-status="done"] {
-  border-color: color-mix(in srgb, var(--success, #16a34a) 50%, transparent);
-  background: color-mix(in srgb, var(--success, #16a34a) 14%, var(--panel, #1e1e1e));
-  color: color-mix(in srgb, var(--success, #4ade80) 85%, #fff);
+  border-color: color-mix(in srgb, var(--success) 50%, transparent);
+  background: color-mix(in srgb, var(--success) 12%, var(--panel));
+  color: var(--success-solid, var(--success));
 }
 #statusbar .fix-mentor-status[data-status="done"] .fix-mentor-status-dot {
-  background: var(--success, #22c55e);
+  background: var(--success-solid, var(--success));
   animation: none;
 }
 #statusbar .fix-mentor-status[data-status="error"] {
-  border-color: color-mix(in srgb, var(--danger, #c44) 55%, transparent);
-  background: color-mix(in srgb, var(--danger, #c44) 14%, var(--panel, #1e1e1e));
-  color: color-mix(in srgb, var(--danger, #f87171) 85%, #fff);
+  border-color: color-mix(in srgb, var(--danger) 50%, transparent);
+  background: color-mix(in srgb, var(--danger) 12%, var(--panel));
+  color: var(--danger-solid, var(--danger));
 }
 #statusbar .fix-mentor-status[data-status="error"] .fix-mentor-status-dot {
-  background: var(--danger, #ef4444);
+  background: var(--danger-solid, var(--danger));
   animation: none;
 }
-#statusbar .fix-mentor-status-text {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 @keyframes fix-mentor-status-pulse {
-  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--ai, #2dd4bf) 55%, transparent); }
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--ai) 55%, transparent); }
   70% { box-shadow: 0 0 0 6px transparent; }
   100% { box-shadow: 0 0 0 0 transparent; }
 }
 
 /* ===== fix-mentor supervision mode ===== */
-#statusbar {
-  justify-content: flex-start;
-}
-#statusbar #status-right {
-  margin-left: auto;
-}
-#statusbar .live-sync-banner,
 #statusbar .supervision-banner {
-  flex: 0 1 auto;
-  min-width: 0;
+  border-color: color-mix(in srgb, #0ea5e9 40%, transparent);
+  background: color-mix(in srgb, #0ea5e9 10%, var(--panel));
+  color: #0369a1;
+  max-width: min(38vw, 300px);
 }
-#statusbar .supervision-banner {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  max-width: min(360px, 38vw);
-  padding: 2px 10px;
-  margin-right: 8px;
-  border-radius: 999px;
-  background: color-mix(in srgb, #0ea5e9 16%, var(--panel, var(--bg-elevated, #1e1e1e)));
-  border: 1px solid color-mix(in srgb, #0ea5e9 45%, transparent);
+html.dark #statusbar .supervision-banner,
+body.dark #statusbar .supervision-banner,
+:root[data-theme="dark"] #statusbar .supervision-banner {
   color: #7dd3fc;
-  font-size: 12px;
-  line-height: 1.3;
 }
-#statusbar .supervision-banner.hidden { display: none !important; }
 @keyframes supervision-pulse {
   0% { box-shadow: 0 0 0 0 rgba(56, 189, 248, 0.55); }
   70% { box-shadow: 0 0 0 6px rgba(56, 189, 248, 0); }
@@ -5328,8 +5372,8 @@ body.supervision-active[data-supervision-lock="document"] .editor-scroll::after 
 
 /* ===== supervision pet + signal lamp (v1.47.1) ===== */
 #statusbar .supervision-signal {
-  width: 10px;
-  height: 10px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
   flex: 0 0 auto;
   background: #64748b;
@@ -5368,7 +5412,7 @@ body.supervision-active[data-supervision-lock="document"] .editor-scroll::after 
 #statusbar .supervision-banner[data-health="stale"],
 #statusbar .supervision-banner[data-health="degraded"] {
   border-style: dashed;
-  color: #cbd5e1;
+  color: #64748b;
 }
 .ProseMirror .supervision-pet {
   display: inline-flex;
@@ -5700,7 +5744,7 @@ body.supervision-active[data-supervision-lock="document"] .editor-scroll::after 
 #statusbar .fix-mentor-status[data-status="running"] .fix-mentor-status-text,
 #statusbar .fix-mentor-status[data-status="starting"] .fix-mentor-status-text,
 #statusbar .fix-mentor-status[data-status="saving"] .fix-mentor-status-text {
-  max-width: min(42vw, 360px);
+  max-width: min(36vw, 280px);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -5708,56 +5752,62 @@ body.supervision-active[data-supervision-lock="document"] .editor-scroll::after 
 
 /* Pi AI connection chip (separate from AI job progress) */
 #statusbar .ai-conn-status {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 2px 10px;
-  border-radius: 999px;
-  border: 1px solid color-mix(in srgb, #64748b 35%, transparent);
-  background: color-mix(in srgb, #64748b 10%, var(--panel, #fff));
-  font-size: 12px;
   max-width: min(28vw, 220px);
-  margin-right: 6px;
   cursor: pointer;
 }
 #statusbar .ai-conn-status:hover {
-  border-color: color-mix(in srgb, var(--danger, #cf2d56) 35%, transparent);
-  color: var(--danger, #cf2d56);
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+  color: var(--text);
 }
-#statusbar .ai-conn-status.hidden { display: none !important; }
 #statusbar .ai-conn-dot {
-  width: 8px; height: 8px; border-radius: 50%;
-  background: #94a3b8; flex: 0 0 auto;
+  background: #94a3b8;
 }
 #statusbar .ai-conn-status[data-state="ready"][data-ready="1"] {
-  border-color: color-mix(in srgb, #16a34a 40%, transparent);
-  background: color-mix(in srgb, #16a34a 12%, var(--panel, #fff));
+  border-color: color-mix(in srgb, var(--success-solid, var(--success)) 42%, transparent);
+  background: color-mix(in srgb, var(--success) 12%, var(--panel));
+  color: var(--success-solid, var(--success));
 }
 #statusbar .ai-conn-status[data-state="ready"] .ai-conn-dot,
-#statusbar .ai-conn-status[data-ready="1"] .ai-conn-dot { background: #16a34a; }
+#statusbar .ai-conn-status[data-ready="1"] .ai-conn-dot {
+  background: var(--success-solid, var(--success));
+}
 #statusbar .ai-conn-status[data-state="loading"],
 #statusbar .ai-conn-status[data-state="starting"] {
-  border-color: color-mix(in srgb, #0d9488 40%, transparent);
+  border-color: color-mix(in srgb, var(--ai) 40%, transparent);
 }
 #statusbar .ai-conn-status[data-state="loading"] .ai-conn-dot,
-#statusbar .ai-conn-status[data-state="starting"] .ai-conn-dot {
-  background: #0d9488;
-  animation: fix-mentor-status-pulse 1.1s ease-out infinite;
-}
+#statusbar .ai-conn-status[data-state="starting"] .ai-conn-dot,
 #statusbar .ai-conn-status[data-state="busy"] .ai-conn-dot {
-  background: #2563eb;
+  background: var(--ai);
   animation: fix-mentor-status-pulse 1.1s ease-out infinite;
 }
 #statusbar .ai-conn-status[data-state="error"],
 #statusbar .ai-conn-status[data-state="down"],
 #statusbar .ai-conn-status[data-state="unavailable"] {
-  border-color: color-mix(in srgb, #dc2626 40%, transparent);
+  border-color: color-mix(in srgb, var(--danger) 45%, transparent);
+  color: var(--danger-solid, var(--danger));
 }
 #statusbar .ai-conn-status[data-state="error"] .ai-conn-dot,
 #statusbar .ai-conn-status[data-state="down"] .ai-conn-dot,
-#statusbar .ai-conn-status[data-state="unavailable"] .ai-conn-dot { background: #dc2626; }
-#statusbar .ai-conn-status-text {
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+#statusbar .ai-conn-status[data-state="unavailable"] .ai-conn-dot {
+  background: var(--danger-solid, var(--danger));
+}
+
+
+/* statusbar responsive collapse */
+@media (max-width: 1100px) {
+  #statusbar .fix-mentor-status-elapsed { display: none; }
+  #statusbar .ai-conn-status-text { max-width: 9ch; }
+}
+@media (max-width: 900px) {
+  #statusbar .ai-conn-status-text { display: none; }
+  #statusbar .ai-conn-status { padding: 0 6px; max-width: none; }
+  #statusbar .fix-mentor-status { max-width: min(42vw, 200px); }
+  #statusbar #status-right { max-width: 34vw; }
+}
+@media (max-width: 720px) {
+  #statusbar .status-zone-center { display: none; }
+  #statusbar #status-right { max-width: 42vw; }
 }
 
 /* Mentor Doctor modal */

@@ -80,7 +80,10 @@ const E2E_CORE = [
   'tests/e2e-mentor-ux-optimization.spec.js',
   'tests/e2e-supervision-lifecycle.spec.js',
   'tests/e2e-supervision-statusbar.spec.js',
-  'tests/e2e-supervision-navigation.spec.js',
+    'tests/e2e-statusbar-layout.spec.js',
+    'tests/unit-statusbar-ephemeral.spec.js',
+    'tests/e2e-app-layout-live-sync-banner.spec.js',
+    'tests/e2e-supervision-navigation.spec.js',
   'examples/probe-supervision-pet.mjs',
 ];
 

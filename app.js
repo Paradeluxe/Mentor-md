@@ -731,7 +731,8 @@ var State = {
   // { 'media/image5.png': 'blob:http://127.0.0.1:8787/abc-123' }
   mediaFiles: {},
   // { 'media/image5.png': Blob } — save 时用, 跟当前 doc 绑定
-  // v1.43.31: 多标签 — 同时开多份文档, 测试/新开不再覆盖 dFC
+  // Single-document page: at most one in-memory slot (tabs[0]).
+  // Multi-open = multiple browser pages/tabs, not in-page doc tabs.
   tabs: [],
   // [{ id, name, html, annotations, dirty, handle, saveMode, mediaUrls, mediaFiles, ... }]
   activeTabId: null,
@@ -1813,9 +1814,47 @@ function showToast(msg, ms = 1800) {
   clearTimeout(t._timer);
   t._timer = setTimeout(() => t.classList.add("hidden"), ms);
 }
+const STATUS_LEFT_TTL_MS = 3200;
+var _statusLeftClearTimer = null;
+function _statusToneFromText(s) {
+  const t = String(s || "");
+  if (/失败|错误|拒绝|未授权|失效|崩/.test(t)) return "err";
+  if (/提示|警告|请先|兼容/.test(t)) return "warn";
+  if (/已保存|已自动保存|已加载|已打开|已导入|已启用|就绪|完成|成功|已重连|已关联|已恢复/.test(t)) return "ok";
+  return "";
+}
 function setStatus(left, right) {
-  if (left !== void 0) $("#status-left").textContent = left;
-  if (right !== void 0) $("#status-right").textContent = right;
+  if (left !== void 0) {
+    const el = $("#status-left");
+    if (el) {
+      const next = left == null ? "" : String(left);
+      el.textContent = next;
+      const tone = _statusToneFromText(next);
+      if (tone) el.dataset.tone = tone;
+      else delete el.dataset.tone;
+      el.classList.toggle("is-empty", !next.trim());
+      if (_statusLeftClearTimer) {
+        clearTimeout(_statusLeftClearTimer);
+        _statusLeftClearTimer = null;
+      }
+      const steady = /^(就绪|源码模式|渲染模式|演示模式)$/.test(next.trim());
+      if (next.trim() && !steady) {
+        const snapshot = next;
+        _statusLeftClearTimer = setTimeout(() => {
+          _statusLeftClearTimer = null;
+          if (el.textContent === snapshot) {
+            el.textContent = "";
+            el.classList.add("is-empty");
+            delete el.dataset.tone;
+          }
+        }, STATUS_LEFT_TTL_MS);
+      }
+    }
+  }
+  if (right !== void 0) {
+    const r = $("#status-right");
+    if (r) r.textContent = right == null ? "" : String(right);
+  }
 }
 var _docMetaTimer = null;
 function updateDocMeta({ immediate = false } = {}) {
@@ -1843,14 +1882,15 @@ function _doUpdateDocMeta() {
   const imgs = State.editor.view?.dom?.querySelectorAll("img") || [];
   const imgCount = imgs.length;
   const imgLoaded = Array.from(imgs).filter((i) => i.complete && i.naturalWidth > 0).length;
-  const mediaUrlCount = Object.keys(State.mediaUrls || {}).length;
-  let statusRight = `${name} \xB7 ${wordCount} \u8BCD \xB7 ${lineCount} \u884C \xB7 ${annCount} \u6279\u6CE8`;
+  // Human meta only. Debug media map stays out of statusbar (Doctor / console).
+  let statusRight = `${name} · ${wordCount} 词 · ${lineCount} 行 · ${annCount} 批注`;
   if (imgCount > 0) {
-    statusRight += ` \xB7 \u{1F5BC} ${imgLoaded}/${imgCount} (media=${mediaUrlCount})`;
-  } else if (mediaUrlCount > 0) {
-    statusRight += ` \xB7 \u{1F5BC} media=${mediaUrlCount} \u4F46 DOM \u65E0 img`;
+    statusRight += imgLoaded < imgCount
+      ? ` · 图 ${imgLoaded}/${imgCount}`
+      : ` · 图 ${imgCount}`;
   }
-  $("#status-right").textContent = statusRight;
+  const el = $("#status-right");
+  if (el) el.textContent = statusRight;
 }
 function markDirty() {
   if (_liveSync && _liveSync.applying) return;
@@ -3911,20 +3951,29 @@ async function writeCurrentToDisk(opts = {}) {
 }
 
 function startAutosaveTimer() {
-  stopAutosaveTimer();
+  // Restart the 30s interval only. Do NOT cancel a pending edit debounce —
+  // open/live-sync/tab paths call startAutosaveTimer after load; wiping
+  // scheduleAutosaveDebounce._t left dirty docs with Save lit until the next
+  // keystroke or the 30s tick (user: AutoSave ON still needs manual Save).
+  stopAutosaveTimer({ clearDebounce: false });
   if (!canWriteLiveDocument()) return;
   // Draft AutoRecover for any open doc (handle or download / deep-link).
   _autosaveTimer = setInterval(() => {
     if (State.currentFile && State.currentFile.dirty) scheduleAutosaveDebounce();
   }, AUTOSAVE_INTERVAL);
+  // If already dirty and no debounce armed (e.g. became owner, or debounce was
+  // cleared by a true stop), arm one without resetting an in-flight delay.
+  if (State.currentFile && State.currentFile.dirty && !scheduleAutosaveDebounce._t) {
+    try { scheduleAutosaveDebounce(); } catch (_) {}
+  }
   console.log("[autosave] timer started (debounce + 30s; disk if AutoSave ON + handle)");
 }
-function stopAutosaveTimer() {
+function stopAutosaveTimer({ clearDebounce = true } = {}) {
   if (_autosaveTimer) {
     clearInterval(_autosaveTimer);
     _autosaveTimer = null;
   }
-  if (scheduleAutosaveDebounce._t) {
+  if (clearDebounce && scheduleAutosaveDebounce._t) {
     clearTimeout(scheduleAutosaveDebounce._t);
     scheduleAutosaveDebounce._t = null;
   }
@@ -3961,6 +4010,8 @@ async function autosaveNow() {
     try {
       const wr = await writeCurrentToDisk({ reason: "autosave", showProgress: false });
       if (wr && wr.ok) {
+        // Disk commit path already ran finalizeOfficialCommit → markClean when
+        // dirtyGen matched. Re-sync toolbar so #btn-save[data-dirty] drops.
         setStatus("已自动保存", time + (wr.via === "server" ? " · 磁盘" : ""));
         console.log(`[autosave] disk at ${time}`, wr.via || "handle");
         try { syncAutosaveToggleUi(); } catch (_) {}
@@ -3969,6 +4020,12 @@ async function autosaveNow() {
       }
       if (wr && wr.skipped) {
         console.log("[autosave] disk skipped:", wr.error || "skipped");
+        // busy: in-flight write queued a follow-up debounce. Keep dirty; still
+        // refresh draft, but do not claim "已自动保存草稿" as the final state.
+        if (wr.error === "busy") {
+          try { await putAtomicDraftForCurrent(); } catch (_) {}
+          return { ok: false, skipped: true, error: "busy", draft: true };
+        }
       } else if (wr && wr.error === "need-permission") {
         console.log("[autosave] disk needs permission; draft only");
       } else if (wr && wr.error === "no-disk-target") {
@@ -6547,9 +6604,20 @@ function aiConnLabel(state, health) {
   if (!health || health.reachable === false || s === "down" || s === "unavailable") return "Pi 未连接";
   if (s === "loading" || s === "starting") return "Pi 检测中…";
   if (s === "ready") return "Pi 已就绪";
-  if (s === "busy") return "Pi 忙碌";
+  if (s === "busy") {
+    const n = Number(health.busyCount || 0);
+    const max = Number(health.maxConcurrent || 0);
+    if (n > 0 && max > 0) return "Pi 忙碌 " + n + "/" + max;
+    return "Pi 忙碌";
+  }
+  if (s === "already-running") return "该文件 AI 任务进行中";
   if (s === "error") return "Pi 错误";
-  if (health.agentReady) return "Pi 已就绪";
+  if (health.agentReady) {
+    const n = Number(health.busyCount || 0);
+    const max = Number(health.maxConcurrent || 0);
+    if (n > 0 && max > 0) return "Pi 运行中 " + n + "/" + max;
+    return "Pi 已就绪";
+  }
   return "Pi " + s;
 }
 
@@ -6566,6 +6634,9 @@ function syncAiConnectionUi() {
     aiConnLabel(state, h),
     "点击打开 Doctor",
     h.skills && h.skills.length ? ("skills: " + h.skills.join(",")) : "",
+    (h.busyCount != null && h.maxConcurrent != null)
+      ? ("jobs " + h.busyCount + "/" + h.maxConcurrent + " · sessions " + (h.sessionCount || 0) + "/" + (h.maxSessions || "?"))
+      : "",
     h.error || "",
     h.mode ? ("mode=" + h.mode) : "",
   ].filter(Boolean).join(" · ");
@@ -6623,6 +6694,11 @@ async function fetchAiConnection(opts) {
       mode: data.mode || "warm",
       uptimeSec: data.uptimeSec,
       busy: !!data.busy,
+      busyCount: Number(data.busyCount || 0),
+      sessionCount: Number(data.sessionCount || 0),
+      maxConcurrent: Number(data.maxConcurrent || 0),
+      maxSessions: Number(data.maxSessions || 0),
+      activeMentors: Array.isArray(data.activeMentors) ? data.activeMentors : [],
       checkedAt: Date.now(),
     };
     try { syncAiConnectionUi(); } catch (_) {}
@@ -7270,7 +7346,7 @@ async function runFixMentorFromUi(opts = {}) {
   const scope = opts.scope === "thread" ? "thread" : "all";
   const cur = State.fixMentorJob || {};
   if (isFixMentorJobActive(cur.status)) {
-    showToast("已有 AI 任务在运行", 2200);
+    showToast("本页已有 AI 任务在运行", 2200);
     return { ok: false, error: "busy" };
   }
 
@@ -7379,19 +7455,43 @@ async function runFixMentorFromUi(opts = {}) {
   try { data = await res.json(); } catch (_) { data = null; }
 
   if (res.status === 409 && data) {
-    // Already running — attach to existing job
+    const errCode = String(data.error || "");
+    const samePath = (() => {
+      try {
+        const a = String(data.path || "").split("\\").join("/").toLowerCase();
+        const b = String(saved.path || "").split("\\").join("/").toLowerCase();
+        if (!a || !b) return errCode === "already-running";
+        const baseA = a.split("/").pop();
+        const baseB = b.split("/").pop();
+        return a === b || (!!baseA && a.endsWith("/" + baseB)) || (!!baseB && b.endsWith("/" + baseA));
+      } catch (_) {
+        return errCode === "already-running";
+      }
+    })();
+    // Same document already running → attach. Concurrent-full on another file → do NOT steal that job.
+    if (errCode === "already-running" || (samePath && data.id)) {
+      setFixMentorJobState({
+        id: data.id || "",
+        status: data.status === "running" ? "running" : "starting",
+        path: data.path || saved.path || "",
+        threadId: data.threadId || threadId,
+        message: data.message || "该文件已有 AI 任务在跑",
+        error: "",
+      });
+      State.fixMentorJob.startedAtClient = Date.now();
+      startFixMentorJobPolling();
+      showToast(data.message || "该文件已有 AI 任务在跑", 2500);
+      return { ok: true, attached: true, job: data };
+    }
+    const msg = data.message || "AI 并发已满，请稍候";
     setFixMentorJobState({
-      id: data.id || "",
-      status: data.status === "running" ? "running" : "starting",
-      path: data.path || saved.path || "",
-      threadId: data.threadId || threadId,
-      message: data.message || "已有任务在运行",
-      error: "",
+      status: "error",
+      error: errCode || "busy",
+      message: msg,
+      path: saved.path || "",
     });
-    State.fixMentorJob.startedAtClient = Date.now();
-    startFixMentorJobPolling();
-    showToast(data.message || "已有 AI 任务在运行", 2500);
-    return { ok: true, attached: true, job: data };
+    showToast(msg, 4200);
+    return { ok: false, error: errCode || "busy", message: msg, job: data };
   }
 
   if (!res.ok || !data || data.ok === false && !data.id) {
@@ -9451,6 +9551,47 @@ function clearPmHistory() {
 function genTabId() {
   return genTabIdPure();
 }
+/** Single-document page: discard/replace gate before open/new. */
+function confirmDiscardCurrentDocument(actionLabel = "继续") {
+  try {
+    if (!State.currentFile) return true;
+    if (!State.currentFile.dirty) return true;
+    if (typeof isActivePlaceholderTab === "function" && isActivePlaceholderTab()) return true;
+  } catch (_) {}
+  const label = actionLabel || "继续";
+  return confirm(
+    `当前文档有未保存的修改。${label}将替换本页内容（同时编辑多个 .mentor 请新开浏览器标签页）。确定？`
+  );
+}
+/** Collapse State.tabs to the active slot only; revoke orphan tab media. */
+function enforceSingleDocumentSlot() {
+  if (!Array.isArray(State.tabs)) State.tabs = [];
+  if (!State.activeTabId) {
+    if (State.tabs.length <= 1) return;
+    const last = State.tabs[State.tabs.length - 1];
+    for (const tab of State.tabs) {
+      if (tab && last && tab.id !== last.id) {
+        try { revokeTabMedia(tab, { dyingState: false }); } catch (_) {}
+      }
+    }
+    State.tabs = last ? [last] : [];
+    if (last) State.activeTabId = last.id;
+    return;
+  }
+  const keepId = State.activeTabId;
+  const keep = State.tabs.find((t) => t && t.id === keepId) || null;
+  if (State.tabs.length <= 1) {
+    State.tabs = State.tabs.filter((t) => t && t.id === keepId);
+    return;
+  }
+  for (const tab of State.tabs) {
+    if (tab && tab.id !== keepId) {
+      try { revokeTabMedia(tab, { dyingState: false }); } catch (_) {}
+    }
+  }
+  State.tabs = keep ? [keep] : [];
+}
+
 function isPlaceholderDocName(name) {
   if (!name) return true;
   return /^(untitled\.md|\u672A\u547D\u540D|\u672A\u547D\u540D\.md)$/i.test(String(name).trim());
@@ -9630,86 +9771,73 @@ function restoreTab(tab, options = {}) {
   return true;
 }
 function switchToTab(tabId) {
+  // Single-document page: in-page multi-doc switching removed.
+  // Multi-open = multiple browser pages.
   if (!tabId || tabId === State.activeTabId) return false;
-  const target = State.tabs.find((t) => t && t.id === tabId);
-  if (!target) return false;
-  try {
-    closeLiveSync();
-  } catch {
-  }
-  try {
-    getSupervisionPoller().stop();
-  } catch {
-  }
-  try {
-    clearSupervisionLocal();
-  } catch {
-  }
-  void queueActiveDraftPersist();
-  snapshotActiveTab();
-  const ok = restoreTab(target);
-  scheduleWorkspaceSessionPersist();
-  // Version drawer follows the active document (per-documentId history).
-  try {
-    const drawer = document.querySelector("#version-history-drawer");
-    if (drawer && !drawer.classList.contains("hidden")) renderVersionHistory();
-  } catch (_) {}
-  return ok;
+  console.warn("[tabs] single-document mode: switchToTab ignored", tabId);
+  return false;
 }
 function closeTab(tabId) {
-  if (!tabId) return false;
-  if (tabId === State.activeTabId) {
-    void queueActiveDraftPersist();
-    snapshotActiveTab();
+  // Single-document page: only the active document can be closed.
+  if (!tabId) tabId = State.activeTabId;
+  if (!tabId || tabId !== State.activeTabId) {
+    enforceSingleDocumentSlot();
+    renderDocTabs();
+    return false;
   }
-  const tab = State.tabs.find((t) => t && t.id === tabId);
-  if (!tab) return false;
-  if (tab.dirty) {
-    if (!confirm(`\u300C${tab.name}\u300D\u6709\u672A\u786E\u8BA4\u4FDD\u5B58\u7684\u4FEE\u6539\uFF08\u76F8\u5BF9\u4E0A\u6B21 Ctrl+S\uFF09\uFF0C\u786E\u5B9A\u5173\u95ED\uFF1F`)) return false;
-  }
-  const wasActive = State.activeTabId === tabId;
-  State.tabs = State.tabs.filter((t) => t && t.id !== tabId);
-  revokeTabMedia(tab, { dyingState: wasActive });
-  if (wasActive) {
-    State.mediaUrls = {};
-    State.mediaFiles = {};
-    if (State.tabs.length > 0) {
-      restoreTab(State.tabs[State.tabs.length - 1]);
-    } else {
-      State.activeTabId = null;
-      State.currentFile = null;
-      State.annotations = [];
-      resetHistory();
-      try {
-        State.annotations = [];
-        State._suspendAnnValidate = true;
-        try {
-          State.editor.commands.setContent("", false);
-        } finally {
-          State._suspendAnnValidate = false;
-        }
-        clearPmHistory();
-      } catch {
-      }
-      markClean();
-      const nameEl = $("#current-file-name");
-      if (nameEl) nameEl.textContent = "\u672A\u6253\u5F00\u6587\u6863";
-      renderCommentList();
-      renderOutline();
-      setStatus("\u5DF2\u5173\u95ED\u5168\u90E8\u6807\u7B7E");
-    }
-  }
-  renderDocTabs();
-  if (!State.tabs.length) {
-    HandleStore.removeWorkspaceSession().catch(() => {});
-  } else {
-    scheduleWorkspaceSessionPersist();
-  }
-  return true;
-}
-function openNewTabBlank() {
   void queueActiveDraftPersist();
   snapshotActiveTab();
+  const tab = State.tabs.find((t) => t && t.id === tabId) || {
+    id: tabId,
+    name: (State.currentFile && State.currentFile.name) || "\u672A\u547D\u540D",
+    dirty: !!(State.currentFile && State.currentFile.dirty)
+  };
+  if (tab.dirty && !isActivePlaceholderTab()) {
+    if (!confirm(`\u300C${tab.name}\u300D\u6709\u672A\u786E\u8BA4\u4FDD\u5B58\u7684\u4FEE\u6539\uFF08\u76F8\u5BF9\u4E0A\u6B21 Ctrl+S\uFF09\uFF0C\u786E\u5B9A\u5173\u95ED\uFF1F`)) return false;
+  }
+  try { closeLiveSync(); } catch {}
+  try { getSupervisionPoller().stop(); } catch {}
+  try { clearSupervisionLocal(); } catch {}
+  revokeTabMedia(tab, { dyingState: true });
+  State.tabs = [];
+  State.activeTabId = null;
+  State.mediaUrls = {};
+  State.mediaFiles = {};
+  State.currentFile = null;
+  State.annotations = [];
+  State.externalWatchPath = "";
+  State.externalWatchToken = "";
+  State.diskPathHint = "";
+  resetHistory();
+  try {
+    State._suspendAnnValidate = true;
+    try {
+      State.editor.commands.setContent("", false);
+    } finally {
+      State._suspendAnnValidate = false;
+    }
+    clearPmHistory();
+  } catch {}
+  markClean();
+  const nameEl = $("#current-file-name");
+  if (nameEl) nameEl.textContent = "\u672A\u6253\u5F00\u6587\u6863";
+  renderCommentList();
+  renderOutline();
+  renderDocTabs();
+  HandleStore.removeWorkspaceSession().catch(() => {});
+  setStatus("\u5DF2\u5173\u95ED\u6587\u6863");
+  return true;
+}
+function openNewTabBlank(opts = {}) {
+  // Replaces the single in-page document. User path (newDocument) confirms first.
+  void queueActiveDraftPersist();
+  try { closeLiveSync(); } catch {}
+  try { getSupervisionPoller().stop(); } catch {}
+  try { clearSupervisionLocal(); } catch {}
+  for (const tab of State.tabs || []) {
+    try { revokeTabMedia(tab, { dyingState: true }); } catch (_) {}
+  }
+  State.tabs = [];
   State.activeTabId = genTabId();
   stopAutosaveTimer();
   revokeMediaUrls();
@@ -9717,6 +9845,9 @@ function openNewTabBlank() {
   State.references = emptyReferenceManifest();
   State.citationNavigation = { key: "", pos: null, ordinal: 0, total: 0 };
   State.activeThreadId = null;
+  State.externalWatchPath = "";
+  State.externalWatchToken = "";
+  State.diskPathHint = "";
   State._suspendAnnValidate = true;
   try {
     State.editor.commands.setContent("<h1>\u65B0\u6587\u6863</h1><p></p>", false);
@@ -9732,9 +9863,11 @@ function openNewTabBlank() {
   renderCommentList();
   renderOutline();
   snapshotActiveTab();
+  enforceSingleDocumentSlot();
   renderDocTabs();
   scheduleWorkspaceSessionPersist();
-  setStatus("\u65B0\u5EFA\u6807\u7B7E");
+  setStatus("\u65B0\u5EFA\u6587\u6863");
+  return true;
 }
 function findTabByName(name) {
   if (!name) return null;
@@ -9783,41 +9916,30 @@ async function resolveDocumentId({ name, content, handle, documentId } = {}) {
   return fingerprintDocument(name, content);
 }
 /**
- * Claim a tab slot before loading document content from disk/memory.
- * Modes:
+ * Claim the single in-page document slot before loading content.
+ * One browser page = one .mentor. Modes:
  *  - reload-same: already the active document → keep activeTabId
- *  - reuse-tab: same document already open in another tab → snapshot current, claim that id
- *  - reuse-blank: active is empty placeholder → keep id, no extra tab
- *  - new-tab: snapshot current (if any), allocate fresh id
+ *  - reuse-blank: active is empty placeholder → keep id
+ *  - replace: different document → reuse the same slot (never stack tabs)
  *
- * Prefer stable documentId; basename fallback keeps legacy single-file reopen UX.
+ * Prefer stable documentId; basename fallback keeps reopen UX.
  */
 function prepareOpenDocument(name, documentId = null) {
   if (State.currentFile && State.activeTabId) {
     const sameId = documentId && State.currentFile.documentId === documentId;
     const sameName = !documentId && name && State.currentFile.name === name;
     if (sameId || sameName) {
+      enforceSingleDocumentSlot();
       return { mode: "reload-same", tabId: State.activeTabId };
     }
   }
-  const existing = findTabByDocument(documentId, name);
-  if (existing) {
-    if (State.activeTabId && State.activeTabId !== existing.id) {
-      snapshotActiveTab();
-    }
-    State.activeTabId = existing.id;
-    State.replyDrafts = Object.assign({}, existing.replyDrafts || {});
-    State.activeThreadId = existing.activeThreadId || null;
-    return { mode: "reuse-tab", tab: existing, tabId: existing.id };
+  if (!State.activeTabId) State.activeTabId = genTabId();
+  enforceSingleDocumentSlot();
+  if (isActivePlaceholderTab()) {
+    return { mode: "reuse-blank", tabId: State.activeTabId };
   }
-  if (State.activeTabId) {
-    if (isActivePlaceholderTab()) {
-      return { mode: "reuse-blank", tabId: State.activeTabId };
-    }
-    snapshotActiveTab();
-  }
-  State.activeTabId = genTabId();
-  return { mode: "new-tab", tabId: State.activeTabId };
+  // Replace in place — never allocate a second in-page tab.
+  return { mode: "replace", tabId: State.activeTabId };
 }
 /** Persist FileSystemFileHandle + last-opened name (IDB). UUID primary key + basename fallback. */
 async function rememberOpenedFile(handleOrName, handle = null) {
@@ -9866,7 +9988,8 @@ async function activateOpenedDocument({
   const resolvedDocumentId = await resolveDocumentId({ name, content, handle, documentId });
   stopAutosaveTimer();
   prepareOpenDocument(name, resolvedDocumentId);
-  // Snapshot of previous tab already kept its media; clear active state media only
+  enforceSingleDocumentSlot();
+  // Single slot: clear active media before inject (no stacked tab media to keep)
   revokeMediaUrls();
   if (mediaFiles && Object.keys(mediaFiles).length > 0) {
     await injectMediaFiles(mediaFiles);
@@ -9993,63 +10116,32 @@ async function activateOpenedDocument({
   return { name, saveMode, documentId: resolvedDocumentId };
 }
 function renderDocTabs() {
+  // In-page multi-doc tab bar removed (single-document page).
+  // Keep at most one snapshot slot for F5 / draft identity.
+  try {
+    if (State.activeTabId && State.currentFile && State.currentFile.name) {
+      const exists = State.tabs.some((t) => t && t.id === State.activeTabId);
+      if (!exists) snapshotActiveTab();
+      else {
+        const t = State.tabs.find((x) => x && x.id === State.activeTabId);
+        if (t) {
+          t.name = State.currentFile.name;
+          t.dirty = !!State.currentFile.dirty;
+        }
+      }
+    } else if ((!State.tabs || State.tabs.length === 0) && State.currentFile && State.currentFile.name) {
+      snapshotActiveTab();
+    }
+  } catch (_) {}
+  enforceSingleDocumentSlot();
   const bar = $("#doc-tabs");
   if (!bar) return;
-  if (State.activeTabId && State.currentFile && State.currentFile.name) {
-    const exists = State.tabs.some((t) => t && t.id === State.activeTabId);
-    if (!exists) snapshotActiveTab();
-    else {
-      const t = State.tabs.find((x) => x && x.id === State.activeTabId);
-      if (t) {
-        t.name = State.currentFile.name;
-        t.dirty = !!State.currentFile.dirty;
-      }
-    }
-  }
-  const tabs = State.tabs.slice();
-  if (tabs.length === 0 && State.currentFile && State.currentFile.name) {
-    snapshotActiveTab();
-  }
-  const list = State.tabs;
   bar.innerHTML = "";
-  bar.classList.toggle("is-empty", list.length === 0);
-  for (const t of list) {
-    if (!t) continue;
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "doc-tab" + (t.id === State.activeTabId ? " is-active" : "") + (t.dirty ? " is-dirty" : "");
-    btn.dataset.tabId = t.id;
-    btn.title = t.name + (t.dirty ? " (\u672A\u4FDD\u5B58)" : "");
-    const label = document.createElement("span");
-    label.className = "doc-tab-label";
-    label.textContent = t.name || "\u672A\u547D\u540D";
-    btn.appendChild(label);
-    const x = document.createElement("span");
-    x.className = "doc-tab-close";
-    x.setAttribute("role", "button");
-    x.setAttribute("aria-label", "\u5173\u95ED");
-    x.textContent = "\xD7";
-    btn.appendChild(x);
-    btn.addEventListener("click", (e) => {
-      if (e.target.closest(".doc-tab-close")) {
-        e.preventDefault();
-        e.stopPropagation();
-        closeTab(t.id);
-        return;
-      }
-      switchToTab(t.id);
-    });
-    bar.appendChild(btn);
-  }
-  const add = document.createElement("button");
-  add.type = "button";
-  add.id = "doc-tab-new";
-  add.className = "doc-tab-new";
-  add.title = "\u65B0\u5EFA\u6807\u7B7E\u9875";
-  add.setAttribute("aria-label", "\u65B0\u5EFA\u6807\u7B7E\u9875");
-  add.textContent = "+";
-  add.addEventListener("click", () => openNewTabBlank());
-  bar.appendChild(add);
+  bar.hidden = true;
+  bar.setAttribute("hidden", "");
+  bar.setAttribute("aria-hidden", "true");
+  bar.classList.add("is-empty", "is-disabled");
+  bar.style.display = "none";
 }
 function setupDocTabs() {
   renderDocTabs();
@@ -11088,7 +11180,7 @@ function _findSidecarHandle(handles, mdHandle) {
     (h) => /\.annotations\.json$/i.test(h.name) && h.name.replace(/\.annotations\.json$/i, "").toLowerCase() === base
   ) || null;
 }
-/** Open one or many FileSystemFileHandles as tabs; last one stays active. */
+/** Open a single FileSystemFileHandle into this page (multi-open = multi browser pages). */
 async function openMultipleHandles(handles) {
   if (!handles || handles.length === 0) return;
   const mentors = handles.filter((h) => _isMentorName(h.name));
@@ -11096,42 +11188,35 @@ async function openMultipleHandles(handles) {
   const mds = handles.filter((h) => _isMdName(h.name));
   // Prefer .mentor packages; else .docx; else .md; else first pick
   const targets = mentors.length ? mentors : docxs.length ? docxs : mds.length ? mds : [handles[0]];
-  const multi = targets.length > 1;
-  let opened = 0;
-  let lastName = "";
-  for (const h of targets) {
-    try {
-      if (_isMentorName(h.name)) {
-        await openFromMentorHandle(h, { quiet: multi });
-      } else if (_isDocxName(h.name)) {
-        const file = await h.getFile();
-        await openFromDocxFile(file, { quiet: multi });
-      } else {
-        await openFromHandle(h, _findSidecarHandle(handles, h), { quiet: multi });
-      }
-      opened++;
-      lastName = h.name;
-    } catch (e) {
-      console.error("[openMultipleHandles] failed:", h.name, e);
-      showToast(`打开失败 ${h.name}: ${e.message || e}`, 4e3);
-    }
+  if (targets.length > 1) {
+    showToast("本页只能打开一个文档；其余请用新的浏览器标签打开", 3500);
   }
-  renderFilePaneCurrent();
-  updateDocMeta({ immediate: true });
-  if (opened === 0) {
+  if (!confirmDiscardCurrentDocument("打开")) return;
+  const h = targets[0];
+  try {
+    if (_isMentorName(h.name)) {
+      await openFromMentorHandle(h, { quiet: false });
+    } else if (_isDocxName(h.name)) {
+      const file = await h.getFile();
+      await openFromDocxFile(file, { quiet: false });
+    } else {
+      await openFromHandle(h, _findSidecarHandle(handles, h), { quiet: false });
+    }
+  } catch (e) {
+    console.error("[openMultipleHandles] failed:", h.name, e);
+    showToast(`打开失败 ${h.name}: ${e.message || e}`, 4e3);
     setStatus("打开失败", "");
     return;
   }
-  if (opened > 1) {
-    setStatus(`已打开 ${opened} 个文档`, lastName);
-    showToast(`已打开 ${opened} 个标签`, 2500);
-  }
+  enforceSingleDocumentSlot();
+  renderFilePaneCurrent();
+  updateDocMeta({ immediate: true });
 }
 async function openFiles() {
   if (FS_API.supported) {
     try {
       const handles = await window.showOpenFilePicker({
-        multiple: true,
+        multiple: false,
         // .mentor primary; .docx import-with-comments also allowed
         types: [{
           description: "Mentor 单文件包 (.mentor)",
@@ -11159,7 +11244,7 @@ async function openFiles() {
 async function openFilesLegacy() {
   const input = document.createElement("input");
   input.type = "file";
-  input.multiple = true;
+  input.multiple = false;
   input.accept = ".mentor,.docx";
   input.onchange = async () => {
     const files = Array.from(input.files || []);
@@ -11172,53 +11257,39 @@ async function openFilesLegacy() {
       else if (_isMentorName(f.name) || await isMentorZip(f)) mentors.push(f);
     }
     if (mentors.length > 0) {
-      const multi = mentors.length > 1;
-      let opened = 0;
-      for (const f of mentors) {
-        try {
-          await openFromMentorFile(f, { quiet: multi });
-          opened++;
-        } catch (e) {
-          console.error("[openFilesLegacy] mentor failed:", f.name, e);
-          showToast(`打开失败 ${f.name}: ${e.message || e}`, 4e3);
-        }
+      if (mentors.length > 1) {
+        showToast("本页只能打开一个文档；其余请用新的浏览器标签打开", 3500);
       }
-      renderFilePaneCurrent();
-      updateDocMeta({ immediate: true });
-      if (opened === 0) {
+      if (!confirmDiscardCurrentDocument("打开")) return;
+      try {
+        await openFromMentorFile(mentors[0], { quiet: false });
+      } catch (e) {
+        console.error("[openFilesLegacy] mentor failed:", mentors[0].name, e);
+        showToast(`打开失败 ${mentors[0].name}: ${e.message || e}`, 4e3);
         setStatus("打开失败", "");
         return;
       }
-      if (opened > 1) {
-        setStatus(`已打开 ${opened} 个文档`, mentors[mentors.length - 1].name);
-        showToast(`已打开 ${opened} 个标签`, 2500);
-      }
+      enforceSingleDocumentSlot();
+      renderFilePaneCurrent();
+      updateDocMeta({ immediate: true });
       return;
     }
     if (docxs.length > 0) {
-      const multi = docxs.length > 1;
-      let opened = 0;
-      let lastName = "";
-      for (const f of docxs) {
-        try {
-          await openFromDocxFile(f, { quiet: multi });
-          opened++;
-          lastName = f.name;
-        } catch (e) {
-          console.error("[openFilesLegacy] docx failed:", f.name, e);
-          showToast(`打开失败 ${f.name}: ${e.message || e}`, 4e3);
-        }
+      if (docxs.length > 1) {
+        showToast("本页只能打开一个文档；其余请用新的浏览器标签打开", 3500);
       }
-      renderFilePaneCurrent();
-      updateDocMeta({ immediate: true });
-      if (opened === 0) {
+      if (!confirmDiscardCurrentDocument("打开")) return;
+      try {
+        await openFromDocxFile(docxs[0], { quiet: false });
+      } catch (e) {
+        console.error("[openFilesLegacy] docx failed:", docxs[0].name, e);
+        showToast(`打开失败 ${docxs[0].name}: ${e.message || e}`, 4e3);
         setStatus("打开失败", "");
         return;
       }
-      if (opened > 1) {
-        setStatus(`已打开 ${opened} 个文档`, lastName);
-        showToast(`已打开 ${opened} 个标签`, 2500);
-      }
+      enforceSingleDocumentSlot();
+      renderFilePaneCurrent();
+      updateDocMeta({ immediate: true });
       return;
     }
     // No mentor/docx — leave legacy path empty (md no longer primary)
@@ -14252,7 +14323,8 @@ async function buildDocxBlob(html, mediaFiles, annotations = []) {
 }
 
 function newDocument() {
-  openNewTabBlank();
+  if (!confirmDiscardCurrentDocument("新建")) return false;
+  return openNewTabBlank({ force: true });
 }
 function _emptyBodyLen() {
   try {
@@ -16817,22 +16889,32 @@ async function restoreWorkspaceSession() {
   const session = normalizeWorkspaceSession(await HandleStore.getWorkspaceSession());
   if (!session.tabs.length) return false;
   _restoringWorkspaceSession = true;
-  const failed = [];
+  let ok = false;
+  let entryName = "";
   try {
-    for (const entry of session.tabs) {
-      try {
-        if (!(await restoreWorkspaceEntry(entry))) failed.push(entry.name || entry.documentId);
-      } catch (error) {
-        failed.push(entry.name || entry.documentId);
-        console.warn("[workspace] restore entry failed", entry && entry.name, error);
-      }
+    // Single-document page: restore one entry only (prefer active, else walk newest→oldest).
+    const preferred =
+      session.tabs.find((t) => t && t.documentId === session.activeDocumentId) || null;
+    const ordered = [];
+    if (preferred) ordered.push(preferred);
+    for (let i = session.tabs.length - 1; i >= 0; i--) {
+      const t = session.tabs[i];
+      if (!t) continue;
+      if (preferred && t.documentId === preferred.documentId) continue;
+      ordered.push(t);
     }
-    const ordered = orderRestoredTabs(State.tabs, session);
-    State.tabs = ordered.tabs;
-    const active = State.tabs.find((tab) =>
-      tab && tab.currentFile && tab.currentFile.documentId === ordered.activeDocumentId
-    );
-    if (active && active.id !== State.activeTabId) restoreTab(active);
+    for (const entry of ordered) {
+      entryName = (entry && (entry.name || entry.documentId)) || "";
+      try {
+        ok = !!(await restoreWorkspaceEntry(entry));
+      } catch (error) {
+        ok = false;
+        console.warn("[workspace] restore entry failed", entryName, error);
+      }
+      if (ok) break;
+    }
+    try { snapshotActiveTab(); } catch (_) {}
+    enforceSingleDocumentSlot();
     renderDocTabs();
   } finally {
     _restoringWorkspaceSession = false;
@@ -16842,17 +16924,10 @@ async function restoreWorkspaceSession() {
     // After hydration finishes, rebind poller once for the active document.
     startSupervisionPolling();
   } catch (_) {}
-  if (State.tabs.length > 0) {
-    if (failed.length) {
-      setStatus(
-        `\u5DF2\u6062\u590D ${State.tabs.length} \u4E2A\u6807\u7B7E`,
-        `${failed.length} \u4E2A\u6587\u4EF6\u9700\u8981\u91CD\u65B0\u6388\u6743\u6216\u91CD\u65B0\u6253\u5F00`
-      );
-    } else {
-      setStatus(`\u5DF2\u6062\u590D ${State.tabs.length} \u4E2A\u6807\u7B7E`, "F5 \u5DE5\u4F5C\u533A\u5DF2\u6062\u590D");
-    }
+  if (ok) {
+    setStatus("\u5DF2\u6062\u590D\u6587\u6863", entryName || "F5");
   }
-  return State.tabs.length > 0;
+  return ok;
 }
 async function tryReconnectLastFile() {
   try {
@@ -17068,6 +17143,8 @@ async function _handleUrlOpen() {
 
 
 window.__mdAnnotator = {
+  STATUS_LEFT_TTL_MS,
+  setStatus,
   State: State,
   FS_API,
   HandleStore,
@@ -17182,10 +17259,12 @@ window.__mdAnnotator = {
   migrateLegacyThread,
   prepareAnnotationForMarkerMode,
   MENTION_TYPES,
-  // v1.43.31 multi-tab · v1.43.52 open/save lifecycle
+  // Single-document page · open/save lifecycle (multi-open = multi browser pages)
   snapshotActiveTab,
   switchToTab,
   closeTab,
+  confirmDiscardCurrentDocument,
+  enforceSingleDocumentSlot,
   checkForUpdate,
   getLocalMentorVersion,
   compareSemver,
@@ -17664,7 +17743,6 @@ window.__mdAnnotator = {
   revealSupervisionThread: (tid) => revealSupervisionThread(tid),
   invokeAiForThread: (tid) => invokeAiForThread(tid),
   runFixMentorFromUi: (opts) => runFixMentorFromUi(opts || {}),
-  resolveActiveMentorAbsPath,
   getFixMentorJob: () => ({ ...(State.fixMentorJob || {}) }),
   threadAnchorOk: (thread) => threadAnchorOk(thread),
   annotationWarningState: (thread) => annotationWarningState(thread),

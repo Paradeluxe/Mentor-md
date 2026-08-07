@@ -55341,15 +55341,6 @@ function createWorkspaceSession({ tabs = [], activeTabId = "" } = {}) {
     updatedAt: Date.now()
   });
 }
-function orderRestoredTabs(runtimeTabs, session) {
-  const rank = new Map((session?.tabs || []).map((entry, index) => [entry.documentId, index]));
-  const tabs = [...runtimeTabs || []].sort(
-    (a, b) => (rank.get(a?.currentFile?.documentId) ?? Number.MAX_SAFE_INTEGER) - (rank.get(b?.currentFile?.documentId) ?? Number.MAX_SAFE_INTEGER)
-  );
-  const ids = new Set(tabs.map((tab) => tab?.currentFile?.documentId).filter(Boolean));
-  const activeDocumentId = ids.has(session?.activeDocumentId) ? session.activeDocumentId : tabs[tabs.length - 1]?.currentFile?.documentId || "";
-  return { tabs, activeDocumentId };
-}
 
 // modules/markdown-normalize.js
 function isFenceLine(line) {
@@ -60419,7 +60410,8 @@ var State2 = {
   // { 'media/image5.png': 'blob:http://127.0.0.1:8787/abc-123' }
   mediaFiles: {},
   // { 'media/image5.png': Blob } — save 时用, 跟当前 doc 绑定
-  // v1.43.31: 多标签 — 同时开多份文档, 测试/新开不再覆盖 dFC
+  // Single-document page: at most one in-memory slot (tabs[0]).
+  // Multi-open = multiple browser pages/tabs, not in-page doc tabs.
   tabs: [],
   // [{ id, name, html, annotations, dirty, handle, saveMode, mediaUrls, mediaFiles, ... }]
   activeTabId: null,
@@ -61456,9 +61448,47 @@ function showToast(msg, ms = 1800) {
   clearTimeout(t._timer);
   t._timer = setTimeout(() => t.classList.add("hidden"), ms);
 }
+var STATUS_LEFT_TTL_MS = 3200;
+var _statusLeftClearTimer = null;
+function _statusToneFromText(s) {
+  const t = String(s || "");
+  if (/失败|错误|拒绝|未授权|失效|崩/.test(t)) return "err";
+  if (/提示|警告|请先|兼容/.test(t)) return "warn";
+  if (/已保存|已自动保存|已加载|已打开|已导入|已启用|就绪|完成|成功|已重连|已关联|已恢复/.test(t)) return "ok";
+  return "";
+}
 function setStatus(left, right) {
-  if (left !== void 0) $("#status-left").textContent = left;
-  if (right !== void 0) $("#status-right").textContent = right;
+  if (left !== void 0) {
+    const el = $("#status-left");
+    if (el) {
+      const next2 = left == null ? "" : String(left);
+      el.textContent = next2;
+      const tone = _statusToneFromText(next2);
+      if (tone) el.dataset.tone = tone;
+      else delete el.dataset.tone;
+      el.classList.toggle("is-empty", !next2.trim());
+      if (_statusLeftClearTimer) {
+        clearTimeout(_statusLeftClearTimer);
+        _statusLeftClearTimer = null;
+      }
+      const steady = /^(就绪|源码模式|渲染模式|演示模式)$/.test(next2.trim());
+      if (next2.trim() && !steady) {
+        const snapshot = next2;
+        _statusLeftClearTimer = setTimeout(() => {
+          _statusLeftClearTimer = null;
+          if (el.textContent === snapshot) {
+            el.textContent = "";
+            el.classList.add("is-empty");
+            delete el.dataset.tone;
+          }
+        }, STATUS_LEFT_TTL_MS);
+      }
+    }
+  }
+  if (right !== void 0) {
+    const r = $("#status-right");
+    if (r) r.textContent = right == null ? "" : String(right);
+  }
 }
 var _docMetaTimer = null;
 function updateDocMeta({ immediate = false } = {}) {
@@ -61486,14 +61516,12 @@ function _doUpdateDocMeta() {
   const imgs = State2.editor.view?.dom?.querySelectorAll("img") || [];
   const imgCount = imgs.length;
   const imgLoaded = Array.from(imgs).filter((i) => i.complete && i.naturalWidth > 0).length;
-  const mediaUrlCount = Object.keys(State2.mediaUrls || {}).length;
   let statusRight = `${name} \xB7 ${wordCount} \u8BCD \xB7 ${lineCount} \u884C \xB7 ${annCount} \u6279\u6CE8`;
   if (imgCount > 0) {
-    statusRight += ` \xB7 \u{1F5BC} ${imgLoaded}/${imgCount} (media=${mediaUrlCount})`;
-  } else if (mediaUrlCount > 0) {
-    statusRight += ` \xB7 \u{1F5BC} media=${mediaUrlCount} \u4F46 DOM \u65E0 img`;
+    statusRight += imgLoaded < imgCount ? ` \xB7 \u56FE ${imgLoaded}/${imgCount}` : ` \xB7 \u56FE ${imgCount}`;
   }
-  $("#status-right").textContent = statusRight;
+  const el = $("#status-right");
+  if (el) el.textContent = statusRight;
 }
 function markDirty() {
   if (_liveSync && _liveSync.applying) return;
@@ -63530,19 +63558,25 @@ async function writeCurrentToDisk(opts = {}) {
   };
 }
 function startAutosaveTimer() {
-  stopAutosaveTimer();
+  stopAutosaveTimer({ clearDebounce: false });
   if (!canWriteLiveDocument()) return;
   _autosaveTimer = setInterval(() => {
     if (State2.currentFile && State2.currentFile.dirty) scheduleAutosaveDebounce();
   }, AUTOSAVE_INTERVAL);
+  if (State2.currentFile && State2.currentFile.dirty && !scheduleAutosaveDebounce._t) {
+    try {
+      scheduleAutosaveDebounce();
+    } catch (_) {
+    }
+  }
   console.log("[autosave] timer started (debounce + 30s; disk if AutoSave ON + handle)");
 }
-function stopAutosaveTimer() {
+function stopAutosaveTimer({ clearDebounce = true } = {}) {
   if (_autosaveTimer) {
     clearInterval(_autosaveTimer);
     _autosaveTimer = null;
   }
-  if (scheduleAutosaveDebounce._t) {
+  if (clearDebounce && scheduleAutosaveDebounce._t) {
     clearTimeout(scheduleAutosaveDebounce._t);
     scheduleAutosaveDebounce._t = null;
   }
@@ -63584,6 +63618,13 @@ async function autosaveNow() {
       }
       if (wr && wr.skipped) {
         console.log("[autosave] disk skipped:", wr.error || "skipped");
+        if (wr.error === "busy") {
+          try {
+            await putAtomicDraftForCurrent();
+          } catch (_) {
+          }
+          return { ok: false, skipped: true, error: "busy", draft: true };
+        }
       } else if (wr && wr.error === "need-permission") {
         console.log("[autosave] disk needs permission; draft only");
       } else if (wr && wr.error === "no-disk-target") {
@@ -66082,9 +66123,20 @@ function aiConnLabel(state, health) {
   if (!health || health.reachable === false || s === "down" || s === "unavailable") return "Pi \u672A\u8FDE\u63A5";
   if (s === "loading" || s === "starting") return "Pi \u68C0\u6D4B\u4E2D\u2026";
   if (s === "ready") return "Pi \u5DF2\u5C31\u7EEA";
-  if (s === "busy") return "Pi \u5FD9\u788C";
+  if (s === "busy") {
+    const n = Number(health.busyCount || 0);
+    const max = Number(health.maxConcurrent || 0);
+    if (n > 0 && max > 0) return "Pi \u5FD9\u788C " + n + "/" + max;
+    return "Pi \u5FD9\u788C";
+  }
+  if (s === "already-running") return "\u8BE5\u6587\u4EF6 AI \u4EFB\u52A1\u8FDB\u884C\u4E2D";
   if (s === "error") return "Pi \u9519\u8BEF";
-  if (health.agentReady) return "Pi \u5DF2\u5C31\u7EEA";
+  if (health.agentReady) {
+    const n = Number(health.busyCount || 0);
+    const max = Number(health.maxConcurrent || 0);
+    if (n > 0 && max > 0) return "Pi \u8FD0\u884C\u4E2D " + n + "/" + max;
+    return "Pi \u5DF2\u5C31\u7EEA";
+  }
   return "Pi " + s;
 }
 function syncAiConnectionUi() {
@@ -66100,6 +66152,7 @@ function syncAiConnectionUi() {
     aiConnLabel(state, h),
     "\u70B9\u51FB\u6253\u5F00 Doctor",
     h.skills && h.skills.length ? "skills: " + h.skills.join(",") : "",
+    h.busyCount != null && h.maxConcurrent != null ? "jobs " + h.busyCount + "/" + h.maxConcurrent + " \xB7 sessions " + (h.sessionCount || 0) + "/" + (h.maxSessions || "?") : "",
     h.error || "",
     h.mode ? "mode=" + h.mode : ""
   ].filter(Boolean).join(" \xB7 ");
@@ -66162,6 +66215,11 @@ async function fetchAiConnection(opts) {
       mode: data.mode || "warm",
       uptimeSec: data.uptimeSec,
       busy: !!data.busy,
+      busyCount: Number(data.busyCount || 0),
+      sessionCount: Number(data.sessionCount || 0),
+      maxConcurrent: Number(data.maxConcurrent || 0),
+      maxSessions: Number(data.maxSessions || 0),
+      activeMentors: Array.isArray(data.activeMentors) ? data.activeMentors : [],
       checkedAt: Date.now()
     };
     try {
@@ -66781,7 +66839,7 @@ async function runFixMentorFromUi(opts = {}) {
   const scope = opts.scope === "thread" ? "thread" : "all";
   const cur = State2.fixMentorJob || {};
   if (isFixMentorJobActive(cur.status)) {
-    showToast("\u5DF2\u6709 AI \u4EFB\u52A1\u5728\u8FD0\u884C", 2200);
+    showToast("\u672C\u9875\u5DF2\u6709 AI \u4EFB\u52A1\u5728\u8FD0\u884C", 2200);
     return { ok: false, error: "busy" };
   }
   if (threadId) {
@@ -66885,18 +66943,42 @@ async function runFixMentorFromUi(opts = {}) {
     data = null;
   }
   if (res.status === 409 && data) {
+    const errCode = String(data.error || "");
+    const samePath = (() => {
+      try {
+        const a = String(data.path || "").split("\\").join("/").toLowerCase();
+        const b = String(saved.path || "").split("\\").join("/").toLowerCase();
+        if (!a || !b) return errCode === "already-running";
+        const baseA = a.split("/").pop();
+        const baseB = b.split("/").pop();
+        return a === b || !!baseA && a.endsWith("/" + baseB) || !!baseB && b.endsWith("/" + baseA);
+      } catch (_) {
+        return errCode === "already-running";
+      }
+    })();
+    if (errCode === "already-running" || samePath && data.id) {
+      setFixMentorJobState({
+        id: data.id || "",
+        status: data.status === "running" ? "running" : "starting",
+        path: data.path || saved.path || "",
+        threadId: data.threadId || threadId,
+        message: data.message || "\u8BE5\u6587\u4EF6\u5DF2\u6709 AI \u4EFB\u52A1\u5728\u8DD1",
+        error: ""
+      });
+      State2.fixMentorJob.startedAtClient = Date.now();
+      startFixMentorJobPolling();
+      showToast(data.message || "\u8BE5\u6587\u4EF6\u5DF2\u6709 AI \u4EFB\u52A1\u5728\u8DD1", 2500);
+      return { ok: true, attached: true, job: data };
+    }
+    const msg = data.message || "AI \u5E76\u53D1\u5DF2\u6EE1\uFF0C\u8BF7\u7A0D\u5019";
     setFixMentorJobState({
-      id: data.id || "",
-      status: data.status === "running" ? "running" : "starting",
-      path: data.path || saved.path || "",
-      threadId: data.threadId || threadId,
-      message: data.message || "\u5DF2\u6709\u4EFB\u52A1\u5728\u8FD0\u884C",
-      error: ""
+      status: "error",
+      error: errCode || "busy",
+      message: msg,
+      path: saved.path || ""
     });
-    State2.fixMentorJob.startedAtClient = Date.now();
-    startFixMentorJobPolling();
-    showToast(data.message || "\u5DF2\u6709 AI \u4EFB\u52A1\u5728\u8FD0\u884C", 2500);
-    return { ok: true, attached: true, job: data };
+    showToast(msg, 4200);
+    return { ok: false, error: errCode || "busy", message: msg, job: data };
   }
   if (!res.ok || !data || data.ok === false && !data.id) {
     const err = data && (data.error || data.message) || "http-" + res.status;
@@ -68939,6 +69021,51 @@ function clearPmHistory() {
 function genTabId2() {
   return genTabId();
 }
+function confirmDiscardCurrentDocument(actionLabel = "\u7EE7\u7EED") {
+  try {
+    if (!State2.currentFile) return true;
+    if (!State2.currentFile.dirty) return true;
+    if (typeof isActivePlaceholderTab === "function" && isActivePlaceholderTab()) return true;
+  } catch (_) {
+  }
+  const label = actionLabel || "\u7EE7\u7EED";
+  return confirm(
+    `\u5F53\u524D\u6587\u6863\u6709\u672A\u4FDD\u5B58\u7684\u4FEE\u6539\u3002${label}\u5C06\u66FF\u6362\u672C\u9875\u5185\u5BB9\uFF08\u540C\u65F6\u7F16\u8F91\u591A\u4E2A .mentor \u8BF7\u65B0\u5F00\u6D4F\u89C8\u5668\u6807\u7B7E\u9875\uFF09\u3002\u786E\u5B9A\uFF1F`
+  );
+}
+function enforceSingleDocumentSlot() {
+  if (!Array.isArray(State2.tabs)) State2.tabs = [];
+  if (!State2.activeTabId) {
+    if (State2.tabs.length <= 1) return;
+    const last = State2.tabs[State2.tabs.length - 1];
+    for (const tab of State2.tabs) {
+      if (tab && last && tab.id !== last.id) {
+        try {
+          revokeTabMedia(tab, { dyingState: false });
+        } catch (_) {
+        }
+      }
+    }
+    State2.tabs = last ? [last] : [];
+    if (last) State2.activeTabId = last.id;
+    return;
+  }
+  const keepId = State2.activeTabId;
+  const keep = State2.tabs.find((t) => t && t.id === keepId) || null;
+  if (State2.tabs.length <= 1) {
+    State2.tabs = State2.tabs.filter((t) => t && t.id === keepId);
+    return;
+  }
+  for (const tab of State2.tabs) {
+    if (tab && tab.id !== keepId) {
+      try {
+        revokeTabMedia(tab, { dyingState: false });
+      } catch (_) {
+      }
+    }
+  }
+  State2.tabs = keep ? [keep] : [];
+}
 function isPlaceholderDocName(name) {
   if (!name) return true;
   return /^(untitled\.md|\u672A\u547D\u540D|\u672A\u547D\u540D\.md)$/i.test(String(name).trim());
@@ -69019,105 +69146,28 @@ function snapshotActiveTab() {
   }
   return snap;
 }
-function restoreTab(tab, options = {}) {
-  if (!tab || !State2.editor) return false;
-  if (!options.force && tab.id && tab.id === State2.activeTabId) {
-    try {
-      snapshotActiveTab();
-    } catch (_) {
-    }
-    return true;
-  }
-  stopAutosaveTimer();
-  try {
-    closeLiveSync();
-  } catch {
-  }
-  State2.activeTabId = tab.id;
-  State2.mediaUrls = Object.assign({}, tab.mediaUrls || {});
-  State2.mediaFiles = Object.assign({}, tab.mediaFiles || {});
-  State2.saveMode = tab.saveMode || "unknown";
-  State2.activeThreadId = tab.activeThreadId || null;
-  State2.replyDrafts = Object.assign({}, tab.replyDrafts || {});
-  State2.references = normalizeReferenceManifest(tab.references || emptyReferenceManifest());
-  State2.citationNavigation = { key: "", pos: null, ordinal: 0, total: 0 };
-  State2.reattachTarget = null;
-  State2.annotations = [];
-  State2._suspendAnnValidate = true;
-  try {
-    try {
-      State2.editor.commands.setContent(tab.html || "<p></p>", false);
-    } catch (e) {
-      console.warn("[tabs] setContent fail", e);
-      State2.editor.commands.setContent("<p></p>", false);
-    }
-  } finally {
-    State2._suspendAnnValidate = false;
-  }
-  clearPmHistory();
-  resetHistory();
-  State2.annotations = JSON.parse(JSON.stringify(tab.annotations || []));
-  try {
-    rebuildAnnotationMarks();
-  } catch (e) {
-    console.warn("[tabs] rebuild marks", e);
-  }
-  State2.currentFile = tab.currentFile ? {
-    documentId: tab.currentFile.documentId || tab.id,
-    name: tab.currentFile.name || tab.name,
-    content: tab.currentFile.content || "",
-    dirty: !!tab.dirty,
-    dirtyGen: tab.currentFile.dirtyGen || 0,
-    handle: tab.handle || tab.currentFile.handle || null,
-    path: tab.currentFile.path || null,
-    annotations: null
-  } : { documentId: tab.id, name: tab.name, content: "", dirty: !!tab.dirty, dirtyGen: 0, handle: tab.handle || null };
-  if (tab.dirty) markDirty();
-  else markClean();
-  const nameEl = $("#current-file-name");
-  if (nameEl) nameEl.textContent = tab.name || "\u672A\u547D\u540D";
-  renderCommentList();
-  try {
-    refreshAnnotationImageDecos();
-  } catch {
-  }
-  renderOutline();
-  renderDocTabs();
-  updateDocMeta({ immediate: true });
-  setStatus("\u5DF2\u5207\u6362", tab.name || "");
-  try {
-    openLiveSyncForCurrentDocument();
-  } catch {
-  }
-  try {
-    startAutosaveTimer();
-  } catch {
-  }
-  try {
-    syncAutosaveToggleUi();
-  } catch {
-  }
-  try {
-    const src = sanitizeSupervisionSource(tab.supervisionSource || {
-      path: tab.currentFile && tab.currentFile.path || "",
-      name: tab.name || ""
-    }, tab.name || "");
-    State2.externalWatchPath = src.path || "";
-    State2.externalWatchToken = "";
-  } catch {
-    State2.externalWatchPath = "";
-    State2.externalWatchToken = "";
-  }
-  try {
-    startSupervisionPolling();
-  } catch {
-  }
-  return true;
-}
 function switchToTab(tabId) {
   if (!tabId || tabId === State2.activeTabId) return false;
-  const target = State2.tabs.find((t) => t && t.id === tabId);
-  if (!target) return false;
+  console.warn("[tabs] single-document mode: switchToTab ignored", tabId);
+  return false;
+}
+function closeTab(tabId) {
+  if (!tabId) tabId = State2.activeTabId;
+  if (!tabId || tabId !== State2.activeTabId) {
+    enforceSingleDocumentSlot();
+    renderDocTabs();
+    return false;
+  }
+  void queueActiveDraftPersist();
+  snapshotActiveTab();
+  const tab = State2.tabs.find((t) => t && t.id === tabId) || {
+    id: tabId,
+    name: State2.currentFile && State2.currentFile.name || "\u672A\u547D\u540D",
+    dirty: !!(State2.currentFile && State2.currentFile.dirty)
+  };
+  if (tab.dirty && !isActivePlaceholderTab()) {
+    if (!confirm(`\u300C${tab.name}\u300D\u6709\u672A\u786E\u8BA4\u4FDD\u5B58\u7684\u4FEE\u6539\uFF08\u76F8\u5BF9\u4E0A\u6B21 Ctrl+S\uFF09\uFF0C\u786E\u5B9A\u5173\u95ED\uFF1F`)) return false;
+  }
   try {
     closeLiveSync();
   } catch {
@@ -69130,72 +69180,59 @@ function switchToTab(tabId) {
     clearSupervisionLocal();
   } catch {
   }
-  void queueActiveDraftPersist();
-  snapshotActiveTab();
-  const ok = restoreTab(target);
-  scheduleWorkspaceSessionPersist();
+  revokeTabMedia(tab, { dyingState: true });
+  State2.tabs = [];
+  State2.activeTabId = null;
+  State2.mediaUrls = {};
+  State2.mediaFiles = {};
+  State2.currentFile = null;
+  State2.annotations = [];
+  State2.externalWatchPath = "";
+  State2.externalWatchToken = "";
+  State2.diskPathHint = "";
+  resetHistory();
   try {
-    const drawer = document.querySelector("#version-history-drawer");
-    if (drawer && !drawer.classList.contains("hidden")) renderVersionHistory();
-  } catch (_) {
-  }
-  return ok;
-}
-function closeTab(tabId) {
-  if (!tabId) return false;
-  if (tabId === State2.activeTabId) {
-    void queueActiveDraftPersist();
-    snapshotActiveTab();
-  }
-  const tab = State2.tabs.find((t) => t && t.id === tabId);
-  if (!tab) return false;
-  if (tab.dirty) {
-    if (!confirm(`\u300C${tab.name}\u300D\u6709\u672A\u786E\u8BA4\u4FDD\u5B58\u7684\u4FEE\u6539\uFF08\u76F8\u5BF9\u4E0A\u6B21 Ctrl+S\uFF09\uFF0C\u786E\u5B9A\u5173\u95ED\uFF1F`)) return false;
-  }
-  const wasActive = State2.activeTabId === tabId;
-  State2.tabs = State2.tabs.filter((t) => t && t.id !== tabId);
-  revokeTabMedia(tab, { dyingState: wasActive });
-  if (wasActive) {
-    State2.mediaUrls = {};
-    State2.mediaFiles = {};
-    if (State2.tabs.length > 0) {
-      restoreTab(State2.tabs[State2.tabs.length - 1]);
-    } else {
-      State2.activeTabId = null;
-      State2.currentFile = null;
-      State2.annotations = [];
-      resetHistory();
-      try {
-        State2.annotations = [];
-        State2._suspendAnnValidate = true;
-        try {
-          State2.editor.commands.setContent("", false);
-        } finally {
-          State2._suspendAnnValidate = false;
-        }
-        clearPmHistory();
-      } catch {
-      }
-      markClean();
-      const nameEl = $("#current-file-name");
-      if (nameEl) nameEl.textContent = "\u672A\u6253\u5F00\u6587\u6863";
-      renderCommentList();
-      renderOutline();
-      setStatus("\u5DF2\u5173\u95ED\u5168\u90E8\u6807\u7B7E");
+    State2._suspendAnnValidate = true;
+    try {
+      State2.editor.commands.setContent("", false);
+    } finally {
+      State2._suspendAnnValidate = false;
     }
+    clearPmHistory();
+  } catch {
   }
+  markClean();
+  const nameEl = $("#current-file-name");
+  if (nameEl) nameEl.textContent = "\u672A\u6253\u5F00\u6587\u6863";
+  renderCommentList();
+  renderOutline();
   renderDocTabs();
-  if (!State2.tabs.length) {
-    HandleStore.removeWorkspaceSession().catch(() => {
-    });
-  } else {
-    scheduleWorkspaceSessionPersist();
-  }
+  HandleStore.removeWorkspaceSession().catch(() => {
+  });
+  setStatus("\u5DF2\u5173\u95ED\u6587\u6863");
   return true;
 }
-function openNewTabBlank() {
+function openNewTabBlank(opts = {}) {
   void queueActiveDraftPersist();
-  snapshotActiveTab();
+  try {
+    closeLiveSync();
+  } catch {
+  }
+  try {
+    getSupervisionPoller().stop();
+  } catch {
+  }
+  try {
+    clearSupervisionLocal();
+  } catch {
+  }
+  for (const tab of State2.tabs || []) {
+    try {
+      revokeTabMedia(tab, { dyingState: true });
+    } catch (_) {
+    }
+  }
+  State2.tabs = [];
   State2.activeTabId = genTabId2();
   stopAutosaveTimer();
   revokeMediaUrls();
@@ -69203,6 +69240,9 @@ function openNewTabBlank() {
   State2.references = emptyReferenceManifest();
   State2.citationNavigation = { key: "", pos: null, ordinal: 0, total: 0 };
   State2.activeThreadId = null;
+  State2.externalWatchPath = "";
+  State2.externalWatchToken = "";
+  State2.diskPathHint = "";
   State2._suspendAnnValidate = true;
   try {
     State2.editor.commands.setContent("<h1>\u65B0\u6587\u6863</h1><p></p>", false);
@@ -69218,23 +69258,11 @@ function openNewTabBlank() {
   renderCommentList();
   renderOutline();
   snapshotActiveTab();
+  enforceSingleDocumentSlot();
   renderDocTabs();
   scheduleWorkspaceSessionPersist();
-  setStatus("\u65B0\u5EFA\u6807\u7B7E");
-}
-function findTabByName(name) {
-  if (!name) return null;
-  return State2.tabs.find((t) => t && t.name === name) || null;
-}
-function findTabByDocument2(documentId, name) {
-  const pure = findTabByDocument(State2.tabs, documentId, name);
-  if (pure) return pure;
-  if (documentId) {
-    const byId = State2.tabs.find((tab) => tab && (tab.currentFile?.documentId || tab.id) === documentId);
-    if (byId) return byId;
-  }
-  if (!name) return null;
-  return findTabByName(name);
+  setStatus("\u65B0\u5EFA\u6587\u6863");
+  return true;
 }
 function fingerprintDocument2(name, content) {
   const pure = fingerprintDocument(name, content);
@@ -69272,27 +69300,16 @@ function prepareOpenDocument(name, documentId = null) {
     const sameId = documentId && State2.currentFile.documentId === documentId;
     const sameName = !documentId && name && State2.currentFile.name === name;
     if (sameId || sameName) {
+      enforceSingleDocumentSlot();
       return { mode: "reload-same", tabId: State2.activeTabId };
     }
   }
-  const existing = findTabByDocument2(documentId, name);
-  if (existing) {
-    if (State2.activeTabId && State2.activeTabId !== existing.id) {
-      snapshotActiveTab();
-    }
-    State2.activeTabId = existing.id;
-    State2.replyDrafts = Object.assign({}, existing.replyDrafts || {});
-    State2.activeThreadId = existing.activeThreadId || null;
-    return { mode: "reuse-tab", tab: existing, tabId: existing.id };
+  if (!State2.activeTabId) State2.activeTabId = genTabId2();
+  enforceSingleDocumentSlot();
+  if (isActivePlaceholderTab()) {
+    return { mode: "reuse-blank", tabId: State2.activeTabId };
   }
-  if (State2.activeTabId) {
-    if (isActivePlaceholderTab()) {
-      return { mode: "reuse-blank", tabId: State2.activeTabId };
-    }
-    snapshotActiveTab();
-  }
-  State2.activeTabId = genTabId2();
-  return { mode: "new-tab", tabId: State2.activeTabId };
+  return { mode: "replace", tabId: State2.activeTabId };
 }
 async function rememberOpenedFile(handleOrName, handle = null) {
   const name = typeof handleOrName === "string" ? handleOrName : handleOrName && handleOrName.name;
@@ -69336,6 +69353,7 @@ async function activateOpenedDocument({
   const resolvedDocumentId = await resolveDocumentId({ name, content, handle, documentId });
   stopAutosaveTimer();
   prepareOpenDocument(name, resolvedDocumentId);
+  enforceSingleDocumentSlot();
   revokeMediaUrls();
   if (mediaFiles && Object.keys(mediaFiles).length > 0) {
     await injectMediaFiles(mediaFiles);
@@ -69453,63 +69471,31 @@ async function activateOpenedDocument({
   return { name, saveMode, documentId: resolvedDocumentId };
 }
 function renderDocTabs() {
+  try {
+    if (State2.activeTabId && State2.currentFile && State2.currentFile.name) {
+      const exists = State2.tabs.some((t) => t && t.id === State2.activeTabId);
+      if (!exists) snapshotActiveTab();
+      else {
+        const t = State2.tabs.find((x) => x && x.id === State2.activeTabId);
+        if (t) {
+          t.name = State2.currentFile.name;
+          t.dirty = !!State2.currentFile.dirty;
+        }
+      }
+    } else if ((!State2.tabs || State2.tabs.length === 0) && State2.currentFile && State2.currentFile.name) {
+      snapshotActiveTab();
+    }
+  } catch (_) {
+  }
+  enforceSingleDocumentSlot();
   const bar = $("#doc-tabs");
   if (!bar) return;
-  if (State2.activeTabId && State2.currentFile && State2.currentFile.name) {
-    const exists = State2.tabs.some((t) => t && t.id === State2.activeTabId);
-    if (!exists) snapshotActiveTab();
-    else {
-      const t = State2.tabs.find((x) => x && x.id === State2.activeTabId);
-      if (t) {
-        t.name = State2.currentFile.name;
-        t.dirty = !!State2.currentFile.dirty;
-      }
-    }
-  }
-  const tabs = State2.tabs.slice();
-  if (tabs.length === 0 && State2.currentFile && State2.currentFile.name) {
-    snapshotActiveTab();
-  }
-  const list = State2.tabs;
   bar.innerHTML = "";
-  bar.classList.toggle("is-empty", list.length === 0);
-  for (const t of list) {
-    if (!t) continue;
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "doc-tab" + (t.id === State2.activeTabId ? " is-active" : "") + (t.dirty ? " is-dirty" : "");
-    btn.dataset.tabId = t.id;
-    btn.title = t.name + (t.dirty ? " (\u672A\u4FDD\u5B58)" : "");
-    const label = document.createElement("span");
-    label.className = "doc-tab-label";
-    label.textContent = t.name || "\u672A\u547D\u540D";
-    btn.appendChild(label);
-    const x = document.createElement("span");
-    x.className = "doc-tab-close";
-    x.setAttribute("role", "button");
-    x.setAttribute("aria-label", "\u5173\u95ED");
-    x.textContent = "\xD7";
-    btn.appendChild(x);
-    btn.addEventListener("click", (e) => {
-      if (e.target.closest(".doc-tab-close")) {
-        e.preventDefault();
-        e.stopPropagation();
-        closeTab(t.id);
-        return;
-      }
-      switchToTab(t.id);
-    });
-    bar.appendChild(btn);
-  }
-  const add = document.createElement("button");
-  add.type = "button";
-  add.id = "doc-tab-new";
-  add.className = "doc-tab-new";
-  add.title = "\u65B0\u5EFA\u6807\u7B7E\u9875";
-  add.setAttribute("aria-label", "\u65B0\u5EFA\u6807\u7B7E\u9875");
-  add.textContent = "+";
-  add.addEventListener("click", () => openNewTabBlank());
-  bar.appendChild(add);
+  bar.hidden = true;
+  bar.setAttribute("hidden", "");
+  bar.setAttribute("aria-hidden", "true");
+  bar.classList.add("is-empty", "is-disabled");
+  bar.style.display = "none";
 }
 function setupDocTabs() {
   renderDocTabs();
@@ -70500,46 +70486,39 @@ function _findSidecarHandle(handles, mdHandle) {
 }
 async function openMultipleHandles(handles) {
   if (!handles || handles.length === 0) return;
-  const mentors = handles.filter((h) => _isMentorName(h.name));
-  const docxs = handles.filter((h) => _isDocxName(h.name));
-  const mds = handles.filter((h) => _isMdName(h.name));
+  const mentors = handles.filter((h2) => _isMentorName(h2.name));
+  const docxs = handles.filter((h2) => _isDocxName(h2.name));
+  const mds = handles.filter((h2) => _isMdName(h2.name));
   const targets = mentors.length ? mentors : docxs.length ? docxs : mds.length ? mds : [handles[0]];
-  const multi = targets.length > 1;
-  let opened = 0;
-  let lastName = "";
-  for (const h of targets) {
-    try {
-      if (_isMentorName(h.name)) {
-        await openFromMentorHandle(h, { quiet: multi });
-      } else if (_isDocxName(h.name)) {
-        const file = await h.getFile();
-        await openFromDocxFile(file, { quiet: multi });
-      } else {
-        await openFromHandle(h, _findSidecarHandle(handles, h), { quiet: multi });
-      }
-      opened++;
-      lastName = h.name;
-    } catch (e) {
-      console.error("[openMultipleHandles] failed:", h.name, e);
-      showToast(`\u6253\u5F00\u5931\u8D25 ${h.name}: ${e.message || e}`, 4e3);
-    }
+  if (targets.length > 1) {
+    showToast("\u672C\u9875\u53EA\u80FD\u6253\u5F00\u4E00\u4E2A\u6587\u6863\uFF1B\u5176\u4F59\u8BF7\u7528\u65B0\u7684\u6D4F\u89C8\u5668\u6807\u7B7E\u6253\u5F00", 3500);
   }
-  renderFilePaneCurrent();
-  updateDocMeta({ immediate: true });
-  if (opened === 0) {
+  if (!confirmDiscardCurrentDocument("\u6253\u5F00")) return;
+  const h = targets[0];
+  try {
+    if (_isMentorName(h.name)) {
+      await openFromMentorHandle(h, { quiet: false });
+    } else if (_isDocxName(h.name)) {
+      const file = await h.getFile();
+      await openFromDocxFile(file, { quiet: false });
+    } else {
+      await openFromHandle(h, _findSidecarHandle(handles, h), { quiet: false });
+    }
+  } catch (e) {
+    console.error("[openMultipleHandles] failed:", h.name, e);
+    showToast(`\u6253\u5F00\u5931\u8D25 ${h.name}: ${e.message || e}`, 4e3);
     setStatus("\u6253\u5F00\u5931\u8D25", "");
     return;
   }
-  if (opened > 1) {
-    setStatus(`\u5DF2\u6253\u5F00 ${opened} \u4E2A\u6587\u6863`, lastName);
-    showToast(`\u5DF2\u6253\u5F00 ${opened} \u4E2A\u6807\u7B7E`, 2500);
-  }
+  enforceSingleDocumentSlot();
+  renderFilePaneCurrent();
+  updateDocMeta({ immediate: true });
 }
 async function openFiles() {
   if (FS_API.supported) {
     try {
       const handles = await window.showOpenFilePicker({
-        multiple: true,
+        multiple: false,
         // .mentor primary; .docx import-with-comments also allowed
         types: [{
           description: "Mentor \u5355\u6587\u4EF6\u5305 (.mentor)",
@@ -70567,7 +70546,7 @@ async function openFiles() {
 async function openFilesLegacy() {
   const input = document.createElement("input");
   input.type = "file";
-  input.multiple = true;
+  input.multiple = false;
   input.accept = ".mentor,.docx";
   input.onchange = async () => {
     const files = Array.from(input.files || []);
@@ -70579,53 +70558,39 @@ async function openFilesLegacy() {
       else if (_isMentorName(f.name) || await isMentorZip(f)) mentors.push(f);
     }
     if (mentors.length > 0) {
-      const multi = mentors.length > 1;
-      let opened = 0;
-      for (const f of mentors) {
-        try {
-          await openFromMentorFile(f, { quiet: multi });
-          opened++;
-        } catch (e) {
-          console.error("[openFilesLegacy] mentor failed:", f.name, e);
-          showToast(`\u6253\u5F00\u5931\u8D25 ${f.name}: ${e.message || e}`, 4e3);
-        }
+      if (mentors.length > 1) {
+        showToast("\u672C\u9875\u53EA\u80FD\u6253\u5F00\u4E00\u4E2A\u6587\u6863\uFF1B\u5176\u4F59\u8BF7\u7528\u65B0\u7684\u6D4F\u89C8\u5668\u6807\u7B7E\u6253\u5F00", 3500);
       }
-      renderFilePaneCurrent();
-      updateDocMeta({ immediate: true });
-      if (opened === 0) {
+      if (!confirmDiscardCurrentDocument("\u6253\u5F00")) return;
+      try {
+        await openFromMentorFile(mentors[0], { quiet: false });
+      } catch (e) {
+        console.error("[openFilesLegacy] mentor failed:", mentors[0].name, e);
+        showToast(`\u6253\u5F00\u5931\u8D25 ${mentors[0].name}: ${e.message || e}`, 4e3);
         setStatus("\u6253\u5F00\u5931\u8D25", "");
         return;
       }
-      if (opened > 1) {
-        setStatus(`\u5DF2\u6253\u5F00 ${opened} \u4E2A\u6587\u6863`, mentors[mentors.length - 1].name);
-        showToast(`\u5DF2\u6253\u5F00 ${opened} \u4E2A\u6807\u7B7E`, 2500);
-      }
+      enforceSingleDocumentSlot();
+      renderFilePaneCurrent();
+      updateDocMeta({ immediate: true });
       return;
     }
     if (docxs.length > 0) {
-      const multi = docxs.length > 1;
-      let opened = 0;
-      let lastName = "";
-      for (const f of docxs) {
-        try {
-          await openFromDocxFile(f, { quiet: multi });
-          opened++;
-          lastName = f.name;
-        } catch (e) {
-          console.error("[openFilesLegacy] docx failed:", f.name, e);
-          showToast(`\u6253\u5F00\u5931\u8D25 ${f.name}: ${e.message || e}`, 4e3);
-        }
+      if (docxs.length > 1) {
+        showToast("\u672C\u9875\u53EA\u80FD\u6253\u5F00\u4E00\u4E2A\u6587\u6863\uFF1B\u5176\u4F59\u8BF7\u7528\u65B0\u7684\u6D4F\u89C8\u5668\u6807\u7B7E\u6253\u5F00", 3500);
       }
-      renderFilePaneCurrent();
-      updateDocMeta({ immediate: true });
-      if (opened === 0) {
+      if (!confirmDiscardCurrentDocument("\u6253\u5F00")) return;
+      try {
+        await openFromDocxFile(docxs[0], { quiet: false });
+      } catch (e) {
+        console.error("[openFilesLegacy] docx failed:", docxs[0].name, e);
+        showToast(`\u6253\u5F00\u5931\u8D25 ${docxs[0].name}: ${e.message || e}`, 4e3);
         setStatus("\u6253\u5F00\u5931\u8D25", "");
         return;
       }
-      if (opened > 1) {
-        setStatus(`\u5DF2\u6253\u5F00 ${opened} \u4E2A\u6587\u6863`, lastName);
-        showToast(`\u5DF2\u6253\u5F00 ${opened} \u4E2A\u6807\u7B7E`, 2500);
-      }
+      enforceSingleDocumentSlot();
+      renderFilePaneCurrent();
+      updateDocMeta({ immediate: true });
       return;
     }
     showToast("\u8BF7\u9009\u62E9 .mentor \u6216 .docx \u6587\u4EF6", 3200);
@@ -73611,7 +73576,8 @@ async function buildDocxBlob(html, mediaFiles, annotations = []) {
   return await zip.generateAsync({ type: "blob", mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", compression: "DEFLATE" });
 }
 function newDocument() {
-  openNewTabBlank();
+  if (!confirmDiscardCurrentDocument("\u65B0\u5EFA")) return false;
+  return openNewTabBlank({ force: true });
 }
 function _emptyBodyLen() {
   try {
@@ -76202,22 +76168,33 @@ async function restoreWorkspaceSession() {
   const session = normalizeWorkspaceSession(await HandleStore.getWorkspaceSession());
   if (!session.tabs.length) return false;
   _restoringWorkspaceSession = true;
-  const failed = [];
+  let ok = false;
+  let entryName = "";
   try {
-    for (const entry of session.tabs) {
-      try {
-        if (!await restoreWorkspaceEntry(entry)) failed.push(entry.name || entry.documentId);
-      } catch (error) {
-        failed.push(entry.name || entry.documentId);
-        console.warn("[workspace] restore entry failed", entry && entry.name, error);
-      }
+    const preferred = session.tabs.find((t) => t && t.documentId === session.activeDocumentId) || null;
+    const ordered = [];
+    if (preferred) ordered.push(preferred);
+    for (let i = session.tabs.length - 1; i >= 0; i--) {
+      const t = session.tabs[i];
+      if (!t) continue;
+      if (preferred && t.documentId === preferred.documentId) continue;
+      ordered.push(t);
     }
-    const ordered = orderRestoredTabs(State2.tabs, session);
-    State2.tabs = ordered.tabs;
-    const active = State2.tabs.find(
-      (tab) => tab && tab.currentFile && tab.currentFile.documentId === ordered.activeDocumentId
-    );
-    if (active && active.id !== State2.activeTabId) restoreTab(active);
+    for (const entry of ordered) {
+      entryName = entry && (entry.name || entry.documentId) || "";
+      try {
+        ok = !!await restoreWorkspaceEntry(entry);
+      } catch (error) {
+        ok = false;
+        console.warn("[workspace] restore entry failed", entryName, error);
+      }
+      if (ok) break;
+    }
+    try {
+      snapshotActiveTab();
+    } catch (_) {
+    }
+    enforceSingleDocumentSlot();
     renderDocTabs();
   } finally {
     _restoringWorkspaceSession = false;
@@ -76227,17 +76204,10 @@ async function restoreWorkspaceSession() {
     startSupervisionPolling();
   } catch (_) {
   }
-  if (State2.tabs.length > 0) {
-    if (failed.length) {
-      setStatus(
-        `\u5DF2\u6062\u590D ${State2.tabs.length} \u4E2A\u6807\u7B7E`,
-        `${failed.length} \u4E2A\u6587\u4EF6\u9700\u8981\u91CD\u65B0\u6388\u6743\u6216\u91CD\u65B0\u6253\u5F00`
-      );
-    } else {
-      setStatus(`\u5DF2\u6062\u590D ${State2.tabs.length} \u4E2A\u6807\u7B7E`, "F5 \u5DE5\u4F5C\u533A\u5DF2\u6062\u590D");
-    }
+  if (ok) {
+    setStatus("\u5DF2\u6062\u590D\u6587\u6863", entryName || "F5");
   }
-  return State2.tabs.length > 0;
+  return ok;
 }
 async function tryReconnectLastFile() {
   try {
@@ -76467,6 +76437,8 @@ async function consumeLaunchOpen() {
   return opened;
 }
 window.__mdAnnotator = {
+  STATUS_LEFT_TTL_MS,
+  setStatus,
   State: State2,
   FS_API,
   HandleStore,
@@ -76583,10 +76555,12 @@ window.__mdAnnotator = {
   migrateLegacyThread,
   prepareAnnotationForMarkerMode,
   MENTION_TYPES,
-  // v1.43.31 multi-tab · v1.43.52 open/save lifecycle
+  // Single-document page · open/save lifecycle (multi-open = multi browser pages)
   snapshotActiveTab,
   switchToTab,
   closeTab,
+  confirmDiscardCurrentDocument,
+  enforceSingleDocumentSlot,
   checkForUpdate,
   getLocalMentorVersion,
   compareSemver,
@@ -77063,7 +77037,6 @@ window.__mdAnnotator = {
   revealSupervisionThread: (tid) => revealSupervisionThread(tid),
   invokeAiForThread: (tid) => invokeAiForThread(tid),
   runFixMentorFromUi: (opts) => runFixMentorFromUi(opts || {}),
-  resolveActiveMentorAbsPath,
   getFixMentorJob: () => ({ ...State2.fixMentorJob || {} }),
   threadAnchorOk: (thread) => threadAnchorOk(thread),
   annotationWarningState: (thread) => annotationWarningState(thread),
