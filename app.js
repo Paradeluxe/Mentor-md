@@ -111,6 +111,8 @@ import {
 import {
   findOccurrences,
   mdEmphasisToPlain,
+  MIN_ANCHOR_TEXT_LEN,
+  assessAnchorTextQuality,
   scoreCandidate,
   resolveAnchor,
   resolveAnchorSet,
@@ -2974,10 +2976,12 @@ function healLiveAnnotationAnchors(options = {}) {
   });
   if (audit.healthy) return { healed: false, applied: [], audit };
 
+  const plainDocForHeal = editor2.state.doc.textBetween(0, editor2.state.doc.content.size, "\n", "\n");
   const plan = planAnnotationAnchorHeal({
     threads: State.annotations || [],
     marks,
-    errors: audit.errors || []
+    errors: audit.errors || [],
+    doc: plainDocForHeal
   });
   if (!plan.recoverable || !plan.actions.length) {
     return { healed: false, applied: [], audit, plan };
@@ -3107,11 +3111,25 @@ function healLiveAnnotationAnchors(options = {}) {
     }
     const candidates = [];
     if (thr.anchor && thr.anchor.quote && thr.anchor.quote.exact) candidates.push(String(thr.anchor.quote.exact));
+    // Prefer original quote over shrunk live text.
     if (thr.text) candidates.push(String(thr.text));
+    // Sort longer first so quality expand beats short fragments.
+    const uniqCand = [];
+    const seenC = new Set();
     for (const c of candidates) {
-      if (!c || c.length < 12) continue;
+      if (!c || seenC.has(c)) continue;
+      seenC.add(c);
+      uniqCand.push(c);
+    }
+    uniqCand.sort((a, b) => b.length - a.length);
+    const plainLive = editor2.state.doc.textBetween(0, editor2.state.doc.content.size, "\n", "\n");
+    for (const c of uniqCand) {
+      if (!c || c.length < MIN_ANCHOR_TEXT_LEN) continue;
+      if (!assessAnchorTextQuality(c, plainLive).ok) continue;
       const hit = findUniquePmTextRange(editor2.state.doc, c);
-      if (hit) return { from: hit.from, to: hit.to, via: "unique-text", text: hit.text };
+      if (hit && assessAnchorTextQuality(hit.text || c, plainLive).ok) {
+        return { from: hit.from, to: hit.to, via: "unique-text", text: hit.text };
+      }
     }
     return null;
   };
@@ -3151,6 +3169,25 @@ function healLiveAnnotationAnchors(options = {}) {
       continue;
     }
     const okAtt = attachThreadRange(thr, target.from, target.to, `${act.reason || "reattach"}:${target.via || ""}`);
+    if (okAtt) {
+      const plainChk = editor2.state.doc.textBetween(0, editor2.state.doc.content.size, "\n", "\n");
+      const qLive = assessAnchorTextQuality(thr.text || target.text || "", plainChk);
+      if (!qLive.ok) {
+        // Refuse to keep a low-quality reattach as attached.
+        removeThreadMarks(act.threadId);
+        thr.range = null;
+        thr.ranges = [];
+        thr.invalid = true;
+        thr.deleted = false;
+        thr.fuzzy = false;
+        thr.invalidReason = (qLive.codes && qLive.codes[0]) || "anchor-text-quality";
+        if (thr.anchor && typeof thr.anchor === "object") {
+          thr.anchor = { ...thr.anchor, status: "orphaned", confidence: 0 };
+        }
+        applied.push({ type: "reattach-quality-reject", threadId: act.threadId, codes: qLive.codes });
+        continue;
+      }
+    }
     if (okAtt && target.via && String(target.via).startsWith("mdRange") && mdText && thr.mdRange && isMdRange(thr.mdRange)) {
       // Canonical quote = mdRange slice (not getMarkdown-derived short live)
       const canon = mdText.slice(thr.mdRange.from, thr.mdRange.to);
@@ -3323,7 +3360,11 @@ function createSaveSnapshot(options = {}) {
         "orphan-status-has-mark",
         "range-mismatch",
         "text-mismatch",
-        "attached-missing-mark"
+        "attached-missing-mark",
+        "anchor-text-too-short",
+        "anchor-text-midword",
+        "anchor-text-nonunique",
+        "anchor-text-empty"
       ]);
       const hard = (audit.errors || []).filter((e) => e && hardCodes.has(e.code));
       if (hard.length) {
@@ -5900,6 +5941,23 @@ function createAnnotationThread(from2, to, text2, opts = null) {
   if (!text2 || text2.length === 0) {
     showToast("\u6279\u6CE8\u6587\u5B57\u4E0D\u80FD\u4E3A\u7A7A", 2e3);
     return null;
+  }
+  // Reject short / mid-word / non-unique selections at create time (image-only exempt).
+  const skipQuality = !!(options.skipMark && Array.isArray(options.imageAnchors) && options.imageAnchors.length);
+  if (!skipQuality && State.editor) {
+    try {
+      const plain = State.editor.state.doc.textBetween(0, State.editor.state.doc.content.size, "\n", "\n");
+      const q = assessAnchorTextQuality(text2, plain);
+      if (!q.ok) {
+        let msg = "\u9009\u533A\u592A\u77ED\u6216\u4E0D\u552F\u4E00\uFF0C\u8BF7\u9009\u66F4\u957F\u7684\u5B8C\u6574\u8BCD\u7EC4";
+        if (q.codes && q.codes.includes("anchor-text-midword")) msg = "\u9009\u533A\u5207\u5230\u4E86\u5355\u8BCD\u4E2D\u95F4\uFF0C\u8BF7\u6269\u5927\u5230\u5B8C\u6574\u8BCD\u7EC4";
+        else if (q.codes && q.codes.includes("anchor-text-nonunique")) msg = "\u9009\u533A\u5728\u6587\u4E2D\u4E0D\u552F\u4E00\uFF0C\u8BF7\u9009\u66F4\u957F\u7247\u6BB5";
+        else if (q.codes && q.codes.includes("anchor-text-too-short")) msg = `\u9009\u533A\u81F3\u5C11 ${MIN_ANCHOR_TEXT_LEN} \u4E2A\u5B57\u7B26`;
+        showToast(msg, 2400);
+        setStatus("\u63D0\u793A", msg);
+        return null;
+      }
+    } catch (_) {}
   }
   if (!checkAnnotationCap()) return null;
   if (State.annotations.some((a) => a.range && a.range.from === from2 && a.range.to === to)) {

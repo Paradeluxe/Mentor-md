@@ -259,17 +259,17 @@ const t = async (name, fn) => {
   });
 
   await t('auditAnnotationInvariants accepts contained-middle physical split', async () => {
-    const doc = 'alpha bravo charlie';
+    const doc = 'alpha middleword charlie';
     const threads = [
-      { threadId: 'outer', text: 'alpha bravo charlie', range: { from: 0, to: 19 }, anchor: { status: 'attached' } },
-      { threadId: 'inner', text: 'bravo', range: { from: 6, to: 11 }, anchor: { status: 'attached' } },
+      { threadId: 'outer', text: 'alpha middleword charlie', range: { from: 0, to: 24 }, anchor: { status: 'attached' } },
+      { threadId: 'inner', text: 'middleword', range: { from: 6, to: 16 }, anchor: { status: 'attached' } },
     ];
     // Nested marks split the outer into three physical pieces (middle carries both marks).
     const marks = [
       { threadId: 'outer', from: 0, to: 6, text: 'alpha ' },
-      { threadId: 'inner', from: 6, to: 11, text: 'bravo' },
-      { threadId: 'outer', from: 6, to: 11, text: 'bravo' },
-      { threadId: 'outer', from: 11, to: 19, text: ' charlie' },
+      { threadId: 'inner', from: 6, to: 16, text: 'middleword' },
+      { threadId: 'outer', from: 6, to: 16, text: 'middleword' },
+      { threadId: 'outer', from: 16, to: 24, text: ' charlie' },
     ];
     const a = mod.auditAnnotationInvariants({ threads, marks, doc });
     assert.equal(a.healthy, true, JSON.stringify(a.errors));
@@ -277,31 +277,31 @@ const t = async (name, fn) => {
   });
 
   await t('auditAnnotationInvariants accepts partial-overlap physical split', async () => {
-    const doc = 'alpha bravo charlie';
+    const doc = 'alpha middleword charlie';
     const threads = [
-      { threadId: 'a', text: 'alpha bravo', range: { from: 0, to: 11 }, anchor: { status: 'attached' } },
-      { threadId: 'b', text: 'bravo charlie', range: { from: 6, to: 19 }, anchor: { status: 'attached' } },
+      { threadId: 'a', text: 'alpha middleword', range: { from: 0, to: 16 }, anchor: { status: 'attached' } },
+      { threadId: 'b', text: 'middleword charlie', range: { from: 6, to: 24 }, anchor: { status: 'attached' } },
     ];
     const marks = [
       { threadId: 'a', from: 0, to: 6, text: 'alpha ' },
-      { threadId: 'a', from: 6, to: 11, text: 'bravo' },
-      { threadId: 'b', from: 6, to: 11, text: 'bravo' },
-      { threadId: 'b', from: 11, to: 19, text: ' charlie' },
+      { threadId: 'a', from: 6, to: 16, text: 'middleword' },
+      { threadId: 'b', from: 6, to: 16, text: 'middleword' },
+      { threadId: 'b', from: 16, to: 24, text: ' charlie' },
     ];
     const a = mod.auditAnnotationInvariants({ threads, marks, doc });
     assert.equal(a.healthy, true, JSON.stringify(a.errors));
   });
 
   await t('auditAnnotationInvariants detects mark replacement caused by overlap', async () => {
-    const doc = 'alpha bravo charlie';
+    const doc = 'alpha middleword charlie';
     const threads = [
-      { threadId: 'outer', text: 'alpha bravo charlie', range: { from: 0, to: 19 }, anchor: { status: 'attached' } },
-      { threadId: 'inner', text: 'bravo charlie', range: { from: 6, to: 19 }, anchor: { status: 'attached' } },
+      { threadId: 'outer', text: 'alpha middleword charlie', range: { from: 0, to: 24 }, anchor: { status: 'attached' } },
+      { threadId: 'inner', text: 'middleword charlie', range: { from: 6, to: 24 }, anchor: { status: 'attached' } },
     ];
     // Outer missing the shared segment — true replacement / incomplete outer.
     const marks = [
       { threadId: 'outer', from: 0, to: 6, text: 'alpha ' },
-      { threadId: 'inner', from: 6, to: 19, text: 'bravo charlie' },
+      { threadId: 'inner', from: 6, to: 24, text: 'middleword charlie' },
     ];
     const a = mod.auditAnnotationInvariants({ threads, marks, doc });
     assert.equal(a.healthy, false);
@@ -375,23 +375,77 @@ const t = async (name, fn) => {
   });
 
   await t('plan heal hard deleted orphan+mark stays unplanned', async () => {
-    const threads = [{
-      threadId: 't-del',
-      text: 'gone',
-      deleted: true,
-      range: { from: 0, to: 4 },
-      anchor: { status: 'orphaned' }
-    }];
-    const marks = [{ threadId: 't-del', from: 0, to: 4, text: 'gone' }];
-    const audit = mod.auditAnnotationInvariants({ threads, marks, doc: 'gone' });
-    const plan = mod.planAnnotationAnchorHeal({ threads, marks, errors: audit.errors });
-    assert.ok(!plan.actions.some((a) => a.threadId === 't-del' && (a.type === 'clear-soft-orphan' || a.type === 'sync-from-mark')));
+      const threads = [{
+        threadId: 't-del',
+        text: 'gone',
+        deleted: true,
+        range: { from: 0, to: 4 },
+        anchor: { status: 'orphaned' }
+      }];
+      const marks = [{ threadId: 't-del', from: 0, to: 4, text: 'gone' }];
+      const audit = mod.auditAnnotationInvariants({ threads, marks, doc: 'gone' });
+      const plan = mod.planAnnotationAnchorHeal({ threads, marks, errors: audit.errors });
+      assert.ok(!plan.actions.some((a) => a.threadId === 't-del' && (a.type === 'clear-soft-orphan' || a.type === 'sync-from-mark')));
+    });
+
+    await t('assessAnchorTextQuality catches short/midword/nonunique', async () => {
+      assert.equal(typeof mod.assessAnchorTextQuality, 'function');
+      const short = mod.assessAnchorTextQuality('al st', 'functional states that dominate the aging');
+      assert.equal(short.ok, false);
+      assert.ok(short.codes.includes('anchor-text-too-short'));
+
+      const doc = 'simple "more time in one\'s own state" account. The cost is therefore not carried by occupancy';
+      const mid = mod.assessAnchorTextQuality('unt. The cost is therefore not carried', doc);
+      assert.equal(mid.ok, false);
+      assert.ok(mid.codes.includes('anchor-text-midword'), JSON.stringify(mid));
+
+      const multi = mod.assessAnchorTextQuality('state', 'state one and state two and state three');
+      assert.equal(multi.ok, false);
+      assert.ok(multi.codes.includes('anchor-text-nonunique'));
+
+      const good = mod.assessAnchorTextQuality(
+        'State 2 was strongly older-adult dominant',
+        'Lead. State 2 was strongly older-adult dominant (OA FO = 0.50). Tail.'
+      );
+      assert.equal(good.ok, true, JSON.stringify(good));
+    });
+
+    await t('audit hard-fails false-healthy midword fragment', async () => {
+      const doc = 'account. The cost is therefore not carried by occupancy';
+      // live mark is mid-word fragment that matches itself — old path would be healthy
+      const threads = [{
+        threadId: 't-mid',
+        text: 'unt. The cost is therefore not carried',
+        range: { from: 2, to: 40 },
+        anchor: { status: 'attached' }
+      }];
+      const marks = [{ threadId: 't-mid', from: 2, to: 40, text: 'unt. The cost is therefore not carried' }];
+      const a = mod.auditAnnotationInvariants({ threads, marks, doc });
+      assert.equal(a.healthy, false);
+      assert.ok(a.errors.some((e) => e.code === 'anchor-text-midword'), JSON.stringify(a.errors));
+      const plan = mod.planAnnotationAnchorHeal({ threads, marks, errors: a.errors, doc });
+      assert.ok(plan.actions.some((x) => x.type === 'reattach-needed' && x.threadId === 't-mid'));
+    });
+
+    await t('plan refuses sync-from-mark when mark text is low quality', async () => {
+      const doc = 'prefix account. The cost is therefore not carried tail';
+      const threads = [{
+        threadId: 't-q',
+        text: 'wrong range meta',
+        range: { from: 0, to: 99 },
+        anchor: { status: 'attached' }
+      }];
+      const marks = [{ threadId: 't-q', from: 9, to: 47, text: 'unt. The cost is therefore not carried' }];
+      const audit = mod.auditAnnotationInvariants({ threads, marks, doc });
+      const plan = mod.planAnnotationAnchorHeal({ threads, marks, errors: audit.errors, doc });
+      assert.ok(!plan.actions.some((a) => a.type === 'sync-from-mark'));
+      assert.ok(plan.actions.some((a) => a.type === 'reattach-needed'));
+    });
+
+
+    console.log('\n=== RESULT:', pass, 'pass /', fail, 'fail ===');
+    process.exit(fail ? 1 : 0);
+  })().catch((e) => {
+    console.error(e);
+    process.exit(1);
   });
-
-
-  console.log('\n=== RESULT:', pass, 'pass /', fail, 'fail ===');
-  process.exit(fail ? 1 : 0);
-})().catch((e) => {
-  console.error(e);
-  process.exit(1);
-});

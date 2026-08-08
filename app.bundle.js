@@ -56688,6 +56688,47 @@ function samePlain(a, b) {
   if (a == null || b == null) return false;
   return mdEmphasisToPlain(a) === mdEmphasisToPlain(b) || mdEmphasisToPlain(a) === b || a === mdEmphasisToPlain(b);
 }
+var MIN_ANCHOR_TEXT_LEN = 8;
+function isWordChar(ch) {
+  if (!ch) return false;
+  const c = String(ch);
+  return /[A-Za-z0-9\u00C0-\u024F\u4E00-\u9FFF\u3400-\u4DBF]/.test(c);
+}
+function assessAnchorTextQuality(text3, doc5 = "", options = {}) {
+  const minLen = options.minLen != null ? options.minLen : MIN_ANCHOR_TEXT_LEN;
+  const t = text3 == null ? "" : String(text3);
+  const codes = [];
+  if (!t) {
+    codes.push("anchor-text-empty");
+    return { ok: false, codes, length: 0, occurrences: 0 };
+  }
+  if (t.length < minLen) codes.push("anchor-text-too-short");
+  let occurrences = 0;
+  const plainDoc = doc5 == null ? "" : String(doc5);
+  if (plainDoc) {
+    const offs = findOccurrences(plainDoc, t);
+    occurrences = offs.length;
+    if (occurrences > 1) codes.push("anchor-text-nonunique");
+    if (occurrences >= 1) {
+      const midAll = offs.every((i) => {
+        const before = i > 0 ? plainDoc[i - 1] : "";
+        const after = i + t.length < plainDoc.length ? plainDoc[i + t.length] : "";
+        const startMid = isWordChar(before) && isWordChar(t[0]);
+        const endMid = isWordChar(after) && isWordChar(t[t.length - 1]);
+        return startMid || endMid;
+      });
+      if (midAll) codes.push("anchor-text-midword");
+    }
+  }
+  const seen = /* @__PURE__ */ new Set();
+  const uniq = [];
+  for (const c of codes) {
+    if (seen.has(c)) continue;
+    seen.add(c);
+    uniq.push(c);
+  }
+  return { ok: uniq.length === 0, codes: uniq, length: t.length, occurrences };
+}
 function localContext(doc5, from2, to, maxLen = DEFAULT_CONTEXT) {
   const preFrom = Math.max(0, from2 - maxLen);
   const sufTo = Math.min(doc5.length, to + maxLen);
@@ -57026,6 +57067,7 @@ function auditAnnotationInvariants({ threads, marks, doc: doc5 }) {
   const thrList = Array.isArray(threads) ? threads.filter((t) => t && t.threadId) : [];
   const markList = Array.isArray(marks) ? marks.filter((m) => m && m.threadId) : [];
   const logicalMarks = coalesceAnnotationMarkPieces(markList);
+  const plainDoc = typeof doc5 === "string" ? doc5 : "";
   const seenIds = /* @__PURE__ */ new Set();
   for (const t of thrList) {
     if (seenIds.has(t.threadId)) {
@@ -57084,9 +57126,17 @@ function auditAnnotationInvariants({ threads, marks, doc: doc5 }) {
         if (t.text != null && m.text != null && t.text !== m.text && status !== "edited") {
           errors.push({ code: "text-mismatch", threadId: t.threadId, text: t.text, markText: m.text });
         }
-        if (doc5 && m.from != null && m.to != null && doc5.slice) {
-          const slice2 = doc5.slice(m.from, m.to);
-          if (m.text != null && slice2 !== m.text && !doc5.includes(m.text)) {
+        const qText = m.text != null && m.text !== "" ? m.text : t.text || "";
+        const q = assessAnchorTextQuality(qText, plainDoc);
+        if (!q.ok) {
+          for (const code of q.codes) {
+            errors.push({
+              code,
+              threadId: t.threadId,
+              text: qText,
+              length: q.length,
+              occurrences: q.occurrences
+            });
           }
         }
       }
@@ -57137,6 +57187,8 @@ function planAnnotationAnchorHeal(input = {}) {
     seen.add(key);
     actions.push(act);
   };
+  const docStr = typeof input.doc === "string" ? input.doc : "";
+  const qualityOk = (txt) => assessAnchorTextQuality(txt || "", docStr).ok;
   for (const e of errList) {
     if (!e || !e.code) continue;
     const tid = e.threadId;
@@ -57147,7 +57199,7 @@ function planAnnotationAnchorHeal(input = {}) {
       case "range-mismatch":
       case "text-mismatch": {
         if (!tid) break;
-        if (ms.length === 1 && !multiOk) {
+        if (ms.length === 1 && !multiOk && qualityOk(ms[0].text || "")) {
           push({
             type: "sync-from-mark",
             threadId: tid,
@@ -57156,11 +57208,17 @@ function planAnnotationAnchorHeal(input = {}) {
             text: ms[0].text || "",
             reason: e.code
           });
-        } else if (ms.length > 1 || multiOk) {
-          push({ type: "reattach-needed", threadId: tid, reason: e.code, count: ms.length });
         } else {
-          push({ type: "reattach-needed", threadId: tid, reason: e.code, count: 0 });
+          push({ type: "reattach-needed", threadId: tid, reason: e.code, count: ms.length });
         }
+        break;
+      }
+      case "anchor-text-too-short":
+      case "anchor-text-midword":
+      case "anchor-text-nonunique":
+      case "anchor-text-empty": {
+        if (!tid) break;
+        push({ type: "reattach-needed", threadId: tid, reason: e.code, count: ms.length });
         break;
       }
       case "duplicate-mark": {
@@ -57178,7 +57236,7 @@ function planAnnotationAnchorHeal(input = {}) {
         const st = thr.anchor && thr.anchor.status;
         const hardDeleted = !!(thr.deleted || st === "text-deleted" || thr.invalidReason === "text-deleted");
         if (hardDeleted) break;
-        if (ms.length === 1 && !multiOk) {
+        if (ms.length === 1 && !multiOk && qualityOk(ms[0].text || "")) {
           push({
             type: "sync-from-mark",
             threadId: tid,
@@ -57188,8 +57246,8 @@ function planAnnotationAnchorHeal(input = {}) {
             reason: "orphan-status-has-mark"
           });
           push({ type: "clear-soft-orphan", threadId: tid, reason: "orphan-status-has-mark" });
-        } else if (ms.length > 1) {
-          push({ type: "reattach-needed", threadId: tid, reason: "orphan-multi-mark", count: ms.length });
+        } else if (ms.length >= 1) {
+          push({ type: "reattach-needed", threadId: tid, reason: "orphan-status-has-mark", count: ms.length });
         }
         break;
       }
@@ -62651,10 +62709,12 @@ function healLiveAnnotationAnchors(options = {}) {
     doc: editor2.state.doc.textBetween(0, editor2.state.doc.content.size, "\n", "\n")
   });
   if (audit.healthy) return { healed: false, applied: [], audit };
+  const plainDocForHeal = editor2.state.doc.textBetween(0, editor2.state.doc.content.size, "\n", "\n");
   const plan = planAnnotationAnchorHeal({
     threads: State2.annotations || [],
     marks,
-    errors: audit.errors || []
+    errors: audit.errors || [],
+    doc: plainDocForHeal
   });
   if (!plan.recoverable || !plan.actions.length) {
     return { healed: false, applied: [], audit, plan };
@@ -62785,10 +62845,22 @@ function healLiveAnnotationAnchors(options = {}) {
     const candidates = [];
     if (thr.anchor && thr.anchor.quote && thr.anchor.quote.exact) candidates.push(String(thr.anchor.quote.exact));
     if (thr.text) candidates.push(String(thr.text));
+    const uniqCand = [];
+    const seenC = /* @__PURE__ */ new Set();
     for (const c of candidates) {
-      if (!c || c.length < 12) continue;
+      if (!c || seenC.has(c)) continue;
+      seenC.add(c);
+      uniqCand.push(c);
+    }
+    uniqCand.sort((a, b) => b.length - a.length);
+    const plainLive = editor2.state.doc.textBetween(0, editor2.state.doc.content.size, "\n", "\n");
+    for (const c of uniqCand) {
+      if (!c || c.length < MIN_ANCHOR_TEXT_LEN) continue;
+      if (!assessAnchorTextQuality(c, plainLive).ok) continue;
       const hit = findUniquePmTextRange(editor2.state.doc, c);
-      if (hit) return { from: hit.from, to: hit.to, via: "unique-text", text: hit.text };
+      if (hit && assessAnchorTextQuality(hit.text || c, plainLive).ok) {
+        return { from: hit.from, to: hit.to, via: "unique-text", text: hit.text };
+      }
     }
     return null;
   };
@@ -62825,6 +62897,24 @@ function healLiveAnnotationAnchors(options = {}) {
       continue;
     }
     const okAtt = attachThreadRange(thr, target.from, target.to, `${act.reason || "reattach"}:${target.via || ""}`);
+    if (okAtt) {
+      const plainChk = editor2.state.doc.textBetween(0, editor2.state.doc.content.size, "\n", "\n");
+      const qLive = assessAnchorTextQuality(thr.text || target.text || "", plainChk);
+      if (!qLive.ok) {
+        removeThreadMarks(act.threadId);
+        thr.range = null;
+        thr.ranges = [];
+        thr.invalid = true;
+        thr.deleted = false;
+        thr.fuzzy = false;
+        thr.invalidReason = qLive.codes && qLive.codes[0] || "anchor-text-quality";
+        if (thr.anchor && typeof thr.anchor === "object") {
+          thr.anchor = { ...thr.anchor, status: "orphaned", confidence: 0 };
+        }
+        applied.push({ type: "reattach-quality-reject", threadId: act.threadId, codes: qLive.codes });
+        continue;
+      }
+    }
     if (okAtt && target.via && String(target.via).startsWith("mdRange") && mdText && thr.mdRange && isMdRange(thr.mdRange)) {
       const canon = mdText.slice(thr.mdRange.from, thr.mdRange.to);
       if (canon && canon.length >= (thr.text || "").length) {
@@ -62986,7 +63076,11 @@ function createSaveSnapshot(options = {}) {
         "orphan-status-has-mark",
         "range-mismatch",
         "text-mismatch",
-        "attached-missing-mark"
+        "attached-missing-mark",
+        "anchor-text-too-short",
+        "anchor-text-midword",
+        "anchor-text-nonunique",
+        "anchor-text-empty"
       ]);
       const hard = (audit.errors || []).filter((e) => e && hardCodes.has(e.code));
       if (hard.length) {
@@ -65515,6 +65609,23 @@ function createAnnotationThread(from2, to, text22, opts = null) {
   if (!text22 || text22.length === 0) {
     showToast("\u6279\u6CE8\u6587\u5B57\u4E0D\u80FD\u4E3A\u7A7A", 2e3);
     return null;
+  }
+  const skipQuality = !!(options.skipMark && Array.isArray(options.imageAnchors) && options.imageAnchors.length);
+  if (!skipQuality && State2.editor) {
+    try {
+      const plain = State2.editor.state.doc.textBetween(0, State2.editor.state.doc.content.size, "\n", "\n");
+      const q = assessAnchorTextQuality(text22, plain);
+      if (!q.ok) {
+        let msg = "\u9009\u533A\u592A\u77ED\u6216\u4E0D\u552F\u4E00\uFF0C\u8BF7\u9009\u66F4\u957F\u7684\u5B8C\u6574\u8BCD\u7EC4";
+        if (q.codes && q.codes.includes("anchor-text-midword")) msg = "\u9009\u533A\u5207\u5230\u4E86\u5355\u8BCD\u4E2D\u95F4\uFF0C\u8BF7\u6269\u5927\u5230\u5B8C\u6574\u8BCD\u7EC4";
+        else if (q.codes && q.codes.includes("anchor-text-nonunique")) msg = "\u9009\u533A\u5728\u6587\u4E2D\u4E0D\u552F\u4E00\uFF0C\u8BF7\u9009\u66F4\u957F\u7247\u6BB5";
+        else if (q.codes && q.codes.includes("anchor-text-too-short")) msg = `\u9009\u533A\u81F3\u5C11 ${MIN_ANCHOR_TEXT_LEN} \u4E2A\u5B57\u7B26`;
+        showToast(msg, 2400);
+        setStatus("\u63D0\u793A", msg);
+        return null;
+      }
+    } catch (_) {
+    }
   }
   if (!checkAnnotationCap()) return null;
   if (State2.annotations.some((a) => a.range && a.range.from === from2 && a.range.to === to)) {

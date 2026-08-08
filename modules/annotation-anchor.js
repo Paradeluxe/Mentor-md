@@ -60,6 +60,59 @@ function samePlain(a, b) {
   return mdEmphasisToPlain(a) === mdEmphasisToPlain(b) || mdEmphasisToPlain(a) === b || a === mdEmphasisToPlain(b);
 }
 
+/** Minimum plain-text length for a savable attached text anchor (image-only exempt). */
+export const MIN_ANCHOR_TEXT_LEN = 8;
+
+function isWordChar(ch) {
+  if (!ch) return false;
+  const c = String(ch);
+  // Latin/digit + common CJK — mid-token cut detection.
+  return /[A-Za-z0-9\u00C0-\u024F\u4E00-\u9FFF\u3400-\u4DBF]/.test(c);
+}
+
+/**
+ * Quality gate for attached anchor text. Catches the "false healthy" class:
+ * mid-word fragments, ultra-short tokens, non-unique exact strings.
+ * `doc` should be the same plain string used for audit (PM textBetween).
+ */
+export function assessAnchorTextQuality(text, doc = '', options = {}) {
+  const minLen = options.minLen != null ? options.minLen : MIN_ANCHOR_TEXT_LEN;
+  const t = text == null ? '' : String(text);
+  const codes = [];
+  if (!t) {
+    codes.push('anchor-text-empty');
+    return { ok: false, codes, length: 0, occurrences: 0 };
+  }
+  if (t.length < minLen) codes.push('anchor-text-too-short');
+
+  let occurrences = 0;
+  const plainDoc = doc == null ? '' : String(doc);
+  if (plainDoc) {
+    const offs = findOccurrences(plainDoc, t);
+    occurrences = offs.length;
+    if (occurrences > 1) codes.push('anchor-text-nonunique');
+    if (occurrences >= 1) {
+      const midAll = offs.every((i) => {
+        const before = i > 0 ? plainDoc[i - 1] : '';
+        const after = i + t.length < plainDoc.length ? plainDoc[i + t.length] : '';
+        const startMid = isWordChar(before) && isWordChar(t[0]);
+        const endMid = isWordChar(after) && isWordChar(t[t.length - 1]);
+        return startMid || endMid;
+      });
+      if (midAll) codes.push('anchor-text-midword');
+    }
+  }
+  const seen = new Set();
+  const uniq = [];
+  for (const c of codes) {
+    if (seen.has(c)) continue;
+    seen.add(c);
+    uniq.push(c);
+  }
+  return { ok: uniq.length === 0, codes: uniq, length: t.length, occurrences };
+}
+
+
 function localContext(doc, from, to, maxLen = DEFAULT_CONTEXT) {
   const preFrom = Math.max(0, from - maxLen);
   const sufTo = Math.min(doc.length, to + maxLen);
@@ -478,6 +531,7 @@ export function auditAnnotationInvariants({ threads, marks, doc }) {
   const thrList = Array.isArray(threads) ? threads.filter((t) => t && t.threadId) : [];
   const markList = Array.isArray(marks) ? marks.filter((m) => m && m.threadId) : [];
   const logicalMarks = coalesceAnnotationMarkPieces(markList);
+  const plainDoc = typeof doc === 'string' ? doc : '';
 
   const seenIds = new Set();
   for (const t of thrList) {
@@ -544,10 +598,18 @@ export function auditAnnotationInvariants({ threads, marks, doc }) {
         if (t.text != null && m.text != null && t.text !== m.text && status !== 'edited') {
           errors.push({ code: 'text-mismatch', threadId: t.threadId, text: t.text, markText: m.text });
         }
-        if (doc && m.from != null && m.to != null && doc.slice) {
-          const slice = doc.slice(m.from, m.to);
-          if (m.text != null && slice !== m.text && !doc.includes(m.text)) {
-            // soft: plain-text docs may use different separators than PM
+        // Quality: reject mid-word / ultra-short / non-unique attached text (false-healthy drift).
+        const qText = (m.text != null && m.text !== '') ? m.text : (t.text || '');
+        const q = assessAnchorTextQuality(qText, plainDoc);
+        if (!q.ok) {
+          for (const code of q.codes) {
+            errors.push({
+              code,
+              threadId: t.threadId,
+              text: qText,
+              length: q.length,
+              occurrences: q.occurrences
+            });
           }
         }
       }
@@ -625,6 +687,9 @@ export function planAnnotationAnchorHeal(input = {}) {
     actions.push(act);
   };
 
+  const docStr = typeof input.doc === 'string' ? input.doc : '';
+  const qualityOk = (txt) => assessAnchorTextQuality(txt || '', docStr).ok;
+
   for (const e of errList) {
     if (!e || !e.code) continue;
     const tid = e.threadId;
@@ -636,7 +701,7 @@ export function planAnnotationAnchorHeal(input = {}) {
       case 'range-mismatch':
       case 'text-mismatch': {
         if (!tid) break;
-        if (ms.length === 1 && !multiOk) {
+        if (ms.length === 1 && !multiOk && qualityOk(ms[0].text || '')) {
           push({
             type: 'sync-from-mark',
             threadId: tid,
@@ -645,11 +710,18 @@ export function planAnnotationAnchorHeal(input = {}) {
             text: ms[0].text || '',
             reason: e.code
           });
-        } else if (ms.length > 1 || multiOk) {
-          push({ type: 'reattach-needed', threadId: tid, reason: e.code, count: ms.length });
         } else {
-          push({ type: 'reattach-needed', threadId: tid, reason: e.code, count: 0 });
+          // Low-quality single mark must not be stamped as truth — expand/reattach.
+          push({ type: 'reattach-needed', threadId: tid, reason: e.code, count: ms.length });
         }
+        break;
+      }
+      case 'anchor-text-too-short':
+      case 'anchor-text-midword':
+      case 'anchor-text-nonunique':
+      case 'anchor-text-empty': {
+        if (!tid) break;
+        push({ type: 'reattach-needed', threadId: tid, reason: e.code, count: ms.length });
         break;
       }
       case 'duplicate-mark': {
@@ -668,7 +740,7 @@ export function planAnnotationAnchorHeal(input = {}) {
         const st = thr.anchor && thr.anchor.status;
         const hardDeleted = !!(thr.deleted || st === 'text-deleted' || thr.invalidReason === 'text-deleted');
         if (hardDeleted) break;
-        if (ms.length === 1 && !multiOk) {
+        if (ms.length === 1 && !multiOk && qualityOk(ms[0].text || '')) {
           push({
             type: 'sync-from-mark',
             threadId: tid,
@@ -678,8 +750,8 @@ export function planAnnotationAnchorHeal(input = {}) {
             reason: 'orphan-status-has-mark'
           });
           push({ type: 'clear-soft-orphan', threadId: tid, reason: 'orphan-status-has-mark' });
-        } else if (ms.length > 1) {
-          push({ type: 'reattach-needed', threadId: tid, reason: 'orphan-multi-mark', count: ms.length });
+        } else if (ms.length >= 1) {
+          push({ type: 'reattach-needed', threadId: tid, reason: 'orphan-status-has-mark', count: ms.length });
         }
         break;
       }
@@ -711,6 +783,8 @@ export function applyStatusToThread(thread, status) {
 export default {
   findOccurrences,
   mdEmphasisToPlain,
+  MIN_ANCHOR_TEXT_LEN,
+  assessAnchorTextQuality,
   scoreCandidate,
   resolveAnchor,
   mapAnchorRange,
