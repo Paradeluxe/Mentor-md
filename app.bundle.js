@@ -56689,11 +56689,6 @@ function samePlain(a, b) {
   return mdEmphasisToPlain(a) === mdEmphasisToPlain(b) || mdEmphasisToPlain(a) === b || a === mdEmphasisToPlain(b);
 }
 var MIN_ANCHOR_TEXT_LEN = 8;
-function isWordChar(ch) {
-  if (!ch) return false;
-  const c = String(ch);
-  return /[A-Za-z0-9\u00C0-\u024F\u4E00-\u9FFF\u3400-\u4DBF]/.test(c);
-}
 function assessAnchorTextQuality(text3, doc5 = "", options = {}) {
   const minLen = options.minLen != null ? options.minLen : MIN_ANCHOR_TEXT_LEN;
   const t = text3 == null ? "" : String(text3);
@@ -56709,15 +56704,11 @@ function assessAnchorTextQuality(text3, doc5 = "", options = {}) {
     const offs = findOccurrences(plainDoc, t);
     occurrences = offs.length;
     if (occurrences > 1) codes.push("anchor-text-nonunique");
-    if (occurrences >= 1) {
-      const midAll = offs.every((i) => {
-        const before = i > 0 ? plainDoc[i - 1] : "";
-        const after = i + t.length < plainDoc.length ? plainDoc[i + t.length] : "";
-        const startMid = isWordChar(before) && isWordChar(t[0]);
-        const endMid = isWordChar(after) && isWordChar(t[t.length - 1]);
-        return startMid || endMid;
-      });
-      if (midAll) codes.push("anchor-text-midword");
+  }
+  const quoteExact = options && options.quoteExact != null ? String(options.quoteExact) : "";
+  if (quoteExact && t && quoteExact.length >= t.length + 8 && quoteExact.includes(t) && quoteExact !== t) {
+    if (!plainDoc || findOccurrences(plainDoc, quoteExact).length === 1) {
+      codes.push("anchor-text-truncated-from-quote");
     }
   }
   const seen = /* @__PURE__ */ new Set();
@@ -57127,7 +57118,8 @@ function auditAnnotationInvariants({ threads, marks, doc: doc5 }) {
           errors.push({ code: "text-mismatch", threadId: t.threadId, text: t.text, markText: m.text });
         }
         const qText = m.text != null && m.text !== "" ? m.text : t.text || "";
-        const q = assessAnchorTextQuality(qText, plainDoc);
+        const quoteExact = t.anchor && t.anchor.quote && t.anchor.quote.exact || t.text || "";
+        const q = assessAnchorTextQuality(qText, plainDoc, { quoteExact });
         if (!q.ok) {
           for (const code of q.codes) {
             errors.push({
@@ -57214,9 +57206,9 @@ function planAnnotationAnchorHeal(input = {}) {
         break;
       }
       case "anchor-text-too-short":
-      case "anchor-text-midword":
       case "anchor-text-nonunique":
-      case "anchor-text-empty": {
+      case "anchor-text-empty":
+      case "anchor-text-truncated-from-quote": {
         if (!tid) break;
         push({ type: "reattach-needed", threadId: tid, reason: e.code, count: ms.length });
         break;
@@ -63078,9 +63070,9 @@ function createSaveSnapshot(options = {}) {
         "text-mismatch",
         "attached-missing-mark",
         "anchor-text-too-short",
-        "anchor-text-midword",
         "anchor-text-nonunique",
-        "anchor-text-empty"
+        "anchor-text-empty",
+        "anchor-text-truncated-from-quote"
       ]);
       const hard = (audit.errors || []).filter((e) => e && hardCodes.has(e.code));
       if (hard.length) {
@@ -65616,9 +65608,8 @@ function createAnnotationThread(from2, to, text22, opts = null) {
       const plain = State2.editor.state.doc.textBetween(0, State2.editor.state.doc.content.size, "\n", "\n");
       const q = assessAnchorTextQuality(text22, plain);
       if (!q.ok) {
-        let msg = "\u9009\u533A\u592A\u77ED\u6216\u4E0D\u552F\u4E00\uFF0C\u8BF7\u9009\u66F4\u957F\u7684\u5B8C\u6574\u8BCD\u7EC4";
-        if (q.codes && q.codes.includes("anchor-text-midword")) msg = "\u9009\u533A\u5207\u5230\u4E86\u5355\u8BCD\u4E2D\u95F4\uFF0C\u8BF7\u6269\u5927\u5230\u5B8C\u6574\u8BCD\u7EC4";
-        else if (q.codes && q.codes.includes("anchor-text-nonunique")) msg = "\u9009\u533A\u5728\u6587\u4E2D\u4E0D\u552F\u4E00\uFF0C\u8BF7\u9009\u66F4\u957F\u7247\u6BB5";
+        let msg = "\u9009\u533A\u4E0D\u53EF\u7528\uFF0C\u8BF7\u6362\u4E00\u6BB5\u552F\u4E00\u6587\u672C";
+        if (q.codes && q.codes.includes("anchor-text-nonunique")) msg = "\u9009\u533A\u5728\u6587\u4E2D\u4E0D\u552F\u4E00\uFF0C\u8BF7\u9009\u66F4\u957F\u7247\u6BB5";
         else if (q.codes && q.codes.includes("anchor-text-too-short")) msg = `\u9009\u533A\u81F3\u5C11 ${MIN_ANCHOR_TEXT_LEN} \u4E2A\u5B57\u7B26`;
         showToast(msg, 2400);
         setStatus("\u63D0\u793A", msg);

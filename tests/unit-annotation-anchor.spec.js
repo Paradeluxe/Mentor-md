@@ -388,16 +388,24 @@ const t = async (name, fn) => {
       assert.ok(!plan.actions.some((a) => a.threadId === 't-del' && (a.type === 'clear-soft-orphan' || a.type === 'sync-from-mark')));
     });
 
-    await t('assessAnchorTextQuality catches short/midword/nonunique', async () => {
+        await t('assessAnchorTextQuality: char-level ok; short/nonunique/truncated hard', async () => {
       assert.equal(typeof mod.assessAnchorTextQuality, 'function');
       const short = mod.assessAnchorTextQuality('al st', 'functional states that dominate the aging');
       assert.equal(short.ok, false);
       assert.ok(short.codes.includes('anchor-text-too-short'));
 
+      // Mid-token / char-level alone is ALLOWED (字之间)
       const doc = 'simple "more time in one\'s own state" account. The cost is therefore not carried by occupancy';
-      const mid = mod.assessAnchorTextQuality('unt. The cost is therefore not carried', doc);
-      assert.equal(mid.ok, false);
-      assert.ok(mid.codes.includes('anchor-text-midword'), JSON.stringify(mid));
+      const midOk = mod.assessAnchorTextQuality('unt. The cost is therefore not carried', doc);
+      assert.equal(midOk.ok, true, 'mid-token alone must pass: ' + JSON.stringify(midOk));
+      assert.ok(!midOk.codes.includes('anchor-text-midword'));
+
+      // Same fragment is drift when a longer unique quote.exact is remembered
+      const trunc = mod.assessAnchorTextQuality('unt. The cost is therefore not carried', doc, {
+        quoteExact: '"more time in one\'s own state" account. The cost is therefore not carried'
+      });
+      assert.equal(trunc.ok, false, JSON.stringify(trunc));
+      assert.ok(trunc.codes.includes('anchor-text-truncated-from-quote'));
 
       const multi = mod.assessAnchorTextQuality('state', 'state one and state two and state three');
       assert.equal(multi.ok, false);
@@ -410,24 +418,35 @@ const t = async (name, fn) => {
       assert.equal(good.ok, true, JSON.stringify(good));
     });
 
-    await t('audit hard-fails false-healthy midword fragment', async () => {
+    await t('audit allows intentional mid-token; hard-fails truncated-from-quote', async () => {
       const doc = 'account. The cost is therefore not carried by occupancy';
-      // live mark is mid-word fragment that matches itself — old path would be healthy
-      const threads = [{
+      const intentional = [{
         threadId: 't-mid',
         text: 'unt. The cost is therefore not carried',
         range: { from: 2, to: 40 },
-        anchor: { status: 'attached' }
+        anchor: { status: 'attached', quote: { exact: 'unt. The cost is therefore not carried' } }
       }];
       const marks = [{ threadId: 't-mid', from: 2, to: 40, text: 'unt. The cost is therefore not carried' }];
-      const a = mod.auditAnnotationInvariants({ threads, marks, doc });
-      assert.equal(a.healthy, false);
-      assert.ok(a.errors.some((e) => e.code === 'anchor-text-midword'), JSON.stringify(a.errors));
-      const plan = mod.planAnnotationAnchorHeal({ threads, marks, errors: a.errors, doc });
+      const a1 = mod.auditAnnotationInvariants({ threads: intentional, marks, doc });
+      assert.equal(a1.healthy, true, 'intentional char-level: ' + JSON.stringify(a1.errors));
+
+      const drifted = [{
+        threadId: 't-mid',
+        text: 'unt. The cost is therefore not carried',
+        range: { from: 2, to: 40 },
+        anchor: {
+          status: 'attached',
+          quote: { exact: 'account. The cost is therefore not carried by occupancy' }
+        }
+      }];
+      const a2 = mod.auditAnnotationInvariants({ threads: drifted, marks, doc });
+      assert.equal(a2.healthy, false);
+      assert.ok(a2.errors.some((e) => e.code === 'anchor-text-truncated-from-quote'), JSON.stringify(a2.errors));
+      const plan = mod.planAnnotationAnchorHeal({ threads: drifted, marks, errors: a2.errors, doc });
       assert.ok(plan.actions.some((x) => x.type === 'reattach-needed' && x.threadId === 't-mid'));
     });
 
-    await t('plan refuses sync-from-mark when mark text is low quality', async () => {
+    await t('plan refuses sync-from-mark when mark text is low quality (too short)', async () => {
       const doc = 'prefix account. The cost is therefore not carried tail';
       const threads = [{
         threadId: 't-q',
@@ -435,7 +454,7 @@ const t = async (name, fn) => {
         range: { from: 0, to: 99 },
         anchor: { status: 'attached' }
       }];
-      const marks = [{ threadId: 't-q', from: 9, to: 47, text: 'unt. The cost is therefore not carried' }];
+      const marks = [{ threadId: 't-q', from: 0, to: 5, text: 'prefi' }];
       const audit = mod.auditAnnotationInvariants({ threads, marks, doc });
       const plan = mod.planAnnotationAnchorHeal({ threads, marks, errors: audit.errors, doc });
       assert.ok(!plan.actions.some((a) => a.type === 'sync-from-mark'));

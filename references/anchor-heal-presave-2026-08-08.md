@@ -1,32 +1,27 @@
-# Anchor auto-heal + quality hard-gate (2026-08-08 / v=285)
+# Anchor auto-heal + quality hard-gate (2026-08-08 / v=286)
 
-## Classes blocked forever (product)
+## Product rule: character-level is first-class
+User may select **字之间 / mid-token** ranges. That is intentional DOCX-char-range style.
+**Mid-word alone is never a hard error.**
+
+## Hard fails only
 1. Structural: duplicate-mark, range/text-mismatch, attached-missing-mark, soft orphan+mark
-2. **Quality (false-healthy drift):**
+2. Quality:
    - `anchor-text-too-short` (< MIN_ANCHOR_TEXT_LEN=8)
-   - `anchor-text-midword` (starts/ends inside a word token)
-   - `anchor-text-nonunique` (exact text appears >1 in plain doc)
+   - `anchor-text-nonunique`
    - `anchor-text-empty`
+   - `anchor-text-truncated-from-quote` — live text is a strict shorter substring of a **longer unique** `quote.exact` (shrink drift). Intentional char-level keeps `quote.exact === text` → no fire.
 
 ## Behavior
-- `assessAnchorTextQuality` in `modules/annotation-anchor.js`
-- Hard audit fails on quality codes (save blocked if still attached+bad after heal)
-- `planAnnotationAnchorHeal` → `reattach-needed` (never sync-from-mark a low-quality mark)
-- `healLiveAnnotationAnchors` expands via unique mdRange / longer quote; quality-reject → orphan (no short mark kept)
-- Create path: `createAnnotationThread` rejects short/midword/nonunique selection
-- Pre-save heal still uses **content.md** for mdRange slices (not getMarkdown)
-
-## Not auto-healed (by design)
-- duplicate-threadId, ambiguous-has-mark, mark-collision, hard deleted
-- True multi-hit ambiguity without longer unique quote/mdRange → orphan banner, not silent wrong attach
+- `assessAnchorTextQuality(text, doc, { quoteExact })`
+- Heal expands via mdRange / longer quote; never sync-from-mark a too-short mark
+- Create: block short + nonunique only (not mid-token)
+- mdRange slices still use **content.md**, not getMarkdown()
 
 ## Gates
-- `node tests/unit-annotation-anchor.spec.js` (30+)
+- `node tests/unit-annotation-anchor.spec.js` (30)
 - `node tmp/probe-anchor-heal-spill.mjs`
-- `node tmp/probe-anchor-quality-gate.mjs` (poison `al st` → expand or hard-block; never save short)
+- `node tmp/probe-anchor-quality-gate.mjs`
 
-## User action
-Ctrl+F5 to `?v=285+`, reopen `.mentor`.
-
-## Honest limit
-Cannot math-prove zero bugs forever. Closed the known recurrence class: mid-word/short fragments that still matched their own marks and passed audit.
+## User
+Ctrl+F5 → `?v=286+`

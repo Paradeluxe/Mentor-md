@@ -63,17 +63,19 @@ function samePlain(a, b) {
 /** Minimum plain-text length for a savable attached text anchor (image-only exempt). */
 export const MIN_ANCHOR_TEXT_LEN = 8;
 
-function isWordChar(ch) {
-  if (!ch) return false;
-  const c = String(ch);
-  // Latin/digit + common CJK — mid-token cut detection.
-  return /[A-Za-z0-9\u00C0-\u024F\u4E00-\u9FFF\u3400-\u4DBF]/.test(c);
-}
-
 /**
- * Quality gate for attached anchor text. Catches the "false healthy" class:
- * mid-word fragments, ultra-short tokens, non-unique exact strings.
- * `doc` should be the same plain string used for audit (PM textBetween).
+ * Quality gate for attached anchor text.
+ *
+ * Character-level / mid-token ranges are FIRST-CLASS (user may annotate 字之间).
+ * Hard fails only:
+ *   - empty
+ *   - too-short (< MIN)
+ *   - non-unique exact string in plain doc
+ *   - truncated-from-quote (live text is a strict shorter substring of a unique quote.exact)
+ *
+ * Mid-word alone is NEVER a hard error.
+ * `doc` = plain string used for audit (PM textBetween).
+ * options.quoteExact = optional longer canonical quote from thread.anchor.quote.exact
  */
 export function assessAnchorTextQuality(text, doc = '', options = {}) {
   const minLen = options.minLen != null ? options.minLen : MIN_ANCHOR_TEXT_LEN;
@@ -91,17 +93,23 @@ export function assessAnchorTextQuality(text, doc = '', options = {}) {
     const offs = findOccurrences(plainDoc, t);
     occurrences = offs.length;
     if (occurrences > 1) codes.push('anchor-text-nonunique');
-    if (occurrences >= 1) {
-      const midAll = offs.every((i) => {
-        const before = i > 0 ? plainDoc[i - 1] : '';
-        const after = i + t.length < plainDoc.length ? plainDoc[i + t.length] : '';
-        const startMid = isWordChar(before) && isWordChar(t[0]);
-        const endMid = isWordChar(after) && isWordChar(t[t.length - 1]);
-        return startMid || endMid;
-      });
-      if (midAll) codes.push('anchor-text-midword');
+  }
+
+  // Drift signal: mark shrunk inside a longer unique quote the thread still remembers.
+  // Intentional char-level selection keeps quote.exact === text, so this does not fire.
+  const quoteExact = options && options.quoteExact != null ? String(options.quoteExact) : '';
+  if (
+    quoteExact &&
+    t &&
+    quoteExact.length >= t.length + 8 &&
+    quoteExact.includes(t) &&
+    quoteExact !== t
+  ) {
+    if (!plainDoc || findOccurrences(plainDoc, quoteExact).length === 1) {
+      codes.push('anchor-text-truncated-from-quote');
     }
   }
+
   const seen = new Set();
   const uniq = [];
   for (const c of codes) {
@@ -598,9 +606,10 @@ export function auditAnnotationInvariants({ threads, marks, doc }) {
         if (t.text != null && m.text != null && t.text !== m.text && status !== 'edited') {
           errors.push({ code: 'text-mismatch', threadId: t.threadId, text: t.text, markText: m.text });
         }
-        // Quality: reject mid-word / ultra-short / non-unique attached text (false-healthy drift).
+        // Quality: short / non-unique / truncated-from-quote. Char-level mid-token is allowed.
         const qText = (m.text != null && m.text !== '') ? m.text : (t.text || '');
-        const q = assessAnchorTextQuality(qText, plainDoc);
+        const quoteExact = (t.anchor && t.anchor.quote && t.anchor.quote.exact) || t.text || '';
+        const q = assessAnchorTextQuality(qText, plainDoc, { quoteExact });
         if (!q.ok) {
           for (const code of q.codes) {
             errors.push({
@@ -717,9 +726,9 @@ export function planAnnotationAnchorHeal(input = {}) {
         break;
       }
       case 'anchor-text-too-short':
-      case 'anchor-text-midword':
       case 'anchor-text-nonunique':
-      case 'anchor-text-empty': {
+      case 'anchor-text-empty':
+      case 'anchor-text-truncated-from-quote': {
         if (!tid) break;
         push({ type: 'reattach-needed', threadId: tid, reason: e.code, count: ms.length });
         break;

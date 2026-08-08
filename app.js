@@ -3362,9 +3362,9 @@ function createSaveSnapshot(options = {}) {
         "text-mismatch",
         "attached-missing-mark",
         "anchor-text-too-short",
-        "anchor-text-midword",
         "anchor-text-nonunique",
-        "anchor-text-empty"
+        "anchor-text-empty",
+        "anchor-text-truncated-from-quote"
       ]);
       const hard = (audit.errors || []).filter((e) => e && hardCodes.has(e.code));
       if (hard.length) {
@@ -5949,9 +5949,9 @@ function createAnnotationThread(from2, to, text2, opts = null) {
       const plain = State.editor.state.doc.textBetween(0, State.editor.state.doc.content.size, "\n", "\n");
       const q = assessAnchorTextQuality(text2, plain);
       if (!q.ok) {
-        let msg = "\u9009\u533A\u592A\u77ED\u6216\u4E0D\u552F\u4E00\uFF0C\u8BF7\u9009\u66F4\u957F\u7684\u5B8C\u6574\u8BCD\u7EC4";
-        if (q.codes && q.codes.includes("anchor-text-midword")) msg = "\u9009\u533A\u5207\u5230\u4E86\u5355\u8BCD\u4E2D\u95F4\uFF0C\u8BF7\u6269\u5927\u5230\u5B8C\u6574\u8BCD\u7EC4";
-        else if (q.codes && q.codes.includes("anchor-text-nonunique")) msg = "\u9009\u533A\u5728\u6587\u4E2D\u4E0D\u552F\u4E00\uFF0C\u8BF7\u9009\u66F4\u957F\u7247\u6BB5";
+        // Char-level / mid-token selection is allowed. Only short / non-unique blocked at create.
+        let msg = "\u9009\u533A\u4E0D\u53EF\u7528\uFF0C\u8BF7\u6362\u4E00\u6BB5\u552F\u4E00\u6587\u672C";
+        if (q.codes && q.codes.includes("anchor-text-nonunique")) msg = "\u9009\u533A\u5728\u6587\u4E2D\u4E0D\u552F\u4E00\uFF0C\u8BF7\u9009\u66F4\u957F\u7247\u6BB5";
         else if (q.codes && q.codes.includes("anchor-text-too-short")) msg = `\u9009\u533A\u81F3\u5C11 ${MIN_ANCHOR_TEXT_LEN} \u4E2A\u5B57\u7B26`;
         showToast(msg, 2400);
         setStatus("\u63D0\u793A", msg);
