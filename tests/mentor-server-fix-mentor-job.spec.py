@@ -162,7 +162,63 @@ def main():
                 raw = exc.read().decode("utf-8", errors="ignore")
                 assert "staged-not-allowed" in raw, raw
 
+
+            # --- concurrent different paths (custom slow cmd) ---
+            os.environ["MENTOR_AI_MAX_CONCURRENT"] = "2"
+            # slow job so both stay active
+            os.environ["MENTOR_FIX_MENTOR_CMD"] = json.dumps([
+                sys.executable, "-c",
+                "import time; print('slow-a'); time.sleep(1.2); print('done-a')"
+            ])
+            mentor2 = Path(tmp) / "other.mentor"
+            mentor2.write_bytes(b"PK\x03\x04mentor-test-v2")
+            mentor3 = Path(tmp) / "third.mentor"
+            mentor3.write_bytes(b"PK\x03\x04mentor-test-v3")
+
+            code_a, body_a = http_json(
+                f"{base}/run-fix-mentor",
+                {"path": str(mentor), "token": token},
+            )
+            assert code_a == 202, (code_a, body_a)
+            code_b, body_b = http_json(
+                f"{base}/run-fix-mentor",
+                {"path": str(mentor2), "token": token},
+            )
+            assert code_b == 202, (code_b, body_b)
+            assert body_a["id"] != body_b["id"]
+
+            # third should hit concurrent cap while first two still running
+            code_c, body_c = http_json(
+                f"{base}/run-fix-mentor",
+                {"path": str(mentor3), "token": token},
+            )
+            assert code_c == 409, (code_c, body_c)
+            assert body_c.get("error") == "busy", body_c
+            assert "并发" in (body_c.get("message") or "") or body_c.get("maxConcurrent") == 2
+
+            # same-path while A running → already-running
+            code_a2, body_a2 = http_json(
+                f"{base}/run-fix-mentor",
+                {"path": str(mentor), "token": token},
+            )
+            assert code_a2 == 409, (code_a2, body_a2)
+            assert body_a2.get("error") == "already-running", body_a2
+
+            # wait both finish
+            for jid in (body_a["id"], body_b["id"]):
+                deadline = time.time() + 10
+                while time.time() < deadline:
+                    q = urllib.parse.urlencode({"id": jid, "token": token})
+                    c, b = http_json(f"{base}/fix-mentor-job?{q}")
+                    if b and b.get("status") in ("done", "error"):
+                        assert b.get("status") == "done", b
+                        break
+                    time.sleep(0.1)
+                else:
+                    raise AssertionError("timeout waiting " + jid)
+
             print("PASS mentor-server-fix-mentor-job")
+
         finally:
             httpd.shutdown()
             # cleanup env

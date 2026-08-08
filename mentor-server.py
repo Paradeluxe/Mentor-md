@@ -594,6 +594,45 @@ def find_active_fix_mentor_job(path=None):
     return None
 
 
+def list_active_fix_mentor_jobs():
+    """All in-flight fix-mentor jobs (any path)."""
+    with FIX_MENTOR_LOCK:
+        out = []
+        for job in FIX_MENTOR_JOBS.values():
+            st = job.get('status')
+            if st in ('starting', 'running', 'queued', 'saving'):
+                out.append(job)
+        return out
+
+
+def count_active_fix_mentor_jobs(path=None):
+    with FIX_MENTOR_LOCK:
+        n = 0
+        for job in FIX_MENTOR_JOBS.values():
+            st = job.get('status')
+            if st not in ('starting', 'running', 'queued', 'saving'):
+                continue
+            if path is None:
+                n += 1
+            elif os.path.abspath(job.get('path') or '') == os.path.abspath(path):
+                n += 1
+        return n
+
+
+def max_concurrent_fix_mentor_jobs():
+    """Cap concurrent AI jobs (different .mentor files). Env MENTOR_AI_MAX_CONCURRENT."""
+    raw = (os.environ.get('MENTOR_AI_MAX_CONCURRENT') or '').strip()
+    try:
+        n = int(raw) if raw else 2
+    except Exception:
+        n = 2
+    if n < 1:
+        n = 1
+    if n > 16:
+        n = 16
+    return n
+
+
 def get_fix_mentor_job(job_id):
     with FIX_MENTOR_LOCK:
         return FIX_MENTOR_JOBS.get(job_id)
@@ -786,10 +825,17 @@ def start_fix_mentor_job(path, thread_id='', scope='all', staged=False, source_n
     if staged:
         return None, 'staged-not-allowed'
 
-    active = find_active_fix_mentor_job()
-    if active:
-        same = os.path.abspath(active.get('path') or '') == abspath
-        return active, ('already-running' if same else 'busy')
+    active_same = find_active_fix_mentor_job(path=abspath)
+    if active_same:
+        return active_same, 'already-running'
+
+    # Different files may run in parallel up to MENTOR_AI_MAX_CONCURRENT.
+    active_n = count_active_fix_mentor_jobs()
+    max_n = max_concurrent_fix_mentor_jobs()
+    if active_n >= max_n:
+        # Prefer returning another active job so UI can show what is running.
+        other = find_active_fix_mentor_job()
+        return other, 'busy'
 
     scope = scope if scope in ('all', 'thread') else 'all'
     thread_id = str(thread_id or '').strip()
@@ -1329,10 +1375,24 @@ class MentorHandler(http.server.SimpleHTTPRequestHandler):
                 payload = public_fix_mentor_job(job) or {}
                 payload['ok'] = False
                 payload['error'] = err
-                payload['message'] = (
-                    '该文件已有 AI 任务在跑' if err == 'already-running'
-                    else '已有其它 AI 任务在跑，请稍候'
-                )
+                max_n = max_concurrent_fix_mentor_jobs()
+                active_n = count_active_fix_mentor_jobs()
+                payload['maxConcurrent'] = max_n
+                payload['activeCount'] = active_n
+                if err == 'already-running':
+                    payload['message'] = '该文件已有 AI 任务在跑'
+                else:
+                    other_name = ''
+                    try:
+                        other_name = os.path.basename((job or {}).get('path') or '') or ''
+                    except Exception:
+                        other_name = ''
+                    if other_name:
+                        payload['message'] = (
+                            f'AI 并发已满（最多 {max_n} 个）。另有任务在处理 {other_name}，请稍候'
+                        )
+                    else:
+                        payload['message'] = f'AI 并发已满（最多 {max_n} 个），请稍候'
                 self._send_json(409, payload)
                 return
             if err:

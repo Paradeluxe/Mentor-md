@@ -121,6 +121,8 @@ def apply_pi_event_to_job(job: Dict[str, Any], event: Dict[str, Any]) -> None:
 
 def ai_connection_health(*, warm: bool = False) -> Dict[str, Any]:
     """Connection layer status (no paper job)."""
+    from .session_manager import max_concurrent_cap, max_sessions_cap
+
     det = detect_pi()
     skill_dir = None
     skill_err = None
@@ -145,6 +147,10 @@ def ai_connection_health(*, warm: bool = False) -> Dict[str, Any]:
         skills.append("browser-skill")
     if not skill_dir:
         skills = []
+    busy_count = int(st.get("busy_count") or 0)
+    session_count = int(st.get("session_count") or 0)
+    max_conc = int(st.get("max_concurrent") or max_concurrent_cap())
+    max_sess = int(st.get("max_sessions") or max_sessions_cap())
     return {
         "ok": True,
         "service": "mentor-ai-pi",
@@ -162,8 +168,14 @@ def ai_connection_health(*, warm: bool = False) -> Dict[str, Any]:
         "browserSkillDir": str(browser_dir) if browser_dir else "",
         "skills": skills,
         "busy": bool(st.get("busy")),
+        "busyCount": busy_count,
+        "sessionCount": session_count,
+        "maxConcurrent": max_conc,
+        "maxSessions": max_sess,
         "hasSession": bool(st.get("has_session")),
         "activeMentor": st.get("active_mentor"),
+        "activeMentors": list(st.get("active_mentors") or []),
+        "sessions": list(st.get("sessions") or []),
         "checkedAt": time.time(),
     }
 
@@ -196,6 +208,7 @@ def run_pi_fix_mentor_job(
         logs.append(str(line)[:500])
         job["lastLog"] = str(line)[:240]
 
+    mentor_key = os.path.abspath(abspath) if abspath else ""
     try:
         job["status"] = "running"
         job["message"] = "确保 Pi 会话…"
@@ -204,9 +217,10 @@ def run_pi_fix_mentor_job(
         job["step"] = 1
         job["progress"] = 15
         _log("[pi] ensure_for_mentor")
+        # Per-document session: does not tear down other open .mentor Pi processes.
         mgr.ensure_for_mentor(abspath)
-        client = mgr.get_client()
-        mgr.set_busy(True)
+        client = mgr.get_client(abspath)
+        mgr.set_busy(True, abspath)
         job["message"] = "Pi / fix-mentor 运行中"
         job["phase"] = "running"
         job["phaseLabel"] = "AI 运行中"
@@ -297,7 +311,11 @@ def run_pi_fix_mentor_job(
         _log(f"[pi-error] {e}")
     finally:
         try:
-            mgr.set_busy(False)
+            # Clear busy on the same document slot only.
+            if mentor_key:
+                mgr.set_busy(False, mentor_key)
+            else:
+                mgr.set_busy(False)
         except Exception:
             pass
         job["finishedAt"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
