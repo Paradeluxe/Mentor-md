@@ -118,6 +118,7 @@ import {
   captureAnchorEvidence,
   projectLegacyFlags,
   auditAnnotationInvariants,
+  planAnnotationAnchorHeal,
   applyStatusToThread
 } from './modules/annotation-anchor.js';
 import {
@@ -2891,13 +2892,9 @@ function buildAnnotationsSidecar() {
   } catch (_) {}
   return State.annotations.filter((x) => x && typeof x === "object" && x.threadId).map(serializeAnnotationThread).filter(Boolean);
 }
-function collectLiveAnnotationAudit() {
-  if (!State.editor) {
-    return auditAnnotationInvariants({ threads: State.annotations || [], marks: [], doc: "" });
-  }
-  const doc5 = State.editor.state.doc;
-  const markType = State.editor.schema.marks.annotation;
+function collectPhysicalAnnotationMarks(doc5, markType) {
   const marks = [];
+  if (!doc5 || !markType) return marks;
   doc5.descendants((node, pos) => {
     if (!node.isText || !node.marks) return;
     for (const m of node.marks) {
@@ -2906,11 +2903,370 @@ function collectLiveAnnotationAudit() {
           threadId: m.attrs.threadId,
           from: pos,
           to: pos + node.nodeSize,
-          text: node.text || ""
+          text: node.text || "",
+          mark: m
         });
       }
     }
   });
+  return marks;
+}
+
+/** Unique PM range for exact plain text across text nodes (may cross nodes). Null if 0/2+ hits. */
+function findUniquePmTextRange(doc5, text2) {
+  if (!doc5 || !text2) return null;
+  const needles = [];
+  const seen = new Set();
+  const push = (n) => {
+    if (!n || seen.has(n)) return;
+    seen.add(n);
+    needles.push(n);
+  };
+  push(String(text2));
+  try {
+    const plain = mdEmphasisToPlain(String(text2));
+    if (plain) push(plain);
+  } catch (_) {}
+  const positions = [];
+  doc5.descendants((node, pos) => {
+    if (!node.isText) return;
+    const t = node.text || "";
+    for (let i = 0; i < t.length; i++) positions.push({ pm: pos + i, ch: t[i] });
+  });
+  if (!positions.length) return null;
+  const joined = positions.map((p) => p.ch).join("");
+  for (const needle of needles) {
+    const hits = [];
+    let from = 0;
+    while (from < joined.length) {
+      const i = joined.indexOf(needle, from);
+      if (i < 0) break;
+      hits.push(i);
+      from = i + 1;
+      if (hits.length > 1) break;
+    }
+    if (hits.length === 1) {
+      const i = hits[0];
+      const startPm = positions[i].pm;
+      const endPm = positions[i + needle.length - 1].pm + 1;
+      return { from: startPm, to: endPm, text: needle };
+    }
+  }
+  return null;
+}
+
+/**
+ * Auto-heal recoverable anchor audit failures before save/open hard-block.
+ * No quote-fuzzy multi-hit attach. Uses mdRange first, then unique exact text.
+ */
+function healLiveAnnotationAnchors(options = {}) {
+  const editor2 = State.editor;
+  if (!editor2) return { healed: false, applied: [], audit: null };
+  const markType = editor2.schema.marks.annotation;
+  if (!markType) return { healed: false, applied: [], audit: null };
+
+  const collectMarks = () => collectPhysicalAnnotationMarks(editor2.state.doc, markType);
+  let marks = collectMarks();
+  let audit = auditAnnotationInvariants({
+    threads: State.annotations || [],
+    marks,
+    doc: editor2.state.doc.textBetween(0, editor2.state.doc.content.size, "\n", "\n")
+  });
+  if (audit.healthy) return { healed: false, applied: [], audit };
+
+  const plan = planAnnotationAnchorHeal({
+    threads: State.annotations || [],
+    marks,
+    errors: audit.errors || []
+  });
+  if (!plan.recoverable || !plan.actions.length) {
+    return { healed: false, applied: [], audit, plan };
+  }
+
+  const applied = [];
+  const thrById = new Map((State.annotations || []).filter((t) => t && t.threadId).map((t) => [t.threadId, t]));
+  // mdRange coordinates are stamped against content.md (currentFile.content).
+  // getMarkdown() can differ in whitespace/heading markers → wrong slice → short/wrong reattach.
+  // Prefer: explicit open md → stored content.md → live getMarkdown last.
+  let mdText = "";
+  if (options && typeof options.mdText === "string" && options.mdText) mdText = options.mdText;
+  if (!mdText) {
+    try {
+      if (State.currentFile && typeof State.currentFile.content === "string") mdText = State.currentFile.content;
+    } catch (_) {}
+  }
+  if (!mdText) {
+    try {
+      if (typeof getMarkdown === "function") mdText = getMarkdown() || "";
+    } catch (_) {}
+  }
+
+  const removeThreadMarks = (tid) => {
+    let removed = 0;
+    for (let pass = 0; pass < 3; pass++) {
+      const pieces = collectPhysicalAnnotationMarks(editor2.state.doc, markType).filter((m) => m.threadId === tid);
+      if (!pieces.length) break;
+      let tr2 = editor2.state.tr;
+      for (const p of pieces.sort((a, b) => b.from - a.from)) {
+        // Prefer instance remove so nested other-thread marks stay.
+        if (p.mark) tr2 = tr2.removeMark(p.from, p.to, p.mark);
+        else tr2 = tr2.removeMark(p.from, p.to, markType);
+        removed++;
+      }
+      tr2.setMeta("addToHistory", false);
+      tr2.setMeta("__activeMarkSync", true);
+      editor2.view.dispatch(tr2);
+    }
+    return removed;
+  };
+
+  const attachThreadRange = (thr, from2, to, reason) => {
+    if (!thr || typeof from2 !== "number" || typeof to !== "number" || from2 >= to) return false;
+    const doc5 = editor2.state.doc;
+    if (from2 < 0 || to > doc5.content.size) return false;
+    let live = "";
+    try {
+      live = doc5.textBetween(from2, to, " ");
+    } catch (_) {
+      return false;
+    }
+    const tr2 = editor2.state.tr;
+    tr2.addMark(from2, to, markType.create(annotationMarkAttrs(thr, { threadId: thr.threadId, resolved: !!thr.resolved })));
+    tr2.setMeta("addToHistory", false);
+    tr2.setMeta("__activeMarkSync", true);
+    editor2.view.dispatch(tr2);
+    thr.range = { from: from2, to };
+    thr.ranges = [{ from: from2, to, text: live }];
+    thr.invalid = false;
+    thr.deleted = false;
+    thr.fuzzy = false;
+    thr.invalidReason = void 0;
+    if (live) thr.text = live;
+    try {
+      normalizeThreadQuoteToLive(thr, doc5, from2, to);
+    } catch (_) {}
+    try {
+      syncThreadAnchorEvidence(thr, doc5, { from: from2, to }, { exact: thr.text || live, status: "attached", confidence: 1 });
+    } catch (_) {
+      if (thr.anchor && typeof thr.anchor === "object") {
+        thr.anchor = {
+          ...thr.anchor,
+          status: "attached",
+          confidence: 1,
+          position: { from: from2, to, startAssoc: 1, endAssoc: -1 },
+          quote: {
+            exact: thr.text || live,
+            prefix: thr.prefix || "",
+            suffix: thr.suffix || ""
+          }
+        };
+      }
+    }
+    applied.push({ type: "reattach", threadId: thr.threadId, from: from2, to, reason, text: (thr.text || live).slice(0, 80) });
+    return true;
+  };
+
+  const liveMatchesMd = (from2, to, mdSlice) => {
+    if (!mdSlice || typeof from2 !== "number" || from2 >= to) return false;
+    let live = "";
+    try {
+      live = editor2.state.doc.textBetween(from2, to, " ");
+    } catch (_) {
+      return false;
+    }
+    if (!live) return false;
+    let plainMd = mdSlice;
+    let plainLive = live;
+    try { plainMd = mdEmphasisToPlain(mdSlice) || mdSlice; } catch (_) {}
+    try { plainLive = mdEmphasisToPlain(live) || live; } catch (_) {}
+    if (live === mdSlice || live === plainMd || plainLive === plainMd) return true;
+    // whitespace-flexible equality
+    const norm = (s) => String(s).replace(/\s+/g, " ").trim();
+    return norm(plainLive) === norm(plainMd);
+  };
+
+  const resolveReattachRange = (thr) => {
+    if (!thr) return null;
+    // Prefer unique full mdRange slice in PM text nodes (stable across heading boundaries).
+    if (mdText && thr.mdRange && typeof isMdRange === "function" && isMdRange(thr.mdRange)) {
+      const slice = mdText.slice(thr.mdRange.from, thr.mdRange.to);
+      if (slice && slice.length >= 4) {
+        try {
+          const hitMd = findUniquePmTextRange(editor2.state.doc, slice);
+          if (hitMd && liveMatchesMd(hitMd.from, hitMd.to, slice)) {
+            return { from: hitMd.from, to: hitMd.to, via: "mdRange-unique", text: hitMd.text };
+          }
+        } catch (_) {}
+        try {
+          const pm = pmRangeFromMdRange(editor2.state.doc, mdText, thr.mdRange, " ");
+          if (pm && typeof pm.from === "number" && pm.from < pm.to && liveMatchesMd(pm.from, pm.to, slice)) {
+            return { from: pm.from, to: pm.to, via: "mdRange-map", text: slice };
+          }
+        } catch (_) {}
+      }
+    }
+    const candidates = [];
+    if (thr.anchor && thr.anchor.quote && thr.anchor.quote.exact) candidates.push(String(thr.anchor.quote.exact));
+    if (thr.text) candidates.push(String(thr.text));
+    for (const c of candidates) {
+      if (!c || c.length < 12) continue;
+      const hit = findUniquePmTextRange(editor2.state.doc, c);
+      if (hit) return { from: hit.from, to: hit.to, via: "unique-text", text: hit.text };
+    }
+    return null;
+  };
+
+  for (const act of plan.actions) {
+    if (act.type !== "strip-unknown-marks") continue;
+    const n = removeThreadMarks(act.threadId);
+    applied.push({ type: "strip-unknown-marks", threadId: act.threadId, removed: n });
+  }
+
+  const reattachDone = new Set();
+  for (const act of plan.actions) {
+    if (act.type !== "reattach-needed") continue;
+    if (!act.threadId || reattachDone.has(act.threadId)) continue;
+    reattachDone.add(act.threadId);
+    const thr = thrById.get(act.threadId);
+    if (!thr) continue;
+    removeThreadMarks(act.threadId);
+    const target = resolveReattachRange(thr);
+    if (!target) {
+      applied.push({ type: "reattach-failed", threadId: act.threadId, reason: act.reason });
+      // Strip bad marks already done. Soft-orphan only — keep mdRange for later repair.
+      thr.range = null;
+      thr.ranges = [];
+      thr.deleted = false;
+      thr.invalid = true;
+      thr.fuzzy = false;
+      thr.invalidReason = act.reason || "reattach-failed";
+      if (thr.anchor && typeof thr.anchor === "object") {
+        thr.anchor = {
+          ...thr.anchor,
+          status: "orphaned",
+          confidence: 0,
+          // keep quote.exact if still a useful locator
+        };
+      }
+      continue;
+    }
+    const okAtt = attachThreadRange(thr, target.from, target.to, `${act.reason || "reattach"}:${target.via || ""}`);
+    if (okAtt && target.via && String(target.via).startsWith("mdRange") && mdText && thr.mdRange && isMdRange(thr.mdRange)) {
+      // Canonical quote = mdRange slice (not getMarkdown-derived short live)
+      const canon = mdText.slice(thr.mdRange.from, thr.mdRange.to);
+      if (canon && canon.length >= (thr.text || "").length) {
+        thr.text = mdEmphasisToPlain(canon) || canon;
+        if (thr.anchor && thr.anchor.quote) {
+          thr.anchor = {
+            ...thr.anchor,
+            quote: { ...thr.anchor.quote, exact: thr.text },
+            status: "attached",
+            confidence: 1
+          };
+        }
+      }
+    }
+  }
+
+  marks = collectMarks();
+  const logical = typeof coalesceAnnotationMarkPieces === "function"
+    ? coalesceAnnotationMarkPieces(marks)
+    : marks;
+  const logicalByTid = new Map();
+  for (const m of logical) {
+    if (!logicalByTid.has(m.threadId)) logicalByTid.set(m.threadId, []);
+    logicalByTid.get(m.threadId).push(m);
+  }
+  for (const act of plan.actions) {
+    if (act.type !== "sync-from-mark" && act.type !== "clear-soft-orphan") continue;
+    const thr = thrById.get(act.threadId);
+    if (!thr) continue;
+    if (act.type === "clear-soft-orphan") {
+      thr.invalid = false;
+      thr.deleted = false;
+      thr.fuzzy = false;
+      thr.invalidReason = void 0;
+      if (thr.anchor && typeof thr.anchor === "object") {
+        thr.anchor = { ...thr.anchor, status: "attached", confidence: 1 };
+      }
+      applied.push({ type: "clear-soft-orphan", threadId: act.threadId });
+      continue;
+    }
+    const ms = logicalByTid.get(act.threadId) || [];
+    const m = ms.length === 1 ? ms[0] : (act.from != null ? { from: act.from, to: act.to, text: act.text } : null);
+    if (!m || typeof m.from !== "number" || m.from >= m.to) continue;
+    let live = m.text || "";
+    try {
+      live = editor2.state.doc.textBetween(m.from, m.to, " ") || live;
+    } catch (_) {}
+    thr.range = { from: m.from, to: m.to };
+    thr.ranges = [{ from: m.from, to: m.to, text: live }];
+    if (live) thr.text = live;
+    thr.invalid = false;
+    thr.fuzzy = false;
+    thr.invalidReason = void 0;
+    try {
+      normalizeThreadQuoteToLive(thr, editor2.state.doc, m.from, m.to);
+    } catch (_) {}
+    try {
+      syncThreadAnchorEvidence(thr, editor2.state.doc, { from: m.from, to: m.to }, {
+        exact: thr.text || live,
+        status: "attached",
+        confidence: 1
+      });
+    } catch (_) {
+      if (thr.anchor && typeof thr.anchor === "object") {
+        thr.anchor = {
+          ...thr.anchor,
+          status: "attached",
+          confidence: 1,
+          position: { from: m.from, to: m.to, startAssoc: 1, endAssoc: -1 }
+        };
+      }
+    }
+    applied.push({ type: "sync-from-mark", threadId: act.threadId, from: m.from, to: m.to, reason: act.reason });
+  }
+
+  try {
+    if (mdText && Array.isArray(State.annotations)) {
+      for (const th of State.annotations) {
+        if (!th || th.invalid || th.deleted) continue;
+        if (Array.isArray(th.imageAnchors) && th.imageAnchors.length && !th.range) continue;
+        // Keep a pre-existing mdRange after heal (reattach used it as SoT).
+        // Only stamp when missing so we do not shrink coordinates from a short live mark.
+        if (th.mdRange && typeof isMdRange === "function" && isMdRange(th.mdRange)) continue;
+        stampThreadMdRange(th, mdText);
+      }
+    }
+  } catch (_) {}
+
+  marks = collectMarks();
+  audit = auditAnnotationInvariants({
+    threads: State.annotations || [],
+    marks,
+    doc: editor2.state.doc.textBetween(0, editor2.state.doc.content.size, "\n", "\n")
+  });
+  State._lastAnchorAudit = audit;
+  if (applied.length) {
+    try {
+      console.info("[anchor-heal]", options.reason || "heal", applied.length, "actions; healthy=", audit.healthy);
+    } catch (_) {}
+  }
+  return { healed: applied.length > 0, applied, audit, plan };
+}
+
+function collectLiveAnnotationAudit() {
+  if (!State.editor) {
+    return auditAnnotationInvariants({ threads: State.annotations || [], marks: [], doc: "" });
+  }
+  const doc5 = State.editor.state.doc;
+  const markType = State.editor.schema.marks.annotation;
+  const marks = collectPhysicalAnnotationMarks(doc5, markType).map((m) => ({
+    threadId: m.threadId,
+    from: m.from,
+    to: m.to,
+    text: m.text
+  }));
   // Keep physical pieces; auditAnnotationInvariants coalesces by threadId so
   // nested/partial-overlap fragmentation is not treated as duplicate anchors.
   const sep = String.fromCharCode(10);
@@ -2945,6 +3301,13 @@ function exportAnchorDiagnosis() {
 }
 function createSaveSnapshot(options = {}) {
   if (!State.currentFile) throw new Error("\u672A\u6253\u5F00\u6587\u6863");
+  // Auto-heal recoverable anchor drift (heading spill, stale range, soft orphan+mark)
+  // before hard-block. Fail closed if still unhealthy after heal.
+  try {
+    healLiveAnnotationAnchors({ reason: options.reason || "save" });
+  } catch (eHeal) {
+    console.warn("[anchor-heal] pre-save", eHeal);
+  }
   // Hard-block structurally inconsistent archives before write
   // skipHardAudit: diagnostic / 另存副本 only — never use for in-place write-back.
   try {
@@ -10352,31 +10715,75 @@ function loadMarkdownIntoEditor(name, content, annotationsData = null, options =
         continue;
       }
       if (ranges.length) {
-        const thread = {
-          ...ann,
-          authorColor: annotationAuthorColor(ann),
-          ranges: ranges.map((r) => ({ from: r.from, to: r.to })),
-          range: { from: ranges[0].from, to: ranges[ranges.length - 1].to },
-          invalid: false,
-          deleted: false,
-          fuzzy: false,
-          invalidReason: void 0
-        };
-        const parts = ranges.map((r) => r.text).filter(Boolean);
-        if (parts.length) thread.text = parts.join(" ");
-        syncThreadAnchorEvidence(thread, doc5, thread.range, {
-          exact: thread.text,
-          status: "attached",
-          confidence: 1
-        });
-        if (hasImgAnchors) {
-          thread.imageAnchors = ann.imageAnchors.map((a) => ({ ...a }));
-          resyncImageAnchors(thread, doc5);
+        // Distrust non-contiguous embedded marks (heading spill etc.) unless explicit multi-range.
+        // Prefer mdRange recovery over stale document.html mark fragments.
+        let trustEmbedded = true;
+        try {
+          const logicalEmb = coalesceAnnotationMarkPieces(
+            ranges.map((r) => ({ threadId: ann.threadId, from: r.from, to: r.to, text: r.text || "" }))
+          );
+          const multiOk = Array.isArray(ann.ranges) && ann.ranges.length > 1;
+          if (logicalEmb.length > 1 && !multiOk) trustEmbedded = false;
+          if (trustEmbedded && logicalEmb.length === 1) {
+            const liveText = String(logicalEmb[0].text || ranges.map((r) => r.text || "").join(""));
+            const mdSourceProbe = typeof content === "string" ? content : "";
+            if (mdSourceProbe && ann.mdRange && typeof isMdRange === "function" && isMdRange(ann.mdRange)) {
+              const vProbe = validateThreadMdRange(ann, mdSourceProbe);
+              if (vProbe && vProbe.ok) {
+                const mdSlice = mdSourceProbe.slice(ann.mdRange.from, ann.mdRange.to);
+                let plainMd = mdSlice;
+                try { plainMd = mdEmphasisToPlain(mdSlice) || mdSlice; } catch (_) {}
+                let plainLive = liveText;
+                try { plainLive = mdEmphasisToPlain(liveText) || liveText; } catch (_) {}
+                if (liveText && plainMd && liveText !== plainMd && liveText !== mdSlice && plainLive !== plainMd) {
+                  trustEmbedded = false;
+                }
+              }
+            }
+          }
+        } catch (_) {
+          trustEmbedded = true;
         }
-        State.annotations.push(thread);
-        continue;
+        if (trustEmbedded) {
+          const thread = {
+            ...ann,
+            authorColor: annotationAuthorColor(ann),
+            ranges: ranges.map((r) => ({ from: r.from, to: r.to })),
+            range: { from: ranges[0].from, to: ranges[ranges.length - 1].to },
+            invalid: false,
+            deleted: false,
+            fuzzy: false,
+            invalidReason: void 0
+          };
+          const parts = ranges.map((r) => r.text).filter(Boolean);
+          if (parts.length) thread.text = parts.join(" ");
+          syncThreadAnchorEvidence(thread, doc5, thread.range, {
+            exact: thread.text,
+            status: "attached",
+            confidence: 1
+          });
+          if (hasImgAnchors) {
+            thread.imageAnchors = ann.imageAnchors.map((a) => ({ ...a }));
+            resyncImageAnchors(thread, doc5);
+          }
+          State.annotations.push(thread);
+          continue;
+        }
+        // Fall through to mdRange recovery — strip bad embedded marks first
+        try {
+          const markTypeStrip = State.editor.schema.marks.annotation;
+          if (markTypeStrip && ranges.length) {
+            let trStrip = State.editor.state.tr;
+            for (const r of ranges.slice().sort((a, b) => b.from - a.from)) {
+              trStrip = trStrip.removeMark(r.from, r.to, markTypeStrip);
+            }
+            trStrip.setMeta("addToHistory", false);
+            trStrip.setMeta("__activeMarkSync", true);
+            State.editor.view.dispatch(trStrip);
+          }
+        } catch (_) {}
       }
-      // Prefer embedded HTML marks; if missing, recover via mdRange (no quote fuzzy).
+      // Prefer embedded HTML marks; if missing/distrusted, recover via mdRange (no quote fuzzy).
       const mdSourceHtml = typeof content === "string" ? content : "";
       const vHtml = validateThreadMdRange(ann, mdSourceHtml);
       if (vHtml.ok) {
@@ -10685,6 +11092,15 @@ function loadMarkdownIntoEditor(name, content, annotationsData = null, options =
     }
   } catch (eStampLive) {
     console.warn("[md-range] live stamp after load", eStampLive);
+  }
+  // Heal recoverable open-time drift (stale HTML marks, range metadata lag)
+  try {
+    healLiveAnnotationAnchors({
+      reason: "open",
+      mdText: typeof content === "string" ? content : ""
+    });
+  } catch (eHealOpen) {
+    console.warn("[anchor-heal] post-open", eHealOpen);
   }
   if (preservedTabThreadId && State.annotations.some((a) => a && a.threadId === preservedTabThreadId)) {
     State.activeThreadId = preservedTabThreadId;
@@ -17322,6 +17738,8 @@ window.__mdAnnotator = {
   sanitizeStructuralHtml,
   computeContextAt,
   collectLiveAnnotationAudit,
+  healLiveAnnotationAnchors,
+  planAnnotationAnchorHeal,
   exportAnchorDiagnosis,
   resolveAnchor,
   resolveAnchorSet,

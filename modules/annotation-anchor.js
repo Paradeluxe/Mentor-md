@@ -582,6 +582,121 @@ export function auditAnnotationInvariants({ threads, marks, doc }) {
 }
 
 /**
+ * Plan automatic heal for hard-audit failures that are recoverable without
+ * quote-fuzzy guessing.
+ *
+ * Recoverable:
+ * - range-mismatch / text-mismatch with exactly one logical mark → sync-from-mark
+ * - orphan-status-has-mark (not deleted) with one logical mark → sync + clear-soft-orphan
+ * - duplicate-mark / attached-missing-mark / multi-mark mismatch → reattach-needed
+ * - mark-unknown-thread → strip-unknown-marks
+ *
+ * Not planned here: duplicate-threadId, ambiguous-has-mark, mark-collision.
+ *
+ * @param {{ threads?: any[], marks?: any[], errors?: any[], doc?: string }} input
+ * @returns {{ actions: Array<object>, recoverable: boolean }}
+ */
+export function planAnnotationAnchorHeal(input = {}) {
+  const thrList = Array.isArray(input.threads) ? input.threads.filter((t) => t && t.threadId) : [];
+  const markList = Array.isArray(input.marks) ? input.marks.filter((m) => m && m.threadId) : [];
+  const logicalMarks = coalesceAnnotationMarkPieces(markList);
+  const marksByTid = new Map();
+  for (const m of logicalMarks) {
+    if (!marksByTid.has(m.threadId)) marksByTid.set(m.threadId, []);
+    marksByTid.get(m.threadId).push(m);
+  }
+  const thrById = new Map(thrList.map((t) => [t.threadId, t]));
+
+  let errList = Array.isArray(input.errors) ? input.errors.slice() : null;
+  if (!errList) {
+    errList = auditAnnotationInvariants({ threads: thrList, marks: markList, doc: input.doc || '' }).errors || [];
+  }
+
+  const actions = [];
+  const seen = new Set();
+  const push = (act) => {
+    if (!act || !act.type) return;
+    // reattach-needed is once per thread (multiple error codes collapse)
+    const key = act.type === 'reattach-needed'
+      ? `${act.type}:${act.threadId || ''}`
+      : `${act.type}:${act.threadId || ''}:${act.reason || ''}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    actions.push(act);
+  };
+
+  for (const e of errList) {
+    if (!e || !e.code) continue;
+    const tid = e.threadId;
+    const thr = tid ? thrById.get(tid) : null;
+    const ms = tid ? (marksByTid.get(tid) || []) : [];
+    const multiOk = !!(thr && Array.isArray(thr.ranges) && thr.ranges.length > 1);
+
+    switch (e.code) {
+      case 'range-mismatch':
+      case 'text-mismatch': {
+        if (!tid) break;
+        if (ms.length === 1 && !multiOk) {
+          push({
+            type: 'sync-from-mark',
+            threadId: tid,
+            from: ms[0].from,
+            to: ms[0].to,
+            text: ms[0].text || '',
+            reason: e.code
+          });
+        } else if (ms.length > 1 || multiOk) {
+          push({ type: 'reattach-needed', threadId: tid, reason: e.code, count: ms.length });
+        } else {
+          push({ type: 'reattach-needed', threadId: tid, reason: e.code, count: 0 });
+        }
+        break;
+      }
+      case 'duplicate-mark': {
+        if (!tid) break;
+        push({ type: 'reattach-needed', threadId: tid, reason: 'duplicate-mark', count: e.count || ms.length });
+        break;
+      }
+      case 'attached-missing-mark': {
+        if (!tid) break;
+        push({ type: 'reattach-needed', threadId: tid, reason: 'attached-missing-mark', count: 0 });
+        break;
+      }
+      case 'orphan-status-has-mark': {
+        if (!tid || !thr) break;
+        // Keep hard deleted / text-deleted banners — do not auto-heal those.
+        const st = thr.anchor && thr.anchor.status;
+        const hardDeleted = !!(thr.deleted || st === 'text-deleted' || thr.invalidReason === 'text-deleted');
+        if (hardDeleted) break;
+        if (ms.length === 1 && !multiOk) {
+          push({
+            type: 'sync-from-mark',
+            threadId: tid,
+            from: ms[0].from,
+            to: ms[0].to,
+            text: ms[0].text || '',
+            reason: 'orphan-status-has-mark'
+          });
+          push({ type: 'clear-soft-orphan', threadId: tid, reason: 'orphan-status-has-mark' });
+        } else if (ms.length > 1) {
+          push({ type: 'reattach-needed', threadId: tid, reason: 'orphan-multi-mark', count: ms.length });
+        }
+        break;
+      }
+      case 'mark-unknown-thread': {
+        if (!tid) break;
+        push({ type: 'strip-unknown-marks', threadId: tid, reason: 'mark-unknown-thread' });
+        break;
+      }
+      default:
+        break;
+    }
+  }
+
+  return { actions, recoverable: actions.length > 0 };
+}
+
+/**
  * Apply legacy flags onto a thread from anchor status (mutates copy).
  */
 export function applyStatusToThread(thread, status) {
@@ -603,5 +718,6 @@ export default {
   captureAnchorEvidence,
   projectLegacyFlags,
   auditAnnotationInvariants,
+  planAnnotationAnchorHeal,
   applyStatusToThread
 };

@@ -35,6 +35,7 @@ const t = async (name, fn) => {
     assert.equal(typeof mod.mapAnchorRange, 'function');
     assert.equal(typeof mod.resolveAnchorSet, 'function');
     assert.equal(typeof mod.auditAnnotationInvariants, 'function');
+    assert.equal(typeof mod.planAnnotationAnchorHeal, 'function');
     assert.equal(typeof mod.captureAnchorEvidence, 'function');
     assert.equal(typeof mod.projectLegacyFlags, 'function');
   });
@@ -316,6 +317,77 @@ const t = async (name, fn) => {
     assert.equal(a.healthy, false);
     assert.ok(a.errors.some((e) => e.code === 'orphan-status-has-mark' || e.code === 'ambiguous-has-mark'));
   });
+
+
+  await t('planAnnotationAnchorHeal export', async () => {
+    assert.equal(typeof mod.planAnnotationAnchorHeal, 'function');
+  });
+
+  await t('plan heal range-mismatch single mark → sync-from-mark', async () => {
+    const threads = [{
+      threadId: 't1',
+      text: 'hello world',
+      range: { from: 0, to: 20 },
+      anchor: { status: 'attached' }
+    }];
+    const marks = [{ threadId: 't1', from: 0, to: 11, text: 'hello world' }];
+    const audit = mod.auditAnnotationInvariants({ threads, marks, doc: 'hello world more' });
+    assert.equal(audit.healthy, false);
+    assert.ok(audit.errors.some((e) => e.code === 'range-mismatch'));
+    const plan = mod.planAnnotationAnchorHeal({ threads, marks, errors: audit.errors });
+    assert.equal(plan.recoverable, true);
+    assert.ok(plan.actions.some((a) => a.type === 'sync-from-mark' && a.threadId === 't1'));
+  });
+
+  await t('plan heal duplicate-mark gap spill → reattach-needed', async () => {
+    const threads = [{
+      threadId: 't-spill',
+      text: 'Heading title',
+      range: { from: 0, to: 30 },
+      ranges: [{ from: 0, to: 30 }],
+      anchor: { status: 'attached' }
+    }];
+    const marks = [
+      { threadId: 't-spill', from: 0, to: 13, text: 'Heading title' },
+      { threadId: 't-spill', from: 15, to: 30, text: 'Why should next' }
+    ];
+    const audit = mod.auditAnnotationInvariants({ threads, marks, doc: 'Heading title\nWhy should next' });
+    assert.ok(audit.errors.some((e) => e.code === 'duplicate-mark'), JSON.stringify(audit.errors));
+    const plan = mod.planAnnotationAnchorHeal({ threads, marks, errors: audit.errors });
+    assert.ok(plan.actions.some((a) => a.type === 'reattach-needed' && a.threadId === 't-spill' && a.reason === 'duplicate-mark'));
+  });
+
+  await t('plan heal orphan-status-has-mark soft → clear-soft-orphan', async () => {
+    const threads = [{
+      threadId: 't-soft',
+      text: 'exact quote here',
+      range: { from: 0, to: 16 },
+      invalid: true,
+      invalidReason: 'missing-mdRange',
+      anchor: { status: 'orphaned' }
+    }];
+    const marks = [{ threadId: 't-soft', from: 0, to: 16, text: 'exact quote here' }];
+    const audit = mod.auditAnnotationInvariants({ threads, marks, doc: 'exact quote here' });
+    assert.ok(audit.errors.some((e) => e.code === 'orphan-status-has-mark'));
+    const plan = mod.planAnnotationAnchorHeal({ threads, marks, errors: audit.errors });
+    assert.ok(plan.actions.some((a) => a.type === 'sync-from-mark'));
+    assert.ok(plan.actions.some((a) => a.type === 'clear-soft-orphan'));
+  });
+
+  await t('plan heal hard deleted orphan+mark stays unplanned', async () => {
+    const threads = [{
+      threadId: 't-del',
+      text: 'gone',
+      deleted: true,
+      range: { from: 0, to: 4 },
+      anchor: { status: 'orphaned' }
+    }];
+    const marks = [{ threadId: 't-del', from: 0, to: 4, text: 'gone' }];
+    const audit = mod.auditAnnotationInvariants({ threads, marks, doc: 'gone' });
+    const plan = mod.planAnnotationAnchorHeal({ threads, marks, errors: audit.errors });
+    assert.ok(!plan.actions.some((a) => a.threadId === 't-del' && (a.type === 'clear-soft-orphan' || a.type === 'sync-from-mark')));
+  });
+
 
   console.log('\n=== RESULT:', pass, 'pass /', fail, 'fail ===');
   process.exit(fail ? 1 : 0);
