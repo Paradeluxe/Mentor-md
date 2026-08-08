@@ -1,4 +1,4 @@
-// e2e: workspace restore skips missing entries and keeps surviving order
+// e2e: workspace restore single-doc — skip missing active, fall back to recoverable entry
 const assert = require('assert');
 const { chromium } = require('playwright');
 
@@ -18,7 +18,6 @@ const { chromium } = require('playwright');
 
   await page.evaluate(async () => {
     const M = window.__mdAnnotator;
-    // clear prior workspace/drafts
     try { await M.HandleStore.removeWorkspaceSession(); } catch (_) {}
     for (const id of ['doc-a', 'doc-b', 'doc-missing']) {
       try { await M.DraftStore.deleteDraft(id); } catch (_) {}
@@ -53,7 +52,7 @@ const { chromium } = require('playwright');
   });
 
   await page.reload({ waitUntil: 'domcontentloaded' });
-  await page.waitForFunction(() => window.__mdAnnotator?.State?.tabs?.length >= 2, { timeout: 20000 });
+  await page.waitForFunction(() => window.__mdAnnotator?.State?.tabs?.length === 1, { timeout: 20000 });
 
   const result = await page.evaluate(() => {
     const M = window.__mdAnnotator;
@@ -62,21 +61,17 @@ const { chromium } = require('playwright');
       documentId: t.currentFile?.documentId || t.id
     }));
     const active = M.State.currentFile?.documentId || '';
-    const status = (document.querySelector('#status-left')?.textContent || '') + ' ' +
-      (document.querySelector('#status-right')?.textContent || '');
     const body = M.State.editor ? M.State.editor.getText() : '';
-    return { tabs, active, status, body, tabCount: tabs.length };
+    return { tabs, active, body, tabCount: tabs.length };
   });
 
-  assert.equal(result.tabCount, 2, 'expected 2 restored tabs: ' + JSON.stringify(result));
-  assert.deepEqual(result.tabs.map((t) => t.documentId), ['doc-a', 'doc-b'], JSON.stringify(result));
-  assert.equal(result.active, 'doc-b', 'missing active falls back to last restored: ' + JSON.stringify(result));
-  assert.ok(/BETA_MARK|B restored/i.test(result.body), 'active body: ' + result.body);
-  // status may be overwritten by restoreTab("已切换"); core restore success is tabs+active+body
+  assert.equal(result.tabCount, 1, 'single restored slot: ' + JSON.stringify(result));
+  assert.ok(result.active === 'doc-b' || result.active === 'doc-a', 'fallback to a recoverable draft: ' + JSON.stringify(result));
+  assert.ok(/BETA_MARK|ALPHA_MARK|restored/i.test(result.body), 'active body: ' + result.body);
   assert.ok(result.tabs.every((t) => t.documentId !== 'doc-missing'));
 
   if (errs.length) throw new Error('page errors: ' + errs.join(' | '));
-  console.log('PASS workspace-restore-partial');
+  console.log('PASS workspace-restore-partial-single');
   await browser.close();
   process.exit(0);
 })().catch((error) => {

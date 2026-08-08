@@ -1,4 +1,5 @@
-// e2e: delayed draft write must capture source tab identity, not active tab after switch
+// e2e: delayed draft write must capture source document identity before single-slot replace
+// (single-document page: open B replaces A in-page; A draft must still flush as A)
 const assert = require('assert');
 const { chromium } = require('playwright');
 

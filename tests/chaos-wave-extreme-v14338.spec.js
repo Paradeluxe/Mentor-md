@@ -206,10 +206,9 @@ fs.mkdirSync(TEMP, { recursive: true });
     if (r.writes === undefined) throw new Error('bad');
   });
 
-  await t('A', 'A6 multi-tab: edit blank while research-named tab exists — no cross wipe of tab snapshot', async () => {
+  await t('A', 'A6 single-doc: blank replace drops prior research snapshot (no multi-tab stack)', async () => {
     const r = await page.evaluate(async () => {
       const M = window.__mdAnnotator;
-      // tab1 = research-named content in memory only
       M.openNewTabBlank();
       M.State.editor.commands.setContent('<p>RESEARCH_MARK_ORIGINAL_CONTENT_KEEP_ME_12345</p>');
       M.State.currentFile = {
@@ -219,38 +218,31 @@ fs.mkdirSync(TEMP, { recursive: true });
       };
       M.State.diskPathHint = 'E:/tmp/research/research-paper.mentor';
       try { M.snapshotActiveTab(); } catch (_) {}
-      const dfcTabId = M.State.activeTabId;
+      const researchId = M.State.activeTabId;
 
       M.openNewTabBlank();
       M.State.editor.commands.setContent('<p>BLANK_EDIT_XXX</p>');
       M.State.editor.commands.insertContent(' more');
       try { M.snapshotActiveTab(); } catch (_) {}
 
-      // switch back to research tab
-      if (dfcTabId && typeof M.switchToTab === 'function') {
-        M.switchToTab(dfcTabId);
-      } else {
-        // fallback: find tab by name
-        const tab = (M.State.tabs || []).find((t) => (t.fileName || t.name || '').includes('research-paper'));
-        if (tab) M.switchToTab(tab.id);
-      }
+      // single-doc: cannot switch back; prior slot is gone
+      const switched = researchId && typeof M.switchToTab === 'function'
+        ? M.switchToTab(researchId)
+        : false;
       await new Promise((r) => setTimeout(r, 50));
       const text = M.State.editor.state.doc.textContent;
-      const tabs = (M.State.tabs || []).map((t) => ({
-        n: t.fileName || t.name,
-        id: t.id,
-      }));
       return {
         text,
-        hasMark: text.includes('RESEARCH_MARK_ORIGINAL_CONTENT_KEEP_ME_12345'),
-        noBlankLeak: !text.includes('BLANK_EDIT_XXX'),
+        switched,
+        hasBlank: text.includes('BLANK_EDIT_XXX'),
+        noResearch: !text.includes('RESEARCH_MARK_ORIGINAL_CONTENT_KEEP_ME_12345'),
         tabCount: (M.State.tabs || []).length,
-        tabs,
       };
     });
-    if (!r.hasMark) throw new Error('dFC tab content lost: ' + r.text.slice(0, 80));
-    if (!r.noBlankLeak) throw new Error('blank leaked into dFC tab');
-    if (r.tabCount < 2) throw new Error('tabs=' + r.tabCount);
+    if (r.switched) throw new Error('switchToTab should be no-op');
+    if (!r.hasBlank) throw new Error('blank should remain active: ' + r.text.slice(0, 80));
+    if (!r.noResearch) throw new Error('research should be replaced, not stacked');
+    if (r.tabCount !== 1) throw new Error('tabs=' + r.tabCount);
   });
 
   // ============================================================

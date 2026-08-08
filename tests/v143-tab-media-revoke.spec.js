@@ -1,4 +1,4 @@
-// v1.43.49: multi-tab blob revoke — close active must free; other tab keep
+// single-document: media revoke on replace/close (was multi-tab blob revoke)
 const { chromium } = require('playwright');
 
 (async () => {
@@ -26,7 +26,7 @@ const { chromium } = require('playwright');
     try { window.__mdAnnotator.openNewTabBlank(); } catch (_) {}
   });
 
-  console.log('=== v1.43.49 multi-tab media revoke ===');
+  console.log('=== single-document media revoke ===');
 
   await t('API revokeTabMedia / collectKeptMediaUrls', async () => {
     const r = await page.evaluate(() => {
@@ -42,7 +42,7 @@ const { chromium } = require('playwright');
     }
   });
 
-  await t('close last active tab revokes its blob (not kept by State self-ref)', async () => {
+  await t('close active document revokes its blob', async () => {
     const r = await page.evaluate(async () => {
       const M = window.__mdAnnotator;
       const revoked = [];
@@ -53,7 +53,6 @@ const { chromium } = require('playwright');
       };
       try {
         M.openNewTabBlank();
-        // force clean single tab with one blob
         M.State.tabs = [];
         M.State.activeTabId = null;
         const blob = new Blob([new Uint8Array([1, 2, 3, 4])], { type: 'image/png' });
@@ -64,10 +63,7 @@ const { chromium } = require('playwright');
         M.State.annotations = [];
         M.snapshotActiveTab();
         const tid = M.State.activeTabId;
-        // dirty false → no confirm
-        M.State.tabs.forEach((x) => {
-          if (x) x.dirty = false;
-        });
+        M.State.tabs.forEach((x) => { if (x) x.dirty = false; });
         if (M.State.currentFile) M.State.currentFile.dirty = false;
         const ok = M.closeTab(tid);
         return {
@@ -87,64 +83,7 @@ const { chromium } = require('playwright');
     if (r.tabs !== 0) throw new Error('tabs ' + JSON.stringify(r));
   });
 
-  await t('close tab A keeps tab B blob; revokes only A', async () => {
-    const r = await page.evaluate(() => {
-      const M = window.__mdAnnotator;
-      const revoked = [];
-      const orig = URL.revokeObjectURL.bind(URL);
-      URL.revokeObjectURL = (u) => {
-        revoked.push(u);
-        return orig(u);
-      };
-      try {
-        M.State.tabs = [];
-        M.State.activeTabId = null;
-        M.State.annotations = [];
-        const b1 = new Blob([new Uint8Array([9])], { type: 'image/png' });
-        const b2 = new Blob([new Uint8Array([8])], { type: 'image/png' });
-        const u1 = URL.createObjectURL(b1);
-        const u2 = URL.createObjectURL(b2);
-        // tab A
-        M.State.mediaUrls = { 'media/a.png': u1 };
-        M.State.mediaFiles = { 'media/a.png': b1 };
-        M.State.currentFile = { name: 'A.mentor', content: '', dirty: false, handle: null };
-        M.snapshotActiveTab();
-        const idA = M.State.activeTabId;
-        // switch to B via new blank then set media
-        M.openNewTabBlank();
-        M.State.mediaUrls = { 'media/b.png': u2 };
-        M.State.mediaFiles = { 'media/b.png': b2 };
-        M.State.currentFile = { name: 'B.mentor', content: '', dirty: false, handle: null };
-        M.snapshotActiveTab();
-        const idB = M.State.activeTabId;
-        // clear dirty
-        M.State.tabs.forEach((x) => {
-          if (x) x.dirty = false;
-        });
-        // close A while on B
-        const ok = M.closeTab(idA);
-        const keepB = M.collectKeptMediaUrls({ includeState: true });
-        return {
-          ok,
-          revoked: revoked.slice(),
-          u1,
-          u2,
-          stillB: !!M.State.tabs.find((x) => x && x.id === idB),
-          bUrlInTab: (M.State.tabs.find((x) => x && x.id === idB) || {}).mediaUrls,
-          keepHasU2: keepB.has(u2),
-          tabs: M.State.tabs.map((x) => x && x.name),
-        };
-      } finally {
-        URL.revokeObjectURL = orig;
-      }
-    });
-    if (!r.ok) throw new Error('close A fail ' + JSON.stringify(r));
-    if (!r.revoked.includes(r.u1)) throw new Error('A not revoked ' + JSON.stringify(r));
-    if (r.revoked.includes(r.u2)) throw new Error('B wrongly revoked ' + JSON.stringify(r));
-    if (!r.stillB || !r.keepHasU2) throw new Error('B lost ' + JSON.stringify(r));
-  });
-
-  await t('openNewTabBlank after snapshot does not revoke previous tab media', async () => {
+  await t('openNewTabBlank revokes previous slot media (single-doc replace)', async () => {
     const r = await page.evaluate(() => {
       const M = window.__mdAnnotator;
       const revoked = [];
@@ -169,15 +108,61 @@ const { chromium } = require('playwright');
         return {
           revoked: revoked.slice(),
           u,
-          prevUrl: prev && prev.mediaUrls && prev.mediaUrls['media/x.png'],
-          prevKept: !!(prev && prev.mediaUrls && prev.mediaUrls['media/x.png'] === u),
+          tabCount: (M.State.tabs || []).length,
+          prevGone: !prev,
         };
       } finally {
         URL.revokeObjectURL = orig;
       }
     });
-    if (r.revoked.includes(r.u)) throw new Error('prev revoked on blank ' + JSON.stringify(r));
-    if (!r.prevKept) throw new Error('prev media lost ' + JSON.stringify(r));
+    if (!r.revoked.includes(r.u)) throw new Error('prev should revoke on blank replace ' + JSON.stringify(r));
+    if (r.tabCount !== 1) throw new Error('one slot after blank ' + JSON.stringify(r));
+    if (!r.prevGone) throw new Error('prev snapshot should be gone ' + JSON.stringify(r));
+  });
+
+  await t('enforceSingleDocumentSlot drops ghost tab media', async () => {
+    const r = await page.evaluate(() => {
+      const M = window.__mdAnnotator;
+      const revoked = [];
+      const orig = URL.revokeObjectURL.bind(URL);
+      URL.revokeObjectURL = (u) => {
+        revoked.push(u);
+        return orig(u);
+      };
+      try {
+        M.openNewTabBlank();
+        const b1 = new Blob([new Uint8Array([1])], { type: 'image/png' });
+        const b2 = new Blob([new Uint8Array([2])], { type: 'image/png' });
+        const u1 = URL.createObjectURL(b1);
+        const u2 = URL.createObjectURL(b2);
+        M.State.mediaUrls = { 'media/a.png': u1 };
+        M.State.mediaFiles = { 'media/a.png': b1 };
+        M.State.currentFile = { name: 'A.mentor', content: '', dirty: false, handle: null };
+        M.snapshotActiveTab();
+        const keepId = M.State.activeTabId;
+        M.State.tabs.push({
+          id: 'ghost',
+          name: 'ghost.mentor',
+          html: '',
+          annotations: [],
+          dirty: false,
+          mediaUrls: { 'media/g.png': u2 },
+          mediaFiles: { 'media/g.png': b2 },
+          currentFile: { documentId: 'g', name: 'ghost.mentor', content: '', dirty: false },
+        });
+        M.enforceSingleDocumentSlot();
+        return {
+          tabs: M.State.tabs.map((x) => x && x.id),
+          revoked: revoked.slice(),
+          u2,
+          keepId,
+        };
+      } finally {
+        URL.revokeObjectURL = orig;
+      }
+    });
+    if (r.tabs.length !== 1 || r.tabs[0] !== r.keepId) throw new Error('slot ' + JSON.stringify(r));
+    if (!r.revoked.includes(r.u2)) throw new Error('ghost media not revoked ' + JSON.stringify(r));
   });
 
   console.log('\nTOTAL', pass + fail, 'PASS', pass, 'FAIL', fail);

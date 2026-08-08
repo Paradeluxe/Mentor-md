@@ -13,6 +13,8 @@ async function checkInvariants(page, { strictDirty = false } = {}) {
     const tabs = Array.isArray(S.tabs) ? S.tabs.filter(Boolean) : [];
     const ids = tabs.map((t) => t.id);
     if (new Set(ids).size !== ids.length) problems.push('duplicate tab ids');
+    // Single-document page: at most one in-memory document slot
+    if (tabs.length > 1) problems.push('tabs.length>1 (single-document page)');
 
     if (S.activeTabId != null && !tabs.some((t) => t.id === S.activeTabId)) {
       // blank states may clear — only warn if tabs non-empty

@@ -1,4 +1,4 @@
-// v1.43.31 multi-doc tabs
+// Single-document page contract (was v1.43.31 multi-doc tabs)
 const { chromium } = require('playwright');
 
 (async () => {
@@ -12,126 +12,122 @@ const { chromium } = require('playwright');
     catch (e) { console.log('  ✗', name + ':', e.message); fail++; }
   };
 
-  console.log('=== v1.43.31 multi-doc tabs ===');
-  await page.goto('http://127.0.0.1:8787/index.html?v=147&cb=' + Date.now());
+  console.log('=== single-document page (no in-page multi-doc tabs) ===');
+  await page.goto('http://127.0.0.1:8787/index.html?v=274&cb=' + Date.now());
   await page.waitForFunction(() => window.__mdAnnotator?.State?.editor, { timeout: 15000 });
   await page.evaluate(() => {
     const m = document.querySelector('#author-modal');
     if (m) m.classList.add('hidden');
   });
 
-  await t('doc-tabs bar exists + + button', async () => {
+  await t('doc-tabs bar hidden (no + button)', async () => {
     const r = await page.evaluate(() => {
       const bar = document.querySelector('#doc-tabs');
-      return { bar: !!bar, add: !!document.querySelector('#doc-tab-new') };
+      const cs = bar ? getComputedStyle(bar) : null;
+      return {
+        bar: !!bar,
+        hidden: !bar || bar.hidden || bar.getAttribute('hidden') != null || cs.display === 'none',
+        add: !!document.querySelector('#doc-tab-new'),
+        h: bar ? bar.getBoundingClientRect().height : 0,
+      };
     });
-    if (!r.bar) throw new Error('no #doc-tabs');
-    if (!r.add) throw new Error('no +');
+    if (!r.bar) throw new Error('no #doc-tabs element (keep for API compat)');
+    if (!r.hidden) throw new Error('doc-tabs should be hidden');
+    if (r.add) throw new Error('+ button must not render');
+    if (r.h > 1) throw new Error('doc-tabs height ' + r.h);
   });
 
-  await t('load doc A then doc B keeps both tabs', async () => {
+  await t('open A then B replaces — still one slot', async () => {
     const r = await page.evaluate(() => {
       const M = window.__mdAnnotator;
       M.loadMarkdownIntoEditor('dfc-paper.md', '# DFC Paper\n\nThis is the precious dFC content UNIQUE_DFC_MARKER.\n', null);
       const afterA = {
-        tabs: M.State.tabs.map(t => t.name),
+        tabCount: M.State.tabs.length,
         active: M.State.currentFile?.name,
         body: M.State.editor.state.doc.textContent,
       };
       M.loadMarkdownIntoEditor('test-scratch.md', '# Scratch\n\nAgent test content UNIQUE_TEST_MARKER.\n', null);
       const afterB = {
-        tabs: M.State.tabs.map(t => ({ name: t.name, id: t.id })),
+        tabCount: M.State.tabs.length,
+        active: M.State.currentFile?.name,
+        body: M.State.editor.state.doc.textContent,
+        names: M.State.tabs.map(t => t.name),
+      };
+      return { afterA, afterB };
+    });
+    if (!r.afterA.body.includes('UNIQUE_DFC_MARKER')) throw new Error('A not loaded');
+    if (r.afterA.tabCount > 1) throw new Error('A stacked tabs: ' + r.afterA.tabCount);
+    if (r.afterB.tabCount !== 1) throw new Error('expected 1 tab after B, got ' + r.afterB.tabCount + ' ' + JSON.stringify(r.afterB.names));
+    if (r.afterB.active !== 'test-scratch.md') throw new Error('active not B: ' + r.afterB.active);
+    if (!r.afterB.body.includes('UNIQUE_TEST_MARKER')) throw new Error('B body wrong');
+    if (r.afterB.body.includes('UNIQUE_DFC_MARKER')) throw new Error('A content should be replaced');
+  });
+
+  await t('switchToTab is no-op in single-doc mode', async () => {
+    const r = await page.evaluate(() => {
+      const M = window.__mdAnnotator;
+      M.loadMarkdownIntoEditor('only.md', '# Only\n\nONLY_MARKER\n', null, { documentId: 'doc-only' });
+      const ghostId = 'ghost-tab-id';
+      M.State.tabs.push({
+        id: ghostId,
+        name: 'ghost.md',
+        html: '<p>GHOST</p>',
+        annotations: [],
+        dirty: false,
+        currentFile: { documentId: 'ghost', name: 'ghost.md', content: 'GHOST', dirty: false },
+      });
+      const switched = M.switchToTab(ghostId);
+      M.enforceSingleDocumentSlot();
+      return {
+        switched,
         active: M.State.currentFile?.name,
         body: M.State.editor.state.doc.textContent,
         tabCount: M.State.tabs.length,
       };
-      return { afterA, afterB };
     });
-    if (!r.afterA.body.includes('UNIQUE_DFC_MARKER')) throw new Error('A not loaded: ' + r.afterA.body);
-    if (r.afterB.tabCount < 2) throw new Error('expected 2 tabs, got ' + r.afterB.tabCount + ' ' + JSON.stringify(r.afterB.tabs));
-    if (r.afterB.active !== 'test-scratch.md') throw new Error('active not B: ' + r.afterB.active);
-    if (!r.afterB.body.includes('UNIQUE_TEST_MARKER')) throw new Error('B body wrong');
-    if (!r.afterB.tabs.some(t => t.name === 'dfc-paper.md')) throw new Error('dfc tab missing');
+    if (r.switched) throw new Error('switchToTab should return false');
+    if (r.active !== 'only.md') throw new Error('active changed: ' + r.active);
+    if (!r.body.includes('ONLY_MARKER')) throw new Error('body lost');
+    if (r.tabCount !== 1) throw new Error('enforce should leave 1 tab, got ' + r.tabCount);
   });
 
-  await t('switch back to dFC tab restores content', async () => {
+  await t('openNewTabBlank replaces (still one tab)', async () => {
     const r = await page.evaluate(() => {
       const M = window.__mdAnnotator;
-      const dfc = M.State.tabs.find(t => t.name === 'dfc-paper.md');
-      if (!dfc) return { err: 'no dfc tab' };
-      M.switchToTab(dfc.id);
-      return {
-        active: M.State.currentFile?.name,
-        body: M.State.editor.state.doc.textContent,
-        hasMarker: M.State.editor.state.doc.textContent.includes('UNIQUE_DFC_MARKER'),
-        noTest: !M.State.editor.state.doc.textContent.includes('UNIQUE_TEST_MARKER'),
-      };
-    });
-    if (r.err) throw new Error(r.err);
-    if (r.active !== 'dfc-paper.md') throw new Error('active ' + r.active);
-    if (!r.hasMarker) throw new Error('dfc content lost: ' + r.body);
-    if (!r.noTest) throw new Error('still has test marker');
-  });
-
-  await t('UI tab click switches', async () => {
-    await page.evaluate(() => {
-      const M = window.__mdAnnotator;
-      // ensure two tabs and on dfc
-      const dfc = M.State.tabs.find(t => t.name === 'dfc-paper.md');
-      if (dfc) M.switchToTab(dfc.id);
-      M.renderDocTabs();
-    });
-    await page.waitForTimeout(100);
-    // click test-scratch tab via UI
-    const clicked = await page.evaluate(() => {
-      const tabs = [...document.querySelectorAll('.doc-tab')];
-      const t = tabs.find(el => el.textContent.includes('test-scratch'));
-      if (!t) return false;
-      t.click();
-      return true;
-    });
-    if (!clicked) throw new Error('no ui tab for scratch');
-    await page.waitForTimeout(100);
-    const body = await page.evaluate(() => window.__mdAnnotator.State.editor.state.doc.textContent);
-    if (!body.includes('UNIQUE_TEST_MARKER')) throw new Error('ui switch failed: ' + body);
-  });
-
-  await t('new tab + keeps previous', async () => {
-    const r = await page.evaluate(() => {
-      const M = window.__mdAnnotator;
-      const before = M.State.tabs.length;
+      M.loadMarkdownIntoEditor('keep.md', '# Keep\n\nKEEP_MARKER\n', null);
       M.openNewTabBlank();
       return {
-        before,
-        after: M.State.tabs.length,
-        names: M.State.tabs.map(t => t.name),
-        active: M.State.currentFile?.name,
+        tabCount: M.State.tabs.length,
+        name: M.State.currentFile?.name,
+        body: M.State.editor.state.doc.textContent,
+        hasKeep: M.State.editor.state.doc.textContent.includes('KEEP_MARKER'),
       };
     });
-    if (r.after < r.before + 1) throw new Error(JSON.stringify(r));
-    if (r.active !== 'untitled.md') throw new Error('active ' + r.active);
-    if (!r.names.includes('dfc-paper.md')) throw new Error('dfc gone ' + r.names);
+    if (r.tabCount !== 1) throw new Error('tabCount ' + r.tabCount);
+    if (r.hasKeep) throw new Error('old content should be gone');
+    if (!/新文档|untitled/i.test(r.name + r.body)) throw new Error('expected blank/new: ' + r.name + ' / ' + r.body);
   });
 
-  await t('close tab does not delete other', async () => {
+  await t('prepareOpenDocument never returns new-tab', async () => {
     const r = await page.evaluate(() => {
       const M = window.__mdAnnotator;
-      const scratch = M.State.tabs.find(t => t.name === 'test-scratch.md');
-      if (scratch) {
-        // clear dirty to avoid confirm
-        scratch.dirty = false;
-        M.closeTab(scratch.id);
-      }
-      return {
-        names: M.State.tabs.map(t => t.name),
-        hasDfc: M.State.tabs.some(t => t.name === 'dfc-paper.md'),
-      };
+      M.openNewTabBlank();
+      M.loadMarkdownIntoEditor('a.md', '# A\n', null, { documentId: 'doc-a' });
+      const m1 = M.prepareOpenDocument('b.md', 'doc-b');
+      M.loadMarkdownIntoEditor('b.md', '# B\n', null, { documentId: 'doc-b' });
+      const m2 = M.prepareOpenDocument('b.md', 'doc-b');
+      return { m1: m1.mode, m2: m2.mode, tabs: M.State.tabs.length };
     });
-    if (!r.hasDfc) throw new Error('dfc closed wrongly: ' + r.names);
+    if (r.m1 === 'new-tab' || r.m1 === 'reuse-tab') throw new Error('unexpected mode m1=' + r.m1);
+    if (r.m2 !== 'reload-same') throw new Error('same doc should reload-same, got ' + r.m2);
+    if (r.tabs !== 1) throw new Error('tabs ' + r.tabs);
   });
 
-  console.log('\n=== RESULT:', pass, 'pass /', fail, 'fail ===');
-  console.log('errs', errs.length ? errs.join('|') : 'none');
+  if (errs.length) {
+    console.log('pageerrors', errs.slice(0, 5));
+    fail++;
+  }
+  console.log(`\n${pass} pass, ${fail} fail`);
   await browser.close();
   process.exit(fail ? 1 : 0);
-})();
+})().catch((e) => { console.error(e); process.exit(1); });
